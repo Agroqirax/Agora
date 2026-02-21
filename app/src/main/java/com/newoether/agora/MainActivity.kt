@@ -254,24 +254,20 @@ fun ChatApp(
             
             val lastUserIndex = messages.indexOfLast { it.participant == Participant.USER }
             if (lastUserIndex != -1) {
-                val targetTopPx = with(density) { 180.dp.toPx() }
-
                 // 2. PIN the list reactively using snapshotFlow for maximum robustness
                 // collectLatest ensures that every time the state changes, we re-scroll and reset the stability delay
                 try {
                     withTimeout(4000) {
-                        snapshotFlow { 
+                        snapshotFlow {
                             val sum = messageHeights.values.sum()
-                            Triple(messages, sum, viewportHeightPx) 
+                            Triple(messages, sum, viewportHeightPx)
                         }.collectLatest { data ->
                             val currentMsgs = data.component1()
                             val vHeight = data.component3()
-                            
+
                             val currentLastIndex = currentMsgs.indexOfLast { it.participant == Participant.USER }
                             if (currentLastIndex != -1 && vHeight > 0) {
-                                val offsetDp = with(density) { 160.dp.toPx() }
-                                val immediateSwipeUpOffset = (vHeight / 2f - offsetDp).coerceAtLeast(0f)
-                                listState.scrollToItem(currentLastIndex, (-targetTopPx + immediateSwipeUpOffset).toInt())
+                                listState.scrollToItem(currentLastIndex, 0)
                             }
                             
                             // Wait for 500ms of no changes to consider the layout stable
