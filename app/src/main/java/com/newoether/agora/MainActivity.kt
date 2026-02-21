@@ -241,7 +241,7 @@ fun ChatApp(
                 
                 val diff = targetScrollPx - currentOffsetPx
                 if (kotlin.math.abs(diff) > 2) {
-                    listState.animateScrollBy(diff, tween(600, easing = FastOutSlowInEasing))
+                    listState.animateScrollBy(diff, tween(500, easing = FastOutSlowInEasing))
                 }
             } else {
                 // Use the exact same target pixel offset for jumping
@@ -559,7 +559,7 @@ fun ChatApp(
                                     viewModel.editMessage(id, text)
                                     scope.launch {
                                         if (!isFirstMessage) {
-                                            kotlinx.coroutines.delay(200)
+                                            kotlinx.coroutines.delay(50)
                                             scrollToLastUserMessage(animate = true)
                                         }
                                     }
@@ -640,8 +640,8 @@ fun ChatApp(
                             scope.launch {
                                 // Only scroll if it's not the first message in the chat
                                 if (!isFirstMessage) {
-                                    // Wait for layout to start moving (200ms)
-                                    kotlinx.coroutines.delay(200)
+                                    // Wait for layout to start moving (50ms)
+                                    kotlinx.coroutines.delay(50)
                                     scrollToLastUserMessage(animate = true)
                                 }
                             }
