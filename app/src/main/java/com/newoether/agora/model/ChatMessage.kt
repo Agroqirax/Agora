@@ -8,7 +8,7 @@ enum class Participant {
 }
 
 enum class MessageStatus {
-    SENDING, SUCCESS, STOPPED, ERROR
+    SENDING, THINKING, SUCCESS, STOPPED, ERROR
 }
 
 @Immutable
@@ -16,6 +16,7 @@ data class ChatMessage(
     val id: String = UUID.randomUUID().toString(),
     val parentId: String? = null,
     val text: String,
+    val thoughts: String? = null,
     val tokenCount: Int = 0,
     val status: MessageStatus = MessageStatus.SUCCESS, // Default to SUCCESS for old messages
     val participant: Participant,

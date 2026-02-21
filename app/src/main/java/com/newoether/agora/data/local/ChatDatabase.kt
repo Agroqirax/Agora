@@ -26,6 +26,7 @@ data class ChatEntity(
 
 @Entity(
     tableName = "messages",
+    indices = [Index(value = ["conversationId"])],
     foreignKeys = [
         ForeignKey(
             entity = ChatEntity::class,
@@ -40,6 +41,7 @@ data class MessageEntity(
     val conversationId: String,
     val parentId: String? = null,
     val text: String,
+    val thoughts: String? = null,
     val tokenCount: Int = 0,
     val status: MessageStatus = MessageStatus.SUCCESS,
     val participant: Participant,
@@ -64,7 +66,11 @@ interface ChatDao {
     suspend fun deleteConversation(conversationId: String)
 }
 
-@Database(entities = [ChatEntity::class, MessageEntity::class], version = 1)
+@Database(
+    entities = [ChatEntity::class, MessageEntity::class], 
+    version = 1,
+    exportSchema = true
+)
 @TypeConverters(MessageConverters::class)
 abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao

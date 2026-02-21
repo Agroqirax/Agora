@@ -10,12 +10,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.*
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -40,6 +35,7 @@ import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -61,6 +57,7 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
+import com.mikepenz.markdown.model.markdownPadding
 
 @Composable
 fun MessageList(
@@ -89,28 +86,18 @@ fun MessageList(
     val lastUserMessageIndex = messages.indexOfLast { it.participant == Participant.USER }
     
     // Calculation of extra padding to allow scrolling last user message to 180dp from top.
-    // We don't wrap this in remember to ensure it reacts to every change in messageHeights.
     val extraPadding = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
         0.dp
     } else {
         with(density) {
             val vDp = viewportHeight.toDp()
-            
-            // Target position: top of the last user message at 180dp from top of screen
             val targetTopDp = 180.dp
-            
-            // Available space from target top to the top of the bottom bar
-            // MessageList's contentPadding.bottom already includes bottomBarHeight + 8.dp
             val availableSpaceDp = vDp - targetTopDp - (bottomBarHeight + 8.dp)
-            
-            // Height of all messages from the last user message onwards (inclusive)
-            // messageHeights[id] already includes the vertical padding of the message
             var contentHeightPx = 0
             for (i in lastUserMessageIndex until messages.size) {
                 contentHeightPx += messageHeights[messages[i].id] ?: 0
             }
             val contentHeightDp = contentHeightPx.toDp()
-            
             (availableSpaceDp - contentHeightDp).coerceAtLeast(0.dp)
         }
     }
@@ -125,10 +112,7 @@ fun MessageList(
             items(messages, key = { it.id }) { message ->
                 val isLastMessage = messages.lastOrNull()?.id == message.id
                 val isInContext = inContextIds.contains(message.id)
-                
-                // Calculate branches for this message's parent
-                val siblings = allMessages.filter { it.parentId == message.parentId }
-                    .sortedBy { it.timestamp }
+                val siblings = allMessages.filter { it.parentId == message.parentId }.sortedBy { it.timestamp }
                 val branchIndex = siblings.indexOfFirst { it.id == message.id }
                 val totalBranches = siblings.size
 
@@ -152,7 +136,6 @@ fun MessageList(
                 )
             }
             item {
-                // The spacer ensures we can scroll the last user message to the 180dp mark
                 Spacer(modifier = Modifier.height(extraPadding))
             }
         }
@@ -176,23 +159,17 @@ fun MessageItem(
     onHeightChanged: (Int) -> Unit = {}
 ) {
     var editText by remember { mutableStateOf(message.text) }
-    // Track if this is the first time this message is being composed to skip initial animation
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
 
-    // Re-trigger height reporting when text or status changes
     var currentHeight by remember { mutableIntStateOf(0) }
     LaunchedEffect(message.text, message.status, isEditing) {
-        // A small delay to allow the layout to settle before reporting the new height
         kotlinx.coroutines.delay(50)
         onHeightChanged(currentHeight)
     }
 
-    // Reset edit text when entering edit mode
     LaunchedEffect(isEditing) {
-        if (isEditing) {
-            editText = message.text
-        }
+        if (isEditing) editText = message.text
     }
 
     val alignment = when (message.participant) {
@@ -229,6 +206,20 @@ fun MessageItem(
         h5 = currentTypography.titleSmall,
         h6 = currentTypography.titleSmall,
     )
+    
+    // Dedicated compact typography for thoughts
+    val thoughtTypography = markdownTypography(
+        text = currentTypography.bodySmall.copy(fontSize = 12.sp, lineHeight = 16.sp),
+        h1 = currentTypography.titleSmall.copy(fontSize = 14.sp),
+        h2 = currentTypography.titleSmall.copy(fontSize = 13.sp),
+        h3 = currentTypography.titleSmall.copy(fontSize = 12.sp),
+        h4 = currentTypography.titleSmall.copy(fontSize = 12.sp),
+        h5 = currentTypography.titleSmall.copy(fontSize = 12.sp),
+        h6 = currentTypography.titleSmall.copy(fontSize = 12.sp),
+    )
+
+    val customMarkdownPadding = markdownPadding(block = 12.dp)
+    val thoughtMarkdownPadding = markdownPadding(block = 4.dp)
 
     Column(
         modifier = Modifier
@@ -266,21 +257,11 @@ fun MessageItem(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                TextButton(onClick = { 
-                                    onCancelEdit()
-                                    editText = message.text
-                                }) {
-                                    Text("Cancel")
-                                }
-                                TextButton(onClick = {
-                                    onEdit(message.id, editText)
-                                }) {
-                                    Text("Send")
-                                }
+                                TextButton(onClick = { onCancelEdit(); editText = message.text }) { Text("Cancel") }
+                                TextButton(onClick = { onEdit(message.id, editText) }) { Text("Send") }
                             }
                         }
                     } else {
-                        // User messages use simple text for stability
                         Text(
                             text = message.text,
                             modifier = Modifier.padding(16.dp),
@@ -290,72 +271,32 @@ fun MessageItem(
                     }
                 }
                 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.End,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Branch Selector at the bottom left of the bubble area
-                    if (totalBranches > 1 && !isEditing) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .padding(top = 4.dp)
-                                .clip(RoundedCornerShape(100))
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                .padding(horizontal = 4.dp)
-                        ) {
-                            IconButton(
-                                onClick = { onSwitchBranch(-1) },
-                                enabled = branchIndex > 0 && isEditingAllowed,
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowLeft, 
-                                    contentDescription = "Previous Branch",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = if (branchIndex > 0 && isEditingAllowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                )
-                            }
-                            Text(
-                                text = "${branchIndex + 1} / $totalBranches",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 4.dp)
-                            )
-                            IconButton(
-                                onClick = { onSwitchBranch(1) },
-                                enabled = branchIndex < totalBranches - 1 && isEditingAllowed,
-                                modifier = Modifier.size(24.dp)
-                            ) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowRight, 
-                                    contentDescription = "Next Branch",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = if (branchIndex < totalBranches - 1 && isEditingAllowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                                )
-                            }
+                if (totalBranches > 1 && !isEditing) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(100))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            .padding(horizontal = 4.dp)
+                    ) {
+                        IconButton(onClick = { onSwitchBranch(-1) }, enabled = branchIndex > 0 && isEditingAllowed, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, modifier = Modifier.size(16.dp))
                         }
-                        Spacer(modifier = Modifier.weight(1f))
+                        Text("${branchIndex + 1} / $totalBranches", style = MaterialTheme.typography.labelSmall)
+                        IconButton(onClick = { onSwitchBranch(1) }, enabled = branchIndex < totalBranches - 1 && isEditingAllowed, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, modifier = Modifier.size(16.dp))
+                        }
                     }
+                }
 
-                    if (!isEditing && message.participant == Participant.USER) {
-                        TextButton(
-                            onClick = { onStartEdit() },
-                            modifier = Modifier.padding(top = 4.dp),
-                            enabled = isEditingAllowed,
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = MaterialTheme.colorScheme.primary,
-                                disabledContentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            )
-                        ) {
-                            Text("Edit", style = MaterialTheme.typography.labelSmall)
-                        }
+                if (!isEditing) {
+                    TextButton(onClick = { onStartEdit() }, enabled = isEditingAllowed) {
+                        Text("Edit", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
         } else {
-            // Model or Error
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -365,72 +306,37 @@ fun MessageItem(
                 Column {
                     // Status Header
                     if (message.participant == Participant.MODEL) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "sending_rotation")
-                        val rotation by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1000, easing = LinearEasing)
-                            ),
-                            label = "rotation"
-                        )
+                        val infiniteTransition = rememberInfiniteTransition(label = "sending")
+                        val rotation by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), "rot")
 
-                        val statusText = if (isStreaming) {
-                            "Sending..."
-                        } else {
-                            when (message.status) {
-                                MessageStatus.SENDING -> "Sending..." // Fallback for DB state
-                                MessageStatus.SUCCESS -> if (message.tokenCount > 0) "Cost ${message.tokenCount} tokens" else null
-                                MessageStatus.STOPPED -> null
-                                MessageStatus.ERROR -> null
-                            }
+                        val statusText = when (message.status) {
+                            MessageStatus.THINKING -> "Thinking..."
+                            MessageStatus.SENDING -> "Sending..."
+                            MessageStatus.SUCCESS -> if (message.tokenCount > 0) "Cost ${message.tokenCount} tokens" else null
+                            else -> null
                         }
-                        
+
                         if (statusText != null) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            ) {
-                                if (isStreaming || message.status == MessageStatus.SENDING) {
-                                    Icon(
-                                        imageVector = Icons.Default.Refresh,
-                                        contentDescription = "Sending",
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .rotate(rotation),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                                if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING) {
+                                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(12.dp).rotate(rotation), tint = if (message.status == MessageStatus.THINKING) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
                                 } else {
                                     val icon = when (message.status) {
                                         MessageStatus.SUCCESS -> Icons.Default.CheckCircle
                                         MessageStatus.STOPPED -> Icons.Default.Stop
                                         else -> Icons.Default.Info
                                     }
-                                    val tint = if (message.status == MessageStatus.SUCCESS) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
-                                    
-                                    Icon(
-                                        imageVector = icon,
-                                        contentDescription = statusText,
-                                        modifier = Modifier.size(12.dp),
-                                        tint = tint
-                                    )
+                                    Icon(icon, null, modifier = Modifier.size(12.dp), tint = if (message.status == MessageStatus.SUCCESS) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
                                 }
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = statusText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (message.status == MessageStatus.ERROR || message.status == MessageStatus.STOPPED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text(statusText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
 
-                    // Throttle updates during streaming to prevent Markdown flashing
                     var debouncedText by remember { mutableStateOf(message.text) }
-                    
                     if (isStreaming) {
                         LaunchedEffect(message.text) {
-                            // Only update text every 100ms to allow Markdown layout to settle
                             kotlinx.coroutines.delay(100)
                             debouncedText = message.text
                         }
@@ -438,73 +344,101 @@ fun MessageItem(
                         debouncedText = message.text
                     }
 
-                    // Content Rendering
                     Column {
                         val isError = message.status == MessageStatus.ERROR || message.participant == Participant.ERROR
                         
-                        if (isError) {
+                        // Thought/Reasoning Block
+                        if (!message.thoughts.isNullOrBlank()) {
+                            var isThoughtExpanded by rememberSaveable { mutableStateOf(false) }
+                            val isThinking = message.status == MessageStatus.THINKING
+                            
+                            // Throttle updates for thoughts to match main output behavior
+                            var debouncedThoughts by remember { mutableStateOf(message.thoughts!!) }
+                            if (isStreaming) {
+                                LaunchedEffect(message.thoughts) {
+                                    kotlinx.coroutines.delay(100)
+                                    debouncedThoughts = message.thoughts!!
+                                }
+                            } else {
+                                debouncedThoughts = message.thoughts!!
+                            }
+
                             Surface(
-                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
+                                    .padding(top = 4.dp, bottom = 2.dp) // Reduced outer padding
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { isThoughtExpanded = !isThoughtExpanded }
                             ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Info,
-                                        contentDescription = "Error",
-                                        modifier = Modifier.size(16.dp).padding(top = 2.dp),
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
+                                Column(modifier = Modifier.padding(10.dp)) { // Tighter inner padding
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        
+                                        // Dynamic Title: Content inside ** **
+                                        val thoughtTitle = remember(message.thoughts) {
+                                            val raw = message.thoughts ?: ""
+                                            // Find the LAST instance of **content**
+                                            val matches = Regex("\\*\\*(.*?)\\*\\*").findAll(raw).toList()
+                                            if (matches.isNotEmpty()) {
+                                                matches.last().groupValues[1]
+                                            } else if (isThinking) {
+                                                if (raw.length > 40) "..." + raw.takeLast(40) else raw.ifBlank { "Thinking..." }
+                                            } else {
+                                                "Thought"
+                                            }
+                                        }
+
+                                        Text(
+                                            text = thoughtTitle, 
+                                            style = MaterialTheme.typography.labelMedium, 
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f), 
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        
+                                        Icon(if (isThoughtExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                    }
+                                    if (isThoughtExpanded) {
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Markdown(
+                                            content = debouncedThoughts, 
+                                            modifier = Modifier.fillMaxWidth(),
+                                            typography = thoughtTypography,
+                                            padding = thoughtMarkdownPadding // Use tighter padding for thoughts
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isError) {
+                            Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                                    Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text(
-                                        text = debouncedText.ifEmpty { "Generation failed." },
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            fontWeight = FontWeight.Medium,
-                                            lineHeight = 18.sp
-                                        ),
-                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                    )
+                                    Text(debouncedText.ifEmpty { "Generation failed." }, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, lineHeight = 18.sp), color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f))
                                 }
                             }
                         } else if (debouncedText.isNotEmpty()) {
                             Markdown(
-                                content = debouncedText,
-                                modifier = Modifier.fillMaxWidth(),
-                                typography = customTypography
+                                content = debouncedText, 
+                                modifier = Modifier.fillMaxWidth(), 
+                                typography = customTypography,
+                                padding = customMarkdownPadding
                             )
                         }
 
-                        // Bottom status text for Stopped
-                        if (!isStreaming) {
-                            if (message.status == MessageStatus.STOPPED) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Info,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                        )
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text(
-                                            text = "Generation stopped.",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                        )
-                                    }
+                        if (!isStreaming && message.status == MessageStatus.STOPPED) {
+                            Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                    Icon(Icons.Default.Info, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("Generation stopped.", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                 }
                             }
                         }
@@ -526,13 +460,7 @@ fun Modifier.verticalScrollbar(
         val totalHeight = scrollState.maxValue + viewPortHeight
         val thumbHeight = (viewPortHeight / totalHeight) * viewPortHeight
         val thumbOffset = (scrollState.value / totalHeight.toFloat()) * viewPortHeight
-        
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(size.width - width.toPx() - 4.dp.toPx(), thumbOffset),
-            size = Size(width.toPx(), thumbHeight),
-            cornerRadius = CornerRadius(width.toPx() / 2)
-        )
+        drawRoundRect(color = color, topLeft = Offset(size.width - width.toPx() - 4.dp.toPx(), thumbOffset), size = Size(width.toPx(), thumbHeight), cornerRadius = CornerRadius(width.toPx() / 2))
     }
 }
 
@@ -557,247 +485,46 @@ fun ChatBottomBar(
     var expanded by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
     val isModelValid = selectedModel.isNotBlank() && enabledModels.contains(selectedModel)
-    
     val isMultiLine = textFieldState.text.contains('\n') || textFieldState.text.length > 50
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier)
-            .padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)
-    ) {
+    Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier).padding(8.dp)) {
         if (isExpanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                IconButton(onClick = { isExpanded = false }) {
-                    Icon(
-                        Icons.Default.CloseFullscreen,
-                        contentDescription = "Collapse",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconButton(onClick = { isExpanded = false }) { Icon(Icons.Default.CloseFullscreen, "Collapse", tint = MaterialTheme.colorScheme.primary) }
             }
         }
 
-        // Input widget
-        Box(modifier = Modifier
-            .fillMaxWidth()
-            .then(if (isExpanded) Modifier.weight(1f) else Modifier)
-        ) {
-            TextField(
-                state = textFieldState,
-                scrollState = scrollState,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)
-                    .verticalScrollbar(
-                        scrollState = scrollState,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
-                    ),
-                placeholder = { 
-                    Text(
-                        "Ask Agora anything...", 
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                    ) 
-                },
-                enabled = true,
-                lineLimits = TextFieldLineLimits.MultiLine(1, if (isExpanded) Int.MAX_VALUE else 6),
-                colors = TextFieldDefaults.colors(
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    disabledIndicatorColor = Color.Transparent,
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    disabledContainerColor = Color.Transparent,
-                    cursorColor = MaterialTheme.colorScheme.primary
-                ),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            )
-            
-            if (isMultiLine && !isExpanded) {
-                IconButton(
-                    onClick = { isExpanded = true },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(end = 4.dp, top = 4.dp)
-                        .size(32.dp)
-                ) {
-                    Icon(
-                        Icons.Default.OpenInFull, 
-                        contentDescription = "Expand",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    )
-                }
-            }
+        Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier)) {
+            TextField(state = textFieldState, scrollState = scrollState, modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).verticalScrollbar(scrollState, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)), placeholder = { Text("Ask Agora anything...", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }, enabled = true, lineLimits = TextFieldLineLimits.MultiLine(1, if (isExpanded) Int.MAX_VALUE else 6), colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent, focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent, cursorColor = MaterialTheme.colorScheme.primary), textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface))
+            if (isMultiLine && !isExpanded) IconButton(onClick = { isExpanded = true }, modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 4.dp).size(32.dp)) { Icon(Icons.Default.OpenInFull, "Expand", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)) }
         }
 
-        // Fixed bottom control bar - stays at bottom because weight(1f) is above it
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            // Model and settings on the bottom left
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(100))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-            ) {
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(100)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)).padding(horizontal = 8.dp, vertical = 2.dp)) {
                 val displayText = when {
                     isModelValid -> modelAliases[selectedModel] ?: selectedModel.removePrefix("models/")
                     enabledModels.isNotEmpty() -> "Select Model"
                     else -> "No model selected"
                 }
-
                 Box {
-                    TextButton(
-                        onClick = { expanded = true },
-                        modifier = Modifier.widthIn(max = 160.dp),
-                        contentPadding = PaddingValues(start = 12.dp, end = 8.dp)
-                    ) {
-                        Text(
-                            displayText, 
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = if (isModelValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        )
-                    }
-                    
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
-                        shape = MaterialTheme.shapes.medium
-                    ) {
-                        if (enabledModels.isEmpty()) {
-                            DropdownMenuItem(
-                                text = { Text("No models enabled", style = MaterialTheme.typography.bodyMedium) },
-                                onClick = { expanded = false },
-                                enabled = false
-                            )
-                        } else {
-                            enabledModels.forEach { model ->
-                                DropdownMenuItem(
-                                    text = { Text(modelAliases[model] ?: model.removePrefix("models/"), style = MaterialTheme.typography.bodyMedium) },
-                                    onClick = {
-                                        onModelSelect(model)
-                                        expanded = false
-                                    }
-                                )
-                            }
-                        }
+                    TextButton(onClick = { expanded = true }, modifier = Modifier.widthIn(max = 160.dp), contentPadding = PaddingValues(start = 12.dp, end = 8.dp)) { Text(displayText, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (isModelValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }, shape = MaterialTheme.shapes.medium) {
+                        if (enabledModels.isEmpty()) DropdownMenuItem(text = { Text("No models enabled") }, onClick = { expanded = false }, enabled = false)
+                        else enabledModels.forEach { model -> DropdownMenuItem(text = { Text(modelAliases[model] ?: model.removePrefix("models/")) }, onClick = { onModelSelect(model); expanded = false }) }
                     }
                 }
-
-                IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) {
-                    Icon(
-                        Icons.Default.Settings, 
-                        contentDescription = "Settings", 
-                        modifier = Modifier.size(18.dp), 
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
+                IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Settings, "Settings", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 var toolsMenuExpanded by remember { mutableStateOf(false) }
                 Box {
-                    IconButton(onClick = { toolsMenuExpanded = true }, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Default.MoreVert, 
-                            contentDescription = "Tools", 
-                            modifier = Modifier.size(18.dp), 
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = toolsMenuExpanded,
-                        onDismissRequest = { toolsMenuExpanded = false },
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        DropdownMenuItem(
-                            text = { 
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Code Execution")
-                                }
-                            },
-                            trailingIcon = {
-                                Switch(
-                                    checked = codeExecutionEnabled,
-                                    onCheckedChange = { 
-                                        onCodeExecutionToggle(it)
-                                    },
-                                    modifier = Modifier.scale(0.7f)
-                                )
-                            },
-                            onClick = { onCodeExecutionToggle(!codeExecutionEnabled) }
-                        )
-                        DropdownMenuItem(
-                            text = { 
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Language, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Google Search")
-                                }
-                            },
-                            trailingIcon = {
-                                Switch(
-                                    checked = googleSearchEnabled,
-                                    onCheckedChange = { 
-                                        onGoogleSearchToggle(it)
-                                    },
-                                    modifier = Modifier.scale(0.7f)
-                                )
-                            },
-                            onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
-                        )
+                    IconButton(onClick = { toolsMenuExpanded = true }, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.MoreVert, "Tools", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    DropdownMenu(expanded = toolsMenuExpanded, onDismissRequest = { toolsMenuExpanded = false }, shape = RoundedCornerShape(16.dp)) {
+                        DropdownMenuItem(text = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(12.dp)); Text("Code Execution") } }, trailingIcon = { Switch(checked = codeExecutionEnabled, onCheckedChange = { onCodeExecutionToggle(it) }, modifier = Modifier.scale(0.7f)) }, onClick = { onCodeExecutionToggle(!codeExecutionEnabled) })
+                        DropdownMenuItem(text = { Row(verticalAlignment = Alignment.CenterVertically) { Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp)); Spacer(modifier = Modifier.width(12.dp)); Text("Google Search") } }, trailingIcon = { Switch(checked = googleSearchEnabled, onCheckedChange = { onGoogleSearchToggle(it) }, modifier = Modifier.scale(0.7f)) }, onClick = { onGoogleSearchToggle(!googleSearchEnabled) })
                     }
                 }
             }
-
-            // Send or Stop button
             val canSend = textFieldState.text.isNotBlank() && !isLoading && isModelValid
-            
-            FloatingActionButton(
-                onClick = {
-                    if (isLoading) {
-                        onStopGeneration()
-                    } else if (canSend) {
-                        onSendMessage(textFieldState.text.toString())
-                        textFieldState.edit { replace(0, length, "") }
-                        isExpanded = false // Auto-collapse on send
-                    }
-                },
-                containerColor = if (canSend || isLoading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (canSend || isLoading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
-            ) {
-                if (isLoading) {
-                    Icon(
-                        imageVector = Icons.Default.Stop,
-                        contentDescription = "Stop",
-                        modifier = Modifier.size(24.dp)
-                    )
-                } else {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Send",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
+            FloatingActionButton(onClick = { if (isLoading) onStopGeneration() else if (canSend) { onSendMessage(textFieldState.text.toString()); textFieldState.edit { replace(0, length, "") }; isExpanded = false } }, containerColor = if (canSend || isLoading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, contentColor = if (canSend || isLoading) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(48.dp), shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)) { Icon(if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send, "Action", modifier = Modifier.size(24.dp)) }
         }
     }
 }

@@ -42,9 +42,22 @@ data class ModelInfo(val name: String, val displayName: String, val supportedGen
 
 @Serializable
 data class ApiGenerateContentRequest(
-    val contents: List<ApiContent>,
-    @SerialName("system_instruction") val systemInstruction: ApiContent? = null,
-    val tools: List<ApiTool>? = null
+    val contents: List<ApiRequestContent>,
+    @SerialName("system_instruction") val systemInstruction: ApiRequestContent? = null,
+    val tools: List<ApiTool>? = null,
+    @SerialName("generationConfig") val generationConfig: ApiGenerationConfig? = null
+)
+
+@Serializable
+data class ApiGenerationConfig(
+    @SerialName("thinkingConfig") val thinkingConfig: ApiThinkingConfig? = null
+)
+
+@Serializable
+data class ApiThinkingConfig(
+    @SerialName("includeThoughts") val includeThoughts: Boolean,
+    @SerialName("thinkingLevel") val thinkingLevel: String? = null,
+    @SerialName("thinkingBudget") val thinkingBudget: Int? = null
 )
 
 @Serializable
@@ -54,11 +67,20 @@ data class ApiTool(
 )
 
 @Serializable
-data class ApiContent(val role: String? = null, val parts: List<ApiPart>)
+data class ApiRequestContent(val role: String? = null, val parts: List<ApiRequestPart>)
 
 @Serializable
-data class ApiPart(
+data class ApiRequestPart(val text: String? = null)
+
+@Serializable
+data class ApiResponseContent(val role: String? = null, val parts: List<ApiResponsePart>)
+
+@Serializable
+data class ApiResponsePart(
     val text: String? = null,
+    val thought: JsonElement? = null,
+    @SerialName("thoughtSignature") val thoughtSignature: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
     @SerialName("executable_code") val executableCode: ApiExecutableCode? = null,
     @SerialName("code_execution_result") val codeExecutionResult: ApiCodeExecutionResult? = null
 )
@@ -76,10 +98,13 @@ data class ApiStreamResponse(
 )
 
 @Serializable
-data class ApiCandidate(val content: ApiContent? = null)
+data class ApiCandidate(val content: ApiResponseContent? = null)
 
 @Serializable
-data class ApiUsageMetadata(val totalTokenCount: Int? = null)
+data class ApiUsageMetadata(
+    val totalTokenCount: Int? = null,
+    val thoughtsTokenCount: Int? = null
+)
 
 @Serializable
 data class ApiErrorResponse(val error: ApiError)
@@ -182,6 +207,7 @@ class ChatViewModel(
                                 id = it.id, 
                                 parentId = it.parentId,
                                 text = it.text, 
+                                thoughts = it.thoughts,
                                 tokenCount = it.tokenCount,
                                 status = it.status,
                                 participant = it.participant, 
@@ -320,7 +346,7 @@ class ChatViewModel(
             val newUserMessageId = UUID.randomUUID().toString()
             chatDao.upsertMessage(MessageEntity(
                 id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
-                text = newText, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
+                text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
             ))
             val newMap = _selectedChildren.value.toMutableMap()
             newMap[messageToEdit.parentId] = newUserMessageId
@@ -329,7 +355,7 @@ class ChatViewModel(
             val startTime = System.currentTimeMillis() + 1
             chatDao.upsertMessage(MessageEntity(
                 id = modelMessageId, conversationId = currentId, parentId = newUserMessageId,
-                text = "", status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
+                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
             ))
             generateResponse(currentId, newText, modelMessageId, startTime)
         }
@@ -357,13 +383,13 @@ class ChatViewModel(
             val userMessageId = UUID.randomUUID().toString()
             chatDao.upsertMessage(MessageEntity(
                 id = userMessageId, conversationId = currentId!!, parentId = lastMessageId,
-                text = text, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
+                text = text, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
             ))
             val modelMessageId = UUID.randomUUID().toString()
             val startTime = System.currentTimeMillis() + 1
             chatDao.upsertMessage(MessageEntity(
                 id = modelMessageId, conversationId = currentId, parentId = userMessageId,
-                text = "", status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
+                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
             ))
             generateResponse(currentId, text, modelMessageId, startTime)
         }
@@ -374,6 +400,7 @@ class ChatViewModel(
         _isLoading.value = true
         _streamingMessage.value = null
         var totalText = ""
+        var totalThoughts = ""
         var totalTokenCount = 0
         var currentStatus = MessageStatus.SENDING
         val placeholder = chatDao.getMessagesForConversation(currentId).first().find { it.id == modelMessageId }
@@ -393,14 +420,14 @@ class ChatViewModel(
                 }
 
                 val apiContents = limitedPath.map { msg ->
-                    ApiContent(role = if (msg.participant == Participant.USER) "user" else "model", parts = listOf(ApiPart(text = msg.text)))
+                    ApiRequestContent(role = if (msg.participant == Participant.USER) "user" else "model", parts = listOf(ApiRequestPart(text = msg.text)))
                 }
                 val activePrompt = systemPrompts.value.find { it.id == activeSystemPromptId.value }?.content
                 val sdf = SimpleDateFormat("MMMM d, yyyy, HH:mm", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("GMT+8")
                 }
                 val timeInfo = "Current Time: ${sdf.format(Date())} (UTC+8)\n\n"
-                val systemInstruction = ApiContent(parts = listOf(ApiPart(text = timeInfo + (activePrompt ?: ""))))
+                val systemInstruction = ApiRequestContent(parts = listOf(ApiRequestPart(text = timeInfo + (activePrompt ?: ""))))
                 
                 val tools = mutableListOf<ApiTool>()
                 if (codeExecutionEnabled.value) tools.add(ApiTool(codeExecution = JsonObject(emptyMap())))
@@ -408,10 +435,21 @@ class ChatViewModel(
                     tools.add(ApiTool(googleSearch = JsonObject(emptyMap())))
                 }
                 
+                val thinkingConfig = when {
+                    cleanModelName.contains("gemini-3", ignoreCase = true) -> 
+                        ApiThinkingConfig(includeThoughts = true, thinkingLevel = "HIGH")
+                    cleanModelName.contains("gemini-2.5", ignoreCase = true) -> 
+                        ApiThinkingConfig(includeThoughts = true, thinkingBudget = -1)
+                    cleanModelName.contains("thinking-exp", ignoreCase = true) -> 
+                        ApiThinkingConfig(includeThoughts = true)
+                    else -> null
+                }
+                
                 val requestBody = ApiGenerateContentRequest(
                     contents = apiContents, 
                     systemInstruction = systemInstruction,
-                    tools = if (tools.isNotEmpty()) tools else null
+                    tools = if (tools.isNotEmpty()) tools else null,
+                    generationConfig = if (thinkingConfig != null) ApiGenerationConfig(thinkingConfig = thinkingConfig) else null
                 )
 
                 withContext(Dispatchers.IO) {
@@ -434,19 +472,104 @@ class ChatViewModel(
                                 if (jsonStr != "[DONE]") {
                                     try {
                                         val response = json.decodeFromString<ApiStreamResponse>(jsonStr)
+                                        // Log raw part for diagnosis
+                                        android.util.Log.d("AgoraAPI", "JSON Part: $jsonStr")
+                                        
                                         response.candidates?.firstOrNull()?.content?.parts?.forEach { part ->
-                                            part.text?.let { totalText += it }
-                                            part.executableCode?.let { totalText += "\n```${it.language}\n${it.code}\n```\n" }
-                                            part.codeExecutionResult?.let { totalText += "\n> Output: ${it.output}\n" }
+                                            var hasNewContent = false
+                                            
+                                            // 1. Determine if this part is a "Thought" part
+                                            var isPartOfThought = false
+                                            
+                                            // Handle polymorphic thought field (JsonElement)
+                                            part.thought?.let { thoughtElement ->
+                                                if (thoughtElement is kotlinx.serialization.json.JsonPrimitive) {
+                                                    if (thoughtElement.isString) {
+                                                        totalThoughts += thoughtElement.content
+                                                        isPartOfThought = true
+                                                        hasNewContent = true
+                                                    } else if (thoughtElement.content == "true") {
+                                                        // "thought": true signal -> this part's text is reasoning
+                                                        isPartOfThought = true
+                                                    }
+                                                }
+                                            }
+                                            
+                                            // Handle explicit reasoning_content
+                                            part.reasoningContent?.let { 
+                                                totalThoughts += it 
+                                                isPartOfThought = true
+                                                hasNewContent = true
+                                            }
+
+                                            // Handle Gemini 3 encrypted thoughtSignature
+                                            part.thoughtSignature?.let {
+                                                isPartOfThought = true
+                                                if (totalThoughts.isEmpty()) {
+                                                    totalThoughts = "Model is reasoning..."
+                                                }
+                                                hasNewContent = true
+                                            }
+
+                                            // 2. Process Text based on phase
+                                            part.text?.let { 
+                                                if (isPartOfThought) {
+                                                    totalThoughts += it
+                                                } else {
+                                                    totalText += it 
+                                                    currentStatus = MessageStatus.SENDING
+                                                }
+                                                hasNewContent = true
+                                            }
+                                            
+                                            // 3. Status Transition
+                                            if (isPartOfThought && totalText.isEmpty()) {
+                                                currentStatus = MessageStatus.THINKING
+                                            }
+                                            
+                                            // 4. Other content types (always treated as main output)
+                                            part.executableCode?.let { 
+                                                totalText += "\n```${it.language}\n${it.code}\n```\n" 
+                                                hasNewContent = true
+                                                currentStatus = MessageStatus.SENDING
+                                            }
+                                            
+                                            part.codeExecutionResult?.let { 
+                                                totalText += "\n> Output: ${it.output}\n" 
+                                                hasNewContent = true
+                                                currentStatus = MessageStatus.SENDING
+                                            }
+                                            
+                                            if (hasNewContent) {
+                                                _streamingMessage.value = ChatMessage(
+                                                    id = modelMessageId, 
+                                                    parentId = parentId, 
+                                                    text = totalText, 
+                                                    thoughts = totalThoughts.ifBlank { null }, 
+                                                    tokenCount = totalTokenCount, 
+                                                    status = currentStatus, 
+                                                    participant = Participant.MODEL, 
+                                                    timestamp = startTime
+                                                )
+                                            }
                                         }
-                                        response.usageMetadata?.totalTokenCount?.let { totalTokenCount = it }
-                                        _streamingMessage.value = ChatMessage(id = modelMessageId, parentId = parentId, text = totalText, tokenCount = totalTokenCount, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime)
-                                    } catch (e: Exception) { }
+                                        response.usageMetadata?.let { metadata ->
+                                            metadata.totalTokenCount?.let { totalTokenCount = it }
+                                            if (totalText.isEmpty() && (metadata.thoughtsTokenCount ?: 0) > 0) {
+                                                currentStatus = MessageStatus.THINKING
+                                                if (totalThoughts.isEmpty()) {
+                                                    totalThoughts = "Model is reasoning..."
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) { 
+                                        android.util.Log.e("AgoraAPI", "Parse error: ${e.message}", e)
+                                    }
                                 }
                             }
                             line = reader.readLine()
                         }
-                        currentStatus = if (totalText.isNotEmpty()) MessageStatus.SUCCESS else MessageStatus.ERROR
+                        currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty()) MessageStatus.SUCCESS else MessageStatus.ERROR
                     } else {
                         val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error (Code: $responseCode)"
                         totalText = try {
@@ -484,9 +607,9 @@ class ChatViewModel(
             currentConnection?.disconnect()
             currentConnection = null
             _streamingMessage.value?.let { finalMsg ->
-                chatDao.upsertMessage(MessageEntity(id = finalMsg.id, conversationId = currentId, parentId = finalMsg.parentId, text = finalMsg.text, tokenCount = finalMsg.tokenCount, status = currentStatus, participant = finalMsg.participant, timestamp = finalMsg.timestamp))
+                chatDao.upsertMessage(MessageEntity(id = finalMsg.id, conversationId = currentId, parentId = finalMsg.parentId, text = finalMsg.text, thoughts = finalMsg.thoughts, tokenCount = finalMsg.tokenCount, status = currentStatus, participant = finalMsg.participant, timestamp = finalMsg.timestamp))
             } ?: run {
-                chatDao.upsertMessage(MessageEntity(id = modelMessageId, conversationId = currentId, parentId = parentId, text = totalText, tokenCount = totalTokenCount, status = currentStatus, participant = Participant.MODEL, timestamp = startTime))
+                chatDao.upsertMessage(MessageEntity(id = modelMessageId, conversationId = currentId, parentId = parentId, text = totalText, thoughts = totalThoughts.ifBlank { null }, tokenCount = totalTokenCount, status = currentStatus, participant = Participant.MODEL, timestamp = startTime))
             }
             _isLoading.value = false
             _streamingMessage.value = null
