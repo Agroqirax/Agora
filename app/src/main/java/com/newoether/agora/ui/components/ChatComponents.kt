@@ -326,7 +326,7 @@ fun MessageItem(
                         }
 
                         if (statusText != null) {
-                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                                 if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING) {
                                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(12.dp).rotate(rotation), tint = if (statusText == "Thinking...") MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
                                 } else {
@@ -379,7 +379,7 @@ fun MessageItem(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 4.dp, bottom = bottomPadding)
+                                    .padding(top = 8.dp, bottom = bottomPadding)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     .animateContentSize(animationSpec = tween(400))
