@@ -484,7 +484,7 @@ fun MessageItem(
                         
                         if (message.participant == Participant.MODEL && !isStreaming) {
                             Row(
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                                 horizontalArrangement = Arrangement.Start,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
