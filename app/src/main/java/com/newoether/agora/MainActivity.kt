@@ -527,10 +527,10 @@ fun ChatApp(
                             
                             if (targetNewChat && (targetShowLaunch != initialShowLaunch || targetNewChat != initialState.first)) {
                                 // Transition TO New Chat (or at Launch): Fade out history, Scale in prompt
-                                // Slower scale in, very fast initial speed, smooth finish
-                                val enterSpec = tween<Float>(700, easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f))
+                                // Less extreme initial velocity, smooth finish
+                                val enterSpec = tween<Float>(700, easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1.0f))
                                 val fadeInSpec = tween<Float>(500)
-                                (fadeIn(animationSpec = fadeInSpec) + scaleIn(initialScale = 0.7f, transformOrigin = TransformOrigin(0.5f, 0.45f), animationSpec = enterSpec))
+                                (fadeIn(animationSpec = fadeInSpec) + scaleIn(initialScale = 0.6f, transformOrigin = TransformOrigin(0.5f, 0.45f), animationSpec = enterSpec))
                                     .togetherWith(fadeOut(animationSpec = tween(300)))
                             } else {
                                 // Transition FROM New Chat (or between histories): Simple crossfade
@@ -589,7 +589,7 @@ fun ChatApp(
                             ) {
                                 Text(
                                     "Ask Agora Anything...",
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.headlineLarge,
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                                     fontWeight = FontWeight.Bold
                                 )
