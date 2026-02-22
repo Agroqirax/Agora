@@ -611,15 +611,22 @@ fun ChatBottomBar(
                             modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
-                        IconButton(
-                            onClick = { selectedImageUris = selectedImageUris - uriStr },
+                        Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .offset(x = 4.dp, y = (-4).dp)
-                                .size(16.dp)
-                                .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                .offset(x = 5.dp, y = (-5).dp)
+                                .size(18.dp)
+                                .background(Color.Black.copy(alpha = 0.8f), CircleShape)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable { selectedImageUris = selectedImageUris - uriStr },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Close, "Remove", tint = Color.White, modifier = Modifier.size(10.dp))
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Remove",
+                                tint = Color.White,
+                                modifier = Modifier.size(10.dp)
+                            )
                         }
                     }
                 }
