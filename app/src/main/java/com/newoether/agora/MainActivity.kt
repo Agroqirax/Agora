@@ -565,6 +565,7 @@ fun ChatApp(
                                     }
                                 },
                                 onSwitchBranch = { parentId, direction -> viewModel.switchBranch(parentId, direction) },
+                                onRegenerate = { id -> viewModel.regenerate(id) },
                                 contentPadding = PaddingValues(
                                     start = 8.dp, 
                                     end = 8.dp, 
@@ -582,7 +583,7 @@ fun ChatApp(
                             ) {
                                 Text(
                                     "Ask Agora Anything...",
-                                    style = MaterialTheme.typography.headlineMedium,
+                                    style = MaterialTheme.typography.titleLarge,
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                                     fontWeight = FontWeight.Bold
                                 )
