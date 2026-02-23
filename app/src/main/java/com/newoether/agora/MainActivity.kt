@@ -5,7 +5,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.animation.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -81,6 +84,7 @@ import kotlinx.coroutines.withTimeout
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         
         val database = Room.databaseBuilder(
@@ -100,6 +104,25 @@ class MainActivity : ComponentActivity() {
                 MainNavigation(viewModel)
             }
         }
+    }
+}
+
+@Composable
+fun SloganItem(title: String, description: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            lineHeight = 20.sp
+        )
     }
 }
 
@@ -196,6 +219,7 @@ fun ChatApp(
     var bottomBarHeightPx by rememberSaveable { mutableFloatStateOf(0f) }
     val bottomBarHeight = with(density) { bottomBarHeightPx.toDp() }
     val listState = viewModel.listState
+    val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
 
     // Shared layout state in ViewModel to prevent jumps during transitions
     val messageHeights = viewModel.messageHeights
@@ -479,46 +503,50 @@ fun ChatApp(
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.background,
-                                        MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
-                                        MaterialTheme.colorScheme.background.copy(alpha = 0.8f),
-                                        Color.Transparent
-                                    )
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.background
+                        ) {
+                            TopAppBar(
+                                modifier = Modifier.statusBarsPadding(),
+                                title = { 
+                                    val currentTitle = if (isNewChatMode) "Agora Chat" else conversations.find { it.id == currentConversationId }?.title ?: "Agora Chat"
+                                    Column {
+                                        Text(currentTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) 
+                                        if (!isNewChatMode && totalTokens > 0) {
+                                            Text("Total: $totalTokens tokens", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                },
+                                navigationIcon = {
+                                    IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                        Icon(Icons.Default.Menu, contentDescription = "Menu")
+                                    }
+                                },
+                                actions = {
+                                    IconButton(onClick = { viewModel.createNewChat() }) {
+                                        Icon(Icons.Default.Add, contentDescription = "New Chat")
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = Color.Transparent,
+                                    titleContentColor = MaterialTheme.colorScheme.onBackground,
                                 )
                             )
-                            .statusBarsPadding()
-                            .padding(bottom = 60.dp)
-                    ) {
-                        TopAppBar(
-                            title = { 
-                                val currentTitle = if (isNewChatMode) "Agora Chat" else conversations.find { it.id == currentConversationId }?.title ?: "Agora Chat"
-                                Column {
-                                    Text(currentTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) 
-                                    if (!isNewChatMode && totalTokens > 0) {
-                                        Text("Total: $totalTokens tokens", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                            },
-                            navigationIcon = {
-                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                                    Icon(Icons.Default.Menu, contentDescription = "Menu")
-                                }
-                            },
-                            actions = {
-                                IconButton(onClick = { viewModel.createNewChat() }) {
-                                    Icon(Icons.Default.Add, contentDescription = "New Chat")
-                                }
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = Color.Transparent,
-                                titleContentColor = MaterialTheme.colorScheme.onBackground,
-                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .background(
+                                    Brush.verticalGradient(
+                                        listOf(
+                                            MaterialTheme.colorScheme.background,
+                                            Color.Transparent
+                                        )
+                                    )
+                                )
                         )
                     }
                 }
@@ -586,19 +614,117 @@ fun ChatApp(
                                 )
                             )
                         } else if (targetShowLaunch) {
-                            // Show "Ask Agora" prompt
+                            // Show "New Chat" Interface (Refined Manifesto Style)
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .offset(y = (-40).dp), 
-                                contentAlignment = Alignment.Center
+                                    .padding(bottom = bottomBarHeight), 
+                                contentAlignment = Alignment.TopCenter
                             ) {
-                                Text(
-                                    "Ask Agora Anything...",
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 32.dp)
+                                ) {
+                                    // Padding for Top Bar
+                                    Spacer(modifier = Modifier.height(140.dp))
+
+                                    // App Logo (Transparent Large)
+                                    androidx.compose.foundation.Image(
+                                        painter = androidx.compose.ui.res.painterResource(id = R.drawable.agora_transparent_large),
+                                        contentDescription = "Agora Logo",
+                                        modifier = Modifier
+                                            .size(100.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.height(20.dp))
+
+                                    // Brand & Mission
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text(
+                                            "AGORA",
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 4.sp,
+                                            color = MaterialTheme.colorScheme.onBackground
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            "AN OPEN SOURCE AI CLIENT",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Medium,
+                                            letterSpacing = 4.sp,
+                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.height(48.dp))
+
+                                    // Slogan Section
+                                    Text(
+                                        text = "Access powerful models without the guardrails of corporate silos",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 24.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                                        modifier = Modifier.padding(horizontal = 48.dp)
+                                    )
+
+                                    Spacer(modifier = Modifier.height(48.dp))
+
+                                    // Suggestion Chips (More organic layout)
+                                    Text(
+                                        "START A CONVERSATION",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.padding(bottom = 12.dp)
+                                    )
+                                    
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        val suggestions = listOf(
+                                            "Summarize article" to "Summarize this article: ",
+                                            "Code a script" to "Write a python script for ",
+                                            "Travel plan" to "Plan a 5-day trip to Tokyo",
+                                            "Explain physics" to "Explain quantum physics to me"
+                                        )
+
+                                        suggestions.chunked(2).forEach { rowItems ->
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                            ) {
+                                                rowItems.forEach { (label, prompt) ->
+                                                    SuggestionChip(
+                                                        onClick = { 
+                                                            textFieldState.edit { 
+                                                                replace(0, length, prompt)
+                                                            }
+                                                        },
+                                                        label = { 
+                                                            Text(
+                                                                text = label,
+                                                                style = MaterialTheme.typography.labelLarge,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                                modifier = Modifier.padding(horizontal = 4.dp)
+                                                            ) 
+                                                        },
+                                                        colors = SuggestionChipDefaults.suggestionChipColors(
+                                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                                            labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        ),
+                                                        border = null,
+                                                        shape = CircleShape
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             // Empty box while waiting for launch animation trigger
@@ -671,7 +797,8 @@ fun ChatApp(
                         onGoogleSearchToggle = { viewModel.setGoogleSearchEnabled(it) },
                         onModelSelect = { viewModel.setSelectedModel(it) },
                         onOpenSettings = onOpenSettings,
-                        modifier = Modifier
+                        modifier = Modifier,
+                        textFieldState = textFieldState
                     )
                 }
             }

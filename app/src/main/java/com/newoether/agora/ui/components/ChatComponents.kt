@@ -575,9 +575,9 @@ fun ChatBottomBar(
     onGoogleSearchToggle: (Boolean) -> Unit = {},
     onModelSelect: (String) -> Unit,
     onOpenSettings: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() }
 ) {
-    val textFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() }
     val scrollState = rememberScrollState()
     var expanded by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
