@@ -312,12 +312,12 @@ fun MessageItem(
                     } else {
                         Column(
                             modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = if (message.participant == Participant.USER) Alignment.End else Alignment.Start
+                            horizontalAlignment = Alignment.Start
                         ) {
                             if (message.images.isNotEmpty()) {
                                 androidx.compose.foundation.lazy.LazyRow(
-                                    modifier = Modifier.fillMaxWidth().padding(bottom = if (message.text.isNotEmpty()) 8.dp else 0.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp, if (message.participant == Participant.USER) Alignment.End else Alignment.Start)
+                                    modifier = Modifier.padding(bottom = if (message.text.isNotEmpty()) 8.dp else 0.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(message.images) { imagePath ->
                                         coil.compose.AsyncImage(
