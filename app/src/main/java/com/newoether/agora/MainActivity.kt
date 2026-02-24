@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -379,7 +380,11 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                             offsetY > boundY || offsetY < -boundY
 
                                     // Calculate velocity before launching the coroutine to avoid race with resetTracking
-                                    val velocity = velocityTracker.calculateVelocity()
+                                    val rawVelocity = velocityTracker.calculateVelocity()
+                                    val velocity = Velocity(
+                                        x = if (rawVelocity.x.isNaN()) 0f else rawVelocity.x,
+                                        y = if (rawVelocity.y.isNaN()) 0f else rawVelocity.y
+                                    )
                                     
                                     animationJob = scope.launch {
                                         if (isOutOfBounds) {
@@ -433,7 +438,11 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                             ).animateDecay(decay) {
                                                 val (maxX, maxY) = getMaxOffsets(scale)
                                                 if (value.x > maxX || value.x < -maxX || value.y > maxY || value.y < -maxY) {
-                                                    velocityAtBoundary = this.velocity
+                                                    val rawV = this.velocity
+                                                    velocityAtBoundary = Offset(
+                                                        x = if (rawV.x.isNaN()) 0f else rawV.x,
+                                                        y = if (rawV.y.isNaN()) 0f else rawV.y
+                                                    )
                                                     positionAtBoundary = value
                                                     hitBoundary = true
                                                     cancelAnimation()
