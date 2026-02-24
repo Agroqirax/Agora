@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.NonCancellable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -243,6 +244,28 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
+                    // Fix stuck sending states when loading conversation
+                    val stuckMessages = chatDao.getMessagesForConversation(id).first()
+                        .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING }
+                    
+                    stuckMessages.forEach { msg ->
+                        chatDao.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
+                    }
+
+                    // Restore selected branches
+                    val conversation = chatDao.getConversation(id)
+                    if (conversation?.selectedBranchesJson != null) {
+                        try {
+                            val map = Json.decodeFromString<Map<String, String>>(conversation.selectedBranchesJson)
+                            val decodedMap = map.mapKeys { if (it.key == "null") null else it.key }
+                            _selectedChildren.value = decodedMap
+                        } catch (e: Exception) {
+                            _selectedChildren.value = emptyMap()
+                        }
+                    } else {
+                        _selectedChildren.value = emptyMap()
+                    }
+
                     chatDao.getMessagesForConversation(id).collect { entities ->
                         _allMessages.value = entities.map { 
                             ChatMessage(
@@ -254,13 +277,30 @@ class ChatViewModel(
                                 tokenCount = it.tokenCount,
                                 status = it.status,
                                 participant = it.participant, 
-                                timestamp = it.timestamp
+                                timestamp = it.timestamp,
+                                thoughtTimeMs = it.thoughtTimeMs
                             )
                         }
                     }
                 } else {
                     _allMessages.value = emptyList()
                     _selectedChildren.value = emptyMap()
+                }
+            }
+        }
+        
+        viewModelScope.launch {
+            _selectedChildren.collect { childrenMap ->
+                val id = _currentConversationId.value
+                if (id != null) {
+                    val conversation = chatDao.getConversation(id)
+                    if (conversation != null) {
+                        val stringKeyMap = childrenMap.mapKeys { it.key ?: "null" }
+                        val json = Json.encodeToString(stringKeyMap)
+                        if (conversation.selectedBranchesJson != json) {
+                            chatDao.upsertConversation(conversation.copy(selectedBranchesJson = json))
+                        }
+                    }
                 }
             }
         }
@@ -401,16 +441,33 @@ class ChatViewModel(
             val parentId = messageToRegenerate.parentId ?: return@launch
             val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
 
-            val modelMessageId = UUID.randomUUID().toString()
+            val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
+            val hasChildren = _allMessages.value.any { it.parentId == messageId }
+            val isLatest = !hasChildren
+
+            val modelMessageId: String
             val startTime = System.currentTimeMillis() + 1
-            chatDao.upsertMessage(MessageEntity(
-                id = modelMessageId, conversationId = currentId, parentId = parentId,
-                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
-            ))
             
-            val newMap = _selectedChildren.value.toMutableMap()
-            newMap[parentId] = modelMessageId
-            _selectedChildren.value = newMap
+            if (isErrorOrStopped && isLatest) {
+                modelMessageId = messageId
+                chatDao.upsertMessage(MessageEntity(
+                    id = modelMessageId, conversationId = currentId, parentId = parentId,
+                    text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
+                ))
+                val newMap = _selectedChildren.value.toMutableMap()
+                newMap[parentId] = modelMessageId
+                _selectedChildren.value = newMap
+            } else {
+                modelMessageId = UUID.randomUUID().toString()
+                chatDao.upsertMessage(MessageEntity(
+                    id = modelMessageId, conversationId = currentId, parentId = parentId,
+                    text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
+                ))
+                
+                val newMap = _selectedChildren.value.toMutableMap()
+                newMap[parentId] = modelMessageId
+                _selectedChildren.value = newMap
+            }
             
             generateResponse(currentId, userMessage.text, modelMessageId, startTime)
         }
@@ -529,6 +586,7 @@ class ChatViewModel(
                 id = modelMessageId, conversationId = currentId, parentId = userMessageId,
                 text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime
             ))
+            triggerScrollToMessage(userMessageId)
             generateResponse(currentId, text, modelMessageId, startTime)
         }
     }
@@ -540,6 +598,7 @@ class ChatViewModel(
         var totalText = ""
         var totalThoughts = ""
         var totalTokenCount = 0
+        var totalThoughtTimeMs: Long? = null
         var currentStatus = MessageStatus.SENDING
         val placeholder = chatDao.getMessagesForConversation(currentId).first().find { it.id == modelMessageId }
         val parentId = placeholder?.parentId
@@ -547,7 +606,17 @@ class ChatViewModel(
         try {
             if (provider.value == "Google") {
                 val cleanModelName = selectedModel.value.removePrefix("models/")
-                val currentPath = messages.value.filter { it.participant != Participant.ERROR }
+                val dbMessages = chatDao.getMessagesForConversation(currentId).first()
+                val pathEntities = mutableListOf<MessageEntity>()
+                var currId: String? = parentId
+                while (currId != null) {
+                    val msg = dbMessages.find { it.id == currId } ?: break
+                    pathEntities.add(0, msg)
+                    currId = msg.parentId
+                }
+                val currentPath = pathEntities.map { 
+                    ChatMessage(id = it.id, parentId = it.parentId, text = it.text, images = it.images, thoughts = it.thoughts, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs) 
+                }.filter { it.participant != Participant.ERROR }
                 
                 // Implement rolling context window
                 val windowSize = maxContextWindow.value
@@ -680,6 +749,7 @@ class ChatViewModel(
                                             // 3. Status Transition
                                             if (isPartOfThought && totalText.isEmpty()) {
                                                 currentStatus = MessageStatus.THINKING
+                                                totalThoughtTimeMs = System.currentTimeMillis() - startTime
                                             }
                                             
                                             // 4. Other content types (always treated as main output)
@@ -704,7 +774,8 @@ class ChatViewModel(
                                                     tokenCount = totalTokenCount, 
                                                     status = currentStatus, 
                                                     participant = Participant.MODEL, 
-                                                    timestamp = startTime
+                                                    timestamp = startTime,
+                                                    thoughtTimeMs = totalThoughtTimeMs
                                                 )
                                             }
                                         }
@@ -759,19 +830,22 @@ class ChatViewModel(
                 totalText = "Error: ${e.localizedMessage ?: "An unexpected error occurred."}"
             }
         } finally {
-            currentConnection?.disconnect()
-            currentConnection = null
-            // Only persist if the conversation still exists to avoid FK constraint crashes on deletion
-            val conversationExists = chatDao.getConversation(currentId) != null
-            if (conversationExists) {
-                _streamingMessage.value?.let { finalMsg ->
-                    chatDao.upsertMessage(MessageEntity(id = finalMsg.id, conversationId = currentId, parentId = finalMsg.parentId, text = finalMsg.text, thoughts = finalMsg.thoughts, tokenCount = finalMsg.tokenCount, status = currentStatus, participant = finalMsg.participant, timestamp = finalMsg.timestamp))
-                } ?: run {
-                    chatDao.upsertMessage(MessageEntity(id = modelMessageId, conversationId = currentId, parentId = parentId, text = totalText, thoughts = totalThoughts.ifBlank { null }, tokenCount = totalTokenCount, status = currentStatus, participant = Participant.MODEL, timestamp = startTime))
+            withContext(NonCancellable) {
+                currentConnection?.disconnect()
+                currentConnection = null
+                // Only persist if the conversation still exists to avoid FK constraint crashes on deletion
+                val conversationExists = chatDao.getConversation(currentId) != null
+                if (conversationExists) {
+                    val finalStreamingMsg = _streamingMessage.value
+                    if (finalStreamingMsg != null) {
+                        chatDao.upsertMessage(MessageEntity(id = finalStreamingMsg.id, conversationId = currentId, parentId = finalStreamingMsg.parentId, text = finalStreamingMsg.text, thoughts = finalStreamingMsg.thoughts, tokenCount = finalStreamingMsg.tokenCount, status = currentStatus, participant = finalStreamingMsg.participant, timestamp = finalStreamingMsg.timestamp, thoughtTimeMs = finalStreamingMsg.thoughtTimeMs))
+                    } else {
+                        chatDao.upsertMessage(MessageEntity(id = modelMessageId, conversationId = currentId, parentId = parentId, text = totalText, thoughts = totalThoughts.ifBlank { null }, tokenCount = totalTokenCount, status = currentStatus, participant = Participant.MODEL, timestamp = startTime, thoughtTimeMs = totalThoughtTimeMs))
+                    }
                 }
+                _isLoading.value = false
+                _streamingMessage.value = null
             }
-            _isLoading.value = false
-            _streamingMessage.value = null
         }
     }
 

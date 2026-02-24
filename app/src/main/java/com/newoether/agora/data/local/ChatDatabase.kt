@@ -32,7 +32,8 @@ class MessageConverters {
 data class ChatEntity(
     @PrimaryKey val id: String,
     val title: String,
-    val lastUpdated: Long = System.currentTimeMillis()
+    val lastUpdated: Long = System.currentTimeMillis(),
+    val selectedBranchesJson: String? = null
 )
 
 @Entity(
@@ -57,7 +58,8 @@ data class MessageEntity(
     val tokenCount: Int = 0,
     val status: MessageStatus = MessageStatus.SUCCESS,
     val participant: Participant,
-    val timestamp: Long
+    val timestamp: Long,
+    val thoughtTimeMs: Long? = null
 )
 
 @Dao
@@ -83,7 +85,7 @@ interface ChatDao {
 
 @Database(
     entities = [ChatEntity::class, MessageEntity::class], 
-    version = 2,
+    version = 4,
     exportSchema = true
 )
 @TypeConverters(MessageConverters::class)

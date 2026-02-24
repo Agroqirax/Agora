@@ -76,6 +76,8 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.ChatViewModelFactory
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -87,11 +89,24 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN selectedBranchesJson TEXT")
+            }
+        }
+        
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN thoughtTimeMs INTEGER")
+            }
+        }
+
         val database = Room.databaseBuilder(
             applicationContext,
             ChatDatabase::class.java,
             "agora_db"
         )
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
         .fallbackToDestructiveMigration()
         .build()
         val settingsManager = SettingsManager(applicationContext)
@@ -333,7 +348,26 @@ fun ChatApp(
 
     LaunchedEffect(Unit) {
         viewModel.scrollToMessage.collect { messageId ->
-            scrollToLastUserMessage(animate = true, targetMessageId = messageId)
+            if (messageId != null) {
+                try {
+                    withTimeout(2000) {
+                        snapshotFlow { messages.indexOfFirst { it.id == messageId } }
+                            .filter { it != -1 }
+                            .first()
+                        
+                        // Wait for layout heights to register
+                        snapshotFlow { messageHeights[messageId] }
+                            .filter { it != null && it > 0 }
+                            .first()
+                            
+                        scrollToLastUserMessage(animate = true, targetMessageId = messageId)
+                    }
+                } catch (e: Exception) {
+                    // Timeout
+                }
+            } else {
+                scrollToLastUserMessage(animate = true)
+            }
         }
     }
 
@@ -774,16 +808,7 @@ fun ChatApp(
                 ) {
                     ChatBottomBar(
                         onSendMessage = { text, images ->
-                            val isFirstMessage = messages.isEmpty()
                             viewModel.sendMessage(text, images)
-                            scope.launch {
-                                // Only scroll if it's not the first message in the chat
-                                if (!isFirstMessage) {
-                                    // Wait for layout to start moving (50ms)
-                                    kotlinx.coroutines.delay(50)
-                                    scrollToLastUserMessage(animate = true)
-                                }
-                            }
                         },
                         onStopGeneration = { viewModel.stopGeneration() },
                         isLoading = isLoading,

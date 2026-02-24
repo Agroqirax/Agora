@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.CompositionLocalProvider
@@ -344,8 +345,13 @@ fun MessageItem(
                 }
 
                 if (!isEditing) {
-                    TextButton(onClick = { onStartEdit() }, enabled = isEditingAllowed) {
-                        Text("Edit", style = MaterialTheme.typography.labelSmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                        }
+                        IconButton(onClick = { onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit", modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                        }
                     }
                 }
             }
@@ -430,7 +436,7 @@ fun MessageItem(
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     .clickable { 
-                                        if (!isThoughtExpanded) {
+                                        if (!isThoughtExpanded && stableCollapsedThoughtHeight == 0) {
                                             stableCollapsedThoughtHeight = currentThoughtBlockHeight
                                         }
                                         isThoughtExpanded = !isThoughtExpanded 
@@ -441,17 +447,32 @@ fun MessageItem(
                                     Icon(Icons.Default.Language, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                                     Spacer(modifier = Modifier.width(8.dp))
                                     
-                                    // Dynamic Title: Content inside ** **
-                                    val thoughtTitle = remember(message.thoughts) {
+                                    // Dynamic Title: Content inside ** ** or # Heading
+                                    val thoughtTitle = remember(message.thoughts, isThinking, message.thoughtTimeMs) {
                                         val raw = message.thoughts ?: ""
-                                        // Find the LAST instance of **content**
-                                        val matches = Regex("\\*\\*(.*?)\\*\\*").findAll(raw).toList()
-                                        if (matches.isNotEmpty()) {
-                                            matches.last().groupValues[1]
-                                        } else if (isThinking) {
-                                            if (raw.length > 40) "..." + raw.takeLast(40) else raw.ifBlank { "Thinking..." }
+                                        if (!isThinking) {
+                                            if (message.thoughtTimeMs != null && message.thoughtTimeMs > 0) {
+                                                val seconds = message.thoughtTimeMs / 1000
+                                                if (seconds >= 60) {
+                                                    val minutes = seconds / 60
+                                                    val remSeconds = seconds % 60
+                                                    "Thought for ${minutes}m ${remSeconds}s"
+                                                } else {
+                                                    "Thought for ${seconds}s"
+                                                }
+                                            } else {
+                                                "Thought"
+                                            }
                                         } else {
-                                            "Thought"
+                                            val boldMatches = Regex("\\*\\*(.*?)\\*\\*").findAll(raw).map { it.groupValues[1] }.toList()
+                                            val headingMatches = Regex("(?m)^#+\\s*(.*)$").findAll(raw).map { it.groupValues[1] }.toList()
+                                            
+                                            val allMatches = (boldMatches + headingMatches).filter { it.isNotBlank() }
+                                            if (allMatches.isNotEmpty()) {
+                                                allMatches.last()
+                                            } else {
+                                                if (raw.length > 40) "..." + raw.takeLast(40) else raw.ifBlank { "Thinking..." }
+                                            }
                                         }
                                     }
 
@@ -533,6 +554,25 @@ fun MessageItem(
                                 }
                                 IconButton(onClick = { onRegenerate(message.id) }, modifier = Modifier.size(40.dp)) {
                                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                }
+                                
+                                if (totalBranches > 1) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .padding(start = 8.dp)
+                                            .clip(RoundedCornerShape(100))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                            .padding(horizontal = 4.dp)
+                                    ) {
+                                        IconButton(onClick = { onSwitchBranch(-1) }, enabled = branchIndex > 0, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, modifier = Modifier.size(16.dp))
+                                        }
+                                        Text("${branchIndex + 1} / $totalBranches", style = MaterialTheme.typography.labelSmall)
+                                        IconButton(onClick = { onSwitchBranch(1) }, enabled = branchIndex < totalBranches - 1, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
                                 }
                             }
                         }
