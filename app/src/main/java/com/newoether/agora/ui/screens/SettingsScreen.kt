@@ -436,7 +436,8 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     // Model Alias Dialog
     showModelAliasDialog?.let { model ->
-        var alias by remember { mutableStateOf(modelAliases[model] ?: "") }
+        val aliasState = rememberTextFieldState(modelAliases[model] ?: "")
+        val aliasScrollState = rememberScrollState()
         
         AlertDialog(
             onDismissRequest = { showModelAliasDialog = null },
@@ -445,22 +446,22 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 Column {
                     Text("Current ID: ${model.removePrefix("models/")}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = alias,
-                        onValueChange = { alias = it },
-                        label = { Text("Alias") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .bringIntoViewResponder(noOpResponder),
-                        shape = MaterialTheme.shapes.large,
-                        placeholder = { Text(model.removePrefix("models/")) },
-                        colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
-                    )
+                    Box(modifier = Modifier.bringIntoViewResponder(noOpResponder)) {
+                        TextField(
+                            state = aliasState,
+                            scrollState = aliasScrollState,
+                            label = { Text("Alias") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.large,
+                            placeholder = { Text(model.removePrefix("models/")) },
+                            colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                        )
+                    }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.updateModelAlias(model, alias)
+                    viewModel.updateModelAlias(model, aliasState.text.toString())
                     showModelAliasDialog = null
                 }) { Text("Save") }
             },
@@ -473,7 +474,8 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     // API Key Dialog (Add/Edit)
     showKeyDialog?.let { entry ->
         var name by remember { mutableStateOf(entry.name) }
-        var key by remember { mutableStateOf(entry.key) }
+        val keyState = rememberTextFieldState(entry.key)
+        val keyScrollState = rememberScrollState()
         val isEdit = apiKeys.any { it.id == entry.id }
         
         AlertDialog(
@@ -491,19 +493,21 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    TextField(
-                        value = key, onValueChange = { key = it }, 
-                        label = { Text("Google API Key") }, 
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .bringIntoViewResponder(noOpResponder),
-                        shape = MaterialTheme.shapes.large,
-                        colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
-                    )
+                    Box(modifier = Modifier.bringIntoViewResponder(noOpResponder)) {
+                        TextField(
+                            state = keyState,
+                            scrollState = keyScrollState,
+                            label = { Text("Google API Key") }, 
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.large,
+                            colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
+                        )
+                    }
                 }
             },
             confirmButton = { 
                 TextButton(onClick = { 
+                    val key = keyState.text.toString()
                     if (name.isNotBlank() && key.isNotBlank()) {
                         if (isEdit) viewModel.updateApiKey(entry.id, name, key) else viewModel.addApiKey(name, key)
                         showKeyDialog = null 

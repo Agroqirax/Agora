@@ -177,7 +177,6 @@ fun MessageItem(
     onRegenerate: (String) -> Unit = {},
     onHeightChanged: (Int) -> Unit = {}
 ) {
-    var editText by remember { mutableStateOf(message.text) }
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
 
@@ -213,10 +212,6 @@ fun MessageItem(
     LaunchedEffect(message.text, message.status, isEditing) {
         kotlinx.coroutines.delay(50)
         onHeightChanged(calculateReportedHeight(currentTotalHeight, currentThoughtBlockHeight))
-    }
-
-    LaunchedEffect(isEditing) {
-        if (isEditing) editText = message.text
     }
 
     val alignment = when (message.participant) {
@@ -292,22 +287,26 @@ fun MessageItem(
                         .then(if (shouldAnimate) Modifier.animateContentSize(animationSpec = tween(150)) else Modifier)
                 ) {
                     if (isEditing) {
+                        val editState = rememberTextFieldState(message.text)
+                        val editScrollState = rememberScrollState()
                         Column(modifier = Modifier.padding(8.dp)) {
-                            TextField(
-                                value = editText,
-                                onValueChange = { editText = it },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent
+                            Box(modifier = Modifier.bringIntoViewResponder(noOpResponder)) {
+                                TextField(
+                                    state = editState,
+                                    scrollState = editScrollState,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent
+                                    )
                                 )
-                            )
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
-                                TextButton(onClick = { onCancelEdit(); editText = message.text }) { Text("Cancel") }
-                                TextButton(onClick = { onEdit(message.id, editText) }) { Text("Send") }
+                                TextButton(onClick = { onCancelEdit() }) { Text("Cancel") }
+                                TextButton(onClick = { onEdit(message.id, editState.text.toString()) }) { Text("Send") }
                             }
                         }
                     } else {
@@ -656,6 +655,13 @@ fun ChatBottomBar(
     val isModelValid = selectedModel.isNotBlank() && enabledModels.contains(selectedModel)
     val isMultiLine = textFieldState.text.contains('\n') || textFieldState.text.length > 50
 
+    val noOpResponder = remember {
+        object : BringIntoViewResponder {
+            override fun calculateRectForParent(localRect: Rect): Rect = localRect
+            override suspend fun bringChildIntoView(localRect: () -> Rect?) {}
+        }
+    }
+
     var selectedImageUris by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
@@ -705,7 +711,7 @@ fun ChatBottomBar(
             }
         }
 
-        Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier)) {
+        Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).bringIntoViewResponder(noOpResponder)) {
             TextField(state = textFieldState, scrollState = scrollState, modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).verticalScrollbar(scrollState, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)), placeholder = { Text("Ask Agora anything...", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }, enabled = true, lineLimits = TextFieldLineLimits.MultiLine(1, if (isExpanded) Int.MAX_VALUE else 6), colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent, disabledIndicatorColor = Color.Transparent, focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent, disabledContainerColor = Color.Transparent, cursorColor = MaterialTheme.colorScheme.primary), textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface))
             if (isMultiLine && !isExpanded) IconButton(onClick = { isExpanded = true }, modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 4.dp).size(32.dp)) { Icon(Icons.Default.OpenInFull, "Expand", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)) }
         }
