@@ -40,6 +40,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -268,6 +269,9 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                         return maxX to maxY
                                     }
 
+                                    // Helper for rubber-band resistance
+                                    fun applyResistance(delta: Float): Float = delta * 0.4f
+
                                     awaitEachGesture {
                                         awaitFirstDown(requireUnconsumed = false)
                                         animationJob?.cancel()
@@ -291,19 +295,29 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                                 val centroid = event.calculateCentroid(useCurrent = false)
                                                 if (zoomChange != 1f || panChange != Offset.Zero) {
                                                     val oldScale = scale
-                                                    val newScale = (scale * zoomChange).coerceIn(1f, 10f)
+                                                    val rawScale = (scale * zoomChange).coerceIn(0.5f, 15f)
                                                     
-                                                    val r = if (oldScale != 0f) newScale / oldScale else 1f
-                                                    val (maxX, maxY) = getMaxOffsets(newScale)
+                                                    val r = if (oldScale != 0f) rawScale / oldScale else 1f
                                                     val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
                                                     
-                                                    // Synchronous updates: immediate, stable, no race conditions
+                                                    // Linear target calculation
                                                     val targetX = offsetX * r + (centroid.x - center.x) * (1f - r) + panChange.x
                                                     val targetY = offsetY * r + (centroid.y - center.y) * (1f - r) + panChange.y
                                                     
-                                                    scale = newScale
-                                                    offsetX = targetX.coerceIn(-maxX, maxX)
-                                                    offsetY = targetY.coerceIn(-maxY, maxY)
+                                                    val (maxX, maxY) = getMaxOffsets(rawScale)
+                                                    
+                                                    // Apply resistance for visual state
+                                                    scale = if (rawScale < 1f) 1f - (1f - rawScale) * 0.5f 
+                                                            else if (rawScale > 10f) 10f + (rawScale - 10f) * 0.5f 
+                                                            else rawScale
+
+                                                    offsetX = if (targetX > maxX) maxX + applyResistance(targetX - maxX)
+                                                              else if (targetX < -maxX) -maxX - applyResistance(-maxX - targetX)
+                                                              else targetX
+
+                                                    offsetY = if (targetY > maxY) maxY + applyResistance(targetY - maxY)
+                                                              else if (targetY < -maxY) -maxY - applyResistance(-maxY - targetY)
+                                                              else targetY
                                                     
                                                     event.changes.forEach { if (it.positionChanged()) it.consume() }
                                                 }
@@ -317,20 +331,39 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                             }
                                         } while (event.changes.any { it.pressed })
 
-                                        if (scale > 1f) {
-                                            val velocity = velocityTracker.calculateVelocity()
-                                            val decay = splineBasedDecay<Offset>(density)
-                                            val (maxX, maxY) = getMaxOffsets(scale)
+                                        // Release handler: Snap-back or Fling
+                                        val (boundX, boundY) = getMaxOffsets(scale)
+                                        val isOutOfBounds = scale < 1f || scale > 10f || 
+                                                           offsetX > boundX || offsetX < -boundX || 
+                                                           offsetY > boundY || offsetY < -boundY
 
-                                            animationJob = scope.launch {
+                                        animationJob = scope.launch {
+                                            if (isOutOfBounds) {
+                                                val targetS = scale.coerceIn(1f, 10f)
+                                                val (targetMaxX, targetMaxY) = getMaxOffsets(targetS)
+                                                val targetX = offsetX.coerceIn(-targetMaxX, targetMaxX)
+                                                val targetY = offsetY.coerceIn(-targetMaxY, targetMaxY)
+
+                                                val sS = scale
+                                                val sX = offsetX
+                                                val sY = offsetY
+                                                
+                                                AnimationState(0f).animateTo(1f, spring(stiffness = Spring.StiffnessLow, dampingRatio = Spring.DampingRatioLowBouncy)) {
+                                                    scale = sS + (targetS - sS) * value
+                                                    offsetX = sX + (targetX - sX) * value
+                                                    offsetY = sY + (targetY - sY) * value
+                                                }
+                                            } else if (scale > 1f) {
+                                                val velocity = velocityTracker.calculateVelocity()
+                                                val decay = splineBasedDecay<Offset>(density)
                                                 AnimationState(
                                                     typeConverter = Offset.VectorConverter,
                                                     initialValue = Offset(offsetX, offsetY),
                                                     initialVelocity = Offset(velocity.x, velocity.y)
                                                 ).animateDecay(decay) {
-                                                    offsetX = value.x.coerceIn(-maxX, maxX)
-                                                    offsetY = value.y.coerceIn(-maxY, maxY)
-                                                    if (value.x < -maxX || value.x > maxX || value.y < -maxY || value.y > maxY) {
+                                                    offsetX = value.x.coerceIn(-boundX, boundX)
+                                                    offsetY = value.y.coerceIn(-boundY, boundY)
+                                                    if (value.x < -boundX || value.x > boundX || value.y < -boundY || value.y > boundY) {
                                                         cancelAnimation()
                                                     }
                                                 }
@@ -345,7 +378,7 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                     translationX = offsetX,
                                     translationY = offsetY
                                 ),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            contentScale = ContentScale.Fit
                         )
                         
                         // Close button
