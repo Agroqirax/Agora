@@ -295,28 +295,33 @@ fun MainNavigation(viewModel: ChatViewModel) {
                                                 val centroid = event.calculateCentroid(useCurrent = false)
                                                 if (zoomChange != 1f || panChange != Offset.Zero) {
                                                     val oldScale = scale
+                                                    
+                                                    // 1. Calculate requested scale with soft resistance (WeChat style)
                                                     val rawScale = (scale * zoomChange).coerceIn(0.5f, 15f)
-                                                    
-                                                    val r = if (oldScale != 0f) rawScale / oldScale else 1f
+                                                    val newScale = if (rawScale < 1f) {
+                                                        1f - (1f - rawScale) * 0.6f 
+                                                    } else if (rawScale > 10f) {
+                                                        10f + (rawScale - 10f) * 0.6f
+                                                    } else {
+                                                        rawScale
+                                                    }
+
+                                                    // 2. Use the ACTUAL visual scale change for pivot math to prevent drift
+                                                    val r = if (oldScale != 0f) newScale / oldScale else 1f
                                                     val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
-                                                    
-                                                    // Linear target calculation
                                                     val targetX = offsetX * r + (centroid.x - center.x) * (1f - r) + panChange.x
                                                     val targetY = offsetY * r + (centroid.y - center.y) * (1f - r) + panChange.y
                                                     
-                                                    val (maxX, maxY) = getMaxOffsets(rawScale)
+                                                    val (maxX, maxY) = getMaxOffsets(newScale)
                                                     
-                                                    // Apply resistance for visual state
-                                                    scale = if (rawScale < 1f) 1f - (1f - rawScale) * 0.5f 
-                                                            else if (rawScale > 10f) 10f + (rawScale - 10f) * 0.5f 
-                                                            else rawScale
-
-                                                    offsetX = if (targetX > maxX) maxX + applyResistance(targetX - maxX)
-                                                              else if (targetX < -maxX) -maxX - applyResistance(-maxX - targetX)
+                                                    // 3. Apply soft resistance for visual state (0.6f multiplier)
+                                                    scale = newScale
+                                                    offsetX = if (targetX > maxX) maxX + (targetX - maxX) * 0.6f
+                                                              else if (targetX < -maxX) -maxX - (-maxX - targetX) * 0.6f
                                                               else targetX
 
-                                                    offsetY = if (targetY > maxY) maxY + applyResistance(targetY - maxY)
-                                                              else if (targetY < -maxY) -maxY - applyResistance(-maxY - targetY)
+                                                    offsetY = if (targetY > maxY) maxY + (targetY - maxY) * 0.6f
+                                                              else if (targetY < -maxY) -maxY - (-maxY - targetY) * 0.6f
                                                               else targetY
                                                     
                                                     event.changes.forEach { if (it.positionChanged()) it.consume() }
