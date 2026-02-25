@@ -575,37 +575,37 @@ fun MessageItem(
                         }
 
                         Box(
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .then(if (isStreaming || shouldAnimate) Modifier.animateContentSize(animationSpec = tween(150)) else Modifier)
-                                                        .bringIntoViewResponder(noOpResponder)
-                                                ) {
-                                                    if (isError) {
-                                                        Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                                                Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
-                                                                Spacer(modifier = Modifier.width(12.dp))
-                                                                SelectionContainer {
-                                                                    Text(
-                                                                        debouncedText.ifEmpty { "Failed to generate." },
-                                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, lineHeight = 18.sp),
-                                                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                                                    )
-                                                                }
-                                                            }
-                                                        }
-                                                    } else if (debouncedText.isNotEmpty()) {
-                                                        SelectionContainer {
-                                                            Markdown(
-                                                                content = debouncedText,
-                                                                modifier = Modifier
-                                                                    .fillMaxWidth(),
-                                                                typography = customTypography,
-                                                                padding = customMarkdownPadding
-                                                            )
-                                                        }
-                                                    }
-                                                }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (isStreaming || shouldAnimate) Modifier.animateContentSize(animationSpec = tween(150)) else Modifier)
+                                .bringIntoViewResponder(noOpResponder)
+                        ) {
+                            if (isError) {
+                                Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                                        Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        SelectionContainer {
+                                            Text(
+                                                debouncedText.ifEmpty { "Failed to generate." },
+                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium, lineHeight = 18.sp),
+                                                color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if (debouncedText.isNotEmpty()) {
+                                SelectionContainer {
+                                    Markdown(
+                                        content = debouncedText,
+                                        modifier = Modifier
+                                            .fillMaxWidth(),
+                                        typography = customTypography,
+                                        padding = customMarkdownPadding
+                                    )
+                                }
+                            }
+                        }
                         if (!isStreaming && message.status == MessageStatus.STOPPED) {
                             Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -676,6 +676,7 @@ fun Modifier.verticalScrollbar(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatBottomBar(
     onSendMessage: (String, List<String>) -> Unit,
@@ -696,7 +697,6 @@ fun ChatBottomBar(
     textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() }
 ) {
     val scrollState = rememberScrollState()
-    var expanded by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
     val isModelValid = selectedModel.isNotBlank() && enabledModels.contains(selectedModel)
     val isMultiLine = textFieldState.text.contains('\n') || textFieldState.text.length > 50
@@ -775,37 +775,64 @@ fun ChatBottomBar(
                 ) { 
                     Icon(Icons.Default.Add, "Add Image", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) 
                 }
+                var activeMenu by remember { mutableStateOf<String?>(null) }
+                var modelMenuJustDismissed by remember { mutableStateOf(false) }
+                var toolsMenuJustDismissed by remember { mutableStateOf(false) }
+                
                 val displayText = when {
                     isModelValid -> modelAliases[selectedModel] ?: selectedModel.removePrefix("models/")
                     enabledModels.isNotEmpty() -> "Select Model"
                     else -> "No model selected"
                 }
                 
-                Box {
-                    TextButton(
-                        onClick = { expanded = true }, 
-                        modifier = Modifier.widthIn(max = 160.dp), 
-                        contentPadding = PaddingValues(start = 12.dp, end = 8.dp)
-                    ) { 
-                        Text(
-                            displayText, 
-                            style = MaterialTheme.typography.labelLarge, 
-                            maxLines = 1, 
-                            overflow = TextOverflow.Ellipsis, 
-                            color = if (isModelValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
-                        ) 
+                ExposedDropdownMenuBox(
+                    expanded = activeMenu == "model",
+                    onExpandedChange = { 
+                        if (!it) {
+                            activeMenu = null
+                            modelMenuJustDismissed = true
+                        }
+                    }
+                ) {
+                    Box(modifier = Modifier.menuAnchor()) {
+                        TextButton(
+                            onClick = { 
+                                if (!modelMenuJustDismissed) {
+                                    activeMenu = if (activeMenu == "model") null else "model"
+                                }
+                                modelMenuJustDismissed = false
+                                toolsMenuJustDismissed = false
+                            }, 
+                            modifier = Modifier.widthIn(max = 160.dp), 
+                            contentPadding = PaddingValues(start = 12.dp, end = 8.dp)
+                        ) { 
+                            Text(
+                                displayText, 
+                                style = MaterialTheme.typography.labelLarge, 
+                                maxLines = 1, 
+                                overflow = TextOverflow.Ellipsis, 
+                                color = if (isModelValid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            ) 
+                        }
                     }
                     
-                    DropdownMenu(
-                        expanded = expanded, 
-                        onDismissRequest = { expanded = false },
-                        shape = MaterialTheme.shapes.medium,
-                        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+                    ExposedDropdownMenu(
+                        expanded = activeMenu == "model", 
+                        onDismissRequest = { 
+                            activeMenu = null
+                            modelMenuJustDismissed = true
+                        },
+                        matchTextFieldWidth = false,
+                        focusable = false,
+                        shape = MaterialTheme.shapes.medium
                     ) {
                         if (enabledModels.isEmpty()) {
                             DropdownMenuItem(
                                 text = { Text("No models enabled") }, 
-                                onClick = { expanded = false }, 
+                                onClick = { 
+                                    activeMenu = null
+                                    modelMenuJustDismissed = false
+                                }, 
                                 enabled = false
                             )
                         } else {
@@ -814,7 +841,8 @@ fun ChatBottomBar(
                                     text = { Text(modelAliases[model] ?: model.removePrefix("models/")) }, 
                                     onClick = { 
                                         onModelSelect(model)
-                                        expanded = false 
+                                        activeMenu = null
+                                        modelMenuJustDismissed = false
                                     }
                                 ) 
                             }
@@ -824,20 +852,39 @@ fun ChatBottomBar(
                 
                 IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Settings, "Settings", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 
-                var toolsMenuExpanded by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(
-                        onClick = { toolsMenuExpanded = true }, 
-                        modifier = Modifier.size(32.dp)
-                    ) { 
-                        Icon(Icons.Default.MoreVert, "Tools", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) 
+                ExposedDropdownMenuBox(
+                    expanded = activeMenu == "tools",
+                    onExpandedChange = { 
+                        if (!it) {
+                            activeMenu = null
+                            toolsMenuJustDismissed = true
+                        }
+                    }
+                ) {
+                    Box(modifier = Modifier.menuAnchor()) {
+                        IconButton(
+                            onClick = { 
+                                if (!toolsMenuJustDismissed) {
+                                    activeMenu = if (activeMenu == "tools") null else "tools"
+                                }
+                                toolsMenuJustDismissed = false
+                                modelMenuJustDismissed = false
+                            }, 
+                            modifier = Modifier.size(32.dp)
+                        ) { 
+                            Icon(Icons.Default.MoreVert, "Tools", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) 
+                        }
                     }
                     
-                    DropdownMenu(
-                        expanded = toolsMenuExpanded, 
-                        onDismissRequest = { toolsMenuExpanded = false },
-                        shape = RoundedCornerShape(16.dp),
-                        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+                    ExposedDropdownMenu(
+                        expanded = activeMenu == "tools", 
+                        onDismissRequest = { 
+                            activeMenu = null
+                            toolsMenuJustDismissed = true
+                        },
+                        matchTextFieldWidth = false,
+                        focusable = false,
+                        shape = RoundedCornerShape(16.dp)
                     ) {
                         DropdownMenuItem(
                             text = { 
