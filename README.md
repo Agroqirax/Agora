@@ -1,26 +1,48 @@
-# Agora
+<div align="center">
+  <img src="app/src/main/assets/agora_transparent_large.png" alt="Agora Logo" width="120" />
 
-**Agora** is a sophisticated, modern Android LLM (Large Language Model) chat client built with **Jetpack Compose** and **Kotlin**. It is designed for advanced AI interactions, featuring a robust architecture that supports branching conversation paths and integrated agentic tools.
+  # Agora
+  
+  **Access powerful models without the guardrails of corporate silos.**
 
-## Key Features
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
+  [![Kotlin](https://img.shields.io/badge/Kotlin-Native-blue.svg)](https://kotlinlang.org/)
+</div>
 
-- **Branching Conversation History**: Unlike linear chat apps, Agora supports message branching (tree structure) via a parent-ID based Room database schema, allowing users to explore multiple conversation paths from a single prompt.
-- **Precise UI Padding & Auto-Scroll**: Refined custom logic for stable message anchoring and smooth, 800ms animated auto-scroll that adapts to both user input and AI streaming, even with the IME (keyboard) raised.
-- **Integrated AI Tools**: Built-in support for advanced agentic capabilities like **Code Execution** and **Google Search** integration.
-- **Token & Context Management**: Real-time token counting and configurable context window limits for optimized model usage.
-- **Modern Android Architecture**: 
-  - **Jetpack Compose** for a fully reactive, single-activity UI.
-  - **MVVM Pattern** for clean separation of concerns.
-  - **Kotlin Coroutines & Flow** for efficient asynchronous operations.
-  - **Room Database & DataStore** for persistent message history and application settings.
+---
+
+Official LLM apps are often heavily restricted, wrapping capable AI models in sanitized, linear, and limited user interfaces. **Agora is different.** 
+
+Agora is a completely open-source, BYOK (Bring Your Own Key) Android client designed for power users who want raw, unrestricted access to frontier models. Built natively with Jetpack Compose, it brings desktop-class agentic capabilities to your mobile device, emphasizing user control, privacy, and architectural flexibility.
+
+## Why Agora?
+
+- **No Middlemen:** You connect directly to the API provider. There are no intermediary servers, no hidden telemetry, and no corporate tracking logging your conversations. Your chat history lives locally on your device.
+- **Non-Linear Thought:** Human conversation isn't a straight line, and AI interactions shouldn't be either. Agora uses a tree-structured database that allows you to edit past messages, regenerate responses, and seamlessly explore alternative conversation branches without losing your original context.
+- **Agentic Workflows:** Native support for cutting-edge model capabilities. Agora explicitly supports **Thinking/Reasoning** models, **Code Execution**, and **Google Search** integration directly in the chat.
+
+## Features
+
+- **Bring Your Own Key (BYOK):** Unrestricted access. You control the API key, the model, the system prompts, and the parameters.
+- **Branching History:** Navigate complex, multi-turn conversations with a robust parent-child message architecture.
+- **Context Management:** Real-time token counting and a configurable sliding context window to optimize your API costs and model performance.
+- **System Prompts:** Create, save, and switch between different system prompts (personas) on the fly.
+- **Modern & Fluid UI:** A fully reactive, single-activity UI built entirely in Jetpack Compose. Features precise message anchoring, animated auto-scrolling during model streaming, and an immersive, gesture-driven image viewer.
+- **Markdown & Syntax Highlighting:** Rich text rendering for code blocks, tables, and standard markdown formatting.
+
+## Screenshots
+
+<div align="center">
+  <img src="assets/screenshot.png" alt="Agora New Chat Screen" width="350"/>
+</div>
 
 ## Getting Started
 
 ### Prerequisites
-
-- Android Studio (Ladybug or newer recommended)
+- [Android Studio](https://developer.android.com/studio) (Ladybug or newer recommended)
 - Android SDK 34+
-- A valid Gemini API Key (or other supported LLM provider)
+- A valid Gemini API Key (or other supported provider)
 
 ### Installation
 
@@ -29,19 +51,31 @@
    git clone https://github.com/newo-ether/Agora.git
    ```
 2. Open the project in Android Studio.
-3. Build and run on an emulator or physical device.
-4. Enter your API key in the **Settings** menu.
+3. Sync the project with Gradle files.
+4. Build and run the app on an emulator or a physical Android device.
 
-## Technologies Used
+### Configuration
 
-- **Language**: Kotlin
-- **UI Framework**: Jetpack Compose
-- **Database**: Room
-- **State Management**: ViewModel & Flow
-- **Navigation**: Jetpack Navigation
-- **Styling**: Material 3
-- **Markdown**: Support for rich AI replies
+1. Launch Agora on your device.
+2. Open the **Settings** menu via the navigation drawer.
+3. Add your **API Key** securely within the app.
+4. Customize your experience by adjusting the active model, system prompts, and context limits.
+
+## Tech Stack
+
+Agora is built for performance and maintainability using modern Android architecture:
+- **Language:** [Kotlin](https://kotlinlang.org/)
+- **UI Framework:** [Jetpack Compose](https://developer.android.com/jetpack/compose) (Material 3)
+- **Architecture:** MVVM (Model-View-ViewModel)
+- **Concurrency:** Kotlin Coroutines & Flow
+- **Local Storage:** [Room Database](https://developer.android.com/training/data-storage/room) (Tree-structured message schema) & DataStore
+- **Networking:** Native `HttpURLConnection` with Server-Sent Events (SSE) support for streaming
+- **Serialization:** `kotlinx.serialization`
+
+## Contributing
+
+Contributions are welcome! If you'd like to help improve Agora, please feel free to fork the repository, submit pull requests, or open an issue to discuss new features or bug fixes.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is open-source and available under the [MIT License](LICENSE).
