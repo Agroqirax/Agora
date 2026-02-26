@@ -161,7 +161,7 @@ class ChatViewModel(
 
     val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
         .map { entities -> 
-            entities.map { ChatConversation(id = it.id, title = it.title) }
+            entities.map { ChatConversation(id = it.id, title = it.title, systemPromptId = it.systemPromptId) }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _currentConversationId = MutableStateFlow<String?>(null)
@@ -407,7 +407,19 @@ class ChatViewModel(
 
     fun renameConversation(id: String, newTitle: String) {
         viewModelScope.launch {
-            chatDao.upsertConversation(ChatEntity(id = id, title = newTitle, lastUpdated = System.currentTimeMillis()))
+            val existing = chatDao.getConversation(id)
+            if (existing != null) {
+                chatDao.upsertConversation(existing.copy(title = newTitle, lastUpdated = System.currentTimeMillis()))
+            }
+        }
+    }
+
+    fun setConversationSystemPrompt(id: String, promptId: String?) {
+        viewModelScope.launch {
+            val existing = chatDao.getConversation(id)
+            if (existing != null) {
+                chatDao.upsertConversation(existing.copy(systemPromptId = promptId, lastUpdated = System.currentTimeMillis()))
+            }
         }
     }
 
@@ -651,7 +663,11 @@ class ChatViewModel(
                     if (parts.isEmpty()) parts.add(ApiRequestPart(text = ""))
                     ApiRequestContent(role = if (msg.participant == Participant.USER) "user" else "model", parts = parts)
                 }
-                val activePrompt = systemPrompts.value.find { it.id == activeSystemPromptId.value }?.content
+                
+                val conversation = chatDao.getConversation(currentId)
+                val targetPromptId = conversation?.systemPromptId ?: activeSystemPromptId.value
+                val activePrompt = systemPrompts.value.find { it.id == targetPromptId }?.content
+                
                 val sdf = SimpleDateFormat("MMMM d, yyyy, HH:mm", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("GMT+8")
                 }

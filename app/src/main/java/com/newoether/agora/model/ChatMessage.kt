@@ -30,5 +30,6 @@ data class ChatMessage(
 data class ChatConversation(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
+    val systemPromptId: String? = null,
     val messages: List<ChatMessage> = emptyList()
 )

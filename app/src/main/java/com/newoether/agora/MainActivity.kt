@@ -12,6 +12,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
@@ -87,12 +88,18 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN systemPromptId TEXT")
+            }
+        }
+
         val database = Room.databaseBuilder(
             applicationContext,
             ChatDatabase::class.java,
             "agora_db"
         )
-        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+        .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
         .fallbackToDestructiveMigration()
         .build()
         val settingsManager = SettingsManager(applicationContext)
@@ -560,10 +567,14 @@ fun ChatApp(
     val maxContextWindow by viewModel.maxContextWindow.collectAsState()
     val codeExecutionEnabled by viewModel.codeExecutionEnabled.collectAsState()
     val googleSearchEnabled by viewModel.googleSearchEnabled.collectAsState()
+    
+    val systemPrompts by viewModel.systemPrompts.collectAsState()
+    val activeSystemPromptId by viewModel.activeSystemPromptId.collectAsState()
 
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
     var conversationToRename by remember { mutableStateOf("") }
     var showDeleteConfirmDialog by remember { mutableStateOf<String?>(null) }
+    var showPromptDialog by remember { mutableStateOf(false) }
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -906,6 +917,11 @@ fun ChatApp(
                                     }
                                 },
                                 actions = {
+                                    if (!isNewChatMode) {
+                                        IconButton(onClick = { showPromptDialog = true }) {
+                                            Icon(Icons.Default.Psychology, contentDescription = "System Prompt")
+                                        }
+                                    }
                                     IconButton(onClick = { viewModel.createNewChat() }) {
                                         Icon(Icons.Default.Add, contentDescription = "New Chat")
                                     }
@@ -1235,6 +1251,61 @@ fun ChatApp(
             },
             dismissButton = {
                 TextButton(onClick = { showDeleteConfirmDialog = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showPromptDialog) {
+        val currentConversation = conversations.find { it.id == currentConversationId }
+        var selectedPromptId by remember { mutableStateOf(currentConversation?.systemPromptId) }
+
+        AlertDialog(
+            onDismissRequest = { showPromptDialog = false },
+            title = { Text("Conversation Prompt") },
+            text = {
+                LazyColumn {
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable { selectedPromptId = null }.padding(8.dp)
+                        ) {
+                            RadioButton(
+                                selected = selectedPromptId == null,
+                                onClick = { selectedPromptId = null }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Global Default")
+                        }
+                    }
+                    items(systemPrompts) { prompt ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable { selectedPromptId = prompt.id }.padding(8.dp)
+                        ) {
+                            RadioButton(
+                                selected = selectedPromptId == prompt.id,
+                                onClick = { selectedPromptId = prompt.id }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(prompt.title)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    currentConversationId?.let { id ->
+                        viewModel.setConversationSystemPrompt(id, selectedPromptId)
+                    }
+                    showPromptDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPromptDialog = false }) {
                     Text("Cancel")
                 }
             }

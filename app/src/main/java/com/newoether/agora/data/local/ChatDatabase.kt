@@ -33,7 +33,8 @@ data class ChatEntity(
     @PrimaryKey val id: String,
     val title: String,
     val lastUpdated: Long = System.currentTimeMillis(),
-    val selectedBranchesJson: String? = null
+    val selectedBranchesJson: String? = null,
+    val systemPromptId: String? = null
 )
 
 @Entity(
@@ -86,7 +87,7 @@ interface ChatDao {
 
 @Database(
     entities = [ChatEntity::class, MessageEntity::class], 
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 @TypeConverters(MessageConverters::class)
