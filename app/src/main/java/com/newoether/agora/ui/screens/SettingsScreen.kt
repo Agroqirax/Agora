@@ -207,12 +207,12 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
                                     )
                                 }
-                                                },
+                            },
                             leadingContent = {
                                 Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.link_24), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
                         )
-                        
+
                         LaunchedEffect(baseUrlState.text) {
                             viewModel.setProviderBaseUrl(provider, baseUrlState.text.toString())
                         }
@@ -224,7 +224,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = {
                                 val providerKeys = apiKeys.filter { it.provider == provider }
                                 Text(if (providerKeys.isEmpty()) "No keys configured for $provider" else "${providerKeys.size} key(s) configured")
-                                                },
+                            },
                             leadingContent = {
                                 Icon(Icons.Default.Key, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             }
@@ -564,7 +564,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                     Box(modifier = Modifier.bringIntoViewResponder(noOpResponder)) {
                         TextField(
                             state = keyState,
-                            label = { Text("Google API Key") }, 
+                            label = { Text("${entry.provider} API Key") }, 
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.large,
                             colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent)
