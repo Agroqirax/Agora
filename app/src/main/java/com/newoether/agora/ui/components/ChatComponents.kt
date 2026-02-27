@@ -305,9 +305,9 @@ fun MessageItem(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onSizeChanged { 
+            .onSizeChanged {
                 currentTotalHeight = it.height
-                onHeightChanged(calculateReportedHeight(it.height, currentThoughtBlockHeight)) 
+                onHeightChanged(calculateReportedHeight(it.height, currentThoughtBlockHeight))
             }
             .padding(vertical = 8.dp)
             .then(if (visualizeContextRollout && !isInContext) Modifier.alpha(0.38f) else Modifier),
@@ -489,17 +489,17 @@ fun MessageItem(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .onSizeChanged { 
-                                        currentThoughtBlockHeight = it.height 
+                                    .onSizeChanged {
+                                        currentThoughtBlockHeight = it.height
                                     }
                                     .padding(top = 8.dp, bottom = bottomPadding)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
-                                    .clickable { 
+                                    .clickable {
                                         if (!isThoughtExpanded && stableCollapsedThoughtHeight == 0) {
                                             stableCollapsedThoughtHeight = currentThoughtBlockHeight
                                         }
-                                        isThoughtExpanded = !isThoughtExpanded 
+                                        isThoughtExpanded = !isThoughtExpanded
                                     }
                                     .bringIntoViewResponder(noOpResponder)
                                     .padding(10.dp)
@@ -775,9 +775,12 @@ fun ChatBottomBar(
                 var activeMenu by remember { mutableStateOf<String?>(null) }
                 var lastModelDismissTime by remember { mutableLongStateOf(0L) }
                 var lastToolsDismissTime by remember { mutableLongStateOf(0L) }
+
+                val modelId = selectedModel.removePrefix("models/").substringAfter(":")
+                val provider = selectedModel.removePrefix("models/").substringBefore(":")
                 
                 val displayText = when {
-                    isModelValid -> modelAliases[selectedModel] ?: selectedModel.removePrefix("models/")
+                    isModelValid -> modelAliases[selectedModel] ?: ("$modelId ($provider)")
                     enabledModels.isNotEmpty() -> "Select Model"
                     else -> "No model selected"
                 }
@@ -795,7 +798,7 @@ fun ChatBottomBar(
                                 activeMenu = "model"
                             }
                         }, 
-                        modifier = Modifier.widthIn(max = 160.dp).menuAnchor(), 
+                        modifier = Modifier.widthIn(max = 160.dp).menuAnchor(),
                         contentPadding = PaddingValues(start = 12.dp, end = 8.dp)
                     ) { 
                         Text(
@@ -829,15 +832,19 @@ fun ChatBottomBar(
                                 enabled = false
                             )
                         } else {
-                            enabledModels.forEach { model -> 
+                            enabledModels.forEach { model ->
                                 DropdownMenuItem(
-                                    text = { Text(modelAliases[model] ?: model.removePrefix("models/")) }, 
-                                    onClick = { 
+                                    text = {
+                                        val modelId = model.removePrefix("models/").substringAfter(":")
+                                        val provider = model.removePrefix("models/").substringBefore(":")
+                                        Text(modelAliases[model] ?: ("$modelId ($provider)"))
+                                    },
+                                    onClick = {
                                         onModelSelect(model)
                                         activeMenu = null
                                         lastModelDismissTime = 0L
                                     }
-                                ) 
+                                )
                             }
                         }
                     }
@@ -897,7 +904,7 @@ fun ChatBottomBar(
                                 Row(verticalAlignment = Alignment.CenterVertically) { 
                                     Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Google Search") 
+                                    Text("Web Search")
                                 } 
                             }, 
                             trailingIcon = { 

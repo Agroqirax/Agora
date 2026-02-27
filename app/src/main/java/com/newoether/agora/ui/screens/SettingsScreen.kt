@@ -439,9 +439,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                               },
                             supportingContent = if (enabledModels.isNotEmpty()) {
                                 {
-                                    if (activeAlias != null) {
-                                        Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                                    }
+                                    Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                                 }
                             } else null,
                             leadingContent = {
@@ -537,11 +535,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 ) 
                             },
                             supportingContent = { 
-                                if (alias != null) { 
-                                    Text(cleanId.removePrefix("models/")) 
-                                } else {
-                                    Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                                } 
+                                Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
                             },
                             leadingContent = {
                                 RadioButton(
