@@ -4,15 +4,24 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 
+val MonoFamily = FontFamily(
+    Font(R.font.jetbrains_mono_regular, FontWeight.Normal),
+    Font(R.font.jetbrains_mono_bold, FontWeight.Bold),
+    Font(R.font.jetbrains_mono_italic, FontWeight.Normal, FontStyle.Italic),
+    Font(R.font.jetbrains_mono_bolditalic, FontWeight.Bold, FontStyle.Italic),
+)
+
 val OutfitFamily = FontFamily(
-    Font(R.font.outfit_regular, FontWeight.Normal),
-    Font(R.font.outfit_medium, FontWeight.Medium),
-    Font(R.font.outfit_semibold, FontWeight.SemiBold),
-    Font(R.font.outfit_bold, FontWeight.Bold),
+    Font(R.font.mioutfit_extralight, FontWeight.ExtraLight),
+    Font(R.font.mioutfit_light, FontWeight.Light),
+    Font(R.font.mioutfit_regular, FontWeight.Normal),
+    Font(R.font.mioutfit_medium, FontWeight.Medium),
+    Font(R.font.mioutfit_bold, FontWeight.Bold),
 )
 
 val Typography = Typography(

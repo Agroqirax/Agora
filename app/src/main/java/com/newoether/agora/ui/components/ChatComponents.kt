@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
@@ -72,6 +73,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
@@ -80,6 +83,9 @@ import androidx.compose.ui.unit.sp
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.ui.theme.MonoFamily
+import com.newoether.agora.ui.components.parseLatexSpans
+import com.newoether.agora.ui.components.renderLatexToBitmap
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
@@ -296,6 +302,14 @@ fun MessageItem(
         h4 = currentTypography.titleSmall,
         h5 = currentTypography.titleSmall,
         h6 = currentTypography.titleSmall,
+        code = currentTypography.bodyMedium.copy(
+            fontFamily = MonoFamily,
+            fontSize = 13.sp
+        ),
+        inlineCode = currentTypography.bodyMedium.copy(
+            fontFamily = MonoFamily,
+            fontSize = 13.sp
+        ),
     )
     
     // Dedicated compact typography for thoughts
@@ -439,11 +453,12 @@ fun MessageItem(
                         val infiniteTransition = rememberInfiniteTransition(label = "sending")
                         val rotation by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), "rot")
 
+                        val isThinkingNow = !message.thoughts.isNullOrBlank() || message.status == MessageStatus.THINKING
                         val statusText = when {
                             message.status == MessageStatus.SUCCESS -> if (message.tokenCount > 0) "Cost ${message.tokenCount} tokens" else null
-                            message.text.isNotEmpty() -> "Answering..."
-                            message.status == MessageStatus.THINKING -> "Thinking..."
-                            message.status == MessageStatus.SENDING -> "Sending..."
+                            isStreaming && isThinkingNow -> "Thinking..."
+                            isStreaming && message.text.isNotEmpty() -> "Answering..."
+                            isStreaming -> "Sending..."
                             else -> null
                         }
 
@@ -779,7 +794,7 @@ fun MessageItem(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .then(if (isStreaming || shouldAnimate) Modifier.animateContentSize(animationSpec = tween(150)) else Modifier)
+                                .then(if (shouldAnimate) Modifier.animateContentSize(animationSpec = tween(150)) else Modifier)
                                 .bringIntoViewResponder(noOpResponder)
                         ) {
                             if (isError) {
@@ -797,14 +812,46 @@ fun MessageItem(
                                     }
                                 }
                             } else if (debouncedText.isNotEmpty()) {
-                                SelectionContainer {
-                                    Markdown(
-                                        content = debouncedText,
-                                        modifier = Modifier
-                                            .fillMaxWidth(),
-                                        typography = customTypography,
-                                        padding = customMarkdownPadding
-                                    )
+                                val spans = remember(debouncedText) { parseLatexSpans(debouncedText) }
+                                if (spans.all { !it.isLatex }) {
+                                    SelectionContainer {
+                                        Markdown(
+                                            content = debouncedText,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            typography = customTypography,
+                                            padding = customMarkdownPadding
+                                        )
+                                    }
+                                } else {
+                                    var mergedMarkdown = ""
+                                    Column {
+                                        for (span in spans) {
+                                            if (span.isLatex && span.display) {
+                                                if (mergedMarkdown.isNotBlank()) {
+                                                    SelectionContainer {
+                                                        Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                                    }
+                                                    mergedMarkdown = ""
+                                                }
+                                                val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
+                                                if (bmp != null) {
+                                                    Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
+                                                } else {
+                                                    SelectionContainer {
+                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                                    }
+                                                }
+                                            } else {
+                                                mergedMarkdown += span.content
+                                            }
+                                        }
+                                        if (mergedMarkdown.isNotBlank()) {
+                                            SelectionContainer {
+                                                Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
