@@ -94,6 +94,10 @@ import com.newoether.agora.ui.components.renderLatexToBitmap
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
+import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownTable
+import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
+import com.mikepenz.markdown.compose.elements.MarkdownTableRow
 
 private fun mergeAdjacentSegments(segs: List<MessageSegment>): List<MessageSegment> {
     val merged = mutableListOf<MessageSegment>()
@@ -383,6 +387,38 @@ fun MessageItem(
     val customMarkdownPadding = markdownPadding(block = 12.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 4.dp)
 
+    val customMarkdownComponents = remember {
+        markdownComponents(
+            table = { model ->
+                MarkdownTable(
+                    content = model.content,
+                    node = model.node,
+                    style = model.typography.table,
+                    headerBlock = { content, header, tableWidth, style ->
+                        MarkdownTableHeader(
+                            content = content,
+                            header = header,
+                            tableWidth = tableWidth,
+                            style = style,
+                            maxLines = Int.MAX_VALUE,
+                            overflow = TextOverflow.Clip,
+                        )
+                    },
+                    rowBlock = { content, row, tableWidth, style ->
+                        MarkdownTableRow(
+                            content = content,
+                            header = row,
+                            tableWidth = tableWidth,
+                            style = style,
+                            maxLines = Int.MAX_VALUE,
+                            overflow = TextOverflow.Clip,
+                        )
+                    },
+                )
+            }
+        )
+    }
+
     val shouldAnimate = !isFirstComposition && !isSwitching
 
     Column(
@@ -624,7 +660,8 @@ fun MessageItem(
                                                 SelectionContainer {
                                                         Markdown(
                                                             seg.content, modifier = Modifier.fillMaxWidth().bringIntoViewResponder(noOpResponder),
-                                                            typography = thoughtTypography, padding = thoughtMarkdownPadding
+                                                            typography = thoughtTypography, padding = thoughtMarkdownPadding,
+                                                            components = customMarkdownComponents
                                                         )
                                                     }
                                             } else if (seg.type == "tool") {
@@ -742,7 +779,8 @@ fun MessageItem(
                                                     .fillMaxWidth()
                                                     .bringIntoViewResponder(noOpResponder),
                                                 typography = thoughtTypography,
-                                                padding = thoughtMarkdownPadding // Use tighter padding for thoughts
+                                                padding = thoughtMarkdownPadding, // Use tighter padding for thoughts
+                                                components = customMarkdownComponents
                                             )
                                         }
                                     }
@@ -860,7 +898,8 @@ fun MessageItem(
                                             content = debouncedText,
                                             modifier = Modifier.fillMaxWidth(),
                                             typography = customTypography,
-                                            padding = customMarkdownPadding
+                                            padding = customMarkdownPadding,
+                                            components = customMarkdownComponents
                                         )
                                     }
                                 } else {
@@ -870,7 +909,7 @@ fun MessageItem(
                                             if (span.isLatex && span.display) {
                                                 if (mergedMarkdown.isNotBlank()) {
                                                     SelectionContainer {
-                                                        Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                                        Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents)
                                                     }
                                                     mergedMarkdown = ""
                                                 }
@@ -880,7 +919,7 @@ fun MessageItem(
                                                     Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
                                                 } else {
                                                     SelectionContainer {
-                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents)
                                                     }
                                                 }
                                             } else {
@@ -889,7 +928,7 @@ fun MessageItem(
                                         }
                                         if (mergedMarkdown.isNotBlank()) {
                                             SelectionContainer {
-                                                Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding)
+                                                Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents)
                                             }
                                         }
                                     }
