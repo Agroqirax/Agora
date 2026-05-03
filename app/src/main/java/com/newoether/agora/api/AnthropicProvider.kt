@@ -55,7 +55,12 @@ internal data class AnthropicMessage(
 internal data class AnthropicContentPart(
     val type: String,
     val text: String? = null,
-    val source: AnthropicImageSource? = null
+    val source: AnthropicImageSource? = null,
+    val id: String? = null,
+    val name: String? = null,
+    val input: JsonObject? = null,
+    @SerialName("tool_use_id") val toolUseId: String? = null,
+    val content: String? = null
 )
 
 @Serializable
@@ -122,23 +127,34 @@ class AnthropicProvider : LlmProvider {
 
         val apiMessages = limitedPath.map { msg ->
             val parts = mutableListOf<AnthropicContentPart>()
-            if (msg.text.isNotEmpty()) parts.add(AnthropicContentPart(type = "text", text = msg.text))
-            
-            for (imagePath in msg.images) {
-                try {
-                    val file = File(imagePath)
-                    if (file.exists()) {
-                        val bytes = file.readBytes()
-                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        val mimeType = if (imagePath.endsWith(".png", ignoreCase = true)) "image/png" else "image/jpeg"
-                        parts.add(AnthropicContentPart(type = "image", source = AnthropicImageSource(mediaType = mimeType, data = base64)))
-                    }
-                } catch (e: Exception) {
-                    Log.e("AgoraAPI", "Failed to encode image: $imagePath", e)
-                }
+            if (msg.toolCall != null && msg.participant == Participant.MODEL && msg.text.isEmpty()) {
+                // Assistant tool_use
+                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                parts.add(AnthropicContentPart(
+                    type = "tool_use",
+                    id = toolId,
+                    name = msg.toolCall!!.toolName,
+                    input = try { json.parseToJsonElement(msg.toolCall!!.arguments) as? JsonObject ?: JsonObject(emptyMap()) } catch (_: Exception) { JsonObject(emptyMap()) }
+                ))
+            } else if (msg.toolCall != null && msg.participant == Participant.USER) {
+                // Tool result (may have text content from the tool result)
+                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                parts.add(AnthropicContentPart(
+                    type = "tool_result",
+                    toolUseId = toolId,
+                    content = msg.toolCall!!.result
+                ))
+            } else if (msg.text.isNotEmpty()) {
+                parts.add(AnthropicContentPart(type = "text", text = msg.text))
             }
-            if (parts.isEmpty()) parts.add(AnthropicContentPart(type = "text", text = " "))
-            AnthropicMessage(role = if (msg.participant == Participant.USER) "user" else "assistant", content = parts)
+            if (parts.isEmpty()) parts.add(AnthropicContentPart(type = "text", text = "Continue"))
+            val role = when {
+                msg.toolCall != null && msg.participant == Participant.MODEL -> "assistant"
+                msg.toolCall != null -> "user" // tool_result must be user role
+                msg.participant == Participant.USER -> "user"
+                else -> "assistant"
+            }
+            AnthropicMessage(role = role, content = parts)
         }
 
         // Claude thinking logic - all Claude models support thinking except the 3 legacy ones

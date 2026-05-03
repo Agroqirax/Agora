@@ -421,6 +421,10 @@ class ChatViewModel(
             val conversation = chatDao.getConversation(conversationId) ?: return@launch
             val msgs = chatDao.getMessagesForConversation(conversationId).first()
             val firstUserMsg = msgs.firstOrNull { it.participant == Participant.USER } ?: return@launch
+            // Find the first successful model response after the user message
+            val firstModelMsg = msgs
+                .filter { it.participant == Participant.MODEL && it.text.isNotBlank() }
+                .minByOrNull { it.timestamp }
 
             val titleModelId = titleGenerationModel.value
             val modelIdWithPrefix = if (titleModelId != null) titleModelId else (conversation.modelId ?: selectedModel.value)
@@ -430,9 +434,15 @@ class ChatViewModel(
             val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
             if (activeKey.isBlank() && providerName != "Ollama") return@launch
 
+            val summaryText = if (firstModelMsg != null) {
+                "User: ${firstUserMsg.text}\nAssistant: ${firstModelMsg.text.take(500)}"
+            } else {
+                firstUserMsg.text
+            }
+
             val titlePrompt = listOf(
                 ChatMessage(
-                    text = "Generate a short title (5 words maximum) for a conversation that starts with this message. Respond with ONLY the title text, no quotes, no punctuation, no explanation.",
+                    text = "Generate a short title (5 words maximum) for this conversation:\n\n$summaryText\n\nRespond with ONLY the title text, no quotes, no punctuation, no explanation.",
                     participant = Participant.USER,
                     status = MessageStatus.SUCCESS
                 )
@@ -442,7 +452,7 @@ class ChatViewModel(
             val config = ProviderConfig(
                 apiKey = activeKey,
                 modelId = modelId,
-                systemPrompt = firstUserMsg.text,
+                systemPrompt = "You are a title generator. Your only job is to output a short title.",
                 maxContextWindow = 1,
                 thinkingEnabled = false,
                 baseUrl = providerBaseUrls.value[providerName]
@@ -741,7 +751,8 @@ class ChatViewModel(
 
     private fun executeTool(name: String, arguments: String): String {
         return try {
-            val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(arguments)
+            val argsStr = arguments.ifBlank { "{}" }
+            val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
             fun arg(key: String): String = (args[key] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
             when (name) {
                 "list_memory_files" -> {
@@ -805,6 +816,8 @@ class ChatViewModel(
             val currentPath = pathEntities.map {
                 ChatMessage(id = it.id, parentId = it.parentId, text = it.text, images = it.images, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = it.toolCallJson?.let { json -> try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null } })
             }.filter { it.participant != Participant.ERROR }
+                // Exclude synthetic tool messages from API context
+                .filter { !it.id.startsWith("tool_") && !it.id.startsWith("result_") }
             
             val conversation = chatDao.getConversation(currentId)
             val targetPromptId = conversation?.systemPromptId ?: activeSystemPromptId.value
@@ -928,21 +941,24 @@ class ChatViewModel(
                     add(ChatMessage(
                         id = resultMsgId, parentId = toolMsgId,
                         text = toolCallData!!.result,
-                        participant = Participant.USER, status = MessageStatus.SUCCESS
+                        participant = Participant.USER, status = MessageStatus.SUCCESS,
+                        toolCall = toolCallData
                     ))
                 }
                 // Persist tool call + result to DB so they appear in conversation history
                 val tcSegments = listOf(MessageSegment(type = "tool", toolName = toolCallData!!.toolName, toolArgs = toolCallData!!.arguments, toolResult = toolCallData!!.result))
+                val tcJson = Json.encodeToString(tcSegments)
                 chatDao.upsertMessage(MessageEntity(
                     id = toolMsgId, conversationId = currentId, parentId = prevLastId,
                     text = "", thoughts = null, status = MessageStatus.SUCCESS,
                     participant = Participant.MODEL, timestamp = System.currentTimeMillis(),
-                    toolCallJson = Json.encodeToString(tcSegments)
+                    toolCallJson = tcJson
                 ))
                 chatDao.upsertMessage(MessageEntity(
                     id = resultMsgId, conversationId = currentId, parentId = toolMsgId,
                     text = toolCallData!!.result, thoughts = null, status = MessageStatus.SUCCESS,
-                    participant = Participant.USER, timestamp = System.currentTimeMillis()
+                    participant = Participant.USER, timestamp = System.currentTimeMillis(),
+                    toolCallJson = tcJson
                 ))
 
                 toolCallData = null
