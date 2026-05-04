@@ -72,6 +72,7 @@ class DeepSeekProvider : LlmProvider {
                 connection.readTimeout = 200
                 val reader = connection.inputStream.bufferedReader()
                 var inThinkingBlock = false
+                var pendingBuffer = ""
                 val pendingToolCalls = mutableMapOf<Int, PendingToolCall>()
 
                 var line = reader.readLine()
@@ -93,7 +94,8 @@ class DeepSeekProvider : LlmProvider {
 
                             delta?.content?.let { content ->
                                 if (content.isNotEmpty()) {
-                                    var remaining = content
+                                    var remaining = pendingBuffer + content
+                                    pendingBuffer = ""
                                     while (remaining.isNotEmpty() && currentCoroutineContext().isActive) {
                                         if (!inThinkingBlock) {
                                             val startIdx = remaining.indexOf("<think>")
@@ -103,7 +105,13 @@ class DeepSeekProvider : LlmProvider {
                                                 inThinkingBlock = true
                                                 remaining = remaining.substring(startIdx + 7)
                                             } else {
-                                                emit(StreamEvent.TextChunk(remaining))
+                                                val partialIdx = remaining.indexOf('<')
+                                                if (partialIdx > 0) {
+                                                    emit(StreamEvent.TextChunk(remaining.substring(0, partialIdx)))
+                                                    pendingBuffer = remaining.substring(partialIdx)
+                                                } else {
+                                                    emit(StreamEvent.TextChunk(remaining))
+                                                }
                                                 remaining = ""
                                             }
                                         } else {
@@ -116,8 +124,17 @@ class DeepSeekProvider : LlmProvider {
                                                 inThinkingBlock = false
                                                 remaining = remaining.substring(endIdx + 8)
                                             } else {
-                                                if (config.thinkingEnabled) {
-                                                    emit(StreamEvent.ThoughtChunk(remaining, null))
+                                                val partialIdx = remaining.indexOf('<')
+                                                if (partialIdx > 0) {
+                                                    val thoughtPart = remaining.substring(0, partialIdx)
+                                                    if (thoughtPart.isNotEmpty() && config.thinkingEnabled) {
+                                                        emit(StreamEvent.ThoughtChunk(thoughtPart, null))
+                                                    }
+                                                    pendingBuffer = remaining.substring(partialIdx)
+                                                } else {
+                                                    if (config.thinkingEnabled) {
+                                                        emit(StreamEvent.ThoughtChunk(remaining, null))
+                                                    }
                                                 }
                                                 remaining = ""
                                             }

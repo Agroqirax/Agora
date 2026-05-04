@@ -10,9 +10,11 @@ class MemoryManager(context: Context) {
     private val activeMemoryFile: File =
         File(context.filesDir, "active_memory.md")
 
+    @Synchronized
     fun getActiveMemory(): String =
         if (activeMemoryFile.exists()) activeMemoryFile.readText() else ""
 
+    @Synchronized
     fun updateActiveMemory(content: String, mode: String = "replace"): String =
         when (mode) {
             "append" -> {
@@ -30,18 +32,21 @@ class MemoryManager(context: Context) {
             }
         }
 
+    @Synchronized
     fun listFiles(): List<String> =
         memoryDir.listFiles()
             ?.filter { it.extension == "md" }
             ?.map { it.name }
             ?.sorted() ?: emptyList()
 
+    @Synchronized
     fun readFile(name: String): String {
         val file = resolveFile(name)
         if (!file.exists()) throw IllegalArgumentException("File not found: $name")
         return file.readText()
     }
 
+    @Synchronized
     fun createFile(name: String, content: String): String {
         val file = resolveFile(name)
         if (file.exists()) throw IllegalArgumentException("File already exists: ${file.name}")
@@ -49,6 +54,7 @@ class MemoryManager(context: Context) {
         return "Created ${file.name}"
     }
 
+    @Synchronized
     fun editFile(name: String, content: String? = null, newName: String? = null): String {
         val file = resolveFile(name)
         if (!file.exists()) throw IllegalArgumentException("File not found: $name")
@@ -64,6 +70,7 @@ class MemoryManager(context: Context) {
         return "No changes made."
     }
 
+    @Synchronized
     fun deleteFile(name: String): String {
         val file = resolveFile(name)
         if (!file.exists()) throw IllegalArgumentException("File not found: $name")

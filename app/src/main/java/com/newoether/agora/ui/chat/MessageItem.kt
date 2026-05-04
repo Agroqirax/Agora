@@ -919,6 +919,7 @@ fun MessageItem(
                                                             textStyle = customTypography.paragraph.copy(color = textColor),
                                                             latexTextSize = 56f,
                                                             latexColor = textColor.toArgb(),
+                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
                                                         )
                                                     }
                                                 }
