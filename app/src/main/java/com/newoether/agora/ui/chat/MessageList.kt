@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
@@ -36,7 +37,7 @@ fun MessageList(
     modelAliases: Map<String, String> = emptyMap(),
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
     viewportHeight: Int = 0,
-    messageHeights: MutableMap<String, Int> = remember { mutableStateMapOf() },
+    messageHeights: SnapshotStateMap<String, Int> = remember { mutableStateMapOf() },
     onEditMessage: (String, String) -> Unit = { _, _ -> },
     onSwitchBranch: (String?, Int) -> Unit = { _, _ -> },
     onRegenerate: (String) -> Unit = {},
