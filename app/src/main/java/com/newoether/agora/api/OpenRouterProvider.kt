@@ -20,13 +20,14 @@ import java.util.*
 class OpenRouterProvider : LlmProvider {
     override val name: String = "Open Router"
     override val defaultBaseUrl: String = "https://openrouter.ai/api/v1"
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
         val baseUrl = config.baseUrl?.trimEnd('/') ?: defaultBaseUrl
+        val modelName = config.modelId
 
         val limitedMessages = if (messages.size > config.maxContextWindow) {
             messages.takeLast(config.maxContextWindow)
@@ -44,6 +45,34 @@ class OpenRouterProvider : LlmProvider {
 
         // Messages with image support
         for (msg in limitedMessages) {
+            // tool_ messages: assistant turn with tool_calls
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                val thoughtContent = msg.segments?.lastOrNull { it.type == "thought" }?.content
+                apiMessages.add(OpenAiMessage(
+                    role = "assistant",
+                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    toolCalls = listOf(OpenAiRequestToolCall(
+                        id = toolId,
+                        function = OpenAiRequestFunction(name = msg.toolCall!!.toolName, arguments = msg.toolCall!!.arguments)
+                    )),
+                    reasoningContent = thoughtContent?.ifEmpty { null }
+                ))
+                continue
+            }
+
+            // result_ messages carry the tool result
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                apiMessages.add(OpenAiMessage(
+                    role = "tool",
+                    content = listOf(OpenAiContentPart(type = "text", text = msg.toolCall!!.result)),
+                    toolCallId = toolId
+                ))
+                continue
+            }
+
+            // Normal message: text + images only
             val parts = mutableListOf<OpenAiContentPart>()
             if (msg.text.isNotEmpty()) {
                 parts.add(OpenAiContentPart(type = "text", text = msg.text))
@@ -90,8 +119,9 @@ class OpenRouterProvider : LlmProvider {
             connection.setRequestProperty("HTTP-Referer", "https://github.com/newo-ether/Agora")
             connection.setRequestProperty("X-Title", "Agora")
             connection.doOutput = true
+            val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), requestBody)
             connection.outputStream.bufferedWriter().use {
-                it.write(json.encodeToString(OpenAiChatRequest.serializer(), requestBody))
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -131,7 +161,6 @@ class OpenRouterProvider : LlmProvider {
                                     }
                                 }
                                 delta.reasoningContent?.let {
-                                    Log.d("AgoraAPI", "reasoning_content received: $it")
                                     if (it.isNotEmpty()) {
                                         val title = Regex("\\*\\*(.*?)\\*\\*").find(it)?.groupValues?.get(1)
                                             ?: Regex("(?m)^#+\\s*(.*)$").find(it)?.groupValues?.get(1)
@@ -168,6 +197,7 @@ class OpenRouterProvider : LlmProvider {
                 }
             } else {
                 val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error (Code: $responseCode)"
+                Log.e("AgoraAPI", "[OpenRouter] ERR $responseCode: $errorRaw")
                 emit(StreamEvent.Error("Error $responseCode: $errorRaw"))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {

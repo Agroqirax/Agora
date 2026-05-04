@@ -57,14 +57,15 @@ internal data class OllamaModelInfo(
 class OllamaProvider : LlmProvider {
     override val name: String = "Ollama"
     override val defaultBaseUrl: String = "http://localhost:11434"
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
         val baseUrl = config.baseUrl?.trimEnd('/') ?: "http://localhost:11434"
-        
+        val modelName = config.modelId
+
         val limitedPath = if (messages.size > config.maxContextWindow) {
             messages.takeLast(config.maxContextWindow)
         } else {
@@ -76,7 +77,37 @@ class OllamaProvider : LlmProvider {
             apiMessages.add(OllamaMessage(role = "system", content = config.systemPrompt))
         }
 
-        apiMessages.addAll(limitedPath.map { msg ->
+
+        apiMessages.addAll(limitedPath.flatMap { msg ->
+            val entries = mutableListOf<OllamaMessage>()
+
+            // tool_ messages: assistant turn with tool_calls (and thinking from segments)
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                val argsObj = try { json.parseToJsonElement(msg.toolCall!!.arguments) as? JsonObject } catch (_: Exception) { JsonObject(emptyMap()) }
+                val thinkingContent = msg.segments?.lastOrNull { it.type == "thought" }?.content
+                entries.add(OllamaMessage(
+                    role = "assistant",
+                    content = " ",
+                    thinking = thinkingContent?.ifEmpty { null },
+                    toolCalls = listOf(OpenAiToolCall(
+                        id = toolId,
+                        type = "function",
+                        function = OpenAiFunctionCall(name = msg.toolCall!!.toolName, arguments = argsObj ?: JsonObject(emptyMap()))
+                    ))
+                ))
+                return@flatMap entries
+            }
+
+            // result_ messages carry the tool result
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                entries.add(OllamaMessage(
+                    role = "user",
+                    content = msg.toolCall!!.result
+                ))
+                return@flatMap entries
+            }
+
             val images = msg.images.mapNotNull { imagePath ->
                 try {
                     val file = File(imagePath)
@@ -85,11 +116,14 @@ class OllamaProvider : LlmProvider {
                     } else null
                 } catch (e: Exception) { null }
             }
-            OllamaMessage(
+
+            // Normal message: text + images only
+            entries.add(OllamaMessage(
                 role = if (msg.participant == Participant.USER) "user" else "assistant",
                 content = msg.text,
                 images = if (images.isNotEmpty()) images else null
-            )
+            ))
+            entries
         })
 
         val requestBody = OllamaChatRequest(
@@ -110,9 +144,9 @@ class OllamaProvider : LlmProvider {
                 connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             }
             connection.doOutput = true
-            
-            connection.outputStream.bufferedWriter().use { 
-                it.write(json.encodeToString(OllamaChatRequest.serializer(), requestBody)) 
+            val requestBodyJson = json.encodeToString(OllamaChatRequest.serializer(), requestBody)
+            connection.outputStream.bufferedWriter().use {
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -229,7 +263,9 @@ class OllamaProvider : LlmProvider {
                     throw kotlinx.coroutines.CancellationException("Stream cancelled")
                 }
             } else {
-                emit(StreamEvent.Error("Error $responseCode: ${connection.errorStream?.bufferedReader()?.readText()}"))
+                val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                Log.e("AgoraAPI", "[Ollama] ERR $responseCode: $errorRaw")
+                emit(StreamEvent.Error("Error $responseCode: $errorRaw"))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

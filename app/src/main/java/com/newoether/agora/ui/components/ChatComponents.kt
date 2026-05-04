@@ -113,36 +113,50 @@ private fun mergeAdjacentSegments(segs: List<MessageSegment>): List<MessageSegme
     return merged
 }
 
+private fun toolDisplayName(toolName: String?): String {
+    return when (toolName) {
+        "list_memory_files" -> "Look Up Memories"
+        "read_memory_file" -> "Read Memory"
+        "create_memory_file" -> "Add Memory"
+        "edit_memory_file" -> "Edit Memory"
+        "delete_memory_file" -> "Delete Memory"
+        "update_active_memory" -> "Update Active Memory"
+        else -> (toolName ?: "Tool").split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+    }
+}
+
 private fun toolSummary(seg: MessageSegment): String {
     val name = seg.toolName ?: ""
     val fileName = try {
         val args = Json.parseToJsonElement(seg.toolArgs ?: "{}")
-        args.jsonObject["name"]?.let { (it as? JsonPrimitive)?.content?.removeSuffix(".md") }
+        args.jsonObject["name"]?.let { (it as? JsonPrimitive)?.content }
     } catch (_: Exception) { null }
+    val content = seg.toolResult ?: ""
+    val fileCount = Regex("Memory files:\\s*\\n((?:- .+\\n?)*)").find(content)?.groupValues?.get(1)?.lines()?.count { it.isNotBlank() }
     return when (name) {
-        "read_memory_file" -> if (fileName != null) "Read $fileName.md." else "Read memory file."
-        "create_memory_file" -> if (fileName != null) "Created $fileName.md." else "Created memory file."
-        "edit_memory_file" -> if (fileName != null) "Edited $fileName.md." else "Edited memory file."
-        "delete_memory_file" -> if (fileName != null) "Deleted $fileName.md." else "Deleted memory file."
-        "list_memory_files" -> "Listed memory files."
-        "update_active_memory" -> "Updated active memory."
-        else -> (seg.toolResult ?: "").lines().firstOrNull()?.take(120) ?: "Tool executed."
+        "read_memory_file" -> if (fileName != null) "Read $fileName" else "Read memory"
+        "create_memory_file" -> if (fileName != null) "Saved $fileName" else "Saved a memory"
+        "edit_memory_file" -> if (fileName != null) "Updated $fileName" else "Updated a memory"
+        "delete_memory_file" -> if (fileName != null) "Removed $fileName" else "Removed a memory"
+        "list_memory_files" -> if (fileCount != null) "Looked through $fileCount saved memories" else "Looked through saved memories"
+        "update_active_memory" -> "Updated active memory"
+        else -> content.lines().firstOrNull()?.take(100) ?: "Done"
     }
 }
 
 private fun toolResultSummary(toolName: String, toolArgs: String): String {
     val fileName = try {
         val args = Json.parseToJsonElement(toolArgs.ifBlank { "{}" })
-        args.jsonObject["name"]?.let { (it as? JsonPrimitive)?.content?.removeSuffix(".md") }
+        args.jsonObject["name"]?.let { (it as? JsonPrimitive)?.content }
     } catch (_: Exception) { null }
     return when (toolName) {
-        "read_memory_file" -> if (fileName != null) "Read $fileName.md." else "Read memory file."
-        "create_memory_file" -> if (fileName != null) "Created $fileName.md." else "Created memory file."
-        "edit_memory_file" -> if (fileName != null) "Edited $fileName.md." else "Edited memory file."
-        "delete_memory_file" -> if (fileName != null) "Deleted $fileName.md." else "Deleted memory file."
-        "list_memory_files" -> "Listed memory files."
-        "update_active_memory" -> "Updated active memory."
-        else -> "Tool executed."
+        "read_memory_file" -> if (fileName != null) "Read $fileName" else "Read memory"
+        "create_memory_file" -> if (fileName != null) "Saved $fileName" else "Saved a memory"
+        "edit_memory_file" -> if (fileName != null) "Updated $fileName" else "Updated a memory"
+        "delete_memory_file" -> if (fileName != null) "Removed $fileName" else "Removed a memory"
+        "list_memory_files" -> "Looked through saved memories"
+        "update_active_memory" -> "Updated active memory"
+        else -> "Done"
     }
 }
 
@@ -204,7 +218,7 @@ fun MessageList(
             items(messages, key = { it.id }) { message ->
                 val isLastMessage = messages.lastOrNull()?.id == message.id
                 val isInContext = inContextIds.contains(message.id)
-                val siblings = allMessages.filter { it.parentId == message.parentId }.sortedBy { it.timestamp }
+                val siblings = allMessages.filter { it.parentId == message.parentId && !it.id.startsWith("tool_") && !it.id.startsWith("result_") }.sortedBy { it.timestamp }
                 val branchIndex = siblings.indexOfFirst { it.id == message.id }
                 val totalBranches = siblings.size
 
@@ -581,7 +595,7 @@ fun MessageItem(
                         }
                     }
 
-                    var debouncedText by remember { mutableStateOf(message.text) }
+                    var debouncedText by remember(message.status) { mutableStateOf(message.text) }
                     if (isStreaming) {
                         LaunchedEffect(message.text) {
                             kotlinx.coroutines.delay(100)
@@ -601,12 +615,7 @@ fun MessageItem(
                             val isLastTool = lastSeg.type == "tool"
                             val isThinking = message.status == MessageStatus.THINKING
                             val collapsedTitle = if (isLastTool) {
-                                val baseName = (lastSeg.toolName ?: "Tool").split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
-                                val argName = try {
-                                    val args = Json.parseToJsonElement(lastSeg.toolArgs ?: "{}")
-                                    args.jsonObject["name"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.removeSuffix(".md") }
-                                } catch (_: Exception) { null }
-                                if (argName != null) "$baseName $argName" else baseName
+                                toolSummary(lastSeg)
                             } else {
                                 if (message.thoughtTitle != null) message.thoughtTitle
                                 else if (!isThinking) {
@@ -675,7 +684,7 @@ fun MessageItem(
                                                     }
                                             } else if (seg.type == "tool") {
                                                 Text(
-                                                    (seg.toolName ?: "Tool").split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } },
+                                                    toolDisplayName(seg.toolName),
                                                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                                     fontWeight = FontWeight.SemiBold
@@ -914,10 +923,52 @@ fun MessageItem(
                                         )
                                     }
                                 } else {
+                                    val paragraphs = remember(debouncedText) { splitParagraphs(debouncedText) }
                                     Column {
-                                        var pendingSpans = mutableListOf<LatexSpan>()
-                                        for (span in spans) {
-                                            if (span.isLatex && span.display) {
+                                        paragraphs.forEachIndexed { paraIdx, paragraph ->
+                                            if (paraIdx > 0) Spacer(Modifier.height(8.dp))
+                                            val paraSpans = remember(paragraph) { parseLatexSpans(paragraph) }
+                                            if (paraSpans.all { !it.isLatex }) {
+                                                SelectionContainer {
+                                                    Markdown(
+                                                        content = paragraph,
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        typography = customTypography,
+                                                        padding = customMarkdownPadding,
+                                                        components = customMarkdownComponents,
+                                                        imageTransformer = latexImageTransformer
+                                                    )
+                                                }
+                                            } else {
+                                                var pendingSpans = mutableListOf<LatexSpan>()
+                                                for (span in paraSpans) {
+                                                    if (span.isLatex && span.display) {
+                                                        if (pendingSpans.isNotEmpty()) {
+                                                            SelectionContainer {
+                                                                LatexAwareText(
+                                                                    spans = pendingSpans.toList(),
+                                                                    modifier = Modifier.fillMaxWidth(),
+                                                                    textStyle = customTypography.paragraph.copy(color = textColor),
+                                                                    latexTextSize = 56f,
+                                                                    latexColor = textColor.toArgb(),
+                                                                    codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
+                                                                )
+                                                            }
+                                                            pendingSpans.clear()
+                                                        }
+                                                        val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                        val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
+                                                        if (bmp != null) {
+                                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
+                                                        } else {
+                                                            SelectionContainer {
+                                                                Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
+                                                            }
+                                                        }
+                                                    } else {
+                                                        pendingSpans.add(span)
+                                                    }
+                                                }
                                                 if (pendingSpans.isNotEmpty()) {
                                                     SelectionContainer {
                                                         LatexAwareText(
@@ -926,33 +977,9 @@ fun MessageItem(
                                                             textStyle = customTypography.paragraph.copy(color = textColor),
                                                             latexTextSize = 56f,
                                                             latexColor = textColor.toArgb(),
-                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
                                                         )
                                                     }
-                                                    pendingSpans.clear()
                                                 }
-                                                val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
-                                                if (bmp != null) {
-                                                    Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
-                                                } else {
-                                                    SelectionContainer {
-                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
-                                                    }
-                                                }
-                                            } else {
-                                                pendingSpans.add(span)
-                                            }
-                                        }
-                                        if (pendingSpans.isNotEmpty()) {
-                                            SelectionContainer {
-                                                LatexAwareText(
-                                                    spans = pendingSpans.toList(),
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    textStyle = customTypography.paragraph.copy(color = textColor),
-                                                    latexTextSize = 56f,
-                                                    latexColor = textColor.toArgb(),
-                                                )
                                             }
                                         }
                                     }

@@ -5,6 +5,14 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+import java.util.Properties
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("local.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(keystorePropertiesFile.reader())
+}
+
 android {
     namespace = "com.newoether.agora"
     compileSdk {
@@ -25,8 +33,18 @@ android {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(keystoreProperties["storeFile"] as String)
+            storePassword = keystoreProperties["storePassword"] as String
+            keyAlias = keystoreProperties["keyAlias"] as String
+            keyPassword = keystoreProperties["keyPassword"] as String
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -40,6 +58,18 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+}
+
+tasks.register<Copy>("copyReleaseApk") {
+    from("build/outputs/apk/release")
+    into("release")
+    include("*.apk")
+}
+
+afterEvaluate {
+    tasks.named("assembleRelease") {
+        finalizedBy("copyReleaseApk")
     }
 }
 

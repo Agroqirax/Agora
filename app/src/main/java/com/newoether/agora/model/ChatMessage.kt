@@ -17,7 +17,8 @@ data class MessageSegment(
     val content: String = "",
     val toolName: String? = null,
     val toolArgs: String? = null,
-    val toolResult: String? = null
+    val toolResult: String? = null,
+    val signature: String? = null
 )
 
 enum class Participant {

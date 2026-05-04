@@ -20,7 +20,7 @@ import java.net.URL
 class DeepSeekProvider : LlmProvider {
     override val name: String = "DeepSeek"
     override val defaultBaseUrl: String = "https://api.deepseek.com"
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(
         messages: List<ChatMessage>,
@@ -40,7 +40,39 @@ class DeepSeekProvider : LlmProvider {
             apiMessages.add(OpenAiMessage(role = "system", content = listOf(OpenAiContentPart(type = "text", text = config.systemPrompt))))
         }
 
-        apiMessages.addAll(limitedPath.map { msg ->
+        apiMessages.addAll(limitedPath.flatMap { msg ->
+            val entries = mutableListOf<OpenAiMessage>()
+
+            // tool_ messages: assistant turn with tool_calls (+ reasoning from thought segments)
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val tc = msg.toolCall!!
+                val toolId = "call_${tc.toolName}_${tc.arguments.hashCode().toUInt().toString(16)}"
+                val thoughtContent = msg.segments?.lastOrNull { it.type == "thought" }?.content
+                entries.add(OpenAiMessage(
+                    role = "assistant",
+                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    toolCalls = listOf(OpenAiRequestToolCall(
+                        id = toolId,
+                        function = OpenAiRequestFunction(name = tc.toolName, arguments = tc.arguments)
+                    )),
+                    reasoningContent = thoughtContent?.ifEmpty { null }
+                ))
+                return@flatMap entries
+            }
+
+            // result_ messages: tool result
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                val tc = msg.toolCall!!
+                val toolId = "call_${tc.toolName}_${tc.arguments.hashCode().toUInt().toString(16)}"
+                entries.add(OpenAiMessage(
+                    role = "tool",
+                    content = listOf(OpenAiContentPart(type = "text", text = tc.result)),
+                    toolCallId = toolId
+                ))
+                return@flatMap entries
+            }
+
+            // Normal message: text + images only
             val parts = mutableListOf<OpenAiContentPart>()
             if (msg.text.isNotEmpty()) parts.add(OpenAiContentPart(type = "text", text = msg.text))
             for (imagePath in msg.images) {
@@ -56,7 +88,11 @@ class DeepSeekProvider : LlmProvider {
                 }
             }
             if (parts.isEmpty()) parts.add(OpenAiContentPart(type = "text", text = " "))
-            OpenAiMessage(role = if (msg.participant == Participant.USER) "user" else "assistant", content = parts)
+            entries.add(OpenAiMessage(
+                role = if (msg.participant == Participant.USER) "user" else "assistant",
+                content = parts
+            ))
+            entries
         })
 
         val requestBody = OpenAiChatRequest(
@@ -76,9 +112,9 @@ class DeepSeekProvider : LlmProvider {
             connection.setRequestProperty("Content-Type", "application/json")
             connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             connection.doOutput = true
-
+            val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), requestBody)
             connection.outputStream.bufferedWriter().use {
-                it.write(json.encodeToString(OpenAiChatRequest.serializer(), requestBody))
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -102,7 +138,7 @@ class DeepSeekProvider : LlmProvider {
                             val delta = choice?.delta
 
                             delta?.reasoningContent?.let { reasoning ->
-                                if (reasoning.isNotEmpty() && config.thinkingEnabled) {
+                                if (reasoning.isNotEmpty()) {
                                     emit(StreamEvent.ThoughtChunk(reasoning, null))
                                 }
                             }
@@ -175,6 +211,7 @@ class DeepSeekProvider : LlmProvider {
                 }
             } else {
                 val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                Log.e("AgoraAPI", "[DeepSeek] ERR $responseCode: $errorRaw")
                 emit(StreamEvent.Error("Error $responseCode: $errorRaw"))
             }
         } catch (e: CancellationException) {

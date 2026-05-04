@@ -109,11 +109,11 @@ fun parseLatexSpans(text: String): List<LatexSpan> {
             }
         }
 
-        // $ inline math — skip if followed by digit (money: $100) or preceded by \ (escaped)
+        // $ inline math — skip if preceded by \ (escaped)
         if (remaining[0] == '$' && !remaining.startsWith("$$")) {
             val nextChar = if (remaining.length > 1) remaining[1] else ' '
             val prevChar = if (i > 0) text[i - 1] else ' '
-            if (prevChar != '\\' && !nextChar.isDigit()) {
+            if (prevChar != '\\') {
                 val end = remaining.indexOf('$', 1)
                 val closingOk = end >= 0 && (end == remaining.length - 1 || remaining[end - 1] != '\\')
                 if (closingOk) {
@@ -155,6 +155,40 @@ fun parseLatexSpans(text: String): List<LatexSpan> {
     return spans
 }
 
+fun splitParagraphs(text: String): List<String> {
+    val result = mutableListOf<String>()
+    val buf = StringBuilder()
+    var i = 0
+    while (i < text.length) {
+        val remaining = text.substring(i)
+
+        // ``` fenced code block — keep as an atomic paragraph
+        if (remaining.startsWith("```")) {
+            val end = remaining.indexOf("```", 3)
+            if (end >= 0) {
+                if (buf.isNotBlank()) { result.add(buf.toString().trim()); buf.clear() }
+                result.add(remaining.substring(0, end + 3))
+                i += end + 3
+                continue
+            }
+        }
+
+        // \n\n paragraph separator
+        if (remaining.startsWith("\n\n")) {
+            if (buf.isNotBlank()) { result.add(buf.toString().trim()); buf.clear() }
+            i += 2
+            // skip additional consecutive newlines
+            while (i < text.length && text[i] == '\n') i++
+            continue
+        }
+
+        buf.append(remaining[0])
+        i++
+    }
+    if (buf.isNotBlank()) result.add(buf.toString().trim())
+    return result
+}
+
 fun renderLatexToBitmap(latex: String, textSize: Float = 48f, color: Int = 0xFF000000.toInt(), fallbackW: Int = 800, fallbackH: Int = 200, minW: Int = 0): Bitmap? {
     return try {
         val drawable = JLatexMathDrawable.builder(latex)
@@ -167,15 +201,12 @@ fun renderLatexToBitmap(latex: String, textSize: Float = 48f, color: Int = 0xFF0
         val h = ih.takeIf { it > 0 } ?: fallbackH
         val usedFallbackW = iw <= 0 || iw < minW
         val usedFallbackH = ih <= 0
-        val preview = latex.take(60)
-        Log.d("LatexDebug", "JLatexMath | preview=$preview | intrinsicW=$iw intrinsicH=$ih | finalW=$w finalH=$h | fallbackW=$usedFallbackW fallbackH=$usedFallbackH | minW=$minW")
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         drawable.setBounds(0, 0, w, h)
         drawable.draw(canvas)
         bmp
     } catch (e: Exception) {
-        Log.d("LatexDebug", "JLatexMath FAILED | preview=${latex.take(60)} | ${e.javaClass.simpleName}: ${e.message}")
         null
     }
 }
@@ -238,11 +269,9 @@ class LatexImageTransformer(
                 val fh = (textSize * 2).toInt()
                 val rendered = renderLatexToBitmap(latex, textSize, color, fallbackW = fw, fallbackH = fh, minW = 0)
                 if (rendered != null) {
-                    Log.d("LatexDebug", "JLatexMath | preview=${latex.take(60)} | w=${rendered.width} h=${rendered.height}")
                     rendered
                 } else {
                     val fallback = renderTextToBitmap("$$latex$", textSize, color)
-                    Log.d("LatexDebug", "TEXT fallback | preview=${latex.take(60)} | w=${fallback.width} h=${fallback.height}")
                     fallback
                 }
             }
@@ -362,9 +391,9 @@ fun LatexAwareText(
     }
 
     val paragraphStrings = remember(paragraphGroups, settings) {
+        var latexIdx = 0
         paragraphGroups.map { group ->
             buildAnnotatedString {
-                var latexIdx = 0
                 for (span in group.spans) {
                     if (span.isLatex) {
                         appendInlineContent("LATEX_$latexIdx", span.content)

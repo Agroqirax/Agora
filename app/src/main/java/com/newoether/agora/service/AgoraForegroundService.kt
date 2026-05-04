@@ -19,7 +19,7 @@ class AgoraForegroundService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, AgoraForegroundService::class.java)
-            context.startForegroundService(intent)
+            context.startService(intent)
         }
 
         fun stop(context: Context) {

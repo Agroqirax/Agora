@@ -55,6 +55,8 @@ internal data class AnthropicMessage(
 internal data class AnthropicContentPart(
     val type: String,
     val text: String? = null,
+    val thinking: String? = null,
+    val signature: String? = null,
     val source: AnthropicImageSource? = null,
     val id: String? = null,
     val name: String? = null,
@@ -84,6 +86,7 @@ internal data class AnthropicStreamEvent(
 internal data class AnthropicDelta(
     val text: String? = null,
     val thinking: String? = null,
+    val signature: String? = null,
     @SerialName("partial_json") val partialJson: String? = null,
     val type: String? = null
 )
@@ -93,7 +96,9 @@ internal data class AnthropicContentBlock(
     val type: String,
     val id: String? = null,
     val name: String? = null,
-    val input: JsonObject? = null
+    val input: JsonObject? = null,
+    val thinking: String? = null,
+    val signature: String? = null
 )
 
 @Serializable
@@ -125,36 +130,56 @@ class AnthropicProvider : LlmProvider {
             messages
         }
 
-        val apiMessages = limitedPath.map { msg ->
+        val apiMessages = limitedPath.flatMap { msg ->
+            val entries = mutableListOf<AnthropicMessage>()
+
+            // tool_ messages: assistant turn with tool_use (thinking blocks omitted — signatures unavailable in streaming)
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                entries.add(AnthropicMessage(
+                    role = "assistant",
+                    content = listOf(AnthropicContentPart(
+                        type = "tool_use",
+                        id = toolId,
+                        name = msg.toolCall!!.toolName,
+                        input = try { json.parseToJsonElement(msg.toolCall!!.arguments) as? JsonObject ?: JsonObject(emptyMap()) } catch (_: Exception) { JsonObject(emptyMap()) }
+                    ))
+                ))
+                return@flatMap entries
+            }
+
+            // result_ messages carry the tool_result
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                entries.add(AnthropicMessage(
+                    role = "user",
+                    content = listOf(AnthropicContentPart(
+                        type = "tool_result",
+                        toolUseId = toolId,
+                        content = msg.toolCall!!.result
+                    ))
+                ))
+                return@flatMap entries
+            }
+
             val parts = mutableListOf<AnthropicContentPart>()
-            if (msg.toolCall != null && msg.participant == Participant.MODEL && msg.text.isEmpty()) {
-                // Assistant tool_use
-                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
-                parts.add(AnthropicContentPart(
-                    type = "tool_use",
-                    id = toolId,
-                    name = msg.toolCall!!.toolName,
-                    input = try { json.parseToJsonElement(msg.toolCall!!.arguments) as? JsonObject ?: JsonObject(emptyMap()) } catch (_: Exception) { JsonObject(emptyMap()) }
-                ))
-            } else if (msg.toolCall != null && msg.participant == Participant.USER) {
-                // Tool result (may have text content from the tool result)
-                val toolId = "tool_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
-                parts.add(AnthropicContentPart(
-                    type = "tool_result",
-                    toolUseId = toolId,
-                    content = msg.toolCall!!.result
-                ))
-            } else if (msg.text.isNotEmpty()) {
+            val segs = msg.segments
+
+
+            // Note: thinking blocks from segments are not emitted because Anthropic
+            // requires valid signatures which aren't available from streaming responses
+
+            if (msg.text.isNotEmpty()) {
                 parts.add(AnthropicContentPart(type = "text", text = msg.text))
             }
             if (parts.isEmpty()) parts.add(AnthropicContentPart(type = "text", text = "Continue"))
+
             val role = when {
-                msg.toolCall != null && msg.participant == Participant.MODEL -> "assistant"
-                msg.toolCall != null -> "user" // tool_result must be user role
                 msg.participant == Participant.USER -> "user"
                 else -> "assistant"
             }
-            AnthropicMessage(role = role, content = parts)
+            entries.add(AnthropicMessage(role = role, content = parts))
+            entries
         }
 
         // Claude thinking logic - all Claude models support thinking except the 3 legacy ones
@@ -210,9 +235,9 @@ class AnthropicProvider : LlmProvider {
             connection.setRequestProperty("x-api-key", config.apiKey)
             connection.setRequestProperty("anthropic-version", "2023-06-01")
             connection.doOutput = true
-            
-            connection.outputStream.bufferedWriter().use { 
-                it.write(json.encodeToString(AnthropicRequest.serializer(), requestBody)) 
+            val requestBodyJson = json.encodeToString(AnthropicRequest.serializer(), requestBody)
+            connection.outputStream.bufferedWriter().use {
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -224,6 +249,7 @@ class AnthropicProvider : LlmProvider {
                 var toolUseId: String? = null
                 var toolUseName: String? = null
                 var toolUseArgs = StringBuilder()
+                var thinkingSignature: String? = null
 
                 while (currentCoroutineContext().isActive) {
                     try {
@@ -242,10 +268,15 @@ class AnthropicProvider : LlmProvider {
                             when (event.type) {
                                 "content_block_start" -> {
                                     event.contentBlock?.let { block ->
-                                        if (block.type == "tool_use") {
-                                            toolUseId = block.id
-                                            toolUseName = block.name
-                                            toolUseArgs = StringBuilder()
+                                        when (block.type) {
+                                            "thinking" -> {
+                                                block.signature?.takeIf { it.isNotBlank() }?.let { thinkingSignature = it }
+                                            }
+                                            "tool_use" -> {
+                                                toolUseId = block.id
+                                                toolUseName = block.name
+                                                toolUseArgs = StringBuilder()
+                                            }
                                         }
                                     }
                                 }
@@ -257,7 +288,10 @@ class AnthropicProvider : LlmProvider {
                                             }
                                             else -> {
                                                 delta.text?.let { emit(StreamEvent.TextChunk(it)) }
-                                                delta.thinking?.let { emit(StreamEvent.ThoughtChunk(it, null)) }
+                                                delta.thinking?.let {
+                                                    if (delta.signature != null) thinkingSignature = delta.signature
+                                                    emit(StreamEvent.ThoughtChunk(it, null, thinkingSignature))
+                                                }
                                             }
                                         }
                                     }
@@ -270,6 +304,7 @@ class AnthropicProvider : LlmProvider {
                                         toolUseId = null
                                         toolUseName = null
                                     }
+                                    thinkingSignature = null
                                 }
                                 "message_delta" -> {
                                     event.usage?.let { u ->
@@ -288,6 +323,7 @@ class AnthropicProvider : LlmProvider {
                 }
             } else {
                 val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                Log.e("AgoraAPI", "[Anthropic] ERR $responseCode: $errorRaw")
                 emit(StreamEvent.Error("Error $responseCode: $errorRaw"))
             }
         } catch (e: kotlinx.coroutines.CancellationException) {

@@ -9,10 +9,10 @@ import kotlinx.serialization.json.JsonObject
 
 sealed class StreamEvent {
     data class TextChunk(val text: String) : StreamEvent()
-    data class ThoughtChunk(val thought: String, val title: String? = null) : StreamEvent()
+    data class ThoughtChunk(val thought: String, val title: String? = null, val signature: String? = null) : StreamEvent()
     data class UsageUpdate(val tokenCount: Int, val thoughtsTokenCount: Int = 0) : StreamEvent()
     data class Error(val message: String) : StreamEvent()
-    data class ToolCallRequest(val id: String, val name: String, val arguments: String) : StreamEvent()
+    data class ToolCallRequest(val id: String, val name: String, val arguments: String, val signature: String? = null) : StreamEvent()
 }
 
 data class ProviderConfig(
@@ -84,7 +84,23 @@ data class OpenAiStreamOptions(
 @Serializable
 data class OpenAiMessage(
     val role: String,
-    val content: List<OpenAiContentPart>
+    val content: List<OpenAiContentPart>,
+    @SerialName("tool_calls") val toolCalls: List<OpenAiRequestToolCall>? = null,
+    @SerialName("tool_call_id") val toolCallId: String? = null,
+    @SerialName("reasoning_content") val reasoningContent: String? = null
+)
+
+@Serializable
+data class OpenAiRequestToolCall(
+    val id: String,
+    val type: String = "function",
+    val function: OpenAiRequestFunction
+)
+
+@Serializable
+data class OpenAiRequestFunction(
+    val name: String,
+    val arguments: String
 )
 
 @Serializable

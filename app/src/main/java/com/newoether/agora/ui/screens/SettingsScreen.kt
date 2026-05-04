@@ -637,12 +637,12 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
 
-                    // Memory Database
-                    SettingsGroup(title = "MEMORY DATABASE") {
+                    // Saved Memories
+                    SettingsGroup(title = "SAVED MEMORIES") {
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            headlineContent = { Text("Create New File") },
-                            supportingContent = { Text("Add a new .md file to the memory database") },
+                            headlineContent = { Text("Add Memory") },
+                            supportingContent = { Text("Add a new memory to saved memories") },
                             leadingContent = { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary) },
                             modifier = Modifier.clickable { showNewFileDialog = true }
                         )
@@ -704,7 +704,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 showDeleteFileConfirm?.let { fileName ->
                     AlertDialog(
                         onDismissRequest = { showDeleteFileConfirm = null },
-                        title = { Text("Delete File?") },
+                        title = { Text("Delete Memory?") },
                         text = { Text("Are you sure you want to delete '$fileName'? This cannot be undone.") },
                         confirmButton = {
                             TextButton(
@@ -734,7 +734,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                             fileEditorContent = ""
                         },
                         title = {
-                            Text(if (isActiveMemory) "Edit Active Memory" else "Edit File")
+                            Text(if (isActiveMemory) "Edit Active Memory" else "Edit Memory")
                         },
                         text = {
                             val fm = LocalFocusManager.current
@@ -750,7 +750,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     OutlinedTextField(
                                         value = editFileName,
                                         onValueChange = { editFileName = it },
-                                        label = { Text("File Name") },
+                                        label = { Text("Title") },
                                         singleLine = true,
                                                                                 modifier = Modifier.fillMaxWidth()
                                     )
@@ -800,14 +800,14 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 if (showNewFileDialog) {
                     AlertDialog(
                         onDismissRequest = { showNewFileDialog = false },
-                        title = { Text("Create Memory File") },
+                        title = { Text("Add Memory") },
                         text = {
                             val fm = LocalFocusManager.current
                             Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
                                 OutlinedTextField(
                                     value = newFileName,
                                     onValueChange = { newFileName = it },
-                                    label = { Text("File name") },
+                                    label = { Text("Title") },
                                     singleLine = true,
                                                                         modifier = Modifier.fillMaxWidth()
                                 )

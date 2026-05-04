@@ -28,7 +28,7 @@ internal data class OpenAiError(val message: String, val type: String? = null, v
 class OpenAiProvider : LlmProvider {
     override val name: String = "OpenAI"
     override val defaultBaseUrl: String = "https://api.openai.com/v1"
-    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(
         messages: List<ChatMessage>,
@@ -56,12 +56,42 @@ class OpenAiProvider : LlmProvider {
         }
 
         // Add conversation history
-        apiMessages.addAll(limitedPath.map { msg ->
+        apiMessages.addAll(limitedPath.flatMap { msg ->
+            val entries = mutableListOf<OpenAiMessage>()
+
+            // tool_ messages: assistant turn with tool_calls
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                val thoughtContent = msg.segments?.lastOrNull { it.type == "thought" }?.content
+                entries.add(OpenAiMessage(
+                    role = "assistant",
+                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    toolCalls = listOf(OpenAiRequestToolCall(
+                        id = toolId,
+                        function = OpenAiRequestFunction(name = msg.toolCall!!.toolName, arguments = msg.toolCall!!.arguments)
+                    )),
+                    reasoningContent = thoughtContent?.ifEmpty { null }
+                ))
+                return@flatMap entries
+            }
+
+            // result_ messages carry the tool result
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                entries.add(OpenAiMessage(
+                    role = "tool",
+                    content = listOf(OpenAiContentPart(type = "text", text = msg.toolCall!!.result)),
+                    toolCallId = toolId
+                ))
+                return@flatMap entries
+            }
+
+            // Normal message: text + images only
             val parts = mutableListOf<OpenAiContentPart>()
             if (msg.text.isNotEmpty()) {
                 parts.add(OpenAiContentPart(type = "text", text = msg.text))
             }
-            
+
             for (imagePath in msg.images) {
                 try {
                     val file = File(imagePath)
@@ -80,16 +110,16 @@ class OpenAiProvider : LlmProvider {
                     Log.e("AgoraAPI", "Failed to encode image: $imagePath", e)
                 }
             }
-            
-            // OpenAI requires at least some content
+
             if (parts.isEmpty()) {
                 parts.add(OpenAiContentPart(type = "text", text = " "))
             }
-            
-            OpenAiMessage(
+
+            entries.add(OpenAiMessage(
                 role = if (msg.participant == Participant.USER) "user" else "assistant",
                 content = parts
-            )
+            ))
+            entries
         })
 
         val requestBody = OpenAiChatRequest(
@@ -112,9 +142,9 @@ class OpenAiProvider : LlmProvider {
                 connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             }
             connection.doOutput = true
-            
-            connection.outputStream.bufferedWriter().use { 
-                it.write(json.encodeToString(OpenAiChatRequest.serializer(), requestBody)) 
+            val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), requestBody)
+            connection.outputStream.bufferedWriter().use {
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -183,6 +213,7 @@ class OpenAiProvider : LlmProvider {
                 }
             } else {
                 val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error (Code: $responseCode)"
+                Log.e("AgoraAPI", "[OpenAI] ERR $responseCode: $errorRaw")
                 val errorMessage = try {
                     val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
                     "Error ${errorJson.error.code ?: responseCode} (${errorJson.error.type ?: "UNKNOWN"}): ${errorJson.error.message}"

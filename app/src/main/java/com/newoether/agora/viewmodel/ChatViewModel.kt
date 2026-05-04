@@ -263,7 +263,8 @@ class ChatViewModel(
                                 modelName = it.modelName,
                                 segments = it.toolCallJson?.let { json ->
                                     try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null }
-                                }
+                                },
+                                toolCall = null
                             )
                         }
                     }
@@ -542,48 +543,56 @@ class ChatViewModel(
         if (activeKey.isBlank() && providerName != "Ollama") return
 
         stopGeneration()
+
+        // Compute IDs and set placeholder on the calling thread before launching IO work,
+        // so the combine function never sees _streamingMessage=null while the error is in _allMessages.
+        val messageToRegenerate = _allMessages.value.find { it.id == messageId } ?: return
+        val parentId = messageToRegenerate.parentId ?: return
+        val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
+        val hasChildren = _allMessages.value.any { it.parentId == messageId && !it.id.startsWith("tool_") && !it.id.startsWith("result_") }
+        val isLatest = !hasChildren
+        val modelMessageId = if (isErrorOrStopped && isLatest) messageId else UUID.randomUUID().toString()
+        val startTime = System.currentTimeMillis() + 1
+
+        // Insert placeholder into _allMessages and update _selectedChildren on the calling
+        // thread BEFORE setting _streamingMessage. This ensures the combine function sees a
+        // consistent state where the new ID is both present and selected, avoiding a frame
+        // where two model messages appear in the path.
+        val placeholder = ChatMessage(
+            id = modelMessageId, parentId = parentId, text = "", participant = Participant.MODEL,
+            status = MessageStatus.SENDING, timestamp = startTime
+        )
+        _allMessages.value = _allMessages.value.filter { it.id != modelMessageId } + placeholder
+        val newMap = _selectedChildren.value.toMutableMap()
+        newMap[parentId] = modelMessageId
+        _selectedChildren.value = newMap
+
+        _streamingMessage.value = placeholder
+        _isLoading.value = true
+
         generationJob = generationScope.launch {
-            val messageToRegenerate = _allMessages.value.find { it.id == messageId } ?: return@launch
-            val parentId = messageToRegenerate.parentId ?: return@launch
             val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
 
-            val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
-            val hasChildren = _allMessages.value.any { it.parentId == messageId }
-            val isLatest = !hasChildren
-
-            val modelMessageId: String
-            val startTime = System.currentTimeMillis() + 1
-            
-                        if (isErrorOrStopped && isLatest) {
-                            modelMessageId = messageId
-                            chatDao.upsertMessage(MessageEntity(
-                                id = modelMessageId, conversationId = currentId, parentId = parentId,
-                                text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                                modelName = currentActiveModel.value, toolCallJson = null
-                            ))
-                            val newMap = _selectedChildren.value.toMutableMap()
-                            newMap[parentId] = modelMessageId
-                            _selectedChildren.value = newMap
-                        } else {
-                            modelMessageId = UUID.randomUUID().toString()
-                            chatDao.upsertMessage(MessageEntity(
-                                id = modelMessageId, conversationId = currentId, parentId = parentId,
-                                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                                modelName = currentActiveModel.value
-                            ))
-            
-                            val newMap = _selectedChildren.value.toMutableMap()
-                            newMap[parentId] = modelMessageId
-                            _selectedChildren.value = newMap
+            if (isErrorOrStopped && isLatest) {
+                chatDao.upsertMessage(MessageEntity(
+                    id = modelMessageId, conversationId = currentId, parentId = parentId,
+                    text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
+                    modelName = currentActiveModel.value, toolCallJson = null
+                ))
+            } else {
+                chatDao.upsertMessage(MessageEntity(
+                    id = modelMessageId, conversationId = currentId, parentId = parentId,
+                    text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
+                    modelName = currentActiveModel.value
+                ))
             }
-            
-            generateResponse(currentId, userMessage.text, modelMessageId, startTime, isRegenerate = true)
+            generateResponse(currentId, userMessage.text, modelMessageId, startTime, isRegenerate = true, replaceMessageId = messageId)
         }
     }
 
     fun switchBranch(parentId: String?, direction: Int) {
         if (_isLoading.value) return
-        val siblings = _allMessages.value.filter { it.parentId == parentId }.sortedBy { it.timestamp }
+        val siblings = _allMessages.value.filter { it.parentId == parentId && !it.id.startsWith("tool_") && !it.id.startsWith("result_") }.sortedBy { it.timestamp }
         if (siblings.size < 2) return
         val currentId = _selectedChildren.value[parentId] ?: siblings.last().id
         val currentIndex = siblings.indexOfFirst { it.id == currentId }
@@ -798,15 +807,15 @@ class ChatViewModel(
         }
     }
 
-    private fun buildLiveSegments(flushed: List<MessageSegment>, buf: StringBuilder): List<MessageSegment>? {
+    private fun buildLiveSegments(flushed: List<MessageSegment>, buf: StringBuilder, signature: String? = null): List<MessageSegment>? {
         val result = flushed.toMutableList()
         if (buf.isNotEmpty()) {
-            result.add(MessageSegment(type = "thought", content = buf.toString()))
+            result.add(MessageSegment(type = "thought", content = buf.toString(), signature = signature))
         }
         return result.ifEmpty { null }
     }
 
-    private suspend fun generateResponse(currentId: String, text: String, modelMessageId: String, startTime: Long, isRegenerate: Boolean = false) {
+    private suspend fun generateResponse(currentId: String, text: String, modelMessageId: String, startTime: Long, isRegenerate: Boolean = false, replaceMessageId: String? = null) {
         val myGenerationId = ++generationId
         val modelIdWithPrefix = currentActiveModel.value
         val providerName = getProviderForModel(modelIdWithPrefix)
@@ -816,9 +825,11 @@ class ChatViewModel(
         val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
         _isLoading.value = true
         _generatingInConversationId.value = currentId
-        _streamingMessage.value = null
+        if (_streamingMessage.value?.id != modelMessageId) {
+            _streamingMessage.value = null
+        }
         val app = getApplication<Application>()
-        AgoraForegroundService.start(app)
+        withContext(Dispatchers.Main) { AgoraForegroundService.start(app) }
         var totalText = ""
         var totalThoughts = ""
         var totalThoughtTitle: String? = null
@@ -827,6 +838,7 @@ class ChatViewModel(
         var currentStatus = MessageStatus.SENDING
         val segments = mutableListOf<MessageSegment>()
         var currentThoughtBuf = StringBuilder()
+        var currentThoughtSignature: String? = null
         val placeholder = chatDao.getMessagesForConversation(currentId).first().find { it.id == modelMessageId }
         val parentId = placeholder?.parentId
         var toolPath = emptyList<ChatMessage>()
@@ -841,10 +853,24 @@ class ChatViewModel(
                 currId = msg.parentId
             }
             val currentPath = pathEntities.map {
-                ChatMessage(id = it.id, parentId = it.parentId, text = it.text, images = it.images, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = it.toolCallJson?.let { json -> try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null } })
+                val segs = it.toolCallJson?.let { json -> try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null } }
+                val toolCall = segs?.find { s -> s.type == "tool" }?.let { s ->
+                    ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", s.toolResult ?: "")
+                }
+                ChatMessage(id = it.id, parentId = it.parentId, text = it.text, images = it.images, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = segs, toolCall = toolCall)
             }.filter { it.participant != Participant.ERROR }
-                // Exclude synthetic tool messages from API context
-                .filter { !it.id.startsWith("tool_") && !it.id.startsWith("result_") }
+                .let { path ->
+                    if (isRegenerate) {
+                        // Exclude old model response and all synthetic tool_/result_ messages
+                        path.filterNot { it.id.startsWith("tool_") || it.id.startsWith("result_") }
+                            .let { filtered ->
+                                if (replaceMessageId != null) {
+                                    val oldIdx = filtered.indexOfFirst { it.id == replaceMessageId }
+                                    if (oldIdx >= 0) filtered.take(oldIdx) else filtered
+                                } else filtered
+                            }
+                    } else path
+                }
             
             val conversation = chatDao.getConversation(currentId)
             val targetPromptId = conversation?.systemPromptId ?: activeSystemPromptId.value
@@ -884,8 +910,9 @@ class ChatViewModel(
                                 if (currentStatus == MessageStatus.THINKING) {
                                     totalThoughtTimeMs = System.currentTimeMillis() - startTime
                                     if (currentThoughtBuf.isNotEmpty()) {
-                                        segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString()))
+                                        segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString(), signature = currentThoughtSignature))
                                         currentThoughtBuf = StringBuilder()
+                                        currentThoughtSignature = null
                                     }
                                     totalText += event.text.trimStart()
                                 } else {
@@ -905,6 +932,7 @@ class ChatViewModel(
                                     else totalThoughts += event.thought
                                 }
                                 if (event.title != null) totalThoughtTitle = event.title
+                                if (event.signature != null) currentThoughtSignature = event.signature
                             }
                             is StreamEvent.UsageUpdate -> {
                                 if (event.tokenCount > 0) totalTokenCount = event.tokenCount
@@ -922,12 +950,13 @@ class ChatViewModel(
                             }
                             is StreamEvent.ToolCallRequest -> {
                                 if (currentThoughtBuf.isNotEmpty()) {
-                                    segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString()))
+                                    segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString(), signature = currentThoughtSignature))
                                     currentThoughtBuf = StringBuilder()
+                                    currentThoughtSignature = null
                                 }
                                 val result = executeTool(event.name, event.arguments)
                                 toolCallData = ToolCallData(event.name, event.arguments, result)
-                                segments.add(MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = result))
+                                segments.add(MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = result, signature = event.signature))
                                 currentStatus = MessageStatus.SENDING
                             }
                         }
@@ -945,7 +974,7 @@ class ChatViewModel(
                             thoughtTimeMs = totalThoughtTimeMs,
                             modelName = currentActiveModel.value,
                             toolCall = toolCallData,
-                            segments = buildLiveSegments(segments, currentThoughtBuf)
+                            segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
                         )
             }
 
@@ -962,19 +991,38 @@ class ChatViewModel(
                 val prevLastId = if (toolRound == 1 && chainRootId != null) chainRootId else toolPath.lastOrNull()?.id
                 val toolMsgId = "tool_${UUID.randomUUID()}"
                 val resultMsgId = "result_${UUID.randomUUID()}"
+                val toolMsgSegs = segments.ifEmpty { null }
+                val tcData = toolCallData!!
+                val allSegmentsJson = Json.encodeToString(toolMsgSegs ?: listOf(
+                    MessageSegment(type = "tool", toolName = tcData.toolName, toolArgs = tcData.arguments, toolResult = tcData.result)
+                ))
                 toolPath = toolPath.toMutableList().apply {
                     add(ChatMessage(
                         id = toolMsgId, parentId = prevLastId,
                         text = "", participant = Participant.MODEL,
-                        status = MessageStatus.SUCCESS, toolCall = toolCallData
+                        status = MessageStatus.SUCCESS, toolCall = tcData,
+                        segments = toolMsgSegs
                     ))
                     add(ChatMessage(
                         id = resultMsgId, parentId = toolMsgId,
-                        text = toolCallData!!.result,
+                        text = tcData.result,
                         participant = Participant.USER, status = MessageStatus.SUCCESS,
-                        toolCall = toolCallData
+                        toolCall = tcData
                     ))
                 }
+                // Persist tool call messages to DB so history survives reload
+                chatDao.upsertMessage(MessageEntity(
+                    id = toolMsgId, conversationId = currentId, parentId = prevLastId,
+                    text = "", thoughts = null, status = MessageStatus.SUCCESS,
+                    participant = Participant.MODEL, timestamp = System.currentTimeMillis(),
+                    toolCallJson = allSegmentsJson
+                ))
+                chatDao.upsertMessage(MessageEntity(
+                    id = resultMsgId, conversationId = currentId, parentId = toolMsgId,
+                    text = tcData.result, thoughts = null, status = MessageStatus.SUCCESS,
+                    participant = Participant.USER, timestamp = System.currentTimeMillis(),
+                    toolCallJson = null
+                ))
 
                 toolCallData = null
 
@@ -984,8 +1032,9 @@ class ChatViewModel(
                                     if (currentStatus == MessageStatus.THINKING) {
                                         totalThoughtTimeMs = System.currentTimeMillis() - startTime
                                         if (currentThoughtBuf.isNotEmpty()) {
-                                            segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString()))
+                                            segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString(), signature = currentThoughtSignature))
                                             currentThoughtBuf = StringBuilder()
+                                            currentThoughtSignature = null
                                         }
                                         totalText += event.text.trimStart()
                                     } else {
@@ -1005,6 +1054,7 @@ class ChatViewModel(
                                         else totalThoughts += event.thought
                                     }
                                     if (event.title != null) totalThoughtTitle = event.title
+                                    if (event.signature != null) currentThoughtSignature = event.signature
                                 }
                                 is StreamEvent.UsageUpdate -> {
                                     if (event.tokenCount > 0) totalTokenCount += event.tokenCount
@@ -1015,8 +1065,9 @@ class ChatViewModel(
                                 }
                                 is StreamEvent.ToolCallRequest -> {
                                     if (currentThoughtBuf.isNotEmpty()) {
-                                        segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString()))
+                                        segments.add(MessageSegment(type = "thought", content = currentThoughtBuf.toString(), signature = currentThoughtSignature))
                                         currentThoughtBuf = StringBuilder()
+                                        currentThoughtSignature = null
                                     }
                                     val result = executeTool(event.name, event.arguments)
                                     toolCallData = ToolCallData(event.name, event.arguments, result)
@@ -1038,7 +1089,7 @@ class ChatViewModel(
                                 thoughtTimeMs = totalThoughtTimeMs,
                                 modelName = currentActiveModel.value,
                                 toolCall = toolCallData,
-                                segments = buildLiveSegments(segments, currentThoughtBuf)
+                                segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
                             )
                 }
             }
@@ -1053,9 +1104,10 @@ class ChatViewModel(
                             id = msg.id, conversationId = currentId, parentId = msg.parentId,
                             text = msg.text, thoughts = null, status = msg.status,
                             participant = msg.participant, timestamp = System.currentTimeMillis(),
-                            toolCallJson = msg.toolCall?.let { Json.encodeToString(listOf(
-                                MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result)
-                            )) }
+                            toolCallJson = msg.segments?.let { Json.encodeToString(it) }
+                                ?: msg.toolCall?.let { Json.encodeToString(listOf(
+                                    MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result)
+                                )) }
                         ))
                     }
                 }

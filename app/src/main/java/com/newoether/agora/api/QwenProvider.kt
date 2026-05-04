@@ -24,11 +24,44 @@ class QwenProvider : LlmProvider {
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
         val baseUrl = config.baseUrl?.trimEnd('/') ?: defaultBaseUrl
-        val apiMessages = messages.takeLast(config.maxContextWindow).map { msg ->
-            OpenAiMessage(
+        val modelName = config.modelId
+        val limitedPath = messages.takeLast(config.maxContextWindow)
+        val apiMessages = limitedPath.flatMap { msg ->
+            val entries = mutableListOf<OpenAiMessage>()
+
+            if (msg.id.startsWith("tool_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                val thoughtContent = msg.segments?.lastOrNull { it.type == "thought" }?.content
+                entries.add(OpenAiMessage(
+                    role = "assistant",
+                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    toolCalls = listOf(OpenAiRequestToolCall(
+                        id = toolId,
+                        function = OpenAiRequestFunction(name = msg.toolCall!!.toolName, arguments = msg.toolCall!!.arguments)
+                    )),
+                    reasoningContent = thoughtContent?.ifEmpty { null }
+                ))
+                return@flatMap entries
+            }
+
+            if (msg.id.startsWith("result_") && msg.toolCall != null) {
+                val toolId = "call_${msg.toolCall!!.toolName}_${msg.toolCall!!.arguments.hashCode().toUInt().toString(16)}"
+                entries.add(OpenAiMessage(
+                    role = "tool",
+                    content = listOf(OpenAiContentPart(type = "text", text = msg.toolCall!!.result)),
+                    toolCallId = toolId
+                ))
+                return@flatMap entries
+            }
+
+            // Normal message: text only (no images for Qwen)
+            val parts = mutableListOf<OpenAiContentPart>()
+            parts.add(OpenAiContentPart(type = "text", text = msg.text))
+            entries.add(OpenAiMessage(
                 role = if (msg.participant == Participant.USER) "user" else "assistant",
-                content = listOf(OpenAiContentPart(type = "text", text = msg.text))
-            )
+                content = parts
+            ))
+            entries
         }
 
         val requestBody = OpenAiChatRequest(
@@ -50,9 +83,9 @@ class QwenProvider : LlmProvider {
                 connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
             }
             connection.doOutput = true
-            
-            connection.outputStream.bufferedWriter().use { 
-                it.write(json.encodeToString(OpenAiChatRequest.serializer(), requestBody)) 
+            val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), requestBody)
+            connection.outputStream.bufferedWriter().use {
+                it.write(requestBodyJson)
             }
 
             val responseCode = connection.responseCode
@@ -102,7 +135,9 @@ class QwenProvider : LlmProvider {
                     throw kotlinx.coroutines.CancellationException("Stream cancelled")
                 }
             } else {
-                emit(StreamEvent.Error("Error $responseCode: ${connection.errorStream?.bufferedReader()?.readText()}"))
+                val errorRaw = connection.errorStream?.bufferedReader()?.readText() ?: "Unknown error"
+                Log.e("AgoraAPI", "[Qwen] ERR $responseCode: $errorRaw")
+                emit(StreamEvent.Error("Error $responseCode: $errorRaw"))
             }
         } catch (e: Exception) {
             if (currentCoroutineContext().isActive) emit(StreamEvent.Error("Error: ${e.localizedMessage}"))
