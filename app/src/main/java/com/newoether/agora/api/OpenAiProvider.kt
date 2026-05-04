@@ -202,8 +202,11 @@ class OpenAiProvider : LlmProvider {
                                 }
 
                                 delta.toolCalls?.forEach { tc ->
-                                    val idx = tc.index ?: pendingToolCalls.size
-                                    val pending = pendingToolCalls.getOrPut(idx) { PendingToolCall() }
+                                    val existing = if (tc.id != null) pendingToolCalls.values.firstOrNull { it.id == tc.id } else null
+                                    val pending = if (existing != null) existing else {
+                                        val idx = tc.index ?: pendingToolCalls.size
+                                        pendingToolCalls.getOrPut(idx) { PendingToolCall() }
+                                    }
                                     if (tc.id != null) pending.id = tc.id
                                     tc.function?.name?.let { pending.name = it }
                                     tc.function?.arguments?.let {
@@ -216,6 +219,7 @@ class OpenAiProvider : LlmProvider {
                                 val calls = pendingToolCalls.values.filter { it.name.isNotEmpty() }.map {
                                     StreamEvent.ToolCallRequest(it.id, it.name, it.args.toString())
                                 }
+                                pendingToolCalls.clear()
                                 if (calls.size == 1) emit(calls.first())
                                 else if (calls.size > 1) emit(StreamEvent.ToolCallsRequest(calls))
                             }

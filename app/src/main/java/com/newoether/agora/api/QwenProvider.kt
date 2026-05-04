@@ -121,6 +121,9 @@ class QwenProvider : LlmProvider {
                 connection.readTimeout = 200
                 val reader = connection.inputStream.bufferedReader()
                 var line: String? = null
+                var toolCallId = ""
+                var toolCallName = ""
+                var toolCallArgs = ""
                 while (currentCoroutineContext().isActive) {
                     try {
                         line = reader.readLine()
@@ -135,10 +138,6 @@ class QwenProvider : LlmProvider {
                         try {
                             val response = json.decodeFromString<OpenAiStreamResponse>(jsonStr)
                             val choice = response.choices?.firstOrNull()
-
-                            var toolCallId = ""
-                            var toolCallName = ""
-                            var toolCallArgs = ""
 
                             choice?.delta?.let { delta ->
                                 delta.reasoningContent?.let { reasoning ->
@@ -156,6 +155,9 @@ class QwenProvider : LlmProvider {
 
                             if (choice?.finishReason == "tool_calls" && toolCallName.isNotEmpty()) {
                                 emit(StreamEvent.ToolCallRequest(toolCallId, toolCallName, toolCallArgs))
+                                toolCallId = ""
+                                toolCallName = ""
+                                toolCallArgs = ""
                             }
 
                             response.usage?.let { emit(StreamEvent.UsageUpdate(it.totalTokens)) }
