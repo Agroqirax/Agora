@@ -89,8 +89,8 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.ui.components.parseLatexSpans
-import com.newoether.agora.ui.components.inlineLatexToMarkdown
 import com.newoether.agora.ui.components.LatexImageTransformer
+import com.newoether.agora.ui.components.LatexAwareText
 import com.newoether.agora.ui.components.renderLatexToBitmap
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
@@ -385,7 +385,7 @@ fun MessageItem(
         inlineCode = currentTypography.bodyMedium.copy(fontFamily = MonoFamily, fontSize = 12.sp),
     )
 
-    val customMarkdownPadding = markdownPadding(block = 12.dp)
+    val customMarkdownPadding = markdownPadding(block = 7.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 4.dp)
 
     val customMarkdownComponents = remember {
@@ -625,7 +625,7 @@ fun MessageItem(
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(top = 8.dp, bottom = mergedBottomPadding)
+                                    .padding(top = 8.dp, bottom = mergedBottomPadding + 6.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     .clickable { isMergedExpanded = !isMergedExpanded }
@@ -724,7 +724,7 @@ fun MessageItem(
                                     .onSizeChanged {
                                         currentThoughtBlockHeight = it.height
                                     }
-                                    .padding(top = 8.dp, bottom = bottomPadding)
+                                    .padding(top = 8.dp, bottom = bottomPadding + 6.dp)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     .clickable {
@@ -914,15 +914,22 @@ fun MessageItem(
                                         )
                                     }
                                 } else {
-                                    var mergedMarkdown = ""
                                     Column {
+                                        var pendingSpans = mutableListOf<LatexSpan>()
                                         for (span in spans) {
                                             if (span.isLatex && span.display) {
-                                                if (mergedMarkdown.isNotBlank()) {
+                                                if (pendingSpans.isNotEmpty()) {
                                                     SelectionContainer {
-                                                        Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
+                                                        LatexAwareText(
+                                                            spans = pendingSpans.toList(),
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            textStyle = customTypography.paragraph.copy(color = textColor),
+                                                            latexTextSize = 56f,
+                                                            latexColor = textColor.toArgb(),
+                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
+                                                        )
                                                     }
-                                                    mergedMarkdown = ""
+                                                    pendingSpans.clear()
                                                 }
                                                 val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                                 val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
@@ -933,15 +940,19 @@ fun MessageItem(
                                                         Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
                                                     }
                                                 }
-                                            } else if (span.isLatex) {
-                                                mergedMarkdown += inlineLatexToMarkdown(span.content)
                                             } else {
-                                                mergedMarkdown += span.content
+                                                pendingSpans.add(span)
                                             }
                                         }
-                                        if (mergedMarkdown.isNotBlank()) {
+                                        if (pendingSpans.isNotEmpty()) {
                                             SelectionContainer {
-                                                Markdown(content = mergedMarkdown, modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
+                                                LatexAwareText(
+                                                    spans = pendingSpans.toList(),
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    textStyle = customTypography.paragraph.copy(color = textColor),
+                                                    latexTextSize = 56f,
+                                                    latexColor = textColor.toArgb(),
+                                                )
                                             }
                                         }
                                     }
