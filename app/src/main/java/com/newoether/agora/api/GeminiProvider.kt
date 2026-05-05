@@ -204,28 +204,20 @@ class GeminiProvider : LlmProvider {
                 val toolSegs = msg.segments?.filter { it.type == "tool" }
                 if (!toolSegs.isNullOrEmpty()) {
                     val parts = toolSegs.map { seg ->
-                        val response = try {
-                            json.parseToJsonElement(seg.toolResult ?: "{}") as? JsonObject
-                        } catch (_: Exception) {
-                            JsonObject(mapOf("result" to JsonPrimitive(seg.toolResult ?: "")))
-                        }
+                        val response = buildGeminiFunctionResponse(seg.toolResult ?: "{}")
                         ApiRequestPart(functionResponse = GeminiFunctionResponse(
                             name = seg.toolName ?: "",
-                            response = response ?: JsonObject(emptyMap())
+                            response = response
                         ))
                     }
                     entries.add(ApiRequestContent(role = "user", parts = parts))
                 } else if (msg.toolCall != null) {
-                    val response = try {
-                        json.parseToJsonElement(msg.toolCall!!.result) as? JsonObject
-                    } catch (_: Exception) {
-                        JsonObject(mapOf("result" to JsonPrimitive(msg.toolCall!!.result)))
-                    }
+                    val response = buildGeminiFunctionResponse(msg.toolCall!!.result)
                     entries.add(ApiRequestContent(
                         role = "user",
                         parts = listOf(ApiRequestPart(functionResponse = GeminiFunctionResponse(
                             name = msg.toolCall!!.toolName,
-                            response = response ?: JsonObject(emptyMap())
+                            response = response
                         )))
                     ))
                 }
@@ -497,6 +489,18 @@ class GeminiProvider : LlmProvider {
                 .map { it.name.removePrefix("models/") }
         } catch (e: Exception) {
             emptyList()
+        }
+    }
+
+    private fun buildGeminiFunctionResponse(result: String): JsonObject {
+        return try {
+            val parsed = json.parseToJsonElement(result)
+            when (parsed) {
+                is JsonObject -> parsed
+                else -> JsonObject(mapOf("result" to parsed))
+            }
+        } catch (_: Exception) {
+            JsonObject(mapOf("result" to JsonPrimitive(result)))
         }
     }
 }

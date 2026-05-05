@@ -189,6 +189,7 @@ class OllamaProvider : LlmProvider {
                 val reader = connection.inputStream.bufferedReader()
                 var line: String? = null
                 val thinkParser = StreamingThinkTagParser()
+                var receivedStructuredThinking = false
 
                 while (currentCoroutineContext().isActive) {
                     try {
@@ -205,6 +206,7 @@ class OllamaProvider : LlmProvider {
                             msg.thinking?.let { thinking ->
                                 if (thinking.isNotEmpty() && config.thinkingEnabled) {
                                     emit(StreamEvent.ThoughtChunk(thinking, null))
+                                    receivedStructuredThinking = true
                                 }
                             }
 
@@ -220,14 +222,20 @@ class OllamaProvider : LlmProvider {
                                 else if (calls.size > 1) emit(StreamEvent.ToolCallsRequest(calls))
                             }
 
-                            // 3. Handle content and potential <think> tags in content
+                            // 3. Handle content: if structured thinking was received, emit content
+                            // directly (any <think> tags in content are literal, not semantic).
+                            // Otherwise, parse <think> tags as a fallback for older models.
                             if (msg.content.isNotEmpty()) {
-                                thinkParser.feed(
-                                    content = msg.content,
-                                    thinkingEnabled = config.thinkingEnabled,
-                                    onText = { emit(StreamEvent.TextChunk(it)) },
-                                    onThought = { emit(StreamEvent.ThoughtChunk(it)) }
-                                )
+                                if (receivedStructuredThinking) {
+                                    emit(StreamEvent.TextChunk(msg.content))
+                                } else {
+                                    thinkParser.feed(
+                                        content = msg.content,
+                                        thinkingEnabled = config.thinkingEnabled,
+                                        onText = { emit(StreamEvent.TextChunk(it)) },
+                                        onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+                                    )
+                                }
                             }
                         }
                         if (response.done) {

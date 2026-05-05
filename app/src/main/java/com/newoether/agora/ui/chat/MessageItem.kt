@@ -617,7 +617,7 @@ fun MessageItem(
                                                 )
                                                 SelectionContainer {
                                                         Markdown(
-                                                            seg.content, modifier = Modifier.fillMaxWidth().bringIntoViewResponder(noOpResponder),
+                                                            seg.content.escapeThinkTags(), modifier = Modifier.fillMaxWidth().bringIntoViewResponder(noOpResponder),
                                                             typography = thoughtTypography, padding = thoughtMarkdownPadding,
                                                             components = customMarkdownComponents,
                                                             imageTransformer = latexImageTransformer
@@ -734,7 +734,7 @@ fun MessageItem(
                                         Spacer(modifier = Modifier.height(20.dp))
                                         SelectionContainer {
                                             Markdown(
-                                                content = debouncedThoughts,
+                                                content = debouncedThoughts.escapeThinkTags(),
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .bringIntoViewResponder(noOpResponder),
@@ -856,7 +856,7 @@ fun MessageItem(
                                 if (spans.all { !it.isLatex }) {
                                     SelectionContainer {
                                         Markdown(
-                                            content = debouncedText,
+                                            content = debouncedText.escapeThinkTags(),
                                             modifier = Modifier.fillMaxWidth(),
                                             typography = customTypography,
                                             padding = customMarkdownPadding,
@@ -873,7 +873,7 @@ fun MessageItem(
                                             if (paraSpans.all { !it.isLatex }) {
                                                 SelectionContainer {
                                                     Markdown(
-                                                        content = paragraph,
+                                                        content = paragraph.escapeThinkTags(),
                                                         modifier = Modifier.fillMaxWidth(),
                                                         typography = customTypography,
                                                         padding = customMarkdownPadding,
@@ -983,4 +983,7 @@ fun MessageItem(
         }
     }
 }
+
+private fun String.escapeThinkTags(): String =
+    replace("<think>", "<​think>").replace("</think>", "</​think>")
 

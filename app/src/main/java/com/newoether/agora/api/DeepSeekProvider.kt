@@ -18,14 +18,7 @@ class DeepSeekProvider : BaseOpenAiProvider() {
             }
         }
         delta.content?.let { content ->
-            if (content.isNotEmpty()) {
-                thinkParser.feed(
-                    content = content,
-                    thinkingEnabled = config.thinkingEnabled,
-                    onText = { emit(StreamEvent.TextChunk(it)) },
-                    onThought = { emit(StreamEvent.ThoughtChunk(it)) }
-                )
-            }
+            if (content.isNotEmpty()) emit(StreamEvent.TextChunk(content))
         }
     }
 }

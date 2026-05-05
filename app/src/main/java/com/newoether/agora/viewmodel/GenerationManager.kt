@@ -331,7 +331,7 @@ class GenerationManager(
                             currentThoughtSignature = null
                         }
                         val result = executeTool(event.name, event.arguments)
-                        val tcd = ToolCallData(event.name, event.arguments, result)
+                        val tcd = ToolCallData(event.name, event.arguments, result, event.signature)
                         if (toolCallData == null) toolCallData = tcd
                         toolCallDataList = toolCallDataList + tcd
                         val ts = MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = result, signature = event.signature)
@@ -350,7 +350,7 @@ class GenerationManager(
                             val ts = MessageSegment(type = "tool", toolName = call.name, toolArgs = call.arguments, toolResult = result, signature = call.signature)
                             segments.add(ts)
                             roundToolSegments.add(ts)
-                            ToolCallData(call.name, call.arguments, result)
+                            ToolCallData(call.name, call.arguments, result, call.signature)
                         }
                         toolCallData = tcds.firstOrNull()
                         toolCallDataList = tcds
@@ -392,7 +392,7 @@ class GenerationManager(
                 val toolMsgSegs = txedSegments.ifEmpty { null }
                 val tcds = toolCallDataList
                 val allSegmentsJson = Json.encodeToString(toolMsgSegs ?: tcds.map { tc ->
-                    MessageSegment(type = "tool", toolName = tc.toolName, toolArgs = tc.arguments, toolResult = tc.result)
+                    MessageSegment(type = "tool", toolName = tc.toolName, toolArgs = tc.arguments, toolResult = tc.result, signature = tc.signature)
                 })
                 val resultMsgs = tcds.map { tcData ->
                     val rid = "${Constants.RESULT_MSG_PREFIX}${UUID.randomUUID()}"
@@ -424,7 +424,7 @@ class GenerationManager(
                         text = msg.text, thoughts = null, status = MessageStatus.SUCCESS,
                         participant = Participant.USER, timestamp = System.currentTimeMillis(),
                         toolCallJson = Json.encodeToString(listOf(
-                            MessageSegment(type = "tool", toolName = msg.toolCall!!.toolName, toolArgs = msg.toolCall!!.arguments, toolResult = msg.toolCall!!.result)
+                            MessageSegment(type = "tool", toolName = msg.toolCall!!.toolName, toolArgs = msg.toolCall!!.arguments, toolResult = msg.toolCall!!.result, signature = msg.toolCall!!.signature)
                         ))
                     ))
                 }
@@ -478,10 +478,10 @@ class GenerationManager(
                                 currentThoughtSignature = null
                             }
                             val result = executeTool(event.name, event.arguments)
-                            val tcd = ToolCallData(event.name, event.arguments, result)
+                            val tcd = ToolCallData(event.name, event.arguments, result, event.signature)
                             if (toolCallData == null) toolCallData = tcd
                             toolCallDataList = toolCallDataList + tcd
-                            val ts = MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = result)
+                            val ts = MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = result, signature = event.signature)
                             segments.add(ts)
                             roundToolSegments.add(ts)
                             currentStatus = MessageStatus.SENDING
@@ -497,7 +497,7 @@ class GenerationManager(
                                 val ts = MessageSegment(type = "tool", toolName = call.name, toolArgs = call.arguments, toolResult = result, signature = call.signature)
                                 segments.add(ts)
                                 roundToolSegments.add(ts)
-                                ToolCallData(call.name, call.arguments, result)
+                                ToolCallData(call.name, call.arguments, result, call.signature)
                             }
                             toolCallData = tcds.firstOrNull()
                             toolCallDataList = tcds
@@ -537,7 +537,7 @@ class GenerationManager(
                             participant = msg.participant, timestamp = System.currentTimeMillis(),
                             toolCallJson = msg.segments?.let { Json.encodeToString(it) }
                                 ?: msg.toolCall?.let { Json.encodeToString(listOf(
-                                    MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result)
+                                    MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result, signature = it.signature)
                                 )) }
                         ))
                     }

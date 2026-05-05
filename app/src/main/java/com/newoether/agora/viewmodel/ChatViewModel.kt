@@ -510,8 +510,12 @@ class ChatViewModel(
             try {
                 provider.generateResponse(titlePrompt, config).collect { event ->
                     if (event is StreamEvent.TextChunk) title += event.text
+                    else if (event is StreamEvent.Error) Log.e("AgoraVM", "Title generation error: ${event.message}")
                 }
-            } catch (_: Exception) { return@launch }
+            } catch (e: Exception) {
+                Log.e("AgoraVM", "Title generation failed for provider=$providerName model=$modelId", e)
+                return@launch
+            }
 
             title = title.trim().replace("\n", " ").take(60)
             if (title.isNotBlank()) {

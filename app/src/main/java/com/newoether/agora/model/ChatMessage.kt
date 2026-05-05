@@ -8,7 +8,8 @@ import java.util.UUID
 data class ToolCallData(
     val toolName: String,
     val arguments: String,
-    val result: String
+    val result: String,
+    val signature: String? = null
 )
 
 @Serializable
