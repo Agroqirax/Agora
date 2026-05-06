@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.delay
 
@@ -47,15 +48,19 @@ fun VideoPlayer(
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(player) {
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) {
+                    contentReady = true
+                }
+            }
+        }
+        player.addListener(listener)
         onDispose {
+            player.removeListener(listener)
             player.release()
         }
-    }
-
-    LaunchedEffect(Unit) {
-        delay(150)
-        contentReady = true
     }
 
     LaunchedEffect(closing) {
