@@ -154,7 +154,7 @@ fun ChatBottomBar(
         selectedImageUris = selectedImageUris + uris.map { it.toString() }
     }
 
-    Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier).padding(8.dp)) {
+    Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier).animateContentSize(tween(400)).padding(8.dp)) {
         if (isExpanded) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onCollapse) { Icon(Icons.Default.CloseFullscreen, "Collapse", tint = MaterialTheme.colorScheme.primary) }
