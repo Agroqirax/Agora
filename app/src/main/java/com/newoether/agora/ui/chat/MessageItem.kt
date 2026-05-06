@@ -165,13 +165,13 @@ private fun toolSummary(seg: MessageSegment): String {
             val query = argsJson?.get("query")?.let { (it as? JsonPrimitive)?.content }
             if (isError) "Search failed"
             else if (content.isNotEmpty()) { val m = Regex("Found (\\d+) matche?s").find(content); if (m != null) m.value else "Search done" }
-            else if (query != null) "Searching: $query" else "Searching the web"
+            else if (query != null) "Searching '$query' on the web" else "Searching the web"
         }
         "search_conversations" -> {
             val query = argsJson?.get("query")?.let { (it as? JsonPrimitive)?.content }
             if (isError) "Search failed"
             else if (content.isNotEmpty()) { val m = Regex("Found (\\d+) matche?s").find(content); if (m != null) m.value else "Search done" }
-            else if (query != null) "Searching: $query" else "Searching conversations"
+            else if (query != null) "Searching '$query' in conversations" else "Searching conversations"
         }
         else -> content.lines().firstOrNull()?.take(100) ?: "Done"
     }
