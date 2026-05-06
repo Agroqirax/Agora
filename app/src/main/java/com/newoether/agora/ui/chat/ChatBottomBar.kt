@@ -374,8 +374,8 @@ fun ChatBottomBar(
                     }
                     
                     ExposedDropdownMenu(
-                        expanded = activeMenu == "tools", 
-                        onDismissRequest = { 
+                        expanded = activeMenu == "tools",
+                        onDismissRequest = {
                             if (activeMenu == "tools") {
                                 activeMenu = null
                                 lastToolsDismissTime = System.currentTimeMillis()
@@ -385,55 +385,62 @@ fun ChatBottomBar(
                         focusable = false,
                         shape = RoundedCornerShape(16.dp)
                     ) {
+                        val isGemini = provider.equals("google", ignoreCase = true)
+                        if (isGemini) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text("Code Execution")
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        ProviderBadge("Gemini")
+                                    }
+                                },
+                                trailingIcon = {
+                                    Switch(
+                                        checked = codeExecutionEnabled,
+                                        onCheckedChange = { onCodeExecutionToggle(it) },
+                                        modifier = Modifier.scale(0.7f)
+                                    )
+                                },
+                                onClick = { onCodeExecutionToggle(!codeExecutionEnabled) }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text("Google Search")
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        ProviderBadge("Gemini")
+                                    }
+                                },
+                                trailingIcon = {
+                                    Switch(
+                                        checked = googleSearchEnabled,
+                                        onCheckedChange = { onGoogleSearchToggle(it) },
+                                        modifier = Modifier.scale(0.7f)
+                                    )
+                                },
+                                onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
+                            )
+                        }
                         DropdownMenuItem(
-                            text = { 
-                                Row(verticalAlignment = Alignment.CenterVertically) { 
-                                    Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Code Execution") 
-                                } 
-                            }, 
-                            trailingIcon = { 
-                                Switch(
-                                    checked = codeExecutionEnabled, 
-                                    onCheckedChange = { onCodeExecutionToggle(it) }, 
-                                    modifier = Modifier.scale(0.7f)
-                                ) 
-                            }, 
-                            onClick = { onCodeExecutionToggle(!codeExecutionEnabled) }
-                        )
-                        DropdownMenuItem(
-                            text = { 
-                                Row(verticalAlignment = Alignment.CenterVertically) { 
-                                    Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Web Search")
-                                } 
-                            }, 
-                            trailingIcon = { 
-                                Switch(
-                                    checked = googleSearchEnabled, 
-                                    onCheckedChange = { onGoogleSearchToggle(it) }, 
-                                    modifier = Modifier.scale(0.7f)
-                                ) 
-                            }, 
-                            onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
-                        )
-                        DropdownMenuItem(
-                            text = { 
-                                Row(verticalAlignment = Alignment.CenterVertically) { 
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text("Thinking") 
-                                } 
-                            }, 
-                            trailingIcon = { 
+                                    Text("Thinking")
+                                }
+                            },
+                            trailingIcon = {
                                 Switch(
-                                    checked = thinkingEnabled, 
-                                    onCheckedChange = { onThinkingToggle(it) }, 
+                                    checked = thinkingEnabled,
+                                    onCheckedChange = { onThinkingToggle(it) },
                                     modifier = Modifier.scale(0.7f)
-                                ) 
-                            }, 
+                                )
+                            },
                             onClick = { onThinkingToggle(!thinkingEnabled) }
                         )
                     }
@@ -458,8 +465,30 @@ fun ChatBottomBar(
                 shape = CircleShape, 
                 elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
             ) { 
-                Icon(if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send, "Action", modifier = Modifier.size(24.dp)) 
+                Icon(if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send, "Action", modifier = Modifier.size(24.dp))
             }
         }
+    }
+}
+
+@Composable
+private fun ProviderBadge(provider: String) {
+    val badgeColor = when (provider.lowercase()) {
+        "google", "gemini" -> Color(0xFF4285F4)
+        "anthropic" -> Color(0xFFD97757)
+        "openai" -> Color(0xFF74AA9C)
+        else -> MaterialTheme.colorScheme.primary
+    }
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = badgeColor.copy(alpha = 0.15f)
+    ) {
+        Text(
+            provider,
+            color = badgeColor,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+        )
     }
 }
