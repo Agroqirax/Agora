@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.OpenInFull
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -115,7 +114,6 @@ fun ChatBottomBar(
     onGoogleSearchToggle: (Boolean) -> Unit = {},
     onThinkingToggle: (Boolean) -> Unit = {},
     onModelSelect: (String) -> Unit,
-    onOpenSettings: () -> Unit,
     onImageClick: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() },
@@ -281,8 +279,6 @@ fun ChatBottomBar(
                         }
                     }
                 }
-                
-                IconButton(onClick = onOpenSettings, modifier = Modifier.size(32.dp)) { Icon(Icons.Default.Settings, "Settings", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) }
                 
                 ExposedDropdownMenuBox(
                     expanded = activeMenu == "tools",

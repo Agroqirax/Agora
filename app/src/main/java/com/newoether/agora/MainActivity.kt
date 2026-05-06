@@ -1147,11 +1147,6 @@ fun ChatApp(
                         onGoogleSearchToggle = { viewModel.setGoogleSearchEnabled(it) },
                         onThinkingToggle = { viewModel.setThinkingEnabled(it) },
                         onModelSelect = { viewModel.setActiveModel(it) },
-                        onOpenSettings = {
-                            focusManager.clearFocus()
-                            isExpanded = false
-                            onOpenSettings()
-                        },
                         onImageClick = onImageClick,
                         modifier = Modifier,
                         textFieldState = textFieldState,
