@@ -1,9 +1,6 @@
 package com.newoether.agora.ui.chat
 
 import android.net.Uri
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,13 +28,11 @@ fun VideoPlayer(
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var visible by remember { mutableStateOf(false) }
-
     val player = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(Uri.parse(uri)))
             prepare()
-            playWhenReady = true
+            playWhenReady = false
         }
     }
 
@@ -47,34 +42,22 @@ fun VideoPlayer(
         }
     }
 
-    LaunchedEffect(Unit) {
-        visible = true
-    }
-
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
-        AnimatedVisibility(
-            visible = visible,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            AndroidView(
-                factory = { ctx ->
-                    androidx.media3.ui.PlayerView(ctx).apply {
-                        this.player = player
-                        useController = true
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            )
-        }
+        AndroidView(
+            factory = { ctx ->
+                androidx.media3.ui.PlayerView(ctx).apply {
+                    this.player = player
+                    useController = true
+                }
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+        )
 
         IconButton(
-            onClick = {
-                visible = false
-            },
+            onClick = onClose,
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
@@ -86,13 +69,6 @@ fun VideoPlayer(
                 contentDescription = "Close",
                 tint = Color.White
             )
-        }
-    }
-
-    LaunchedEffect(visible) {
-        if (!visible) {
-            kotlinx.coroutines.delay(300)
-            onClose()
         }
     }
 }
