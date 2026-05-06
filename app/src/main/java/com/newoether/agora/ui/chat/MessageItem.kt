@@ -119,6 +119,8 @@ private fun toolDisplayName(toolName: String?): String {
         "edit_memory_file" -> "Edit Memory"
         "delete_memory_file" -> "Delete Memory"
         "update_active_memory" -> "Update Active Memory"
+        "web_search" -> "Web Search"
+        "search_conversations" -> "Search Conversations"
         else -> (toolName ?: "Tool").split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
     }
 }
@@ -159,6 +161,14 @@ private fun toolSummary(seg: MessageSegment): String {
         }
         "list_memory_files" -> if (isError) "Look up memories failed" else (if (fileCount != null) "Looked through $fileCount saved memories" else "Looked through saved memories")
         "update_active_memory" -> if (isError) "Update active memory failed" else "Updated active memory"
+        "web_search" -> {
+            val query = argsJson?.get("query")?.let { (it as? JsonPrimitive)?.content }
+            if (query != null) "Searching: $query" else "Searching the web"
+        }
+        "search_conversations" -> {
+            val query = argsJson?.get("query")?.let { (it as? JsonPrimitive)?.content }
+            if (query != null) "Searching: $query" else "Searching conversations"
+        }
         else -> content.lines().firstOrNull()?.take(100) ?: "Done"
     }
 }
@@ -184,6 +194,14 @@ private fun toolResultSummary(toolName: String, toolArgs: String, result: String
         "delete_memory_file" -> if (fileName != null) "Removed $fileName" else "Removed a memory"
         "list_memory_files" -> "Looked through saved memories"
         "update_active_memory" -> "Updated active memory"
+        "web_search" -> {
+            val matchLabel = Regex("Found (\\d+) matche?s").find(result)
+            if (matchLabel != null) matchLabel.value else "Web search done"
+        }
+        "search_conversations" -> {
+            val matchLabel = Regex("Found (\\d+) matche?s").find(result)
+            if (matchLabel != null) matchLabel.value else "Conversation search done"
+        }
         else -> "Done"
     }
 }
