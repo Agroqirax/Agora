@@ -1,5 +1,9 @@
 package com.newoether.agora.ui.settings
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,59 +90,78 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         }
     }
 
-    when (selectedCategory) {
-        "provider" -> SettingsProviderPage(viewModel, onBack = { selectedCategory = null })
-        "prompts" -> SettingsPromptsPage(viewModel, onBack = { selectedCategory = null })
-        "models" -> SettingsModelsPage(viewModel, onBack = { selectedCategory = null })
-        "context" -> SettingsContextPage(viewModel, onBack = { selectedCategory = null })
-        "websearch" -> SettingsWebSearchPage(viewModel, onBack = { selectedCategory = null })
-        "titlegen" -> SettingsTitleGenPage(viewModel, onBack = { selectedCategory = null })
-        "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
-        else -> {
-            Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                topBar = {
-                    TopAppBar(
-                        title = { Text("Settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) },
-                        navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.background,
-                            titleContentColor = MaterialTheme.colorScheme.onBackground,
-                        )
-                    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = selectedCategory,
+            transitionSpec = {
+                if (targetState == null) {
+                    slideInHorizontally(initialOffsetX = { -it }) togetherWith slideOutHorizontally(targetOffsetX = { it })
+                } else {
+                    slideInHorizontally(initialOffsetX = { it }) togetherWith slideOutHorizontally(targetOffsetX = { -it })
                 }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier
-                        .padding(padding)
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                ) {
-                    items(categories) { category ->
-                        ListItem(
-                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            headlineContent = { Text(category.title, fontWeight = FontWeight.SemiBold) },
-                            supportingContent = { Text(category.description, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                            leadingContent = {
-                                Icon(category.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                            },
-                            trailingContent = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+            }
+        ) { category ->
+            when (category) {
+                "provider" -> SettingsProviderPage(viewModel, onBack = { selectedCategory = null })
+                "prompts" -> SettingsPromptsPage(viewModel, onBack = { selectedCategory = null })
+                "models" -> SettingsModelsPage(viewModel, onBack = { selectedCategory = null })
+                "context" -> SettingsContextPage(viewModel, onBack = { selectedCategory = null })
+                "websearch" -> SettingsWebSearchPage(viewModel, onBack = { selectedCategory = null })
+                "titlegen" -> SettingsTitleGenPage(viewModel, onBack = { selectedCategory = null })
+                "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
+                else -> {
+                    Scaffold(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        topBar = {
+                            TopAppBar(
+                                title = { Text("Settings", fontWeight = FontWeight.Bold) },
+                                navigationIcon = {
+                                    IconButton(onClick = onBack) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = MaterialTheme.colorScheme.background,
+                                    titleContentColor = MaterialTheme.colorScheme.onBackground,
                                 )
-                            },
-                            modifier = Modifier.clickable { selectedCategory = category.key }
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            )
+                        }
+                    ) { padding ->
+                        LazyColumn(
+                            modifier = Modifier
+                                .padding(padding)
+                                .padding(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            items(categories) { cat ->
+                                ListItem(
+                                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                    headlineContent = { Text(cat.title, fontWeight = FontWeight.SemiBold) },
+                                    supportingContent = { Text(cat.description, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    leadingContent = {
+                                        Icon(cat.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                    },
+                                    trailingContent = {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                        )
+                                    },
+                                    modifier = Modifier.clickable { selectedCategory = cat.key }
+                                )
+                                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            }
+                        }
                     }
                 }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        )
     }
 }

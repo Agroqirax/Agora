@@ -18,6 +18,7 @@ import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.viewmodel.ChatViewModel
 
@@ -28,6 +29,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val webSearchProvider by viewModel.webSearchProvider.collectAsState()
     val webSearchApiKey by viewModel.webSearchApiKey.collectAsState()
     val webSearchBaseUrl by viewModel.webSearchBaseUrl.collectAsState()
+    var showProviderDialog by remember { mutableStateOf(false) }
 
     val noOpResponder = remember {
         object : BringIntoViewResponder {
@@ -78,9 +80,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         headlineContent = { Text("Search Provider") },
                         supportingContent = { Text(if (webSearchProvider == "searxng") "SearXNG" else "Brave") },
                         leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
-                        modifier = Modifier.clickable {
-                            viewModel.setWebSearchProvider(if (webSearchProvider == "searxng") "brave" else "searxng")
-                        }
+                        modifier = Modifier.clickable { showProviderDialog = true }
                     )
 
                     if (webSearchProvider != "searxng") {
@@ -143,5 +143,46 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             }
         }
+    }
+
+    if (showProviderDialog) {
+        AlertDialog(
+            onDismissRequest = { showProviderDialog = false },
+            title = { Text("Select Search Provider") },
+            text = {
+                Column {
+                    val providers = listOf("brave" to "Brave", "searxng" to "SearXNG")
+                    providers.forEach { (key, label) ->
+                        ListItem(
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            headlineContent = { Text(label, fontWeight = if (webSearchProvider == key) FontWeight.Bold else FontWeight.Normal) },
+                            supportingContent = {
+                                Text(
+                                    when (key) {
+                                        "brave" -> "Privacy-focused search API. Free tier available."
+                                        "searxng" -> "Self-hosted metasearch engine. No API key needed."
+                                        else -> ""
+                                    }
+                                )
+                            },
+                            leadingContent = {
+                                RadioButton(
+                                    selected = webSearchProvider == key,
+                                    onClick = {
+                                        viewModel.setWebSearchProvider(key)
+                                        showProviderDialog = false
+                                    }
+                                )
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.setWebSearchProvider(key)
+                                showProviderDialog = false
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showProviderDialog = false }) { Text("Cancel") } }
+        )
     }
 }
