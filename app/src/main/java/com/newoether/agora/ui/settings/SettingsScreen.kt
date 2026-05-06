@@ -91,8 +91,12 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
         }
     }
 
-    BackHandler(enabled = selectedCategory != null) {
-        selectedCategory = null
+    BackHandler {
+        if (selectedCategory != null) {
+            selectedCategory = null
+        } else {
+            onBack()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {

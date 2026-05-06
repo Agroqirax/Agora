@@ -188,9 +188,6 @@ fun MainNavigation(viewModel: ChatViewModel) {
                         }
                     )
 
-                    BackHandler {
-                        showSettings = false
-                    }
                 }
             }
 
@@ -790,7 +787,7 @@ fun ChatApp(
                         .fillMaxHeight()
                         .padding(horizontal = 16.dp, vertical = 20.dp)
                 ) {
-                    Text("Chat History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Conversations", style = MaterialTheme.typography.titleLarge)
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     Button(
