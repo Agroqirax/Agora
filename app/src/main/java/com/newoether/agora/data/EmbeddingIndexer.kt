@@ -16,6 +16,7 @@ object EmbeddingIndexer {
         apiKey: String,
         model: String,
         baseUrl: String,
+        modelId: String,
         chatDao: ChatDao
     ): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -23,6 +24,7 @@ object EmbeddingIndexer {
             val embedding = EmbeddingClient.computeEmbedding(toEmbed, apiKey, model, baseUrl) ?: return@withContext false
             chatDao.upsertEmbedding(EmbeddingEntity(
                 messageId = messageId,
+                modelId = modelId,
                 embedding = floatsToBytes(embedding),
                 chunkText = toEmbed.take(500),
                 dimension = embedding.size

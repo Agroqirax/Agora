@@ -214,8 +214,21 @@
     <string name="local_model_status">状态</string>
     <string name="local_model_ready">模型已下载就绪</string>
     <string name="local_model_not_ready">未指定模型</string>
-    <string name="import_model">导入模型</string>
+    <string name="import_model">导入模型 (.tflite)</string>
     <string name="importing_model">导入中...</string>
+    <string name="no_embedding_models">未配置嵌入模型</string>
+    <string name="embedding_type_remote">远程</string>
+    <string name="embedding_type_local">本地</string>
+    <string name="cached">已缓存</string>
+    <string name="not_cached">未缓存</string>
+    <string name="caching">缓存中…</string>
+    <string name="cache_action">缓存</string>
+    <string name="add_remote_model">添加远程模型</string>
+    <string name="add_local_model">添加本地模型</string>
+    <string name="model_name_label">名称</string>
+    <string name="add">添加</string>
+    <string name="delete_model_title">删除嵌入模型</string>
+    <string name="delete_model_confirm">此操作将一并删除该模型的所有缓存嵌入数据。</string>
 
     <!-- Errors -->
     <string name="search_found_matches">找到 %1$d 条与 \'%2$s\' 相关的对话。</string>

@@ -69,11 +69,8 @@ class GenerationManager(
     var accessPastConversations: Boolean = true
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
     var modelSearchMethod: String = "keyword"
-    var embeddingSource: String = "remote"
-    var embeddingModel: String = "text-embedding-3-small"
-    var embeddingBaseUrl: String = ""
+    var activeEmbeddingConfig: com.newoether.agora.data.EmbeddingModelConfig? = null
     var embeddingApiKey: String = ""
-    var localEmbeddingModelPath: String = ""
     var webSearchEnabled: Boolean = false
     var webSearchApiKey: String = ""
     var webSearchProvider: String = "brave"
@@ -247,7 +244,7 @@ class GenerationManager(
         val limit = ((args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 10).coerceIn(1, 20)
 
         return try {
-            val results = if (modelSearchMethod == "rag" && embeddingApiKey.isNotBlank()) {
+            val results = if (modelSearchMethod == "rag" && activeEmbeddingConfig != null) {
                 semanticSearch(query, limit)
             } else {
                 chatDao.searchMessages(query, limit)
@@ -293,19 +290,21 @@ class GenerationManager(
     }
 
     private suspend fun semanticSearch(query: String, limit: Int): List<com.newoether.agora.data.local.MessageEntity> {
-        val queryEmbedding = if (embeddingSource == "local") {
-            if (!LocalEmbeddingEngine.isModelReady(localEmbeddingModelPath)) return emptyList()
-            LocalEmbeddingEngine.computeEmbedding(query, localEmbeddingModelPath)
+        val config = activeEmbeddingConfig ?: return emptyList()
+        val queryEmbedding = if (config.type == com.newoether.agora.data.EmbeddingModelType.LOCAL) {
+            if (!LocalEmbeddingEngine.isModelReady(config.localFilePath)) return emptyList()
+            LocalEmbeddingEngine.computeEmbedding(query, config.localFilePath)
         } else {
+            val apiKey = resolveEmbeddingApiKey() ?: return emptyList()
             EmbeddingClient.computeEmbedding(
                 text = query,
-                apiKey = embeddingApiKey,
-                model = embeddingModel,
-                baseUrl = embeddingBaseUrl
+                apiKey = apiKey,
+                model = config.remoteModelName,
+                baseUrl = config.remoteBaseUrl.ifBlank { "https://api.openai.com/v1" }
             )
         } ?: return emptyList()
 
-        val all = chatDao.getAllEmbeddings()
+        val all = chatDao.getEmbeddingsByModel(config.id)
         if (all.isEmpty()) return emptyList()
 
         return all.map {
@@ -315,6 +314,10 @@ class GenerationManager(
          .sortedByDescending { it.second }
          .take(limit)
          .let { scored -> chatDao.getMessagesByIds(scored.map { it.first.messageId }) }
+    }
+
+    private fun resolveEmbeddingApiKey(): String? {
+        return embeddingApiKey.ifBlank { null }
     }
 
     private fun executeWebSearch(arguments: String): String {

@@ -44,15 +44,24 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val accessPastConversations by viewModel.accessPastConversations.collectAsState()
     val modelSearchMethod by viewModel.modelSearchMethod.collectAsState()
     val manualSearchMethod by viewModel.manualSearchMethod.collectAsState()
-    val embeddingSource by viewModel.embeddingSource.collectAsState()
-    val embeddingModel by viewModel.embeddingModel.collectAsState()
-    val embeddingBaseUrl by viewModel.embeddingBaseUrl.collectAsState()
-    val localEmbeddingModelUrl by viewModel.localEmbeddingModelUrl.collectAsState()
-    val localEmbeddingModelPath by viewModel.localEmbeddingModelPath.collectAsState()
-    var showEmbeddingDialog by remember { mutableStateOf(false) }
-    var editEmbeddingModel by remember { mutableStateOf("") }
-    var editEmbeddingUrl by remember { mutableStateOf("") }
+    val embeddingModels by viewModel.embeddingModels.collectAsState()
+    val activeEmbeddingModelId by viewModel.activeEmbeddingModelId.collectAsState()
+    var showRemoteDialog by remember { mutableStateOf(false) }
+    var showLocalDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf<String?>(null) }
+    var cachingModelId by remember { mutableStateOf<String?>(null) }
+    var remoteName by remember { mutableStateOf("") }
+    var remoteModelName by remember { mutableStateOf("") }
+    var remoteBaseUrl by remember { mutableStateOf("") }
+    var localName by remember { mutableStateOf("") }
+    var localFilePath by remember { mutableStateOf("") }
     var isImporting by remember { mutableStateOf(false) }
+
+    LaunchedEffect(embeddingModels) {
+        if (cachingModelId != null && embeddingModels.find { it.id == cachingModelId }?.cached == true) {
+            cachingModelId = null
+        }
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -135,105 +144,103 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             }
 
             SettingsGroup(title = stringResource(R.string.embedding_title)) {
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = { Text(stringResource(R.string.embedding_source_label)) },
-                    supportingContent = { Text(if (embeddingSource == "local") stringResource(R.string.embedding_source_local) else stringResource(R.string.embedding_source_remote)) },
-                    leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
-                    trailingContent = {
-                        Switch(
-                            checked = embeddingSource == "local",
-                            onCheckedChange = { viewModel.setEmbeddingSource(if (it) "local" else "remote") }
-                        )
-                    },
-                    modifier = Modifier.clickable { viewModel.setEmbeddingSource(if (embeddingSource == "local") "remote" else "local") }
-                )
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                if (embeddingSource == "remote") {
+                if (embeddingModels.isEmpty()) {
                     ListItem(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        headlineContent = { Text(stringResource(R.string.embedding_model_label)) },
-                        supportingContent = { Text(embeddingModel) },
-                        leadingContent = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) },
-                        modifier = Modifier.clickable {
-                            editEmbeddingModel = embeddingModel
-                            editEmbeddingUrl = embeddingBaseUrl
-                            showEmbeddingDialog = true
-                        }
+                        headlineContent = { Text(stringResource(R.string.no_embedding_models)) },
+                        leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary) }
                     )
                 } else {
-                    val scope = rememberCoroutineScope()
-                    val context = LocalContext.current
-                    val filePickerLauncher = rememberLauncherForActivityResult(
-                        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-                    ) { uri ->
-                        if (uri != null) {
-                            isImporting = true
-                            scope.launch {
-                                try {
-                                    val destFile = File(context.filesDir, "embedding_model.tflite")
-                                    context.contentResolver.openInputStream(uri)?.use { input ->
-                                        destFile.outputStream().use { output ->
-                                            input.copyTo(output)
-                                        }
-                                    }
-                                    viewModel.setLocalEmbeddingModelPath(destFile.absolutePath)
-                                } catch (_: Exception) { }
-                                isImporting = false
-                            }
-                        }
-                    }
-                    val modelReady = localEmbeddingModelPath.isNotBlank() && remember(localEmbeddingModelPath) {
-                        com.newoether.agora.api.LocalEmbeddingEngine.isModelReady(localEmbeddingModelPath)
-                    }
-                    ListItem(
-                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                        headlineContent = { Text(stringResource(R.string.local_model_status)) },
-                        supportingContent = {
-                            Text(
-                                if (isImporting) stringResource(R.string.importing_model)
-                                else if (modelReady) stringResource(R.string.local_model_ready)
-                                else stringResource(R.string.local_model_not_ready),
-                                color = if (modelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        },
-                        leadingContent = {
-                            if (isImporting)
-                                CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                            else
-                                Icon(
-                                    if (modelReady) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                    null,
-                                    tint = if (modelReady) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                    embeddingModels.forEach { model ->
+                        val isActive = model.id == activeEmbeddingModelId
+                        val isCaching = cachingModelId == model.id
+                        ListItem(
+                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                            headlineContent = { Text(model.name) },
+                            supportingContent = {
+                                val typeLabel = if (model.type == com.newoether.agora.data.EmbeddingModelType.REMOTE)
+                                    stringResource(R.string.embedding_type_remote)
+                                else stringResource(R.string.embedding_type_local)
+                                val cacheLabel = if (isCaching) stringResource(R.string.caching)
+                                else if (model.cached) stringResource(R.string.cached)
+                                else stringResource(R.string.not_cached)
+                                Text("$typeLabel · $cacheLabel")
+                            },
+                            leadingContent = {
+                                RadioButton(
+                                    selected = isActive,
+                                    onClick = { viewModel.setActiveEmbeddingModel(model.id) }
                                 )
-                        },
-                        trailingContent = {
-                            TextButton(onClick = { filePickerLauncher.launch(arrayOf("*/*")) }) {
-                                Text(stringResource(R.string.import_model))
-                            }
-                        }
-                    )
+                            },
+                            trailingContent = {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    if (!model.cached && !isCaching) {
+                                        TextButton(onClick = {
+                                            cachingModelId = model.id
+                                            viewModel.cacheMessagesForModel(model.id)
+                                        }) { Text(stringResource(R.string.cache_action)) }
+                                    }
+                                    if (isCaching) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(24.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    }
+                                    IconButton(onClick = { showDeleteDialog = model.id }) {
+                                        Icon(Icons.Default.Warning, contentDescription = stringResource(R.string.delete), tint = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            },
+                            modifier = Modifier.clickable { viewModel.setActiveEmbeddingModel(model.id) }
+                        )
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(onClick = {
+                        remoteName = ""
+                        remoteModelName = ""
+                        remoteBaseUrl = ""
+                        showRemoteDialog = true
+                    }) { Text(stringResource(R.string.add_remote_model)) }
+                    TextButton(onClick = {
+                        localName = ""
+                        localFilePath = ""
+                        showLocalDialog = true
+                    }) { Text(stringResource(R.string.add_local_model)) }
                 }
             }
         }
 
-        if (showEmbeddingDialog) {
+        if (showRemoteDialog) {
             AlertDialog(
-                onDismissRequest = { showEmbeddingDialog = false },
-                title = { Text(stringResource(R.string.embedding_title)) },
+                onDismissRequest = { showRemoteDialog = false },
+                title = { Text(stringResource(R.string.add_remote_model)) },
                 text = {
                     Column {
                         OutlinedTextField(
-                            value = editEmbeddingModel,
-                            onValueChange = { editEmbeddingModel = it },
-                            label = { Text(stringResource(R.string.embedding_model_label)) },
+                            value = remoteName,
+                            onValueChange = { remoteName = it },
+                            label = { Text(stringResource(R.string.model_name_label)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         OutlinedTextField(
-                            value = editEmbeddingUrl,
-                            onValueChange = { editEmbeddingUrl = it },
+                            value = remoteModelName,
+                            onValueChange = { remoteModelName = it },
+                            label = { Text(stringResource(R.string.embedding_model_label)) },
+                            placeholder = { Text("text-embedding-3-small") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = remoteBaseUrl,
+                            onValueChange = { remoteBaseUrl = it },
                             label = { Text(stringResource(R.string.embedding_base_url_label)) },
                             placeholder = { Text("https://api.openai.com/v1") },
                             singleLine = true,
@@ -243,13 +250,112 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 },
                 confirmButton = {
                     TextButton(onClick = {
-                        viewModel.setEmbeddingModel(editEmbeddingModel)
-                        viewModel.setEmbeddingBaseUrl(editEmbeddingUrl)
-                        showEmbeddingDialog = false
-                    }) { Text(stringResource(R.string.save)) }
+                        if (remoteName.isNotBlank() && remoteModelName.isNotBlank()) {
+                            viewModel.addEmbeddingModel(
+                                com.newoether.agora.data.EmbeddingModelConfig(
+                                    name = remoteName,
+                                    type = com.newoether.agora.data.EmbeddingModelType.REMOTE,
+                                    remoteModelName = remoteModelName,
+                                    remoteBaseUrl = remoteBaseUrl
+                                )
+                            )
+                            showRemoteDialog = false
+                        }
+                    }) { Text(stringResource(R.string.add)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showEmbeddingDialog = false }) { Text(stringResource(R.string.cancel)) }
+                    TextButton(onClick = { showRemoteDialog = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
+
+        if (showLocalDialog) {
+            val scope = rememberCoroutineScope()
+            val context = LocalContext.current
+            val filePickerLauncher = rememberLauncherForActivityResult(
+                contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+            ) { uri ->
+                if (uri != null) {
+                    isImporting = true
+                    scope.launch {
+                        try {
+                            val destFile = File(context.filesDir, "embedding_${java.util.UUID.randomUUID()}.tflite")
+                            context.contentResolver.openInputStream(uri)?.use { input ->
+                                destFile.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
+                            }
+                            localFilePath = destFile.absolutePath
+                        } catch (_: Exception) { }
+                        isImporting = false
+                    }
+                }
+            }
+            AlertDialog(
+                onDismissRequest = { showLocalDialog = false },
+                title = { Text(stringResource(R.string.add_local_model)) },
+                text = {
+                    Column {
+                        OutlinedTextField(
+                            value = localName,
+                            onValueChange = { localName = it },
+                            label = { Text(stringResource(R.string.model_name_label)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        if (localFilePath.isNotBlank()) {
+                            ListItem(
+                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                headlineContent = { Text(stringResource(R.string.local_model_ready)) },
+                                leadingContent = {
+                                    Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                }
+                            )
+                        } else {
+                            TextButton(onClick = { filePickerLauncher.launch(arrayOf("*/*")) }) {
+                                Text(stringResource(R.string.import_model))
+                            }
+                        }
+                        if (isImporting) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(start = 16.dp), strokeWidth = 2.dp)
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        if (localName.isNotBlank() && localFilePath.isNotBlank()) {
+                            viewModel.addEmbeddingModel(
+                                com.newoether.agora.data.EmbeddingModelConfig(
+                                    name = localName,
+                                    type = com.newoether.agora.data.EmbeddingModelType.LOCAL,
+                                    localFilePath = localFilePath
+                                )
+                            )
+                            showLocalDialog = false
+                        }
+                    }) { Text(stringResource(R.string.add)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLocalDialog = false }) { Text(stringResource(R.string.cancel)) }
+                }
+            )
+        }
+
+        if (showDeleteDialog != null) {
+            val modelId = showDeleteDialog!!
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = null },
+                title = { Text(stringResource(R.string.delete_model_title)) },
+                text = { Text(stringResource(R.string.delete_model_confirm)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.deleteEmbeddingModel(modelId)
+                        showDeleteDialog = null
+                    }) { Text(stringResource(R.string.delete)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = null }) { Text(stringResource(R.string.cancel)) }
                 }
             )
         }

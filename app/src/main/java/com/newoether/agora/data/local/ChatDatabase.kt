@@ -51,11 +51,12 @@ data class ChatEntity(
 
 @Entity(
     tableName = "embeddings",
-    indices = [Index(value = ["messageId"], unique = true)]
+    indices = [Index(value = ["messageId", "modelId"], unique = true)]
 )
 data class EmbeddingEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val messageId: String,
+    val modelId: String,
     val embedding: ByteArray,
     val chunkText: String,
     val dimension: Int
@@ -129,6 +130,18 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
+    @Query("SELECT * FROM embeddings WHERE modelId = :modelId")
+    suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
+
+    @Query("DELETE FROM embeddings WHERE modelId = :modelId")
+    suspend fun deleteEmbeddingsByModel(modelId: String)
+
+    @Query("SELECT COUNT(*) FROM embeddings WHERE modelId = :modelId")
+    suspend fun getEmbeddingCountByModel(modelId: String): Int
+
+    @Query("SELECT * FROM messages WHERE participant IN ('USER', 'MODEL') AND id NOT LIKE 'tool_%' AND id NOT LIKE 'result_%'")
+    suspend fun getAllMessagesForIndexing(): List<MessageEntity>
+
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
 }
@@ -142,7 +155,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 10
+        const val CURRENT_VERSION = 11
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -193,6 +206,13 @@ abstract class ChatDatabase : RoomDatabase() {
                         )
                     """)
                     db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_embeddings_messageId ON embeddings (messageId)")
+                }
+            },
+            object : Migration(10, 11) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE embeddings ADD COLUMN modelId TEXT NOT NULL DEFAULT ''")
+                    db.execSQL("DROP INDEX IF EXISTS index_embeddings_messageId")
+                    db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_embeddings_messageId_modelId ON embeddings (messageId, modelId)")
                 }
             }
         )

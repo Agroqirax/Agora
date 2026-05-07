@@ -247,8 +247,21 @@
     <string name="local_model_status">Status</string>
     <string name="local_model_ready">Model downloaded and ready</string>
     <string name="local_model_not_ready">No model specified</string>
-    <string name="import_model">Import Model</string>
+    <string name="import_model">Import Model (.tflite)</string>
     <string name="importing_model">Importing...</string>
+    <string name="no_embedding_models">No embedding models configured</string>
+    <string name="embedding_type_remote">Remote</string>
+    <string name="embedding_type_local">Local</string>
+    <string name="cached">Cached</string>
+    <string name="not_cached">Not cached</string>
+    <string name="caching">Caching…</string>
+    <string name="cache_action">Cache</string>
+    <string name="add_remote_model">Add Remote Model</string>
+    <string name="add_local_model">Add Local Model</string>
+    <string name="model_name_label">Name</string>
+    <string name="add">Add</string>
+    <string name="delete_model_title">Delete Embedding Model</string>
+    <string name="delete_model_confirm">This will also delete all cached embeddings for this model.</string>
 
     <!-- Errors -->
     <string name="search_found_matches">Found %1$d matches for \'%2$s\'.</string>
