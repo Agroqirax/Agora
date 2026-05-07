@@ -815,8 +815,8 @@ class ChatViewModel(
                 for (uri in images) {
                     val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
                     if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+                        mediaUris.add(uri)
                         try {
-                            // Only read text-based files, limit to 500KB
                             val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
                             if (isText) {
                                 app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
@@ -826,10 +826,6 @@ class ChatViewModel(
                                         fileContent += "\n\n--- File: $fileName ---\n$content"
                                     }
                                 }
-                            } else {
-                                // For other files, attach as a reference
-                                val fileName = getFileName(app, android.net.Uri.parse(uri))
-                                fileContent += "\n\n[Attached file: $fileName ($mimeType)]"
                             }
                         } catch (_: Exception) {}
                     } else {

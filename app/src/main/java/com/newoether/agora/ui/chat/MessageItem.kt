@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Terminal
@@ -451,20 +452,40 @@ fun MessageItem(
                             horizontalAlignment = Alignment.Start
                         ) {
                             if (message.images.isNotEmpty()) {
+                                val ctx = LocalContext.current
                                 androidx.compose.foundation.lazy.LazyRow(
                                     modifier = Modifier.padding(bottom = if (message.text.isNotEmpty()) 8.dp else 0.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     items(message.images) { imagePath ->
-                                        coil.compose.AsyncImage(
-                                            model = imagePath,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable { onImageClick(imagePath) },
-                                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                                        )
+                                        val mimeType = remember(imagePath) { try { ctx.contentResolver.getType(android.net.Uri.parse(imagePath)) } catch (_: Exception) { null } }
+                                        val isFile = mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")
+                                        val thumbModifier = Modifier
+                                            .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .then(if (!isFile) Modifier.clickable { onImageClick(imagePath) } else Modifier)
+
+                                        if (isFile) {
+                                            val fileName = remember(imagePath) {
+                                                try {
+                                                    val cursor = ctx.contentResolver.query(android.net.Uri.parse(imagePath), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
+                                                    cursor?.use { if (it.moveToFirst()) { val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME); if (idx >= 0) it.getString(idx) else null } else null }
+                                                } catch (_: Exception) { null }
+                                            } ?: imagePath.substringAfterLast("/")
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+                                                Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Default.AttachFile, "File", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                                                }
+                                                Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                                            }
+                                        } else {
+                                            coil.compose.AsyncImage(
+                                                model = imagePath,
+                                                contentDescription = null,
+                                                modifier = thumbModifier,
+                                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                            )
+                                        }
                                     }
                                 }
                             }
