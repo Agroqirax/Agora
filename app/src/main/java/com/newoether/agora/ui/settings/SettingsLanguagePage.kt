@@ -10,10 +10,12 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
 
@@ -23,6 +25,12 @@ private data class LanguageOption(val code: String, val label: String)
 @Composable
 fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val appLanguage by viewModel.appLanguage.collectAsState()
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    val restartMessage = stringResource(R.string.language_restart_message)
+    val restartAction = stringResource(R.string.language_restart_action)
 
     val languages = listOf(
         LanguageOption("system", stringResource(R.string.language_system_default)),
@@ -32,6 +40,7 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.language_title), fontWeight = FontWeight.Bold) },
@@ -61,10 +70,31 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         leadingContent = {
                             RadioButton(
                                 selected = appLanguage == lang.code,
-                                onClick = { viewModel.setAppLanguage(lang.code) }
+                                onClick = {
+                                    viewModel.setAppLanguage(lang.code)
+                                }
                             )
                         },
-                        modifier = Modifier.clickable { viewModel.setAppLanguage(lang.code) }
+                        modifier = Modifier.clickable {
+                            val previous = appLanguage
+                            viewModel.setAppLanguage(lang.code)
+                            if (lang.code != previous) {
+                                scope.launch {
+                                    val result = snackbarHostState.showSnackbar(
+                                        message = restartMessage,
+                                        actionLabel = restartAction,
+                                        duration = SnackbarDuration.Long
+                                    )
+                                    if (result == SnackbarResult.ActionPerformed) {
+                                        activity?.let {
+                                            it.finish()
+                                            it.startActivity(it.intent)
+                                            it.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     )
                     if (lang != languages.last()) {
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))

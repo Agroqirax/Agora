@@ -213,6 +213,8 @@
     <string name="language_title">Language</string>
     <string name="language_desc">Change the app display language</string>
     <string name="language_system_default">System Default</string>
+    <string name="language_restart_message">Restart the app to take effect</string>
+    <string name="language_restart_action">Restart</string>
 
     <!-- General -->
     <string name="back">Back</string>

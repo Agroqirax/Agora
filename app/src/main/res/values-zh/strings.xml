@@ -171,6 +171,8 @@
     <string name="language_title">语言</string>
     <string name="language_desc">更改应用显示语言</string>
     <string name="language_system_default">跟随系统</string>
+    <string name="language_restart_message">重启应用以生效</string>
+    <string name="language_restart_action">重启</string>
 
     <!-- General -->
     <string name="back">返回</string>
