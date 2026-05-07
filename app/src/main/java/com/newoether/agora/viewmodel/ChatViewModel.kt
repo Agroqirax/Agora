@@ -14,7 +14,7 @@ import com.newoether.agora.data.EmbeddingModelType
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.SystemPromptEntry
-import com.newoether.agora.api.LocalEmbeddingEngine
+import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.EmbeddingEntity
@@ -507,8 +507,8 @@ class ChatViewModel(
                 val text = msg.text.take(8000)
                 if (text.isBlank()) continue
                 val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
-                    if (com.newoether.agora.api.LocalEmbeddingEngine.isModelReady(model.localFilePath))
-                        com.newoether.agora.api.LocalEmbeddingEngine.computeEmbedding(text, model.localFilePath)
+                    if (com.newoether.agora.api.LlamaEngine.isModelReady(model.localFilePath))
+                        com.newoether.agora.api.LlamaEngine.computeEmbedding(text, model.localFilePath)
                     else null
                 } else {
                     val apiKey = resolveEmbeddingApiKey() ?: return@launch
@@ -550,8 +550,8 @@ class ChatViewModel(
     private suspend fun resolveEmbedding(text: String): FloatArray? {
         val model = activeEmbeddingModel.value ?: return null
         return if (model.type == EmbeddingModelType.LOCAL) {
-            if (!LocalEmbeddingEngine.isModelReady(model.localFilePath)) return null
-            LocalEmbeddingEngine.computeEmbedding(text, model.localFilePath)
+            if (!LlamaEngine.isModelReady(model.localFilePath)) return null
+            LlamaEngine.computeEmbedding(text, model.localFilePath)
         } else {
             val apiKey = resolveEmbeddingApiKey() ?: return null
             val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
@@ -577,8 +577,8 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             val model = activeEmbeddingModel.value ?: return@launch
             val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
-                if (!LocalEmbeddingEngine.isModelReady(model.localFilePath)) return@launch
-                LocalEmbeddingEngine.computeEmbedding(text, model.localFilePath)
+                if (!LlamaEngine.isModelReady(model.localFilePath)) return@launch
+                LlamaEngine.computeEmbedding(text, model.localFilePath)
             } else {
                 val apiKey = resolveEmbeddingApiKey() ?: return@launch
                 val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }

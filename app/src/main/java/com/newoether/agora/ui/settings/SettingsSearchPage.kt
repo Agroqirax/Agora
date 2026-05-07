@@ -279,7 +279,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     isImporting = true
                     scope.launch {
                         try {
-                            val destFile = File(context.filesDir, "embedding_${java.util.UUID.randomUUID()}.tflite")
+                            val destFile = File(context.filesDir, "embedding_${java.util.UUID.randomUUID()}.gguf")
                             context.contentResolver.openInputStream(uri)?.use { input ->
                                 destFile.outputStream().use { output ->
                                     input.copyTo(output)

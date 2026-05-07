@@ -210,11 +210,11 @@
     <string name="embedding_model_label">模型</string>
     <string name="embedding_base_url_label">基础 URL</string>
     <string name="local_model_url_label">模型下载 URL</string>
-    <string name="local_model_url_hint">https://example.com/model.tflite</string>
+    <string name="local_model_url_hint">https://example.com/model.gguf</string>
     <string name="local_model_status">状态</string>
     <string name="local_model_ready">模型已下载就绪</string>
     <string name="local_model_not_ready">未指定模型</string>
-    <string name="import_model">导入模型 (.tflite)</string>
+    <string name="import_model">导入模型 (.gguf)</string>
     <string name="importing_model">导入中...</string>
     <string name="no_embedding_models">未配置嵌入模型</string>
     <string name="embedding_type_remote">远程</string>

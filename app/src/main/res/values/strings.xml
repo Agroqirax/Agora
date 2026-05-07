@@ -243,11 +243,11 @@
     <string name="embedding_model_label">Model</string>
     <string name="embedding_base_url_label">Base URL</string>
     <string name="local_model_url_label">Model Download URL</string>
-    <string name="local_model_url_hint">https://example.com/model.tflite</string>
+    <string name="local_model_url_hint">https://example.com/model.gguf</string>
     <string name="local_model_status">Status</string>
     <string name="local_model_ready">Model downloaded and ready</string>
     <string name="local_model_not_ready">No model specified</string>
-    <string name="import_model">Import Model (.tflite)</string>
+    <string name="import_model">Import Model (.gguf)</string>
     <string name="importing_model">Importing...</string>
     <string name="no_embedding_models">No embedding models configured</string>
     <string name="embedding_type_remote">Remote</string>

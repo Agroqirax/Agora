@@ -19,7 +19,7 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.api.EmbeddingClient
-import com.newoether.agora.api.LocalEmbeddingEngine
+import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
@@ -292,8 +292,8 @@ class GenerationManager(
     private suspend fun semanticSearch(query: String, limit: Int): List<com.newoether.agora.data.local.MessageEntity> {
         val config = activeEmbeddingConfig ?: return emptyList()
         val queryEmbedding = if (config.type == com.newoether.agora.data.EmbeddingModelType.LOCAL) {
-            if (!LocalEmbeddingEngine.isModelReady(config.localFilePath)) return emptyList()
-            LocalEmbeddingEngine.computeEmbedding(query, config.localFilePath)
+            if (!LlamaEngine.isModelReady(config.localFilePath)) return emptyList()
+            LlamaEngine.computeEmbedding(query, config.localFilePath)
         } else {
             val apiKey = resolveEmbeddingApiKey() ?: return emptyList()
             EmbeddingClient.computeEmbedding(
