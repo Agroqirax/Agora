@@ -225,12 +225,14 @@ class GenerationManager(
     private suspend fun executeSearchConversations(arguments: String): String {
         val argsStr = arguments.ifBlank { "{}" }
         val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
-        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return context.getString(com.newoether.agora.R.string.search_no_query)
+        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            ?: return buildJsonObject { put("type", "search_conversations"); put("error", "no_query") }.toString()
         val limit = ((args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 10).coerceIn(1, 20)
 
         return try {
             val results = chatDao.searchMessages(query, limit)
-            if (results.isEmpty()) return context.getString(com.newoether.agora.R.string.search_no_matches, query)
+            if (results.isEmpty())
+                return buildJsonObject { put("type", "search_conversations"); put("query", query); put("error", "no_results") }.toString()
 
             val grouped = results.groupBy { it.conversationId }
             val titles = mutableMapOf<String, String>()
@@ -260,14 +262,20 @@ class GenerationManager(
                 put("results", resultArray)
             }.toString()
         } catch (e: Exception) {
-            context.getString(com.newoether.agora.R.string.search_error_format, e.message ?: context.getString(com.newoether.agora.R.string.unknown))
+            buildJsonObject {
+                put("type", "search_conversations")
+                put("query", query)
+                put("error", "search_error")
+                put("message", e.message ?: "")
+            }.toString()
         }
     }
 
     private fun executeWebSearch(arguments: String): String {
         val argsStr = arguments.ifBlank { "{}" }
         val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
-        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return context.getString(com.newoether.agora.R.string.search_no_query)
+        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            ?: return buildJsonObject { put("type", "web_search"); put("error", "no_query") }.toString()
         val numResults = ((args["num_results"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 5).coerceIn(1, 10)
 
         return try {
@@ -277,14 +285,16 @@ class GenerationManager(
                     ("$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json&engines=google,brave") to emptyMap<String, String>()
                 }
                 else -> {
-                    val apiKey = webSearchApiKey.ifBlank { return context.getString(com.newoether.agora.R.string.provider_no_keys, "Brave Search") }
+                    val apiKey = webSearchApiKey.ifBlank {
+                        return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_api_key") }.toString()
+                    }
                     ("https://api.search.brave.com/res/v1/web/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&count=$numResults") to
                         mapOf("Accept" to "application/json", "X-Subscription-Token" to apiKey)
                 }
             }
 
             val body = com.newoether.agora.api.HttpClient.fetchModels(url, requestHeaders)
-                ?: return context.getString(com.newoether.agora.R.string.search_no_response)
+                ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
             val json: Map<String, kotlinx.serialization.json.JsonElement> = Json.decodeFromString(body)
             val resultsArray = when {
                 json.containsKey("web") -> {
@@ -293,9 +303,10 @@ class GenerationManager(
                 }
                 json.containsKey("results") -> json["results"]?.jsonArray
                 else -> null
-            } ?: return context.getString(com.newoether.agora.R.string.search_no_results)
+            } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_results") }.toString()
 
-            if (resultsArray.isEmpty()) return context.getString(com.newoether.agora.R.string.search_no_results)
+            if (resultsArray.isEmpty())
+                return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_results") }.toString()
 
             val rawResults = buildJsonArray {
                 for (element in resultsArray) {
@@ -313,7 +324,12 @@ class GenerationManager(
                 put("results", rawResults)
             }.toString()
         } catch (e: Exception) {
-            context.getString(com.newoether.agora.R.string.search_error_format, e.message ?: context.getString(com.newoether.agora.R.string.unknown))
+            buildJsonObject {
+                put("type", "web_search")
+                put("query", query)
+                put("error", "search_error")
+                put("message", e.message ?: "")
+            }.toString()
         }
     }
 

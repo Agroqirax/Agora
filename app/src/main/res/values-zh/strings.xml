@@ -194,10 +194,10 @@
     <string name="memory_access_title">访问权限</string>
 
     <!-- Errors -->
-    <string name="search_found_matches">找到 %1$d 条关于 \'%2$s\' 的匹配。</string>
-    <string name="search_found_results">找到 %1$d 条关于 \'%2$s\' 的结果。</string>
+    <string name="search_found_matches">找到 %1$d 条与 \'%2$s\' 相关的对话。</string>
+    <string name="search_found_results">找到 %1$d 条与 \'%2$s\' 相关的结果。</string>
     <string name="search_found_results_no_query">找到 %1$d 条结果。</string>
-    <string name="search_no_matches">未找到关于 \'%1$s\' 的匹配。</string>
+    <string name="search_no_matches">未找到与 \'%1$s\' 相关的对话。</string>
 
     <string name="unexpected_error">发生了意外错误。</string>
     <string name="unknown">未知</string>
@@ -206,7 +206,7 @@
     <string name="search_role_model">模型</string>
     <string name="search_no_query">未提供搜索查询。</string>
     <string name="search_no_response">搜索失败：无响应</string>
-    <string name="search_no_results">未找到搜索结果。</string>
+    <string name="search_no_results">未找到相关结果。</string>
     <string name="search_error_format">搜索错误：%1$s</string>
     <string name="search_parse_error">解析搜索结果失败：%1$s</string>
     <string name="tool_call_failed">工具调用失败</string>

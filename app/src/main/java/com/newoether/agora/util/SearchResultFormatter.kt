@@ -3,7 +3,6 @@ package com.newoether.agora.util
 import android.content.Context
 import com.newoether.agora.R
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
@@ -20,6 +19,8 @@ object SearchResultFormatter {
         if (!isRawSearchResult(text)) return text
         return try {
             val json = Json.parseToJsonElement(text).jsonObject
+            val error = json["error"]?.let { (it as? JsonPrimitive)?.content }
+            if (error != null) return formatError(json, error, context)
             when (json["type"]?.let { (it as? JsonPrimitive)?.content }) {
                 "web_search" -> formatWebSearch(json, context)
                 "search_conversations" -> formatConversationSearch(json, context)
@@ -35,10 +36,24 @@ object SearchResultFormatter {
         return formatted.lines().first().take(100)
     }
 
+    private fun formatError(json: JsonObject, error: String, context: Context): String {
+        val query = json["query"]?.let { (it as? JsonPrimitive)?.content } ?: ""
+        return when (error) {
+            "no_query" -> context.getString(R.string.search_no_query)
+            "no_results" -> context.getString(R.string.search_no_results)
+            "no_response" -> context.getString(R.string.search_no_response)
+            "no_api_key" -> context.getString(R.string.provider_no_keys, "Brave Search")
+            "search_error" -> {
+                val msg = json["message"]?.let { (it as? JsonPrimitive)?.content } ?: context.getString(R.string.unknown)
+                context.getString(R.string.search_error_format, msg)
+            }
+            else -> context.getString(R.string.search_error_format, error)
+        }
+    }
+
     private fun formatWebSearch(json: JsonObject, context: Context): String {
         val query = json["query"]?.let { (it as? JsonPrimitive)?.content } ?: ""
-        val results = json["results"]?.jsonArray
-            ?: return context.getString(R.string.search_no_results)
+        val results = json["results"]?.jsonArray ?: return context.getString(R.string.search_no_results)
         if (results.isEmpty()) return context.getString(R.string.search_no_results)
 
         val untitled = context.getString(R.string.search_untitled)
@@ -60,8 +75,7 @@ object SearchResultFormatter {
 
     private fun formatConversationSearch(json: JsonObject, context: Context): String {
         val query = json["query"]?.let { (it as? JsonPrimitive)?.content } ?: ""
-        val results = json["results"]?.jsonArray
-            ?: return context.getString(R.string.search_no_matches, query)
+        val results = json["results"]?.jsonArray ?: return context.getString(R.string.search_no_matches, query)
         if (results.isEmpty()) return context.getString(R.string.search_no_matches, query)
 
         val userRole = context.getString(R.string.search_role_user)
