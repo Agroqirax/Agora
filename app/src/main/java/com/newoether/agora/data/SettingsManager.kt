@@ -58,6 +58,8 @@ class SettingsManager(private val context: Context) {
         val ACCESS_SAVED_MEMORIES = booleanPreferencesKey("access_saved_memories")
         val ACCESS_ACTIVE_MEMORY = booleanPreferencesKey("access_active_memory")
         val RAG_SEARCH_ENABLED = booleanPreferencesKey("rag_search_enabled")
+        val MODEL_SEARCH_METHOD = stringPreferencesKey("model_search_method")
+        val MANUAL_SEARCH_METHOD = stringPreferencesKey("manual_search_method")
         val APP_LANGUAGE = stringPreferencesKey("app_language")
         val WEB_SEARCH_ENABLED = booleanPreferencesKey("web_search_enabled")
         val WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
@@ -114,6 +116,8 @@ class SettingsManager(private val context: Context) {
     val accessSavedMemories: Flow<Boolean> = context.dataStore.data.map { it[ACCESS_SAVED_MEMORIES] ?: true }
     val accessActiveMemory: Flow<Boolean> = context.dataStore.data.map { it[ACCESS_ACTIVE_MEMORY] ?: true }
     val ragSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[RAG_SEARCH_ENABLED] ?: false }
+    val modelSearchMethod: Flow<String> = context.dataStore.data.map { it[MODEL_SEARCH_METHOD] ?: "keyword" }
+    val manualSearchMethod: Flow<String> = context.dataStore.data.map { it[MANUAL_SEARCH_METHOD] ?: "keyword" }
 
     val appLanguage: Flow<String> = context.dataStore.data.map { it[APP_LANGUAGE] ?: "system" }
     val webSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEB_SEARCH_ENABLED] ?: false }
@@ -210,6 +214,12 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveRagSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[RAG_SEARCH_ENABLED] = enabled }
+    }
+    suspend fun saveModelSearchMethod(method: String) {
+        context.dataStore.edit { it[MODEL_SEARCH_METHOD] = method }
+    }
+    suspend fun saveManualSearchMethod(method: String) {
+        context.dataStore.edit { it[MANUAL_SEARCH_METHOD] = method }
     }
 
     suspend fun saveAppLanguage(language: String) {

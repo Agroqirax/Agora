@@ -155,7 +155,7 @@
     <string name="memory_access_active">访问活跃记忆</string>
     <string name="memory_access_active_desc">每次 API 调用时包含活跃记忆内容</string>
     <string name="memory_access_past">访问过去的对话</string>
-    <string name="memory_access_past_desc">允许模型搜索对话历史（RAG）</string>
+    <string name="memory_access_past_desc">允许模型搜索对话历史</string>
     <string name="memory_active_title">活跃记忆</string>
     <string name="memory_active_context">活跃记忆上下文</string>
     <string name="memory_active_empty">未设置活跃记忆。模型将在所有对话中记住此内容。</string>
@@ -196,8 +196,13 @@
 
     <!-- Memory Access -->
     <string name="memory_access_title">访问权限</string>
-    <string name="rag_search">语义搜索 (RAG)</string>
-    <string name="rag_search_desc">使用嵌入向量进行语义搜索，替代关键词匹配</string>
+    <string name="search_methods_title">搜索方式</string>
+    <string name="model_search_method">模型搜索方式</string>
+    <string name="model_search_method_desc">模型通过工具调用搜索过去对话的方式</string>
+    <string name="manual_search_method">手动搜索方式</string>
+    <string name="manual_search_method_desc">抽屉中搜索栏的查找方式</string>
+    <string name="search_method_keyword">关键词</string>
+    <string name="search_method_rag">语义 (RAG)</string>
 
     <!-- Errors -->
     <string name="search_found_matches">找到 %1$d 条与 \'%2$s\' 相关的对话。</string>

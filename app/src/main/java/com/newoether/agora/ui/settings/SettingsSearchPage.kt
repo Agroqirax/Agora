@@ -8,6 +8,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,11 +22,19 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
 
+private data class SearchMethodOption(val key: String, @androidx.annotation.StringRes val labelRes: Int)
+
+private val searchMethods = listOf(
+    SearchMethodOption("keyword", R.string.search_method_keyword),
+    SearchMethodOption("rag", R.string.search_method_rag)
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val accessPastConversations by viewModel.accessPastConversations.collectAsState()
-    val ragSearchEnabled by viewModel.ragSearchEnabled.collectAsState()
+    val modelSearchMethod by viewModel.modelSearchMethod.collectAsState()
+    val manualSearchMethod by viewModel.manualSearchMethod.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -62,17 +72,48 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     },
                     modifier = Modifier.clickable { viewModel.setAccessPastConversations(!accessPastConversations) }
                 )
+            }
+
+            SettingsGroup(title = stringResource(R.string.search_methods_title)) {
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = { Text(stringResource(R.string.model_search_method)) },
+                    supportingContent = { Text(stringResource(R.string.model_search_method_desc)) },
+                    leadingContent = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) }
+                )
+                searchMethods.forEach { method ->
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        headlineContent = { Text(stringResource(method.labelRes)) },
+                        leadingContent = {
+                            RadioButton(
+                                selected = modelSearchMethod == method.key,
+                                onClick = { viewModel.setModelSearchMethod(method.key) }
+                            )
+                        },
+                        modifier = Modifier.clickable { viewModel.setModelSearchMethod(method.key) }
+                    )
+                }
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = { Text(stringResource(R.string.rag_search)) },
-                    supportingContent = { Text(stringResource(R.string.rag_search_desc)) },
-                    leadingContent = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.primary) },
-                    trailingContent = {
-                        Switch(checked = ragSearchEnabled, onCheckedChange = { viewModel.setRagSearchEnabled(it) })
-                    },
-                    modifier = Modifier.clickable { viewModel.setRagSearchEnabled(!ragSearchEnabled) }
+                    headlineContent = { Text(stringResource(R.string.manual_search_method)) },
+                    supportingContent = { Text(stringResource(R.string.manual_search_method_desc)) },
+                    leadingContent = { Icon(Icons.Default.ManageSearch, null, tint = MaterialTheme.colorScheme.primary) }
                 )
+                searchMethods.forEach { method ->
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        headlineContent = { Text(stringResource(method.labelRes)) },
+                        leadingContent = {
+                            RadioButton(
+                                selected = manualSearchMethod == method.key,
+                                onClick = { viewModel.setManualSearchMethod(method.key) }
+                            )
+                        },
+                        modifier = Modifier.clickable { viewModel.setManualSearchMethod(method.key) }
+                    )
+                }
             }
         }
     }

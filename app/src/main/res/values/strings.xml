@@ -188,7 +188,7 @@
     <string name="memory_access_active">Access Active Memory</string>
     <string name="memory_access_active_desc">Include active memory content in every API call</string>
     <string name="memory_access_past">Access Past Conversations</string>
-    <string name="memory_access_past_desc">Allow the model to search conversation history (RAG)</string>
+    <string name="memory_access_past_desc">Allow the model to search conversation history</string>
     <string name="memory_active_title">ACTIVE MEMORY</string>
     <string name="memory_active_context">Active Memory Context</string>
     <string name="memory_active_empty">No active memory set. The model will remember this across all conversations.</string>
@@ -229,8 +229,13 @@
 
     <!-- Memory Access -->
     <string name="memory_access_title">ACCESS</string>
-    <string name="rag_search">Semantic Search (RAG)</string>
-    <string name="rag_search_desc">Use embeddings for semantic search instead of keyword matching</string>
+    <string name="search_methods_title">SEARCH METHODS</string>
+    <string name="model_search_method">Model Search Method</string>
+    <string name="model_search_method_desc">How the model searches past conversations via tool calls</string>
+    <string name="manual_search_method">Manual Search Method</string>
+    <string name="manual_search_method_desc">How the search bar in the drawer finds results</string>
+    <string name="search_method_keyword">Keyword</string>
+    <string name="search_method_rag">Semantic (RAG)</string>
 
     <!-- Errors -->
     <string name="search_found_matches">Found %1$d matches for \'%2$s\'.</string>
