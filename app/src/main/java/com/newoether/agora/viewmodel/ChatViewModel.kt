@@ -183,6 +183,7 @@ class ChatViewModel(
     val webSearchProvider = settingsManager.webSearchProvider.stateIn(viewModelScope, SharingStarted.Eagerly, "brave")
     val webSearchApiKey = settingsManager.webSearchApiKey.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val webSearchBaseUrl = settingsManager.webSearchBaseUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val ragThreshold = settingsManager.ragThreshold.stateIn(viewModelScope, SharingStarted.Eagerly, 0.5f)
 
         val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
             .map { entities ->
@@ -548,32 +549,67 @@ class ChatViewModel(
         }
     }
 
-    suspend fun semanticSearch(query: String, limit: Int = 20): List<MessageEntity> {
-        val activeModel = activeEmbeddingModel.value ?: return emptyList()
-        val queryEmbedding = resolveEmbedding(query) ?: return emptyList()
+    suspend fun semanticSearch(query: String, limit: Int = 20): List<Pair<MessageEntity, Float>> {
+        val activeModel = activeEmbeddingModel.value
+        if (activeModel == null) {
+            Log.w("AgoraVM", "RAG search: no active embedding model")
+            return emptyList()
+        }
+        Log.d("AgoraVM", "RAG search: using model '${activeModel.name}' (${activeModel.type})")
+        val queryEmbedding = resolveEmbedding(query)
+        if (queryEmbedding == null) {
+            Log.w("AgoraVM", "RAG search: failed to compute query embedding")
+            return emptyList()
+        }
+        Log.d("AgoraVM", "RAG search: query embedding dim=${queryEmbedding.size}")
 
         val all = chatDao.getEmbeddingsByModel(activeModel.id)
+        Log.d("AgoraVM", "RAG search: found ${all.size} stored embeddings for model ${activeModel.id}")
         if (all.isEmpty()) return emptyList()
 
         val scored = all.map {
             val stored = EmbeddingIndexer.bytesToFloats(it.embedding)
             it to EmbeddingIndexer.cosineSimilarity(queryEmbedding, stored)
-        }.filter { it.second > 0.3f }
+        }
+        val bestScore = scored.maxOfOrNull { it.second } ?: 0f
+        Log.d("AgoraVM", "RAG search: best cosine similarity = ${"%.4f".format(bestScore)}")
+        val threshold = ragThreshold.value
+        val filtered = scored.filter { it.second > threshold }
          .sortedByDescending { it.second }
          .take(limit)
 
-        if (scored.isEmpty()) return emptyList()
-        return chatDao.getMessagesByIds(scored.map { it.first.messageId })
+        if (filtered.isEmpty()) {
+            Log.w("AgoraVM", "RAG search: no results above threshold (best=$bestScore)")
+            return emptyList()
+        }
+        Log.d("AgoraVM", "RAG search: returning ${filtered.size} results")
+        val ids = filtered.map { it.first.messageId }
+        val messages = chatDao.getMessagesByIds(ids)
+        val scoreMap = filtered.associate { it.first.messageId to it.second }
+        return messages.map { it to (scoreMap[it.id] ?: 0f) }
     }
 
     private suspend fun resolveEmbedding(text: String): FloatArray? {
-        val model = activeEmbeddingModel.value ?: return null
+        val model = activeEmbeddingModel.value
+        if (model == null) {
+            Log.w("AgoraVM", "resolveEmbedding: no active model")
+            return null
+        }
         return if (model.type == EmbeddingModelType.LOCAL) {
-            if (!LlamaEngine.isModelReady(model.localFilePath)) return null
+            if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                Log.w("AgoraVM", "resolveEmbedding: local model not ready at ${model.localFilePath}")
+                return null
+            }
+            Log.d("AgoraVM", "resolveEmbedding: using local model ${model.name}")
             LlamaEngine.computeEmbedding(text, model.localFilePath)
         } else {
-            val apiKey = resolveEmbeddingApiKey() ?: return null
+            val apiKey = resolveEmbeddingApiKey()
+            if (apiKey == null) {
+                Log.w("AgoraVM", "resolveEmbedding: no API key available")
+                return null
+            }
             val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
+            Log.d("AgoraVM", "resolveEmbedding: calling ${model.remoteModelName} @ $baseUrl")
             EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
         }
     }
@@ -594,12 +630,24 @@ class ChatViewModel(
 
     fun indexMessageForRag(messageId: String, text: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val model = activeEmbeddingModel.value ?: return@launch
+            val model = activeEmbeddingModel.value
+            if (model == null) {
+                Log.d("AgoraVM", "RAG index: no active model, skipping $messageId")
+                return@launch
+            }
+            Log.d("AgoraVM", "RAG index: indexing $messageId with model '${model.name}'")
             val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
-                if (!LlamaEngine.isModelReady(model.localFilePath)) return@launch
+                if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                    Log.w("AgoraVM", "RAG index: local model not ready, skipping")
+                    return@launch
+                }
                 LlamaEngine.computeEmbedding(text, model.localFilePath)
             } else {
-                val apiKey = resolveEmbeddingApiKey() ?: return@launch
+                val apiKey = resolveEmbeddingApiKey()
+                if (apiKey == null) {
+                    Log.w("AgoraVM", "RAG index: no API key, skipping")
+                    return@launch
+                }
                 val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
                 EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
             }
@@ -611,6 +659,7 @@ class ChatViewModel(
                     chunkText = text.take(500),
                     dimension = embedding.size
                 ))
+                Log.d("AgoraVM", "RAG index: stored embedding (dim=${embedding.size}) for $messageId")
             }
         }
     }
@@ -620,6 +669,7 @@ class ChatViewModel(
     fun setWebSearchProvider(provider: String) { viewModelScope.launch { settingsManager.saveWebSearchProvider(provider) } }
     fun setWebSearchApiKey(apiKey: String) { viewModelScope.launch { settingsManager.saveWebSearchApiKey(apiKey) } }
     fun setWebSearchBaseUrl(url: String) { viewModelScope.launch { settingsManager.saveWebSearchBaseUrl(url) } }
+    fun setRagThreshold(threshold: Float) { viewModelScope.launch { settingsManager.saveRagThreshold(threshold) } }
 
     fun createNewChat() {
         switchingJob?.cancel()
@@ -857,6 +907,7 @@ class ChatViewModel(
             generationManager.modelSearchMethod = modelSearchMethod.value
             generationManager.activeEmbeddingConfig = activeEmbeddingModel.value
             generationManager.embeddingApiKey = resolveEmbeddingApiKey() ?: ""
+            generationManager.ragThreshold = ragThreshold.value
             generationManager.accessPastConversations = accessPastConversations.value
             generationManager.webSearchEnabled = webSearchEnabled.value
             generationManager.webSearchApiKey = webSearchApiKey.value
@@ -945,6 +996,7 @@ class ChatViewModel(
             generationManager.modelSearchMethod = modelSearchMethod.value
             generationManager.activeEmbeddingConfig = activeEmbeddingModel.value
             generationManager.embeddingApiKey = resolveEmbeddingApiKey() ?: ""
+            generationManager.ragThreshold = ragThreshold.value
             generationManager.accessPastConversations = accessPastConversations.value
             generationManager.webSearchEnabled = webSearchEnabled.value
             generationManager.webSearchApiKey = webSearchApiKey.value
@@ -1085,6 +1137,7 @@ class ChatViewModel(
             generationManager.modelSearchMethod = modelSearchMethod.value
             generationManager.activeEmbeddingConfig = activeEmbeddingModel.value
             generationManager.embeddingApiKey = resolveEmbeddingApiKey() ?: ""
+            generationManager.ragThreshold = ragThreshold.value
             generationManager.accessPastConversations = accessPastConversations.value
             generationManager.webSearchEnabled = webSearchEnabled.value
             generationManager.webSearchApiKey = webSearchApiKey.value

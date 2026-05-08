@@ -843,7 +843,7 @@ fun ChatApp(
 
                     // Search bar
                     var searchQuery by remember { mutableStateOf("") }
-                    var searchResults by remember { mutableStateOf<List<com.newoether.agora.data.local.MessageEntity>>(emptyList()) }
+                    var searchResults by remember { mutableStateOf<List<Pair<com.newoether.agora.data.local.MessageEntity, Float>>>(emptyList()) }
                     var isSearchActive by remember { mutableStateOf(false) }
 
                     val manualSearchMethod by viewModel.manualSearchMethod.collectAsState()
@@ -858,7 +858,7 @@ fun ChatApp(
                                 searchResults = if (manualSearchMethod == "rag")
                                     viewModel.semanticSearch(searchQuery)
                                 else
-                                    viewModel.searchMessages(searchQuery)
+                                    viewModel.searchMessages(searchQuery).map { it to 0f }
                                 isSearchActive = true
                             }
                         }
@@ -913,12 +913,14 @@ fun ChatApp(
 
                     LazyColumn(modifier = Modifier.weight(1f)) {
                         if (isSearchActive) {
-                            val grouped = searchResults.groupBy { it.conversationId }
+                            val grouped = searchResults.groupBy { it.first.conversationId }
                             val titleMap = conversations.associate { it.id to it.title }
-                            items(grouped.entries.toList()) { (convId, messages) ->
+                            items(grouped.entries.toList()) { (convId, entries) ->
+                                val bestScore = entries.maxOfOrNull { it.second } ?: 0f
                                 SearchResultItem(
                                     title = titleMap[convId] ?: stringResource(R.string.unknown),
-                                    messages = messages,
+                                    messages = entries.map { it.first },
+                                    score = bestScore,
                                     query = searchQuery,
                                     onClick = {
                                         viewModel.selectConversation(convId)
@@ -1408,6 +1410,7 @@ fun ChatApp(
 private fun SearchResultItem(
     title: String,
     messages: List<com.newoether.agora.data.local.MessageEntity>,
+    score: Float = 0f,
     query: String,
     onClick: () -> Unit
 ) {
@@ -1453,12 +1456,23 @@ private fun SearchResultItem(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            Text(
-                text = highlight(title),
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text(
+                    text = highlight(title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                if (score > 0f) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "${(score * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
             messages.take(2).forEach { msg ->
                 val role = if (msg.participant == com.newoether.agora.model.Participant.USER)
                     stringResource(com.newoether.agora.R.string.search_role_user)

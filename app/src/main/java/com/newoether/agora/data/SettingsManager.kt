@@ -67,6 +67,7 @@ class SettingsManager(private val context: Context) {
         val WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
         val WEB_SEARCH_API_KEY = stringPreferencesKey("web_search_api_key")
         val WEB_SEARCH_BASE_URL = stringPreferencesKey("web_search_base_url")
+        val RAG_THRESHOLD = stringPreferencesKey("rag_threshold")
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
@@ -131,6 +132,7 @@ class SettingsManager(private val context: Context) {
     val webSearchProvider: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_PROVIDER] ?: "brave" }
     val webSearchApiKey: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_API_KEY] ?: "" }
     val webSearchBaseUrl: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_BASE_URL] ?: "" }
+    val ragThreshold: Flow<Float> = context.dataStore.data.map { it[RAG_THRESHOLD]?.toFloatOrNull() ?: 0.5f }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
         context.dataStore.edit { prefs ->
@@ -260,6 +262,9 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveWebSearchBaseUrl(url: String) {
         context.dataStore.edit { it[WEB_SEARCH_BASE_URL] = url }
+    }
+    suspend fun saveRagThreshold(threshold: Float) {
+        context.dataStore.edit { it[RAG_THRESHOLD] = threshold.toString() }
     }
 
     suspend fun saveTitleGenerationModel(model: String?) {

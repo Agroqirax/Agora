@@ -50,6 +50,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val embeddingModels by viewModel.embeddingModels.collectAsState()
     val activeEmbeddingModelId by viewModel.activeEmbeddingModelId.collectAsState()
     val cachingProgress by viewModel.cachingProgress.collectAsState()
+    val ragThreshold by viewModel.ragThreshold.collectAsState()
     var showRemoteDialog by remember { mutableStateOf(false) }
     var showLocalDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<String?>(null) }
@@ -238,6 +239,47 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         localFilePath = ""
                         showLocalDialog = true
                     }) { Text(stringResource(R.string.add_local_model)) }
+                }
+            }
+
+            SettingsGroup(title = stringResource(R.string.advanced_title)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp, bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.Top
+                    ) {
+                        Icon(
+                            Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.rag_threshold_label),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "≥ ${"%.2f".format(ragThreshold)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                            Slider(
+                                value = ragThreshold,
+                                onValueChange = { viewModel.setRagThreshold(it) },
+                                valueRange = 0f..1f,
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    }
                 }
             }
         }

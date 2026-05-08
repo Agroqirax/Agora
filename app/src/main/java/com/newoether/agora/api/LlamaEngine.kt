@@ -21,15 +21,23 @@ object LlamaEngine {
     }
 
     fun computeEmbedding(text: String, modelPath: String): FloatArray? {
+        val start = System.currentTimeMillis()
         val handle = nativeLoadModel(modelPath)
         if (handle == 0L) {
-            Log.e(TAG, "Failed to load model: $modelPath")
+            Log.e(TAG, "Failed to load model (${System.currentTimeMillis() - start}ms): $modelPath")
             return null
         }
+        Log.d(TAG, "Model loaded in ${System.currentTimeMillis() - start}ms, dim=${nativeGetEmbeddingDim(handle)}")
         return try {
-            nativeComputeEmbedding(handle, text)
+            val embd = nativeComputeEmbedding(handle, text)
+            if (embd == null) {
+                Log.e(TAG, "nativeComputeEmbedding returned null for text len=${text.length}")
+            } else {
+                Log.d(TAG, "Embedding computed: dim=${embd.size}, elapsed=${System.currentTimeMillis() - start}ms")
+            }
+            embd
         } catch (e: Exception) {
-            Log.e(TAG, "Embedding computation failed", e)
+            Log.e(TAG, "Embedding computation crashed", e)
             null
         } finally {
             nativeFreeModel(handle)

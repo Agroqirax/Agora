@@ -221,6 +221,8 @@
     <string name="embedding_type_local">本地</string>
     <string name="cached">已缓存</string>
     <string name="not_cached">未缓存</string>
+    <string name="advanced_title">高级</string>
+    <string name="rag_threshold_label">相似度阈值</string>
     <string name="caching">缓存中…</string>
     <string name="cache_action">缓存</string>
     <string name="recache_action">重新缓存</string>

@@ -13,6 +13,6 @@ add_subdirectory(${LLAMA_CPP_DIR} ${CMAKE_CURRENT_BINARY_DIR}/llama)
 
 # Build our JNI wrapper as a shared library
 add_library(agora_llama SHARED llama_jni.cpp)
-target_link_libraries(agora_llama llama)
+target_link_libraries(agora_llama llama log)
 
 target_include_directories(agora_llama PRIVATE ${LLAMA_CPP_DIR}/include)

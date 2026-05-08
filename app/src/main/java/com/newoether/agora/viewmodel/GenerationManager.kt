@@ -71,6 +71,7 @@ class GenerationManager(
     var modelSearchMethod: String = "keyword"
     var activeEmbeddingConfig: com.newoether.agora.data.EmbeddingModelConfig? = null
     var embeddingApiKey: String = ""
+    var ragThreshold: Float = 0.5f
     var webSearchEnabled: Boolean = false
     var webSearchApiKey: String = ""
     var webSearchProvider: String = "brave"
@@ -290,30 +291,49 @@ class GenerationManager(
     }
 
     private suspend fun semanticSearch(query: String, limit: Int): List<com.newoether.agora.data.local.MessageEntity> {
-        val config = activeEmbeddingConfig ?: return emptyList()
+        val config = activeEmbeddingConfig
+        if (config == null) {
+            Log.w("AgoraVM", "GM RAG: no active embedding config")
+            return emptyList()
+        }
         val queryEmbedding = if (config.type == com.newoether.agora.data.EmbeddingModelType.LOCAL) {
-            if (!LlamaEngine.isModelReady(config.localFilePath)) return emptyList()
+            if (!LlamaEngine.isModelReady(config.localFilePath)) {
+                Log.w("AgoraVM", "GM RAG: local model not ready")
+                return emptyList()
+            }
             LlamaEngine.computeEmbedding(query, config.localFilePath)
         } else {
-            val apiKey = resolveEmbeddingApiKey() ?: return emptyList()
+            val apiKey = resolveEmbeddingApiKey()
+            if (apiKey == null) {
+                Log.w("AgoraVM", "GM RAG: no API key")
+                return emptyList()
+            }
             EmbeddingClient.computeEmbedding(
                 text = query,
                 apiKey = apiKey,
                 model = config.remoteModelName,
                 baseUrl = config.remoteBaseUrl.ifBlank { "https://api.openai.com/v1" }
             )
-        } ?: return emptyList()
+        }
+        if (queryEmbedding == null) {
+            Log.w("AgoraVM", "GM RAG: failed to compute query embedding")
+            return emptyList()
+        }
 
         val all = chatDao.getEmbeddingsByModel(config.id)
+        Log.d("AgoraVM", "GM RAG: ${all.size} stored embeddings, query dim=${queryEmbedding.size}")
         if (all.isEmpty()) return emptyList()
 
-        return all.map {
+        val scored = all.map {
             val stored = EmbeddingIndexer.bytesToFloats(it.embedding)
             it to EmbeddingIndexer.cosineSimilarity(queryEmbedding, stored)
-        }.filter { it.second > 0.3f }
+        }
+        val best = scored.maxOfOrNull { it.second } ?: 0f
+        Log.d("AgoraVM", "GM RAG: best cosine = ${"%.4f".format(best)}")
+        return scored.filter { it.second > ragThreshold }
          .sortedByDescending { it.second }
          .take(limit)
-         .let { scored -> chatDao.getMessagesByIds(scored.map { it.first.messageId }) }
+         .let { s -> chatDao.getMessagesByIds(s.map { it.first.messageId }) }
     }
 
     private fun resolveEmbeddingApiKey(): String? {

@@ -2,7 +2,12 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <android/log.h>
 #include "llama.h"
+
+#define LOG_TAG "LlamaEngine"
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 struct LlamaHandle {
     llama_model * model   = nullptr;
@@ -45,6 +50,7 @@ Java_com_newoether_agora_api_LlamaEngine_nativeLoadModel(
 
     // Create context with mean pooling for embeddings
     llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.embeddings   = true;
     ctx_params.pooling_type = LLAMA_POOLING_TYPE_MEAN;
     ctx_params.n_ctx = 512;   // enough for embedding input
     ctx_params.n_batch = 512;
@@ -59,6 +65,8 @@ Java_com_newoether_agora_api_LlamaEngine_nativeLoadModel(
     }
 
     handle->is_encoder = llama_model_has_encoder(handle->model);
+    LOGD("Model loaded: n_embd=%d, is_encoder=%d, n_ctx_train=%d",
+         handle->n_embd, handle->is_encoder, llama_model_n_ctx_train(handle->model));
 
     return reinterpret_cast<jlong>(handle);
 }
@@ -104,8 +112,12 @@ Java_com_newoether_agora_api_LlamaEngine_nativeComputeEmbedding(
                                   input.size(), tokens.data(),
                                   -n_tokens, true, true);
     }
-    if (n_tokens <= 0) return nullptr;
+    if (n_tokens <= 0) {
+        LOGE("Tokenization returned 0 tokens for text len=%zu", input.size());
+        return nullptr;
+    }
     tokens.resize(n_tokens);
+    LOGD("Tokenized: %d tokens for text len=%zu", n_tokens, input.size());
 
     // Truncate to context size
     if (n_tokens > 512) {
@@ -133,11 +145,17 @@ Java_com_newoether_agora_api_LlamaEngine_nativeComputeEmbedding(
     }
     llama_batch_free(batch);
 
-    if (ret != 0) return nullptr;
+    if (ret != 0) {
+        LOGE("llama_encode/decode returned error code %d", ret);
+        return nullptr;
+    }
 
     // Get pooled embedding (mean pooling is done by llama.cpp when pooling_type is MEAN)
     const float * embd = llama_get_embeddings_seq(handle->ctx, 0);
-    if (!embd) return nullptr;
+    if (!embd) {
+        LOGE("llama_get_embeddings_seq returned null");
+        return nullptr;
+    }
 
     jfloatArray result = env->NewFloatArray(handle->n_embd);
     env->SetFloatArrayRegion(result, 0, handle->n_embd, embd);
