@@ -198,7 +198,7 @@ class ChatViewModel(
     private val _isSyncingModels = MutableStateFlow(false)
     val isSyncingModels: StateFlow<Boolean> = _isSyncingModels.asStateFlow()
 
-    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>()
+    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>(extraBufferCapacity = 1)
     val snackbarMessage = _snackbarMessage.asSharedFlow()
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
