@@ -1043,6 +1043,8 @@ class ChatViewModel(
                     modelName = currentActiveModel.value, toolCallJson = null
                 ))
             } else {
+                // New message ID — delete old embedding so it doesn't outlive the replaced message
+                chatDao.deleteEmbedding(messageId)
                 chatDao.upsertMessage(MessageEntity(
                     id = modelMessageId, conversationId = currentId, parentId = parentId,
                     text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
@@ -1124,6 +1126,8 @@ class ChatViewModel(
         generationJob = generationScope.launch {
             val messageToEdit = _allMessages.value.find { it.id == messageId } ?: return@launch
             val newUserMessageId = UUID.randomUUID().toString()
+            // Delete old user message's embedding — the replacement won't reuse that messageId
+            chatDao.deleteEmbedding(messageId)
             chatDao.upsertMessage(MessageEntity(
                 id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
                 text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
