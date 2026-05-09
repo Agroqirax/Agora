@@ -6,7 +6,8 @@ import java.util.UUID
 @Serializable
 data class LocalChatModelConfig(
     val id: String = UUID.randomUUID().toString(),
-    val name: String,
+    val modelId: String,
+    val alias: String,
     val localFilePath: String = "",
     val nCtx: Int = 2048,
     val temperature: Float = 0.7f,

@@ -323,4 +323,6 @@
     <string name="local_top_p">Top P</string>
     <string name="local_max_tokens">Max Tokens</string>
     <string name="local_chat_delete_text">Are you sure you want to delete \'%1$s\'? This will also delete the model file.</string>
+    <string name="model_id_label">ID</string>
+    <string name="model_alias_label">Alias</string>
 </resources>

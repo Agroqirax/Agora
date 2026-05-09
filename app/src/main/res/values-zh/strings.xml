@@ -333,4 +333,6 @@
     <string name="local_top_p">Top P</string>
     <string name="local_max_tokens">最大令牌数</string>
     <string name="local_chat_delete_text">确定要删除 \'%1$s\' 吗？这将同时删除模型文件。</string>
+    <string name="model_id_label">ID</string>
+    <string name="model_alias_label">别名</string>
 </resources>

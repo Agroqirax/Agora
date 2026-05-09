@@ -37,7 +37,7 @@ class LocalProvider(
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
         val chatModels = settingsManager.localChatModels.first()
-        val modelConfig = chatModels.find { it.id == config.modelId }
+        val modelConfig = chatModels.find { it.modelId == config.modelId }
         if (modelConfig == null) {
             emit(StreamEvent.Error("Local model not found: ${config.modelId}"))
             return@flow
@@ -45,7 +45,7 @@ class LocalProvider(
 
         val engine = ensureEngineLoaded(modelConfig)
         if (engine == null) {
-            emit(StreamEvent.Error("Failed to load model: ${modelConfig.name}"))
+            emit(StreamEvent.Error("Failed to load model: ${modelConfig.alias}"))
             return@flow
         }
 
@@ -184,7 +184,7 @@ class LocalProvider(
     }
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> {
-        return settingsManager.localChatModels.first().map { it.id }
+        return settingsManager.localChatModels.first().map { it.modelId }
     }
 
     fun close() {

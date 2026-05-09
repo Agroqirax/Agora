@@ -149,9 +149,9 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         var showMenu by remember { mutableStateOf(false) }
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                            headlineContent = { Text(model.name, fontWeight = FontWeight.Medium) },
+                            headlineContent = { Text(model.alias, fontWeight = FontWeight.Medium) },
                             supportingContent = {
-                                Text("ctx=${model.nCtx}  temp=${model.temperature}  topP=${model.topP}")
+                                Text("${model.modelId}  ctx=${model.nCtx}  temp=${model.temperature}  topP=${model.topP}")
                             },
                             leadingContent = {
                                 RadioButton(
@@ -204,16 +204,18 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                     // Add local model config dialog
                     if (showAddDialog && copiedFilePath != null) {
-                        var modelName by remember { mutableStateOf("") }
+                        var modelId by remember { mutableStateOf("") }
+                        var modelAlias by remember { mutableStateOf("") }
                         var nCtx by remember { mutableStateOf("2048") }
                         var temperature by remember { mutableStateOf("0.7") }
                         var topP by remember { mutableStateOf("0.9") }
                         var maxTokens by remember { mutableStateOf("4096") }
+                        var idError by remember { mutableStateOf<String?>(null) }
                         val fm = LocalFocusManager.current
+                        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
 
                         AlertDialog(
                             onDismissRequest = {
-                                // Clean up copied file on cancel
                                 scope.launch(Dispatchers.IO) {
                                     copiedFilePath?.let { java.io.File(it).delete() }
                                 }
@@ -229,9 +231,18 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         .verticalScroll(rememberScrollState())
                                 ) {
                                     OutlinedTextField(
-                                        value = modelName,
-                                        onValueChange = { modelName = it },
-                                        label = { Text(stringResource(R.string.model_name_label)) },
+                                        value = modelId,
+                                        onValueChange = { modelId = it; idError = null },
+                                        label = { Text(stringResource(R.string.model_id_label)) },
+                                        supportingText = if (idError != null) {{ Text(idError!!, color = MaterialTheme.colorScheme.error) }} else null,
+                                        isError = idError != null,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = modelAlias,
+                                        onValueChange = { modelAlias = it },
+                                        label = { Text(stringResource(R.string.model_alias_label)) },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -266,9 +277,23 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             },
                             confirmButton = {
                                 TextButton(onClick = {
+                                    val id = modelId.trim()
+                                    if (id.isBlank()) {
+                                        idError = "ID is required"
+                                        return@TextButton
+                                    }
+                                    if (!idRegex.matches(id)) {
+                                        idError = "Only lowercase a-z, 0-9, . _ - allowed"
+                                        return@TextButton
+                                    }
+                                    if (viewModel.isLocalModelIdTaken(id)) {
+                                        idError = "This ID is already in use"
+                                        return@TextButton
+                                    }
                                     val path = copiedFilePath ?: return@TextButton
                                     val config = com.newoether.agora.data.LocalChatModelConfig(
-                                        name = modelName.ifBlank { "Local Model" },
+                                        modelId = id,
+                                        alias = modelAlias.ifBlank { id },
                                         localFilePath = path,
                                         nCtx = nCtx.toIntOrNull() ?: 2048,
                                         temperature = temperature.toFloatOrNull() ?: 0.7f,
@@ -294,12 +319,15 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                     // Edit dialog
                     showEditDialog?.let { model ->
-                        var editName by remember { mutableStateOf(model.name) }
+                        var editModelId by remember { mutableStateOf(model.modelId) }
+                        var editAlias by remember { mutableStateOf(model.alias) }
                         var editNCtx by remember { mutableStateOf(model.nCtx.toString()) }
                         var editTemp by remember { mutableStateOf(model.temperature.toString()) }
                         var editTopP by remember { mutableStateOf(model.topP.toString()) }
                         var editMaxTokens by remember { mutableStateOf(model.maxTokens.toString()) }
+                        var editIdError by remember { mutableStateOf<String?>(null) }
                         val fm = LocalFocusManager.current
+                        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
                         AlertDialog(
                             onDismissRequest = { showEditDialog = null },
                             title = { Text(stringResource(R.string.edit)) },
@@ -311,9 +339,18 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         .verticalScroll(rememberScrollState())
                                 ) {
                                     OutlinedTextField(
-                                        value = editName,
-                                        onValueChange = { editName = it },
-                                        label = { Text(stringResource(R.string.model_name_label)) },
+                                        value = editModelId,
+                                        onValueChange = { editModelId = it; editIdError = null },
+                                        label = { Text(stringResource(R.string.model_id_label)) },
+                                        supportingText = if (editIdError != null) {{ Text(editIdError!!, color = MaterialTheme.colorScheme.error) }} else null,
+                                        isError = editIdError != null,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    OutlinedTextField(
+                                        value = editAlias,
+                                        onValueChange = { editAlias = it },
+                                        label = { Text(stringResource(R.string.model_alias_label)) },
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     Spacer(modifier = Modifier.height(8.dp))
@@ -348,16 +385,27 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             },
                             confirmButton = {
                                 TextButton(onClick = {
-                                    if (editName.isNotBlank()) {
-                                        viewModel.updateLocalChatModel(
-                                            model.id, editName,
-                                            editNCtx.toIntOrNull() ?: model.nCtx,
-                                            editTemp.toFloatOrNull() ?: model.temperature,
-                                            editTopP.toFloatOrNull() ?: model.topP,
-                                            editMaxTokens.toIntOrNull() ?: model.maxTokens
-                                        )
-                                        showEditDialog = null
+                                    val id = editModelId.trim()
+                                    if (id.isBlank()) {
+                                        editIdError = "ID is required"
+                                        return@TextButton
                                     }
+                                    if (!idRegex.matches(id)) {
+                                        editIdError = "Only lowercase a-z, 0-9, . _ - allowed"
+                                        return@TextButton
+                                    }
+                                    if (viewModel.isLocalModelIdTaken(id, excludeId = model.id)) {
+                                        editIdError = "This ID is already in use"
+                                        return@TextButton
+                                    }
+                                    viewModel.updateLocalChatModel(
+                                        model.id, id, editAlias.ifBlank { id },
+                                        editNCtx.toIntOrNull() ?: model.nCtx,
+                                        editTemp.toFloatOrNull() ?: model.temperature,
+                                        editTopP.toFloatOrNull() ?: model.topP,
+                                        editMaxTokens.toIntOrNull() ?: model.maxTokens
+                                    )
+                                    showEditDialog = null
                                 }) { Text(stringResource(R.string.save)) }
                             },
                             dismissButton = { TextButton(onClick = { showEditDialog = null }) { Text(stringResource(R.string.cancel)) } }
@@ -369,7 +417,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         AlertDialog(
                             onDismissRequest = { showDeleteConfirm = null },
                             title = { Text(stringResource(R.string.delete_chat)) },
-                            text = { Text(stringResource(R.string.local_chat_delete_text, model.name)) },
+                            text = { Text(stringResource(R.string.local_chat_delete_text, model.alias)) },
                             confirmButton = {
                                 TextButton(
                                     onClick = {
