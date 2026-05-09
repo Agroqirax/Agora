@@ -59,6 +59,19 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
+            val changeLanguage: (String) -> Unit = { code ->
+                if (code != appLanguage) {
+                    viewModel.setAppLanguage(code)
+                    viewModel.emitSnackbar(message = restartMessage, actionLabel = restartAction) {
+                        activity?.let {
+                            it.finish()
+                            it.startActivity(it.intent)
+                            it.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                        }
+                    }
+                }
+            }
+
             SettingsGroup(title = stringResource(R.string.language_title)) {
                 languages.forEach { lang ->
                     ListItem(
@@ -67,39 +80,10 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         leadingContent = {
                             RadioButton(
                                 selected = appLanguage == lang.code,
-                                onClick = {
-                                    if (lang.code != appLanguage) {
-                                        viewModel.setAppLanguage(lang.code)
-                                        viewModel.emitSnackbar(
-                                            message = restartMessage,
-                                            actionLabel = restartAction
-                                        ) {
-                                            activity?.let {
-                                                it.finish()
-                                                it.startActivity(it.intent)
-                                                it.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                                            }
-                                        }
-                                    }
-                                }
+                                onClick = { changeLanguage(lang.code) }
                             )
                         },
-                        modifier = Modifier.clickable {
-                            val previous = appLanguage
-                            viewModel.setAppLanguage(lang.code)
-                            if (lang.code != previous) {
-                                viewModel.emitSnackbar(
-                                    message = restartMessage,
-                                    actionLabel = restartAction
-                                ) {
-                                    activity?.let {
-                                        it.finish()
-                                        it.startActivity(it.intent)
-                                        it.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
-                                    }
-                                }
-                            }
-                        }
+                        modifier = Modifier.clickable { changeLanguage(lang.code) }
                     )
                     if (lang != languages.last()) {
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
