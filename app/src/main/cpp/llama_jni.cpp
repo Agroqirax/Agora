@@ -100,6 +100,9 @@ Java_com_newoether_agora_api_LlamaEngine_nativeComputeEmbedding(
 
     if (input.empty()) return nullptr;
 
+    // Clear KV cache for repeated calls on the same context (batch embedding)
+    llama_memory_clear(llama_get_memory(handle->ctx), true);
+
     // Tokenize
     const int32_t n_tokens_max = input.length() + 32;
     std::vector<llama_token> tokens(n_tokens_max);
