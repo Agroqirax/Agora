@@ -68,7 +68,19 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             RadioButton(
                                 selected = appLanguage == lang.code,
                                 onClick = {
-                                    viewModel.setAppLanguage(lang.code)
+                                    if (lang.code != appLanguage) {
+                                        viewModel.setAppLanguage(lang.code)
+                                        viewModel.emitSnackbar(
+                                            message = restartMessage,
+                                            actionLabel = restartAction
+                                        ) {
+                                            activity?.let {
+                                                it.finish()
+                                                it.startActivity(it.intent)
+                                                it.overridePendingTransition(android.R.anim.fade_in, android.R.anim.fade_out)
+                                            }
+                                        }
+                                    }
                                 }
                             )
                         },
