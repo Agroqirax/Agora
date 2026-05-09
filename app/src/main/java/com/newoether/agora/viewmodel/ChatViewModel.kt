@@ -529,15 +529,18 @@ class ChatViewModel(
     }
     fun deleteEmbeddingModel(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val model = embeddingModels.value.find { it.id == id }
-            if (model?.type == EmbeddingModelType.LOCAL && model.localFilePath.isNotBlank()) {
-                java.io.File(model.localFilePath).delete()
-            }
-            chatDao.deleteEmbeddingsByModel(id)
-            val models = embeddingModels.value.filter { it.id != id }
-            settingsManager.saveEmbeddingModels(models)
-            if (activeEmbeddingModelId.value == id && models.isNotEmpty()) {
-                settingsManager.setActiveEmbeddingModelId(models.first().id)
+            val mutex = cacheMutexes.computeIfAbsent(id) { Mutex() }
+            mutex.withLock {
+                val model = embeddingModels.value.find { it.id == id }
+                if (model?.type == EmbeddingModelType.LOCAL && model.localFilePath.isNotBlank()) {
+                    java.io.File(model.localFilePath).delete()
+                }
+                chatDao.deleteEmbeddingsByModel(id)
+                val models = embeddingModels.value.filter { it.id != id }
+                settingsManager.saveEmbeddingModels(models)
+                if (activeEmbeddingModelId.value == id && models.isNotEmpty()) {
+                    settingsManager.setActiveEmbeddingModelId(models.first().id)
+                }
             }
         }
     }
@@ -639,6 +642,7 @@ class ChatViewModel(
                         "Retry"
                     ) { cacheMessagesForModel(modelId) })
                 }
+                chatDao.deleteOrphanedEmbeddings()
                 refreshCacheCounts()
             }
         }
