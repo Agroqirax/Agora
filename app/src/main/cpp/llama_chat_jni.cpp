@@ -138,34 +138,29 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatApplyTemplate(
     int32_t buf_size = std::max(4096, total_chars * 2);
 
     std::vector<char> buf(buf_size);
-    // Try nullptr first (auto-detect from model), then "chatml" as fallback.
-    // Never pass the raw Jinja from llama_model_chat_template — it only
-    // supports built-in template names, not arbitrary Jinja strings.
-    int32_t result = -1;
-    const char * templates[] = { nullptr, "chatml" };
-    for (const char * tpl : templates) {
+    // nullptr = use model's built-in template. If the model has none,
+    // return null so Kotlin can use its own fallback.
+    int32_t result = llama_chat_apply_template(
+        nullptr,
+        chat_msgs.data(), chat_msgs.size(),
+        add_ass,
+        buf.data(), buf_size
+    );
+
+    if (result > buf_size) {
+        buf.resize(result);
         result = llama_chat_apply_template(
-            tpl,
+            nullptr,
             chat_msgs.data(), chat_msgs.size(),
             add_ass,
-            buf.data(), buf_size
+            buf.data(), result
         );
-        if (result >= 0 && result <= buf_size) break;
-        if (result > buf_size) {
-            buf.resize(result);
-            result = llama_chat_apply_template(
-                tpl,
-                chat_msgs.data(), chat_msgs.size(),
-                add_ass,
-                buf.data(), result
-            );
-            if (result >= 0) break;
-        }
-        LOGE("llama_chat_apply_template(tpl=%s) failed with %d",
-             tpl ? tpl : "null", result);
     }
 
-    if (result < 0) return nullptr;
+    if (result < 0) {
+        LOGE("llama_chat_apply_template failed with %d", result);
+        return nullptr;
+    }
 
     return env->NewStringUTF(buf.data());
 }
