@@ -40,6 +40,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.NonCancellable
 import kotlinx.serialization.encodeToString
@@ -61,7 +63,7 @@ class ChatViewModel(
             val models = settingsManager.embeddingModels.first()
             val activeId = settingsManager.activeEmbeddingModelId.first()
             val active = models.find { it.id == activeId }
-            if (active != null && !active.cached) {
+            if (active != null && !active.cached && !_cachingProgress.value.containsKey(active.id)) {
                 _snackbarMessage.emit(SnackbarEvent(
                     "Embedding model \"${active.name}\" is not cached.",
                     "Cache Now"
@@ -200,6 +202,7 @@ class ChatViewModel(
 
     private val _cachingProgress = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cachingProgress: StateFlow<Map<String, Pair<Int, Int>>> = _cachingProgress.asStateFlow()
+    private val cacheMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
     private val _cacheCounts = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cacheCounts: StateFlow<Map<String, Pair<Int, Int>>> = _cacheCounts.asStateFlow()
     fun loadCacheCounts() {
@@ -547,83 +550,90 @@ class ChatViewModel(
             settingsManager.setActiveEmbeddingModelId(id)
             val model = embeddingModels.value.find { it.id == id }
             if (model != null && !model.cached) {
-                emitSnackbar("Embedding model \"${model.name}\" is not cached.", "Cache Now") {
-                    cacheMessagesForModel(model.id)
+                if (cachingProgress.value.containsKey(id)) {
+                    emitSnackbar("Embedding model \"${model.name}\" is caching...")
+                } else {
+                    emitSnackbar("Embedding model \"${model.name}\" is not cached.", "Cache Now") {
+                        cacheMessagesForModel(model.id)
+                    }
                 }
             }
         }
     }
     fun cacheMessagesForModel(modelId: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val model = embeddingModels.value.find { it.id == modelId } ?: return@launch
-            if (model.cached) {
-                settingsManager.saveEmbeddingModels(embeddingModels.value.map { if (it.id == modelId) it.copy(cached = false) else it })
-                chatDao.deleteEmbeddingsByModel(modelId)
-            }
-            val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
-            val existingIds = if (!model.cached) chatDao.getEmbeddedMessageIdsByModel(modelId).toSet() else emptySet()
-            val toProcess = if (!model.cached) allMessages.filter { it.id !in existingIds } else allMessages
-            val alreadyDone = allMessages.size - toProcess.size
-            val total = allMessages.size
-            if (total == 0) {
-                _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
-                refreshCacheCounts()
-                return@launch
-            }
-            if (toProcess.isEmpty()) {
-                settingsManager.markModelCached(modelId)
-                _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
-                refreshCacheCounts()
-                return@launch
-            }
-            var processed = alreadyDone
-            var succeeded = 0
-            _cachingProgress.value = _cachingProgress.value + (modelId to (alreadyDone to total))
-            for (msg in toProcess) {
-                if (embeddingModels.value.none { it.id == modelId }) {
-                    _cachingProgress.value = _cachingProgress.value - modelId
+            val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
+            mutex.withLock {
+                val model = embeddingModels.value.find { it.id == modelId } ?: return@launch
+                val recache = model.cached
+                if (recache) {
+                    settingsManager.saveEmbeddingModels(embeddingModels.value.map { if (it.id == modelId) it.copy(cached = false) else it })
+                    chatDao.deleteEmbeddingsByModel(modelId)
+                }
+                val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
+                val existingIds = if (!recache) chatDao.getEmbeddedMessageIdsByModel(modelId).toSet() else emptySet()
+                val toProcess = if (!recache) allMessages.filter { it.id !in existingIds } else allMessages
+                val alreadyDone = allMessages.size - toProcess.size
+                val total = allMessages.size
+                if (total == 0) {
+                    _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
+                    refreshCacheCounts()
                     return@launch
                 }
-                val text = msg.text.take(8000)
-                val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
-                    if (LlamaEngine.isModelReady(model.localFilePath))
-                        LlamaEngine.computeEmbedding(text, model.localFilePath)
-                    else null
-                } else {
-                    val apiKey = resolveEmbeddingApiKey()
-                    if (apiKey == null) {
-                        _cachingProgress.value = _cachingProgress.value - modelId
-                        _snackbarMessage.emit(SnackbarEvent("No API key configured."))
-                        return@launch
+                if (toProcess.isEmpty()) {
+                    settingsManager.markModelCached(modelId)
+                    _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
+                    refreshCacheCounts()
+                    return@launch
+                }
+                var processed = alreadyDone
+                var succeeded = 0
+                _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
+                try {
+                    for (msg in toProcess) {
+                        if (embeddingModels.value.none { it.id == modelId }) return@launch
+                        val text = msg.text.take(8000)
+                        val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
+                            if (LlamaEngine.isModelReady(model.localFilePath))
+                                LlamaEngine.computeEmbedding(text, model.localFilePath)
+                            else null
+                        } else {
+                            val apiKey = resolveEmbeddingApiKey()
+                            if (apiKey == null) {
+                                _snackbarMessage.emit(SnackbarEvent("No API key configured."))
+                                return@launch
+                            }
+                            val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
+                            EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
+                        }
+                        if (embedding != null) {
+                            chatDao.upsertEmbedding(EmbeddingEntity(
+                                messageId = msg.id,
+                                modelId = modelId,
+                                embedding = EmbeddingIndexer.floatsToBytes(embedding),
+                                chunkText = text.take(500),
+                                dimension = embedding.size
+                            ))
+                            succeeded++
+                        }
+                        processed++
+                        _cachingProgress.update { it + (modelId to (processed to total)) }
                     }
-                    val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                    EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
+                } finally {
+                    _cachingProgress.update { it - modelId }
                 }
-                if (embedding != null) {
-                    chatDao.upsertEmbedding(EmbeddingEntity(
-                        messageId = msg.id,
-                        modelId = modelId,
-                        embedding = EmbeddingIndexer.floatsToBytes(embedding),
-                        chunkText = text.take(500),
-                        dimension = embedding.size
-                    ))
-                    succeeded++
+                val failed = toProcess.size - succeeded
+                if (failed == 0) {
+                    settingsManager.markModelCached(modelId)
+                    _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
+                } else {
+                    _snackbarMessage.emit(SnackbarEvent(
+                        "Cached $succeeded of ${toProcess.size}. ${failed} failed.",
+                        "Retry"
+                    ) { cacheMessagesForModel(modelId) })
                 }
-                processed++
-                _cachingProgress.value = _cachingProgress.value + (modelId to (processed to total))
+                refreshCacheCounts()
             }
-            val failed = toProcess.size - succeeded
-            if (failed == 0) {
-                settingsManager.markModelCached(modelId)
-                _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
-            } else {
-                _snackbarMessage.emit(SnackbarEvent(
-                    "Cached $succeeded of ${toProcess.size}. ${failed} failed.",
-                    "Retry"
-                ) { cacheMessagesForModel(modelId) })
-            }
-            _cachingProgress.value = _cachingProgress.value - modelId
-            refreshCacheCounts()
         }
     }
 
