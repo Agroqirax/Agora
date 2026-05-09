@@ -148,7 +148,7 @@ interface ChatDao {
     @Query("SELECT messageId FROM embeddings WHERE modelId = :modelId")
     suspend fun getEmbeddedMessageIdsByModel(modelId: String): List<String>
 
-    @Query("SELECT * FROM messages WHERE participant IN ('USER', 'MODEL') AND id NOT LIKE 'tool_%' AND id NOT LIKE 'result_%'")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.participant IN ('USER', 'MODEL') AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getAllMessagesForIndexing(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
