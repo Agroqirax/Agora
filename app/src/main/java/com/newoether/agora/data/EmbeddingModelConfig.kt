@@ -10,7 +10,6 @@ data class EmbeddingModelConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String,
     val type: EmbeddingModelType,
-    val cached: Boolean = false,
     val remoteModelName: String = "",
     val remoteBaseUrl: String = "",
     val localFilePath: String = ""

@@ -169,6 +169,8 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val isActive = model.id == activeEmbeddingModelId
                         val progress = cachingProgress[model.id]
                         val isCaching = progress != null
+                        val counts = cacheCounts[model.id]
+                        val allCached = counts != null && counts.second > 0 && counts.first >= counts.second
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             headlineContent = { Text(model.name) },
@@ -178,14 +180,12 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 else stringResource(R.string.embedding_type_local)
                                 val cacheLabel = if (isCaching) {
                                     "${progress!!.second - progress!!.first} ${stringResource(R.string.not_cached)} (${progress!!.first}/${progress!!.second})"
+                                } else if (counts != null && counts.second > 0) {
+                                    val notCached = (counts.second - counts.first).coerceAtLeast(0)
+                                    if (notCached == 0) stringResource(R.string.cached)
+                                    else "${notCached} ${stringResource(R.string.not_cached)} (${counts.first}/${counts.second})"
                                 } else {
-                                    val counts = cacheCounts[model.id]
-                                    if (counts != null && counts.second > 0) {
-                                        val notCached = (counts.second - counts.first).coerceAtLeast(0)
-                                        if (notCached == 0) stringResource(R.string.cached)
-                                        else "${notCached} ${stringResource(R.string.not_cached)} (${counts.first}/${counts.second})"
-                                    } else if (model.cached) stringResource(R.string.cached)
-                                    else stringResource(R.string.not_cached)
+                                    stringResource(R.string.not_cached)
                                 }
                                 Text("$typeLabel · $cacheLabel")
                             },
@@ -199,12 +199,12 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     if (!isCaching) {
                                         TextButton(onClick = {
-                                            if (model.cached) {
+                                            if (allCached) {
                                                 showRecacheConfirm = model.id
                                             } else {
                                                 viewModel.cacheMessagesForModel(model.id)
                                             }
-                                        }) { Text(if (model.cached) stringResource(R.string.recache_action) else stringResource(R.string.cache_action)) }
+                                        }) { Text(if (allCached) stringResource(R.string.recache_action) else stringResource(R.string.cache_action)) }
                                     }
                                     if (isCaching) {
                                         val ratio = progress!!.first.toFloat() / progress.second.toFloat()
@@ -480,7 +480,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 text = { Text(stringResource(R.string.recache_confirm_message)) },
                 confirmButton = {
                     TextButton(onClick = {
-                        viewModel.cacheMessagesForModel(modelId)
+                        viewModel.cacheMessagesForModel(modelId, recache = true)
                         showRecacheConfirm = null
                     }) { Text(stringResource(R.string.recache_action)) }
                 },

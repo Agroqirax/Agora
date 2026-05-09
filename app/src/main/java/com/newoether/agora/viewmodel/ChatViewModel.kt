@@ -570,32 +570,29 @@ class ChatViewModel(
             }
         }
     }
-    fun cacheMessagesForModel(modelId: String) {
+    fun cacheMessagesForModel(modelId: String, recache: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
             mutex.withLock {
                 val model = embeddingModels.value.find { it.id == modelId } ?: return@launch
-                val recache = model.cached
                 if (recache) {
-                    settingsManager.saveEmbeddingModels(embeddingModels.value.map { if (it.id == modelId) it.copy(cached = false) else it })
                     chatDao.deleteEmbeddingsByModel(modelId)
                 }
                 val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
-                val existingIds = if (!recache) chatDao.getEmbeddedMessageIdsByModel(modelId).toSet() else emptySet()
-                val toProcess = if (!recache) allMessages.filter { it.id !in existingIds } else allMessages
-                val alreadyDone = allMessages.size - toProcess.size
                 val total = allMessages.size
                 if (total == 0) {
                     _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
                     refreshCacheCounts()
                     return@launch
                 }
+                val existingIds = chatDao.getEmbeddedMessageIdsByModel(modelId).toSet()
+                val toProcess = allMessages.filter { it.id !in existingIds }
                 if (toProcess.isEmpty()) {
-                    settingsManager.markModelCached(modelId)
                     _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
                     refreshCacheCounts()
                     return@launch
                 }
+                val alreadyDone = total - toProcess.size
                 var processed = alreadyDone
                 var succeeded = 0
                 _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
@@ -634,7 +631,6 @@ class ChatViewModel(
                 }
                 val failed = toProcess.size - succeeded
                 if (failed == 0) {
-                    settingsManager.markModelCached(modelId)
                     _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
                 } else {
                     _snackbarMessage.emit(SnackbarEvent(

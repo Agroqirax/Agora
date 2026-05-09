@@ -243,14 +243,6 @@ class SettingsManager(private val context: Context) {
     suspend fun setActiveEmbeddingModelId(id: String) {
         context.dataStore.edit { it[ACTIVE_EMBEDDING_MODEL_ID] = id }
     }
-    suspend fun markModelCached(modelId: String) {
-        context.dataStore.edit { prefs ->
-            val jsonStr = prefs[EMBEDDING_MODELS_JSON] ?: "[]"
-            val models = try { json.decodeFromString<List<EmbeddingModelConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
-            prefs[EMBEDDING_MODELS_JSON] = json.encodeToString(models.map { if (it.id == modelId) it.copy(cached = true) else it })
-        }
-    }
-
     suspend fun saveAppLanguage(language: String) {
         context.dataStore.edit { it[APP_LANGUAGE] = language }
     }
