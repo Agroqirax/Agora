@@ -33,6 +33,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -316,6 +317,7 @@ fun SystemPromptEditorPage(
                     leadingContent = {
                         Icon(variableIcon(key), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     modifier = Modifier.fillMaxWidth().clickable {
                         val item = PromptTemplateItem(type = PromptItemType.PREDEFINED, value = key)
                         if (targetIndex >= 0 && targetIndex <= currentItems.size) {
