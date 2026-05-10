@@ -5,11 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -209,12 +204,7 @@ fun SystemPromptEditorPage(
 
             // Tab content
             AnimatedContent(
-                targetState = selectedTab,
-                transitionSpec = {
-                    val dir = if (targetState > initialState) 1 else -1
-                    (fadeIn(tween(200)) + slideInVertically(tween(200)) { it * dir })
-                        .togetherWith(fadeOut(tween(200)) + slideOutVertically(tween(200)) { it * -dir })
-                }
+                targetState = selectedTab
             ) {
                 Column {
                     if (currentItems.isEmpty()) {
