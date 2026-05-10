@@ -178,6 +178,7 @@ private fun toolSummary(seg: MessageSegment): String {
         "web_fetch" -> {
             val url = argsJson?.get("url")?.let { (it as? JsonPrimitive)?.content }
             if (isError) stringResource(R.string.tool_web_fetch_failed)
+            else if (content.isNotEmpty()) stringResource(R.string.tool_web_fetch_done)
             else if (url != null) stringResource(R.string.tool_web_fetching, url.take(40)) else stringResource(R.string.tool_web_fetch_default)
         }
         "search_conversations" -> {
