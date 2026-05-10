@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
@@ -18,14 +19,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.TextFields
-import androidx.compose.material.icons.automirrored.outlined.PlaylistAdd
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -89,12 +92,20 @@ fun SystemPromptEditorPage(
     }
 
     var showVariablePicker by remember { mutableStateOf(false) }
+    var insertAtIndex by remember { mutableIntStateOf(-1) }
     var titleError by remember { mutableStateOf(false) }
 
     val currentItems: MutableList<PromptTemplateItem> = when (selectedTab) {
         0 -> systemItems
         1 -> userPrependItems
         else -> userPostpendItems
+    }
+
+    BackHandler(enabled = showVariablePicker) {
+        showVariablePicker = false
+    }
+    BackHandler(enabled = !showVariablePicker) {
+        onBack()
     }
 
     Scaffold(
@@ -148,17 +159,44 @@ fun SystemPromptEditorPage(
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = MaterialTheme.colorScheme.onSurface
             ) {
-                Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 },
-                    text = { Text(stringResource(R.string.template_tab_system), maxLines = 1) })
-                Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 },
-                    text = { Text(stringResource(R.string.template_tab_prepend), maxLines = 1) })
-                Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 },
-                    text = { Text(stringResource(R.string.template_tab_postpend), maxLines = 1) })
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = {
+                        Text(
+                            stringResource(R.string.template_tab_system),
+                            maxLines = 1,
+                            color = if (selectedTab == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                )
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = {
+                        Text(
+                            stringResource(R.string.template_tab_prepend),
+                            maxLines = 1,
+                            color = if (selectedTab == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = {
+                        Text(
+                            stringResource(R.string.template_tab_postpend),
+                            maxLines = 1,
+                            color = if (selectedTab == 2) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Add buttons
+            // Add buttons at top
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilledTonalButton(onClick = {
                     currentItems.add(PromptTemplateItem(type = PromptItemType.CUSTOM, value = ""))
@@ -180,7 +218,7 @@ fun SystemPromptEditorPage(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Tab content with animation
+            // Tab content
             AnimatedContent(
                 targetState = selectedTab,
                 transitionSpec = {
@@ -188,7 +226,7 @@ fun SystemPromptEditorPage(
                     (fadeIn(tween(200)) + slideInVertically(tween(200)) { it * dir })
                         .togetherWith(fadeOut(tween(200)) + slideOutVertically(tween(200)) { it * -dir })
                 }
-            ) { tab ->
+            ) {
                 Column {
                     if (currentItems.isEmpty()) {
                         Column(
@@ -212,21 +250,33 @@ fun SystemPromptEditorPage(
 
                     for (i in currentItems.indices) {
                         val item = currentItems[i]
+
+                        // Insert button above each item
+                        InsertBetweenButton(
+                            onClick = { insertAtIndex = i }
+                        )
+
                         AnimatedVisibility(
                             visible = true,
                             enter = fadeIn(tween(200)) + expandVertically(tween(200)),
                             exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
                         ) {
-                            Column {
-                                TemplateItemRow(
-                                    item = item,
-                                    onChange = { updated -> currentItems[i] = updated },
-                                    onDelete = { currentItems.removeAt(i) }
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                            }
+                            TemplateItemRow(
+                                item = item,
+                                onChange = { updated -> currentItems[i] = updated },
+                                onDelete = { currentItems.removeAt(i) },
+                                onMoveUp = if (i > 0) {{ val moved = currentItems.removeAt(i); currentItems.add(i - 1, moved) }} else null,
+                                onMoveDown = if (i < currentItems.lastIndex) {{ val moved = currentItems.removeAt(i); currentItems.add(i + 1, moved) }} else null
+                            )
                         }
                     }
+
+                    // Insert button at the end
+                    InsertBetweenButton(
+                        onClick = { insertAtIndex = currentItems.size }
+                    )
+
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
 
@@ -261,8 +311,47 @@ fun SystemPromptEditorPage(
         }
     }
 
+    // Insert dropdown
+    if (insertAtIndex >= 0) {
+        AlertDialog(
+            onDismissRequest = { insertAtIndex = -1 },
+            title = { Text(stringResource(R.string.template_insert_title)) },
+            text = {
+                Column {
+                    TextButton(
+                        onClick = {
+                            currentItems.add(insertAtIndex, PromptTemplateItem(type = PromptItemType.CUSTOM, value = ""))
+                            insertAtIndex = -1
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.TextFields, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(stringResource(R.string.template_add_text), modifier = Modifier.weight(1f))
+                    }
+                    TextButton(
+                        onClick = {
+                            showVariablePicker = true
+                            insertAtIndex = -1
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.AutoMirrored.Outlined.PlaylistAdd, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(stringResource(R.string.template_add_variable), modifier = Modifier.weight(1f))
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { insertAtIndex = -1 }) { Text(stringResource(R.string.provider_cancel)) }
+            }
+        )
+    }
+
     // Variable picker bottom sheet
     if (showVariablePicker) {
+        val targetIndex = insertAtIndex
         ModalBottomSheet(
             onDismissRequest = { showVariablePicker = false },
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -279,15 +368,17 @@ fun SystemPromptEditorPage(
                     headlineContent = { Text(variableDisplayName(key)) },
                     supportingContent = { Text("{${key}}") },
                     leadingContent = {
-                        Icon(
-                            variableIcon(key),
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                        Icon(variableIcon(key), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     },
                     modifier = Modifier.fillMaxWidth().clickable {
-                        currentItems.add(PromptTemplateItem(type = PromptItemType.PREDEFINED, value = key))
+                        val item = PromptTemplateItem(type = PromptItemType.PREDEFINED, value = key)
+                        if (targetIndex >= 0 && targetIndex <= currentItems.size) {
+                            currentItems.add(targetIndex, item)
+                        } else {
+                            currentItems.add(item)
+                        }
                         showVariablePicker = false
+                        insertAtIndex = -1
                     }
                 )
             }
@@ -297,10 +388,39 @@ fun SystemPromptEditorPage(
 }
 
 @Composable
+private fun InsertBetweenButton(onClick: () -> Unit) {
+    var hovered by remember { mutableStateOf(false) }
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(24.dp)
+            .clickable { onClick() }
+    ) {
+        HorizontalDivider(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+        )
+        FilledTonalIconButton(
+            onClick = onClick,
+            modifier = Modifier.size(20.dp)
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = stringResource(R.string.template_insert_title),
+                modifier = Modifier.size(12.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun TemplateItemRow(
     item: PromptTemplateItem,
     onChange: (PromptTemplateItem) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onMoveUp: (() -> Unit)? = null,
+    onMoveDown: (() -> Unit)? = null
 ) {
     when (item.type) {
         PromptItemType.CUSTOM -> {
@@ -313,8 +433,20 @@ private fun TemplateItemRow(
                 },
                 label = { Text(stringResource(R.string.template_custom_text_label)) },
                 trailingIcon = {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.provider_delete))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (onMoveUp != null) {
+                            IconButton(onClick = onMoveUp) {
+                                Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.template_move_up))
+                            }
+                        }
+                        if (onMoveDown != null) {
+                            IconButton(onClick = onMoveDown) {
+                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.template_move_down))
+                            }
+                        }
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.provider_delete))
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -327,7 +459,7 @@ private fun TemplateItemRow(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                    modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
                 ) {
                     Icon(
                         variableIcon(item.value),
@@ -347,6 +479,16 @@ private fun TemplateItemRow(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                         )
+                    }
+                    if (onMoveUp != null) {
+                        IconButton(onClick = onMoveUp) {
+                            Icon(Icons.Default.KeyboardArrowUp, contentDescription = stringResource(R.string.template_move_up))
+                        }
+                    }
+                    if (onMoveDown != null) {
+                        IconButton(onClick = onMoveDown) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.template_move_down))
+                        }
                     }
                     IconButton(onClick = onDelete) {
                         Icon(Icons.Default.Close, contentDescription = stringResource(R.string.provider_delete))

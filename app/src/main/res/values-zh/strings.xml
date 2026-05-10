@@ -118,6 +118,9 @@
     <string name="template_preview_empty">（空白）</string>
     <string name="template_variable_picker_title">选择变量</string>
     <string name="template_custom_text_label">文本</string>
+    <string name="template_insert_title">插入项目</string>
+    <string name="template_move_up">上移</string>
+    <string name="template_move_down">下移</string>
 
     <!-- Settings - Models Page -->
     <string name="models_title">模型</string>

@@ -1,5 +1,11 @@
 package com.newoether.agora.ui.settings
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,23 +37,76 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var editingEntry by remember { mutableStateOf<SystemPromptEntry?>(null) }
     var showDeletePromptConfirm by remember { mutableStateOf<SystemPromptEntry?>(null) }
 
-    if (editingEntry != null) {
-        SystemPromptEditorPage(
-            entry = editingEntry,
-            onSave = { title, systemItems, userPrependItems, userPostpendItems ->
-                val entry = editingEntry!!
-                if (systemPrompts.any { it.id == entry.id }) {
-                    viewModel.updateSystemPrompt(entry.id, title, systemItems, userPrependItems, userPostpendItems)
-                } else {
-                    viewModel.addSystemPrompt(title, systemItems, userPrependItems, userPostpendItems)
-                }
-                editingEntry = null
-            },
-            onBack = { editingEntry = null }
-        )
-        return
+    BackHandler(enabled = editingEntry != null) {
+        editingEntry = null
     }
 
+    AnimatedContent(
+        targetState = editingEntry,
+        transitionSpec = {
+            if (targetState != null) {
+                (slideInHorizontally(tween(300)) { it }).togetherWith(slideOutHorizontally(tween(300)) { -it })
+            } else {
+                (slideInHorizontally(tween(300)) { -it }).togetherWith(slideOutHorizontally(tween(300)) { it })
+            }
+        }
+    ) { currentEntry ->
+        if (currentEntry != null) {
+            SystemPromptEditorPage(
+                entry = currentEntry,
+                onSave = { title, systemItems, userPrependItems, userPostpendItems ->
+                    if (systemPrompts.any { it.id == currentEntry.id }) {
+                        viewModel.updateSystemPrompt(currentEntry.id, title, systemItems, userPrependItems, userPostpendItems)
+                    } else {
+                        viewModel.addSystemPrompt(title, systemItems, userPrependItems, userPostpendItems)
+                    }
+                    editingEntry = null
+                },
+                onBack = { editingEntry = null }
+            )
+        } else {
+            PromptList(
+                systemPrompts = systemPrompts,
+                activeSystemPromptId = activeSystemPromptId,
+                onSelectPrompt = { viewModel.setActiveSystemPrompt(it) },
+                onEdit = { editingEntry = it },
+                onAdd = { editingEntry = SystemPromptEntry(title = "") },
+                onDeleteRequest = { showDeletePromptConfirm = it },
+                onBack = onBack
+            )
+        }
+    }
+
+    showDeletePromptConfirm?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { showDeletePromptConfirm = null },
+            title = { Text(stringResource(R.string.prompts_delete_title)) },
+            text = { Text(stringResource(R.string.prompts_delete_text, entry.title)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteSystemPrompt(entry.id)
+                        showDeletePromptConfirm = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.provider_delete)) }
+            },
+            dismissButton = { TextButton(onClick = { showDeletePromptConfirm = null }) { Text(stringResource(R.string.provider_cancel)) } }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PromptList(
+    systemPrompts: List<SystemPromptEntry>,
+    activeSystemPromptId: String?,
+    onSelectPrompt: (String) -> Unit,
+    onEdit: (SystemPromptEntry) -> Unit,
+    onAdd: () -> Unit,
+    onDeleteRequest: (SystemPromptEntry) -> Unit,
+    onBack: () -> Unit
+) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -60,7 +119,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         }
@@ -91,7 +150,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             Text(preview, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         },
                         leadingContent = {
-                            RadioButton(selected = entry.id == activeSystemPromptId, onClick = { viewModel.setActiveSystemPrompt(entry.id) })
+                            RadioButton(selected = entry.id == activeSystemPromptId, onClick = { onSelectPrompt(entry.id) })
                         },
                         trailingContent = {
                             Box {
@@ -99,17 +158,17 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options))
                                 }
                                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)) {
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; editingEntry = entry })
-                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeletePromptConfirm = entry })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; onEdit(entry) })
+                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; onDeleteRequest(entry) })
                                 }
                             }
                         },
-                        modifier = Modifier.clickable { viewModel.setActiveSystemPrompt(entry.id) }.padding(start = 16.dp)
+                        modifier = Modifier.clickable { onSelectPrompt(entry.id) }.padding(start = 16.dp)
                     )
                 }
 
                 TextButton(
-                    onClick = { editingEntry = SystemPromptEntry(title = "") },
+                    onClick = onAdd,
                     modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 8.dp)
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -118,24 +177,5 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             }
         }
-    }
-
-    // Delete Confirmation
-    showDeletePromptConfirm?.let { entry ->
-        AlertDialog(
-            onDismissRequest = { showDeletePromptConfirm = null },
-            title = { Text(stringResource(R.string.prompts_delete_title)) },
-            text = { Text(stringResource(R.string.prompts_delete_text, entry.title)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.deleteSystemPrompt(entry.id)
-                        showDeletePromptConfirm = null
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.provider_delete)) }
-            },
-            dismissButton = { TextButton(onClick = { showDeletePromptConfirm = null }) { Text(stringResource(R.string.provider_cancel)) } }
-        )
     }
 }

@@ -151,6 +151,9 @@
     <string name="template_preview_empty">(empty)</string>
     <string name="template_variable_picker_title">Choose Variable</string>
     <string name="template_custom_text_label">Text</string>
+    <string name="template_insert_title">Insert Item</string>
+    <string name="template_move_up">Move up</string>
+    <string name="template_move_down">Move down</string>
 
     <!-- Settings - Models Page -->
     <string name="models_title">Models</string>
