@@ -278,8 +278,7 @@ fun SystemPromptEditorPage(
             Text(
                 text = stringResource(R.string.template_preview),
                 style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                //color = MaterialTheme.colorScheme.primary
+                fontWeight = FontWeight.Bold
             )
             Spacer(modifier = Modifier.height(6.dp))
             ElevatedCard(
