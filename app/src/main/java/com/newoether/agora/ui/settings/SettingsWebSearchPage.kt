@@ -33,6 +33,8 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val webSearchApiKeys by viewModel.webSearchApiKeys.collectAsState()
     val webSearchBaseUrl by viewModel.webSearchBaseUrl.collectAsState()
     var showProviderDialog by remember { mutableStateOf(false) }
+    var apiKeyText by remember(webSearchProvider) { mutableStateOf(webSearchApiKeys[webSearchProvider] ?: "") }
+    LaunchedEffect(webSearchProvider) { apiKeyText = webSearchApiKeys[webSearchProvider] ?: "" }
 
     val noOpResponder = remember {
         object : BringIntoViewResponder {
@@ -121,8 +123,8 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                     Box(modifier = Modifier.bringIntoViewResponder(noOpResponder).padding(top = 8.dp)) {
                                         OutlinedTextField(
-                                            value = webSearchApiKeys[webSearchProvider] ?: "",
-                                            onValueChange = { viewModel.setWebSearchApiKey(webSearchProvider, it) },
+                                            value = apiKeyText,
+                                            onValueChange = { apiKeyText = it; viewModel.setWebSearchApiKey(webSearchProvider, it) },
                                             placeholder = {
                                                 Text(
                                                     stringResource(
