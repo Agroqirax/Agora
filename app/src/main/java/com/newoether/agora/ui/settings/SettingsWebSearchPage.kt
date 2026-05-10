@@ -83,7 +83,16 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     ListItem(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         headlineContent = { Text(stringResource(R.string.web_search_provider_label)) },
-                        supportingContent = { Text(if (webSearchProvider == "searxng") stringResource(R.string.web_search_searxng) else stringResource(R.string.web_search_brave)) },
+                        supportingContent = {
+                            Text(
+                                when (webSearchProvider) {
+                                    "searxng" -> stringResource(R.string.web_search_searxng)
+                                    "serper" -> stringResource(R.string.web_search_serper)
+                                    "tavily" -> stringResource(R.string.web_search_tavily)
+                                    else -> stringResource(R.string.web_search_brave)
+                                }
+                            )
+                        },
                         leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
                         modifier = Modifier.clickable { showProviderDialog = true }
                     )
@@ -100,12 +109,31 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.web_search_brave_key), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                                    Text(
+                                        stringResource(
+                                            when (webSearchProvider) {
+                                                "serper" -> R.string.web_search_serper_key
+                                                "tavily" -> R.string.web_search_tavily_key
+                                                else -> R.string.web_search_brave_key
+                                            }
+                                        ),
+                                        style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface
+                                    )
                                     Box(modifier = Modifier.bringIntoViewResponder(noOpResponder).padding(top = 8.dp)) {
                                         OutlinedTextField(
                                             value = webSearchApiKey,
                                             onValueChange = { viewModel.setWebSearchApiKey(it) },
-                                            placeholder = { Text(stringResource(R.string.web_search_brave_key_hint)) },
+                                            placeholder = {
+                                                Text(
+                                                    stringResource(
+                                                        when (webSearchProvider) {
+                                                            "serper" -> R.string.web_search_serper_key_hint
+                                                            "tavily" -> R.string.web_search_tavily_key_hint
+                                                            else -> R.string.web_search_brave_key_hint
+                                                        }
+                                                    )
+                                                )
+                                            },
                                             visualTransformation = PasswordVisualTransformation(),
                                             modifier = Modifier.fillMaxWidth(),
                                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -154,7 +182,12 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.web_search_select_provider)) },
             text = {
                 Column {
-                    val providers = listOf("brave" to R.string.web_search_brave, "searxng" to R.string.web_search_searxng)
+                    val providers = listOf(
+                        "brave" to R.string.web_search_brave,
+                        "serper" to R.string.web_search_serper,
+                        "tavily" to R.string.web_search_tavily,
+                        "searxng" to R.string.web_search_searxng
+                    )
                     providers.forEach { (key, labelRes) ->
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
@@ -164,6 +197,8 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     stringResource(
                                         when (key) {
                                             "brave" -> R.string.web_search_brave_desc
+                                            "serper" -> R.string.web_search_serper_desc
+                                            "tavily" -> R.string.web_search_tavily_desc
                                             "searxng" -> R.string.web_search_searxng_desc
                                             else -> R.string.web_search_brave_desc
                                         }

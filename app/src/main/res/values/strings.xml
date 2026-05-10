@@ -184,12 +184,20 @@
     <string name="web_search_enable_desc">Allow models to search the web via tool calling</string>
     <string name="web_search_provider_label">Search Provider</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_serper">Serper</string>
+    <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
     <string name="web_search_brave_desc">Privacy-focused search API. Free tier available.</string>
+    <string name="web_search_serper_desc">Fast Google Search API. 2,500 free queries/month.</string>
+    <string name="web_search_tavily_desc">AI-optimized search API. Built for LLM agents.</string>
     <string name="web_search_searxng_desc">Self-hosted metasearch engine. No API key needed.</string>
     <string name="web_search_select_provider">Select Search Provider</string>
     <string name="web_search_brave_key">Brave Search API Key</string>
     <string name="web_search_brave_key_hint">API key from brave.com/search/api/</string>
+    <string name="web_search_serper_key">Serper API Key</string>
+    <string name="web_search_serper_key_hint">API key from serper.dev</string>
+    <string name="web_search_tavily_key">Tavily API Key</string>
+    <string name="web_search_tavily_key_hint">API key from tavily.com</string>
     <string name="web_search_searxng_url">SearXNG Base URL</string>
     <string name="web_search_searxng_url_hint">https://searx.be</string>
 

@@ -151,12 +151,20 @@
     <string name="web_search_enable_desc">允许模型通过工具调用搜索网页</string>
     <string name="web_search_provider_label">搜索提供商</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_serper">Serper</string>
+    <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
     <string name="web_search_brave_desc">注重隐私的搜索 API。提供免费套餐。</string>
+    <string name="web_search_serper_desc">快速 Google 搜索 API。每月 2,500 次免费查询。</string>
+    <string name="web_search_tavily_desc">面向 AI 优化的搜索 API。专为 LLM 代理构建。</string>
     <string name="web_search_searxng_desc">自托管的元搜索引擎。无需 API 密钥。</string>
     <string name="web_search_select_provider">选择搜索提供商</string>
     <string name="web_search_brave_key">Brave 搜索 API 密钥</string>
     <string name="web_search_brave_key_hint">来自 brave.com/search/api/ 的 API 密钥</string>
+    <string name="web_search_serper_key">Serper API 密钥</string>
+    <string name="web_search_serper_key_hint">来自 serper.dev 的 API 密钥</string>
+    <string name="web_search_tavily_key">Tavily API 密钥</string>
+    <string name="web_search_tavily_key_hint">来自 tavily.com 的 API 密钥</string>
     <string name="web_search_searxng_url">SearXNG 基础 URL</string>
     <string name="web_search_searxng_url_hint">https://searx.be</string>
 

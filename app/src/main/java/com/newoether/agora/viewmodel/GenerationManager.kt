@@ -364,29 +364,52 @@ class GenerationManager(
         val numResults = ((args["num_results"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 5).coerceIn(1, 10)
 
         return try {
-            val (url, requestHeaders) = when (ctx.webSearchProvider) {
+            val body = when (ctx.webSearchProvider) {
+                "serper" -> {
+                    val apiKey = ctx.webSearchApiKey.ifBlank {
+                        return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_api_key") }.toString()
+                    }
+                    com.newoether.agora.api.HttpClient.post(
+                        "https://google.serper.dev/search",
+                        Json.encodeToString(buildJsonObject { put("q", query); put("num", numResults) }),
+                        mapOf("X-API-KEY" to apiKey)
+                    )
+                }
+                "tavily" -> {
+                    val apiKey = ctx.webSearchApiKey.ifBlank {
+                        return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_api_key") }.toString()
+                    }
+                    com.newoether.agora.api.HttpClient.post(
+                        "https://api.tavily.com/search",
+                        Json.encodeToString(buildJsonObject { put("api_key", apiKey); put("query", query); put("max_results", numResults) }),
+                        emptyMap()
+                    )
+                }
                 "searxng" -> {
                     val baseUrl = ctx.webSearchBaseUrl.ifBlank { "https://searx.be" }
-                    ("$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json&engines=google,brave") to emptyMap<String, String>()
+                    com.newoether.agora.api.HttpClient.fetchModels(
+                        "$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json&engines=google,brave"
+                    )
                 }
                 else -> {
                     val apiKey = ctx.webSearchApiKey.ifBlank {
                         return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_api_key") }.toString()
                     }
-                    ("https://api.search.brave.com/res/v1/web/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&count=$numResults") to
+                    com.newoether.agora.api.HttpClient.fetchModels(
+                        "https://api.search.brave.com/res/v1/web/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&count=$numResults",
                         mapOf("Accept" to "application/json", "X-Subscription-Token" to apiKey)
+                    )
                 }
-            }
+            } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
 
-            val body = com.newoether.agora.api.HttpClient.fetchModels(url, requestHeaders)
-                ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
             val json: Map<String, kotlinx.serialization.json.JsonElement> = Json.decodeFromString(body)
             val resultsArray = when {
+                json.containsKey("organic") -> json["organic"]?.jsonArray   // Serper
                 json.containsKey("web") -> {
                     val web = json["web"]?.jsonObject
                     web?.get("results")?.jsonArray
                 }
-                json.containsKey("results") -> json["results"]?.jsonArray
+                json.containsKey("results") -> json["results"]?.jsonArray  // Tavily, SearXNG
                 else -> null
             } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_results") }.toString()
 
@@ -398,8 +421,8 @@ class GenerationManager(
                     val obj = element.jsonObject
                     add(buildJsonObject {
                         put("title", (obj["title"] as? JsonPrimitive)?.content ?: "")
-                        put("url", (obj["url"] as? JsonPrimitive)?.content ?: "")
-                        put("description", (obj["description"] as? JsonPrimitive)?.content ?: "")
+                        put("url", (obj["link"] as? JsonPrimitive)?.content ?: (obj["url"] as? JsonPrimitive)?.content ?: "")
+                        put("description", (obj["snippet"] as? JsonPrimitive)?.content ?: (obj["content"] as? JsonPrimitive)?.content ?: (obj["description"] as? JsonPrimitive)?.content ?: "")
                     })
                 }
             }
