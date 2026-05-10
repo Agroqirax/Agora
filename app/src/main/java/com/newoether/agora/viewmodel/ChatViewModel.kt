@@ -595,7 +595,7 @@ class ChatViewModel(
             }
         }
     }
-    fun cacheMessagesForModel(modelId: String, recache: Boolean = false) {
+    fun cacheMessagesForModel(modelId: String, recache: Boolean = false, silent: Boolean = false) {
         viewModelScope.launch(Dispatchers.IO) {
             val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
             mutex.withLock {
@@ -606,14 +606,14 @@ class ChatViewModel(
                 val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
                 val total = allMessages.size
                 if (total == 0) {
-                    _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
+                    if (!silent) _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
                     refreshCacheCounts()
                     return@launch
                 }
                 val existingIds = chatDao.getEmbeddedMessageIdsByModel(modelId).toSet()
                 val toProcess = allMessages.filter { it.id !in existingIds }
                 if (toProcess.isEmpty()) {
-                    _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
+                    if (!silent) _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
                     refreshCacheCounts()
                     return@launch
                 }
@@ -632,7 +632,7 @@ class ChatViewModel(
                         } else {
                             val apiKey = resolveEmbeddingApiKey()
                             if (apiKey == null) {
-                                _snackbarMessage.emit(SnackbarEvent("No API key configured."))
+                                if (!silent) _snackbarMessage.emit(SnackbarEvent("No API key configured."))
                                 return@launch
                             }
                             val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
@@ -655,13 +655,15 @@ class ChatViewModel(
                     _cachingProgress.update { it - modelId }
                 }
                 val failed = toProcess.size - succeeded
-                if (failed == 0) {
-                    _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
-                } else {
-                    _snackbarMessage.emit(SnackbarEvent(
-                        "Cached $succeeded of ${toProcess.size}. ${failed} failed.",
-                        "Retry"
-                    ) { cacheMessagesForModel(modelId) })
+                if (!silent) {
+                    if (failed == 0) {
+                        _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
+                    } else {
+                        _snackbarMessage.emit(SnackbarEvent(
+                            "Cached $succeeded of ${toProcess.size}. ${failed} failed.",
+                            "Retry"
+                        ) { cacheMessagesForModel(modelId) })
+                    }
                 }
                 chatDao.deleteOrphanedEmbeddings()
                 refreshCacheCounts()
@@ -1113,7 +1115,7 @@ class ChatViewModel(
                 onStreamUpdate = { _streamingMessage.value = it },
                 onLoadingChange = { _isLoading.value = it },
                 onGeneratingIdChange = { _generatingInConversationId.value = it },
-                onStreamClear = { _streamingMessage.value = null }
+                onStreamClear = { _streamingMessage.value = null; val id = activeEmbeddingModelId.value; if (id.isNotEmpty()) cacheMessagesForModel(id, silent = true) }
             )
         }
     }
@@ -1207,7 +1209,7 @@ class ChatViewModel(
                 onStreamUpdate = { _streamingMessage.value = it },
                 onLoadingChange = { _isLoading.value = it },
                 onGeneratingIdChange = { _generatingInConversationId.value = it },
-                onStreamClear = { _streamingMessage.value = null }
+                onStreamClear = { _streamingMessage.value = null; val id = activeEmbeddingModelId.value; if (id.isNotEmpty()) cacheMessagesForModel(id, silent = true) }
             )
         }
     }
@@ -1381,7 +1383,7 @@ class ChatViewModel(
                 onStreamUpdate = { _streamingMessage.value = it },
                 onLoadingChange = { _isLoading.value = it },
                 onGeneratingIdChange = { _generatingInConversationId.value = it },
-                onStreamClear = { _streamingMessage.value = null }
+                onStreamClear = { _streamingMessage.value = null; val id = activeEmbeddingModelId.value; if (id.isNotEmpty()) cacheMessagesForModel(id, silent = true) }
             )
 
             val lastMsg = _allMessages.value.find { it.id == modelMessageId }
