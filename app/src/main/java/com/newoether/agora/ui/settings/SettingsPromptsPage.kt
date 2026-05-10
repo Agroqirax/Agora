@@ -2,7 +2,6 @@ package com.newoether.agora.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -45,9 +44,9 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         targetState = editingEntry,
         transitionSpec = {
             if (targetState != null) {
-                (slideInHorizontally(tween(300)) { it }).togetherWith(slideOutHorizontally(tween(300)) { -it })
+                slideInHorizontally(initialOffsetX = { it }) togetherWith slideOutHorizontally(targetOffsetX = { -it })
             } else {
-                (slideInHorizontally(tween(300)) { -it }).togetherWith(slideOutHorizontally(tween(300)) { it })
+                slideInHorizontally(initialOffsetX = { -it }) togetherWith slideOutHorizontally(targetOffsetX = { it })
             }
         }
     ) { currentEntry ->
