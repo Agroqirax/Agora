@@ -619,6 +619,32 @@ fun MessageItem(
                         thinkingContentMaxHeightPx = 0
                     }
 
+                    // Double-buffer for main text: old content stays visible while new renders
+                    var mainStableText by remember { mutableStateOf(debouncedText) }
+                    var mainShowNewLayer by remember { mutableStateOf(false) }
+                    var mainTransitionAlpha by remember { mutableFloatStateOf(1f) }
+
+                    if (mainStableText != debouncedText && isStreaming && debouncedText.isNotEmpty()) {
+                        mainShowNewLayer = true
+                        mainTransitionAlpha = 0f
+                    }
+                    LaunchedEffect(debouncedText) {
+                        if (isStreaming && debouncedText.isNotEmpty() && mainShowNewLayer) {
+                            withFrameNanos { }
+                            val startNs = withFrameNanos { it }
+                            val durationNs = 200_000_000L
+                            while (true) {
+                                val nowNs = withFrameNanos { it }
+                                val progress = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
+                                mainTransitionAlpha = progress
+                                if (progress >= 1f) break
+                            }
+                            mainStableText = debouncedText
+                            mainShowNewLayer = false
+                            mainTransitionAlpha = 1f
+                        }
+                    }
+
                     Column {
                         val isError = message.status == MessageStatus.ERROR || message.participant == Participant.ERROR
 
@@ -967,6 +993,23 @@ fun MessageItem(
                                 }
                                 .bringIntoViewResponder(noOpResponder)
                         ) {
+                            // Double-buffer stable layer: plain text of previous content
+                            // shown at full opacity behind the Markdown during transition
+                            if (mainShowNewLayer && mainStableText.isNotEmpty() && !isError) {
+                                SelectionContainer {
+                                    Text(
+                                        text = mainStableText.escapeThinkTags(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = textColor,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (mainShowNewLayer) mainTransitionAlpha else 1f)
+                            ) {
                             if (isError) {
                                 Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
@@ -1057,6 +1100,7 @@ fun MessageItem(
                                         }
                                     }
                                 }
+                            }
                             }
                         }
                         if (!isStreaming && message.status == MessageStatus.STOPPED) {
