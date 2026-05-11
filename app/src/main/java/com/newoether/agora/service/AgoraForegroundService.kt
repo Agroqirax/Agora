@@ -15,7 +15,7 @@ import com.newoether.agora.R
 class AgoraForegroundService : Service() {
 
     companion object {
-        const val CHANNEL_ID = "agora_generation_v2"
+        const val CHANNEL_ID = "agora_generation"
         const val NOTIFICATION_ID = 1
 
         fun start(context: Context) {
@@ -33,9 +33,9 @@ class AgoraForegroundService : Service() {
         }
 
         fun createChannel(context: Context) {
-            // Remove old channel so the new IMPORTANCE_MIN takes effect
+            // Delete and recreate so IMPORTANCE_MIN takes effect (channels are immutable)
             val manager = context.getSystemService(NotificationManager::class.java)
-            manager.deleteNotificationChannel("agora_generation")
+            manager.deleteNotificationChannel(CHANNEL_ID)
 
             val channel = NotificationChannel(
                 CHANNEL_ID,
