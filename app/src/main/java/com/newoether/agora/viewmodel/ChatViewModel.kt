@@ -1035,10 +1035,7 @@ class ChatViewModel(
         // so the combine function never sees _streamingMessage=null while the error is in _allMessages.
         val messageToRegenerate = _allMessages.value.find { it.id == messageId } ?: return
         val parentId = messageToRegenerate.parentId ?: return
-        val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
-        val hasChildren = _allMessages.value.any { it.parentId == messageId }
-        val isLatest = !hasChildren
-        val modelMessageId = if (isErrorOrStopped && isLatest) messageId else UUID.randomUUID().toString()
+        val modelMessageId = UUID.randomUUID().toString()
         val startTime = System.currentTimeMillis() + 1
 
         // Insert placeholder into _allMessages and update _selectedChildren on the calling
@@ -1060,33 +1057,12 @@ class ChatViewModel(
         generationJob = generationScope.launch {
             val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
 
-            if (isErrorOrStopped && isLatest) {
-                // Delete stale tool call children from the previous failed attempt
-                val allMsgs = _allMessages.value
-                val staleIds = mutableListOf<String>()
-                val queue = mutableListOf(modelMessageId)
-                while (queue.isNotEmpty()) {
-                    val pid = queue.removeAt(0)
-                    allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
-                        .forEach { staleIds.add(it.id); queue.add(it.id) }
-                }
-                if (staleIds.isNotEmpty()) {
-                    chatDao.deleteMessagesByIds(staleIds)
-                    _allMessages.update { it.filter { m -> m.id !in staleIds } }
-                }
-                chatDao.upsertMessage(MessageEntity(
-                    id = modelMessageId, conversationId = currentId, parentId = parentId,
-                    text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                    modelName = currentActiveModel.value, toolCallJson = null
-                ))
-            } else {
-                // New branch — old message's embedding stays (it's still a valid branch)
-                chatDao.upsertMessage(MessageEntity(
-                    id = modelMessageId, conversationId = currentId, parentId = parentId,
-                    text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                    modelName = currentActiveModel.value
-                ))
-            }
+            // Always branch — old message (and its tool calls) stays as a selectable branch
+            chatDao.upsertMessage(MessageEntity(
+                id = modelMessageId, conversationId = currentId, parentId = parentId,
+                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
+                modelName = currentActiveModel.value
+            ))
             val resolved = buildEffectiveSystemPrompt(currentId)
             val config = GenerationConfig(
                 providerName = providerName,
