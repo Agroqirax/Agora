@@ -70,6 +70,7 @@ private val categories = listOf(
     SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
     SettingsCategory("titlegen", R.string.settings_title_gen, R.string.settings_title_gen_desc, Icons.Default.Edit),
     SettingsCategory("memory", R.string.settings_memory, R.string.settings_memory_desc, Icons.Default.Description),
+    SettingsCategory("datacontrol", R.string.settings_data_control, R.string.settings_data_control_desc, Icons.Default.Storage),
     SettingsCategory("language", R.string.language_title, R.string.language_desc, Icons.Default.Translate)
 )
 
@@ -115,6 +116,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "titlegen" -> SettingsTitleGenPage(viewModel, onBack = { selectedCategory = null })
                 "search" -> SettingsSearchPage(viewModel, onBack = { selectedCategory = null })
                 "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
+                "datacontrol" -> SettingsDataControlPage(viewModel, onBack = { selectedCategory = null })
                 else -> {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,

@@ -159,6 +159,19 @@ interface ChatDao {
 
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
+
+    // Bulk export/import
+    @Query("SELECT * FROM conversations")
+    suspend fun getAllConversationsList(): List<ChatEntity>
+
+    @Query("SELECT * FROM messages")
+    suspend fun getAllMessagesList(): List<MessageEntity>
+
+    @Query("DELETE FROM conversations")
+    suspend fun deleteAllConversations()
+
+    @Query("SELECT id FROM messages WHERE id IN (:ids)")
+    suspend fun findExistingMessageIds(ids: List<String>): List<String>
 }
 
 @Database(

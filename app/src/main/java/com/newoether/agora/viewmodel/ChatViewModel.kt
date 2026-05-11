@@ -2,12 +2,15 @@ package com.newoether.agora.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.newoether.agora.api.*
 import com.newoether.agora.data.ApiKeyEntry
+import com.newoether.agora.data.DataExporter
+import com.newoether.agora.data.DataImporter
 import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.EmbeddingModelType
@@ -333,6 +336,28 @@ class ChatViewModel(
 
     private val _branchSwitchTrigger = MutableStateFlow<String?>(null)
     val branchSwitchTrigger: StateFlow<String?> = _branchSwitchTrigger.asStateFlow()
+
+    // Export/Import state
+    private val _exportProgress = MutableStateFlow<Float?>(null)
+    val exportProgress: StateFlow<Float?> = _exportProgress.asStateFlow()
+
+    private val _importProgress = MutableStateFlow<Float?>(null)
+    val importProgress: StateFlow<Float?> = _importProgress.asStateFlow()
+
+    private val _importManifest = MutableStateFlow<DataImporter.ImportManifest?>(null)
+    val importManifest: StateFlow<DataImporter.ImportManifest?> = _importManifest.asStateFlow()
+
+    private val _importPreview = MutableStateFlow<DataImporter.ImportPreview?>(null)
+    val importPreview: StateFlow<DataImporter.ImportPreview?> = _importPreview.asStateFlow()
+
+    private val _conversationCount = MutableStateFlow(0)
+    val conversationCount: StateFlow<Int> = _conversationCount.asStateFlow()
+
+    private val _memoryCount = MutableStateFlow(0)
+    val memoryCount: StateFlow<Int> = _memoryCount.asStateFlow()
+
+    private val _systemPromptCount = MutableStateFlow(0)
+    val systemPromptCount: StateFlow<Int> = _systemPromptCount.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -1459,6 +1484,110 @@ class ChatViewModel(
                 else -> if (skippedCount > 0) app.getString(R.string.sync_no_providers) else app.getString(R.string.sync_completed)
             }
             _snackbarMessage.emit(SnackbarEvent(message))
+        }
+    }
+
+    // ---- Data Control: Export / Import ----
+
+    fun refreshDataCounts() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _conversationCount.value = chatDao.getAllConversationsList().size
+            _memoryCount.value = memoryManager.listFiles().size +
+                (if (memoryManager.getActiveMemory().isNotEmpty()) 1 else 0)
+            _systemPromptCount.value = settingsManager.systemPrompts.first().size
+        }
+    }
+
+    fun exportData(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val exporter = DataExporter(getApplication(), chatDao, settingsManager, memoryManager)
+                val categories = setOf(
+                    DataExporter.ExportCategory.CONVERSATIONS,
+                    DataExporter.ExportCategory.MEMORIES,
+                    DataExporter.ExportCategory.SYSTEM_PROMPTS,
+                    DataExporter.ExportCategory.SETTINGS
+                )
+                exporter.export(uri, categories, false) { progress ->
+                    _exportProgress.value = progress
+                }
+                _exportProgress.value = null
+                _snackbarMessage.emit(SnackbarEvent(getApplication<android.app.Application>().getString(R.string.export_success)))
+            } catch (e: Exception) {
+                _exportProgress.value = null
+                _snackbarMessage.emit(SnackbarEvent(
+                    getApplication<android.app.Application>().getString(R.string.export_failed, e.localizedMessage ?: "")
+                ))
+            }
+        }
+    }
+
+    fun previewImport(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val importer = DataImporter(getApplication(), chatDao, settingsManager, memoryManager)
+                val manifest = importer.readManifest(uri)
+                if (manifest == null) {
+                    _snackbarMessage.emit(SnackbarEvent(
+                        getApplication<android.app.Application>().getString(R.string.import_invalid_file)
+                    ))
+                    return@launch
+                }
+                val preview = importer.preview(uri)
+                if (preview.conversationCount == 0 && preview.memoryCount == 0 &&
+                    preview.systemPromptCount == 0 && !preview.settingsPresent) {
+                    _snackbarMessage.emit(SnackbarEvent(
+                        getApplication<android.app.Application>().getString(R.string.import_no_data)
+                    ))
+                    return@launch
+                }
+                _importManifest.value = manifest
+                _importPreview.value = preview
+            } catch (e: Exception) {
+                _snackbarMessage.emit(SnackbarEvent(
+                    getApplication<android.app.Application>().getString(R.string.import_failed, e.localizedMessage ?: "")
+                ))
+            }
+        }
+    }
+
+    fun clearImportState() {
+        _importManifest.value = null
+        _importPreview.value = null
+    }
+
+    fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val importer = DataImporter(getApplication(), chatDao, settingsManager, memoryManager)
+                val result = importer.import(uri, decisions) { progress ->
+                    _importProgress.value = progress
+                }
+                _importProgress.value = null
+                _importManifest.value = null
+                _importPreview.value = null
+                refreshDataCounts()
+
+                val parts = mutableListOf<String>()
+                if (result.conversationsImported > 0) parts.add("${result.conversationsImported} conversations")
+                if (result.memoriesImported > 0) parts.add("${result.memoriesImported} memories")
+                if (result.systemPromptsImported > 0) parts.add("${result.systemPromptsImported} prompts")
+                if (result.settingsImported) parts.add("settings")
+                if (result.apiKeysImported) parts.add("API keys")
+
+                val summary = if (result.errors.isEmpty()) {
+                    getApplication<android.app.Application>().getString(R.string.import_success, parts.joinToString(", "))
+                } else {
+                    getApplication<android.app.Application>().getString(R.string.import_failed,
+                        "${result.errors.size} error(s): ${result.errors.first()}")
+                }
+                _snackbarMessage.emit(SnackbarEvent(summary))
+            } catch (e: Exception) {
+                _importProgress.value = null
+                _snackbarMessage.emit(SnackbarEvent(
+                    getApplication<android.app.Application>().getString(R.string.import_failed, e.localizedMessage ?: "")
+                ))
+            }
         }
     }
 }

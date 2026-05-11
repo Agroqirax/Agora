@@ -354,4 +354,35 @@
     <string name="local_chat_delete_text">Are you sure you want to delete \'%1$s\'? This will also delete the model file.</string>
     <string name="model_id_label">ID</string>
     <string name="model_alias_label">Alias</string>
+
+    <!-- Data Control -->
+    <string name="settings_data_control">Data Control</string>
+    <string name="settings_data_control_desc">Export or import your data</string>
+    <string name="data_export_title">Export Data</string>
+    <string name="data_export_subtitle">Save conversations, memories, prompts, and settings to a file.</string>
+    <string name="data_import_title">Import Data</string>
+    <string name="data_import_subtitle">Restore from a previous .agora export file.</string>
+    <string name="export_category_conversations">Conversations &amp; Messages</string>
+    <string name="export_category_memories">Memories</string>
+    <string name="export_category_system_prompts">System Prompts</string>
+    <string name="export_category_settings">Settings</string>
+    <string name="export_category_api_keys">API Keys</string>
+    <string name="export_api_keys_warning">API keys will be exported in plain text. Only enable if you trust the destination.</string>
+    <string name="export_estimated_size">Estimated size: %1$s</string>
+    <string name="export_button">Export</string>
+    <string name="exporting_label">Exporting…</string>
+    <string name="export_success">Data exported successfully.</string>
+    <string name="export_failed">Export failed: %1$s</string>
+    <string name="import_preview_title">Import Data</string>
+    <string name="import_from">Exported on %1$s from Agora v%2$s</string>
+    <string name="import_strategy_merge">Merge</string>
+    <string name="import_strategy_replace">Replace</string>
+    <string name="import_strategy_skip">Skip</string>
+    <string name="import_api_keys_warning">This export contains API keys. Keys will be imported in plain text. Only proceed if you trust the source.</string>
+    <string name="import_button">Import</string>
+    <string name="importing_label">Importing…</string>
+    <string name="import_success">Import complete: %1$s</string>
+    <string name="import_failed">Import failed: %1$s</string>
+    <string name="import_invalid_file">Invalid .agora file. Please select a valid export.</string>
+    <string name="import_no_data">This export file contains no importable data.</string>
 </resources>
