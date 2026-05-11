@@ -619,37 +619,6 @@ fun MessageItem(
                         thinkingContentMaxHeightPx = 0
                     }
 
-                    // Double-buffer: render previous text as Markdown behind the new Markdown
-                    // layer during transition. Both use identical typography for seamless crossfade.
-                    var mainStableText by remember { mutableStateOf(debouncedText) }
-                    var mainShowNewLayer by remember { mutableStateOf(false) }
-                    var mainTransitionAlpha by remember { mutableFloatStateOf(1f) }
-
-                    if (!isStreaming) {
-                        mainStableText = debouncedText
-                        mainShowNewLayer = false
-                        mainTransitionAlpha = 1f
-                    } else if (mainStableText != debouncedText && debouncedText.isNotEmpty()) {
-                        mainShowNewLayer = true
-                        mainTransitionAlpha = 0f
-                    }
-                    LaunchedEffect(debouncedText) {
-                        if (isStreaming && debouncedText.isNotEmpty() && mainShowNewLayer) {
-                            withFrameNanos { }
-                            val startNs = withFrameNanos { it }
-                            val durationNs = 200_000_000L
-                            while (true) {
-                                val nowNs = withFrameNanos { it }
-                                val progress = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
-                                mainTransitionAlpha = progress
-                                if (progress >= 1f) break
-                            }
-                            mainStableText = debouncedText
-                            mainShowNewLayer = false
-                            mainTransitionAlpha = 1f
-                        }
-                    }
-
                     Column {
                         val isError = message.status == MessageStatus.ERROR || message.participant == Participant.ERROR
 
@@ -736,12 +705,19 @@ fun MessageItem(
                                                     fontWeight = FontWeight.SemiBold
                                                 )
                                                 SelectionContainer {
-                                                        Markdown(
-                                                            seg.content.escapeThinkTags(), modifier = Modifier.fillMaxWidth().bringIntoViewResponder(noOpResponder),
-                                                            typography = thoughtTypography, padding = thoughtMarkdownPadding,
-                                                            components = customMarkdownComponents,
-                                                            imageTransformer = latexImageTransformer
-                                                        )
+                                                        RecomposeSafeMarkdown(
+                                                            content = seg.content,
+                                                            isStreaming = isStreaming
+                                                        ) { text ->
+                                                            Markdown(
+                                                                content = text.escapeThinkTags(),
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                typography = thoughtTypography,
+                                                                padding = thoughtMarkdownPadding,
+                                                                components = customMarkdownComponents,
+                                                                imageTransformer = latexImageTransformer
+                                                            )
+                                                        }
                                                     }
                                             } else if (seg.type == "tool") {
                                                 val isToolError = (seg.toolResult ?: "").startsWith("Error")
@@ -884,16 +860,19 @@ fun MessageItem(
                                             fontWeight = FontWeight.SemiBold
                                         )
                                         SelectionContainer {
-                                            Markdown(
-                                                content = debouncedThoughts.escapeThinkTags(),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .bringIntoViewResponder(noOpResponder),
-                                                typography = thoughtTypography,
-                                                padding = thoughtMarkdownPadding, // Use tighter padding for thoughts
-                                                components = customMarkdownComponents,
-                                                imageTransformer = latexImageTransformer
-                                            )
+                                            RecomposeSafeMarkdown(
+                                                content = debouncedThoughts,
+                                                isStreaming = isStreaming
+                                            ) { text ->
+                                                Markdown(
+                                                    content = text.escapeThinkTags(),
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    typography = thoughtTypography,
+                                                    padding = thoughtMarkdownPadding,
+                                                    components = customMarkdownComponents,
+                                                    imageTransformer = latexImageTransformer
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -998,23 +977,6 @@ fun MessageItem(
                                 }
                                 .bringIntoViewResponder(noOpResponder)
                         ) {
-                            // Double-buffer stable layer: Markdown of previous content
-                            // rendered identically behind the new layer during transition
-                            if (mainShowNewLayer && mainStableText.isNotEmpty() && !isError) {
-                                Markdown(
-                                    content = mainStableText.escapeThinkTags(),
-                                    modifier = Modifier.fillMaxWidth(),
-                                    typography = customTypography,
-                                    padding = customMarkdownPadding,
-                                    components = customMarkdownComponents,
-                                    imageTransformer = latexImageTransformer
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .alpha(if (mainShowNewLayer) mainTransitionAlpha else 1f)
-                            ) {
                             if (isError) {
                                 Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                     Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
@@ -1033,14 +995,19 @@ fun MessageItem(
                                 val spans = remember(debouncedText) { parseLatexSpans(debouncedText) }
                                 if (spans.all { !it.isLatex }) {
                                     SelectionContainer {
-                                        Markdown(
-                                            content = debouncedText.escapeThinkTags(),
-                                            modifier = Modifier.fillMaxWidth(),
-                                            typography = customTypography,
-                                            padding = customMarkdownPadding,
-                                            components = customMarkdownComponents,
-                                            imageTransformer = latexImageTransformer
-                                        )
+                                        RecomposeSafeMarkdown(
+                                            content = debouncedText,
+                                            isStreaming = isStreaming
+                                        ) { text ->
+                                            Markdown(
+                                                content = text.escapeThinkTags(),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                typography = customTypography,
+                                                padding = customMarkdownPadding,
+                                                components = customMarkdownComponents,
+                                                imageTransformer = latexImageTransformer
+                                            )
+                                        }
                                     }
                                 } else {
                                     val paragraphs = remember(debouncedText) { splitParagraphs(debouncedText) }
@@ -1106,7 +1073,6 @@ fun MessageItem(
                                     }
                                 }
                             }
-                            }
                         }
                         if (!isStreaming && message.status == MessageStatus.STOPPED) {
                             Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp)) {
@@ -1159,6 +1125,64 @@ fun MessageItem(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Renders Markdown with a double-buffer crossfade during streaming to mask
+ * the flash from composable node destruction/recreation on AST re-parse.
+ * Takes a [render] lambda so callers pass their exact Markdown configuration.
+ */
+@Composable
+private fun RecomposeSafeMarkdown(
+    content: String,
+    isStreaming: Boolean,
+    modifier: Modifier = Modifier,
+    render: @Composable (text: String) -> Unit
+) {
+    var stableText by remember { mutableStateOf(content) }
+    var showNewLayer by remember { mutableStateOf(false) }
+    var transitionAlpha by remember { mutableFloatStateOf(1f) }
+
+    if (!isStreaming) {
+        stableText = content
+        showNewLayer = false
+        transitionAlpha = 1f
+    } else if (stableText != content && content.isNotEmpty()) {
+        showNewLayer = true
+        transitionAlpha = 0f
+    }
+
+    LaunchedEffect(content) {
+        if (isStreaming && content.isNotEmpty() && showNewLayer) {
+            withFrameNanos { }
+            val startNs = withFrameNanos { it }
+            val durationNs = 200_000_000L
+            while (true) {
+                val nowNs = withFrameNanos { it }
+                val progress = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
+                transitionAlpha = progress
+                if (progress >= 1f) break
+            }
+            stableText = content
+            showNewLayer = false
+            transitionAlpha = 1f
+        }
+    }
+
+    Box(modifier = modifier) {
+        // Stable layer: previous content at full opacity, identical rendering
+        if (showNewLayer && stableText.isNotEmpty()) {
+            render(stableText)
+        }
+        // Live layer: current content, fades in during transition
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (showNewLayer) transitionAlpha else 1f)
+        ) {
+            render(content)
         }
     }
 }
