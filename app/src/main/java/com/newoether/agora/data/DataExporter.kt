@@ -110,12 +110,16 @@ class DataExporter(
         val webSearchApiKeys: Map<String, String>
     )
 
+    data class ExportResult(
+        val imagesExported: Int = 0
+    )
+
     suspend fun export(
         uri: Uri,
         categories: Set<ExportCategory>,
         includeApiKeys: Boolean,
         onProgress: (Float) -> Unit = {}
-    ) {
+    ): ExportResult {
         val appInfo = context.packageManager.getPackageInfo(context.packageName, 0)
         val appVersion = appInfo.versionName ?: "unknown"
         val exportedAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
@@ -128,6 +132,7 @@ class DataExporter(
             hasApiKeys = includeApiKeys && categories.contains(ExportCategory.API_KEYS)
         )
 
+        var imagesExportedTotal = 0
         val totalSteps = categories.size + 1 // +1 for manifest
         var completed = 0
         fun step() { completed++; onProgress(completed.toFloat() / totalSteps) }
@@ -165,6 +170,7 @@ class DataExporter(
                             // File not accessible — drop from export
                         }
                     }
+                    imagesExportedTotal += surviving.size
                     if (surviving.isNotEmpty()) {
                         imageMap[msg.id] = surviving
                     }
@@ -268,5 +274,6 @@ class DataExporter(
         }
 
         onProgress(1f)
+        return ExportResult(imagesExported = imagesExportedTotal)
     }
 }

@@ -372,6 +372,7 @@
     <string name="export_button">Export</string>
     <string name="exporting_label">Exporting…</string>
     <string name="export_success">Data exported successfully.</string>
+    <string name="export_success_with_images">Data exported successfully (%1$d images).</string>
     <string name="export_failed">Export failed: %1$s</string>
     <string name="import_preview_title">Import Data</string>
     <string name="import_from">Exported on %1$s from Agora v%2$s</string>
