@@ -14,7 +14,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 import java.util.UUID
-import java.util.zip.ZipInputStream
+import java.io.File
+import java.util.zip.ZipFile
 
 class DataImporter(
     private val context: Context,
@@ -26,7 +27,7 @@ class DataImporter(
 
     @Serializable
     data class ImportManifest(
-        @SerialName("agora_export_version") val version: Int,
+        @SerialName("agora_export_version") val version: Int = 1,
         @SerialName("app_version") val appVersion: String = "",
         @SerialName("exported_at") val exportedAt: String = "",
         val categories: List<String> = emptyList(),
@@ -53,24 +54,40 @@ class DataImporter(
 
     private fun readAllEntries(uri: Uri): Map<String, ByteArray> {
         val entries = mutableMapOf<String, ByteArray>()
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            val zip = ZipInputStream(input)
-            var entry = zip.nextEntry
-            while (entry != null) {
-                if (!entry.isDirectory) {
-                    entries[entry.name] = zip.readBytes()
-                }
-                entry = zip.nextEntry
+        // Copy SAF content to temp file so we can use ZipFile (more reliable than ZipInputStream)
+        val tmpFile = File(context.cacheDir, "agora_import_tmp.zip")
+        try {
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                tmpFile.outputStream().use { out -> input.copyTo(out) }
             }
+            ZipFile(tmpFile).use { zip ->
+                val manifestEntry = zip.getEntry("manifest.json")
+                if (manifestEntry != null) {
+                    entries["manifest.json"] = zip.getInputStream(manifestEntry).readBytes()
+                }
+                // Read other entries lazily - just get names for now
+                val enum = zip.entries()
+                while (enum.hasMoreElements()) {
+                    val e = enum.nextElement()
+                    if (!e.isDirectory && e.name != "manifest.json") {
+                        entries[e.name] = zip.getInputStream(e).readBytes()
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Fall through: entries will be empty
+        } finally {
+            tmpFile.delete()
         }
         return entries
     }
 
     suspend fun readManifest(uri: Uri): ImportManifest? {
         return withContext(Dispatchers.IO) {
+            val entries = readAllEntries(uri)
+            if (entries.isEmpty()) return@withContext null
+            val manifestJson = entries["manifest.json"]?.decodeToString() ?: return@withContext null
             try {
-                val entries = readAllEntries(uri)
-                val manifestJson = entries["manifest.json"]?.decodeToString() ?: return@withContext null
                 Json.decodeFromString<ImportManifest>(manifestJson)
             } catch (_: Exception) {
                 null
