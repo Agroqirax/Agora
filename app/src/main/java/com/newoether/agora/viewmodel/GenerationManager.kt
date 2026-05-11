@@ -633,17 +633,20 @@ class GenerationManager(
                 } else {
                     for (toolMsg in toolChildren) {
                         expanded.add(toolMsg)
-                        var current: MessageEntity = toolMsg
+                        val pending = mutableListOf(toolMsg)
                         var safety = 0
-                        while (safety < 100) {
-                            val next = dbMessages
+                        while (pending.isNotEmpty() && safety < 100) {
+                            val current = pending.removeAt(0)
+                            val children = dbMessages
                                 .filter { it.parentId == current.id && (it.id.startsWith(Constants.RESULT_MSG_PREFIX) || it.id.startsWith(Constants.TOOL_MSG_PREFIX)) }
-                                .minByOrNull { it.timestamp }
-                            if (next != null) {
-                                if (next !in expanded) expanded.add(next)
-                                current = next
-                                safety++
-                            } else break
+                                .sortedBy { it.timestamp }
+                            for (child in children) {
+                                if (child !in expanded) {
+                                    expanded.add(child)
+                                    pending.add(child)
+                                }
+                            }
+                            safety++
                         }
                     }
                     // Add entity without tool data so it serializes as plain text,
