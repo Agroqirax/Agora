@@ -1061,6 +1061,19 @@ class ChatViewModel(
             val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
 
             if (isErrorOrStopped && isLatest) {
+                // Delete stale tool call children from the previous failed attempt
+                val allMsgs = _allMessages.value
+                val staleIds = mutableListOf<String>()
+                val queue = mutableListOf(modelMessageId)
+                while (queue.isNotEmpty()) {
+                    val pid = queue.removeAt(0)
+                    allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
+                        .forEach { staleIds.add(it.id); queue.add(it.id) }
+                }
+                if (staleIds.isNotEmpty()) {
+                    chatDao.deleteMessagesByIds(staleIds)
+                    _allMessages.update { it.filter { m -> m.id !in staleIds } }
+                }
                 chatDao.upsertMessage(MessageEntity(
                     id = modelMessageId, conversationId = currentId, parentId = parentId,
                     text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,

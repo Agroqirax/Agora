@@ -114,6 +114,9 @@ interface ChatDao {
     @Query("DELETE FROM messages WHERE conversationId = :conversationId")
     suspend fun deleteMessagesByConversation(conversationId: String)
 
+    @Query("DELETE FROM messages WHERE id IN (:ids)")
+    suspend fun deleteMessagesByIds(ids: List<String>)
+
     @Query("DELETE FROM embeddings WHERE messageId IN (SELECT id FROM messages WHERE conversationId = :conversationId)")
     suspend fun deleteEmbeddingsByConversation(conversationId: String)
 

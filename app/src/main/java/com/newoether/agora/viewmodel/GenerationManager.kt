@@ -619,19 +619,30 @@ class GenerationManager(
                 pathEntities.add(0, msg)
                 currId = msg.parentId
             }
-            // Inject all result_ siblings of each tool_ message so multi-tool
-            // responses include every tool result, not just the branch ancestor.
+            // Inject tool call chains that are children of messages in the ancestor path.
+            // Tool messages are children of model messages; walk the tool→result→tool chain
+            // so that subsequent turns include previous rounds' tool calls.
             val expanded = mutableListOf<MessageEntity>()
             for (entity in pathEntities) {
                 expanded.add(entity)
-                if (entity.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
-                    val resultSiblings = dbMessages
-                        .filter { it.parentId == entity.id && it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
-                        .sortedBy { it.timestamp }
-                    for (sibling in resultSiblings) {
-                        if (sibling !in pathEntities) expanded.add(sibling)
+                dbMessages
+                    .filter { it.parentId == entity.id && it.id.startsWith(Constants.TOOL_MSG_PREFIX) }
+                    .sortedBy { it.timestamp }
+                    .forEach { toolMsg ->
+                        expanded.add(toolMsg)
+                        var current = toolMsg
+                        var safety = 0
+                        while (safety < 100) {
+                            val next = dbMessages
+                                .filter { it.parentId == current.id && (it.id.startsWith(Constants.RESULT_MSG_PREFIX) || it.id.startsWith(Constants.TOOL_MSG_PREFIX)) }
+                                .minByOrNull { it.timestamp }
+                            if (next != null) {
+                                if (next !in expanded) expanded.add(next)
+                                current = next
+                                safety++
+                            } else break
+                        }
                     }
-                }
             }
             val currentPath = expanded.map {
                 val segs = it.toolCallJson?.let { json -> try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null } }
@@ -641,14 +652,9 @@ class GenerationManager(
                 ChatMessage(id = it.id, parentId = it.parentId, text = it.text, images = it.images, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = segs, toolCall = toolCall)
             }.filter { it.participant != Participant.ERROR }
                 .let { path ->
-                    if (isRegenerate) {
-                        path.filterNot { it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
-                            .let { filtered ->
-                                if (replaceMessageId != null) {
-                                    val oldIdx = filtered.indexOfFirst { it.id == replaceMessageId }
-                                    if (oldIdx >= 0) filtered.take(oldIdx) else filtered
-                                } else filtered
-                            }
+                    if (isRegenerate && replaceMessageId != null) {
+                        val oldIdx = path.indexOfFirst { it.id == replaceMessageId }
+                        if (oldIdx >= 0) path.take(oldIdx) else path
                     } else path
                 }
 
@@ -796,7 +802,6 @@ class GenerationManager(
             // Multi-tool loop
             var toolRound = 0
             toolPath = currentPath
-            val chainRootId = if (isRegenerate) parentId else null
 
             while (toolCallDataList.isNotEmpty() && currentStatus != MessageStatus.ERROR && currentCoroutineContext().isActive) {
                 toolRound++
@@ -804,7 +809,7 @@ class GenerationManager(
                 roundToolSegments.clear()
                 val thoughtSegs = segments.filter { it.type == "thought" }
                 val txedSegments = if (thoughtSegs.isNotEmpty()) thoughtSegs + roundToolList else roundToolList
-                val prevLastId = if (toolRound == 1 && chainRootId != null) chainRootId else toolPath.lastOrNull()?.id
+                val prevLastId = if (toolRound == 1) modelMessageId else toolPath.lastOrNull()?.id
                 val toolMsgId = "${Constants.TOOL_MSG_PREFIX}${UUID.randomUUID()}"
                 val toolMsgSegs = txedSegments.ifEmpty { null }
                 val tcds = toolCallDataList
