@@ -1196,7 +1196,7 @@ private fun RecomposeSafeMarkdown(
         if (crossfading) {
             withFrameNanos { }
             val startNs = withFrameNanos { it }
-            val durationNs = 400_000_000L
+            val durationNs = 200_000_000L
             while (true) {
                 val nowNs = withFrameNanos { it }
                 val progress = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
