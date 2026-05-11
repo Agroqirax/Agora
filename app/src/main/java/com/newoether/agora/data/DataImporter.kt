@@ -2,6 +2,7 @@ package com.newoether.agora.data
 
 import android.content.Context
 import android.net.Uri
+import androidx.core.content.FileProvider
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
@@ -197,7 +198,12 @@ class DataImporter(
                                 val ext = detectImageExtension(bytes)
                                 val imgFile = java.io.File(imagesDir, "${msgId}_${parts[1]}.$ext")
                                 imgFile.writeBytes(bytes)
-                                restoredImages.getOrPut(msgId) { mutableListOf() }.add(imgFile.toURI().toString())
+                                val contentUri = FileProvider.getUriForFile(
+                                    context,
+                                    "${context.packageName}.fileprovider",
+                                    imgFile
+                                )
+                                restoredImages.getOrPut(msgId) { mutableListOf() }.add(contentUri.toString())
                             }
                         }
 
