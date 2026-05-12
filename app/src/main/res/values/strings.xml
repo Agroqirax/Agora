@@ -397,6 +397,7 @@
     <string name="extract_frames">Extract %1$d frames</string>
 
     <!-- File Validation -->
+    <string name="file_unsupported_title">File Not Supported</string>
     <string name="file_unknown_type">Unknown file type</string>
     <string name="file_unsupported_type">Unsupported file type: %1$s</string>
     <string name="file_too_large">File too large (max 20 MB)</string>

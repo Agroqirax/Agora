@@ -374,6 +374,7 @@
     <string name="extract_frames">提取 %1$d 帧</string>
 
     <!-- File Validation -->
+    <string name="file_unsupported_title">不支持的文件</string>
     <string name="file_unknown_type">未知文件类型</string>
     <string name="file_unsupported_type">不支持的文件类型: %1$s</string>
     <string name="file_too_large">文件过大 (最大 20 MB)</string>

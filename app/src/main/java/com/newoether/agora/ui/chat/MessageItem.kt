@@ -42,7 +42,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.AttachFile
+
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Terminal
@@ -467,7 +467,7 @@ fun MessageItem(
                                 val meta = remember(message.attachmentMeta) {
                                     message.attachmentMeta
                                 }
-                                // Build display items: skip non-first video frames, use meta for type info
+                                // Build display items: skip non-first video frames, add meta-only items (files/PDFs without imageIndex)
                                 val displayItems = remember(message.images, meta) {
                                     val skipIndices = mutableSetOf<Int>()
                                     if (meta != null) {
@@ -479,13 +479,20 @@ fun MessageItem(
                                             }
                                         }
                                     }
-                                    message.images.mapIndexedNotNull { index, path ->
+                                    // Image-backed items
+                                    val imageItems = message.images.mapIndexedNotNull { index, path ->
                                         if (index in skipIndices) null
                                         else {
                                             val item = meta?.items?.firstOrNull { it.imageIndex == index }
                                             Triple(index, path, item)
                                         }
                                     }
+                                    // Meta-only items (file/PDF without image representation)
+                                    val metaOnlyItems = meta?.items
+                                        ?.filter { it.imageIndex == null && (it.type == "file" || it.type == "pdf") }
+                                        ?.map { Triple(-1, "", it) }
+                                        ?: emptyList()
+                                    imageItems + metaOnlyItems
                                 }
 
                                 androidx.compose.foundation.lazy.LazyRow(
@@ -510,17 +517,18 @@ fun MessageItem(
 
                                         if (isFileType) {
                                             val fileName = metaItem?.fileName ?: imagePath.substringAfterLast("/")
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
-                                                Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-                                                    Icon(Icons.Default.AttachFile, "File", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
+                                            val ext = fileName.substringAfterLast('.', "").uppercase().take(4).ifEmpty { "TXT" }
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
+                                                Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)), contentAlignment = Alignment.Center) {
+                                                    Text(ext, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                                                 }
                                                 Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                                             }
                                         } else if (isPdf) {
                                             val fileName = metaItem?.fileName ?: imagePath.substringAfterLast("/")
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
                                                 Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE53935).copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
-                                                    Icon(Icons.Default.AttachFile, "PDF", tint = Color(0xFFE53935), modifier = Modifier.size(28.dp))
+                                                    Text("PDF", style = MaterialTheme.typography.labelMedium, color = Color(0xFFE53935), fontWeight = FontWeight.SemiBold)
                                                 }
                                                 Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                                                 if (metaItem?.warning != null) {

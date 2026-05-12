@@ -1435,11 +1435,6 @@ class ChatViewModel(
                         }
                     }
                     "file" -> {
-                        val validation = com.newoether.agora.util.FileValidator.validate(app, android.net.Uri.parse(att.uri))
-                        if (!validation.valid) {
-                            _snackbarMessage.emit(SnackbarEvent(com.newoether.agora.util.FileValidator.errorMessage(app, validation.error!!, validation.mimeType)))
-                            continue
-                        }
                         try {
                             app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
                                 val content = stream.bufferedReader().readText().take(500_000)
@@ -1455,11 +1450,6 @@ class ChatViewModel(
                         ))
                     }
                     "pdf" -> {
-                        val validation = com.newoether.agora.util.FileValidator.validate(app, android.net.Uri.parse(att.uri))
-                        if (!validation.valid) {
-                            _snackbarMessage.emit(SnackbarEvent(com.newoether.agora.util.FileValidator.errorMessage(app, validation.error!!, validation.mimeType)))
-                            continue
-                        }
                         if (supportsNativePdf(providerName)) {
                             val pdfFile = java.io.File(app.filesDir, "pdf_${java.util.UUID.randomUUID()}.pdf")
                             try {

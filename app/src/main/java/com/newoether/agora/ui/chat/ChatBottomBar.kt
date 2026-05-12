@@ -227,11 +227,21 @@ fun ChatBottomBar(
         pendingVideoQueue = pendingVideoQueue + urisToQueue
         if (!showVideoSliceDialog) processNextVideo()
     }
+    // File validation rejection dialog
+    var rejectedFileMessage by remember { mutableStateOf<String?>(null) }
+
     val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris ->
-        selectedAttachments = selectedAttachments + uris.map { uri ->
-            val mimeType = try { context.contentResolver.getType(uri) } catch (_: Exception) { null }
+        val validAttachments = mutableListOf<com.newoether.agora.model.SelectedAttachment>()
+        val rejectedMessages = mutableListOf<String>()
+        for (uri in uris) {
+            val validation = com.newoether.agora.util.FileValidator.validate(context, uri)
+            if (!validation.valid) {
+                rejectedMessages.add(com.newoether.agora.util.FileValidator.errorMessage(context, validation.error!!, validation.mimeType))
+                continue
+            }
+            val mimeType = validation.mimeType
             val type = when {
                 mimeType == "application/pdf" -> "pdf"
                 mimeType != null -> "file"
@@ -248,11 +258,15 @@ fun ChatBottomBar(
                     } else null
                 }
             } catch (_: Exception) { null }
-            com.newoether.agora.model.SelectedAttachment(
+            validAttachments.add(com.newoether.agora.model.SelectedAttachment(
                 uri = uri.toString(), type = type,
                 mimeType = mimeType, fileName = fileName
-            )
+            ))
         }
+        if (rejectedMessages.isNotEmpty()) {
+            rejectedFileMessage = rejectedMessages.joinToString("\n")
+        }
+        selectedAttachments = selectedAttachments + validAttachments
     }
 
     Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier).padding(8.dp)) {
@@ -376,7 +390,8 @@ fun ChatBottomBar(
                             if (isProcessing) {
                                 Box(
                                     modifier = Modifier
-                                        .fillMaxSize()
+                                        .matchParentSize()
+                                        .clip(RoundedCornerShape(8.dp))
                                         .background(Color.Black.copy(alpha = 0.4f)),
                                     contentAlignment = Alignment.Center
                                 ) {
@@ -417,7 +432,7 @@ fun ChatBottomBar(
                             )
                         }
                         }
-                        if ((isFile || isPdf || isVideo) && attachment.fileName != null) {
+                        if ((isFile || isPdf) && attachment.fileName != null) {
                             Text(
                                 text = attachment.fileName!!,
                                 style = MaterialTheme.typography.labelSmall,
@@ -753,6 +768,20 @@ fun ChatBottomBar(
                 }
             }
         }
+    }
+
+    // File rejection dialog
+    if (rejectedFileMessage != null) {
+        AlertDialog(
+            onDismissRequest = { rejectedFileMessage = null },
+            title = { Text(stringResource(R.string.file_unsupported_title)) },
+            text = { Text(rejectedFileMessage!!) },
+            confirmButton = {
+                TextButton(onClick = { rejectedFileMessage = null }) {
+                    Text(stringResource(R.string.provider_close))
+                }
+            }
+        )
     }
 
     // Video slice dialog
