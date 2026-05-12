@@ -56,6 +56,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -173,6 +174,8 @@ class MainActivity : ComponentActivity() {
 fun MainNavigation(viewModel: ChatViewModel) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var fullScreenImageUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val pdfPages by viewModel.previewPdfPages.collectAsState()
+    val pdfIndex by viewModel.previewPdfIndex.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val focusManager = LocalFocusManager.current
 
@@ -572,9 +575,22 @@ fun MainNavigation(viewModel: ChatViewModel) {
                             ),
                         contentScale = ContentScale.Fit
                     )
+                    // PDF page counter and navigation
+                    val pdfPageIndex = pdfPages.indexOf(url)
+                    if (pdfPageIndex >= 0) {
+                        Surface(shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.6f), modifier = Modifier.align(Alignment.TopStart).padding(12.dp).statusBarsPadding()) {
+                            Text("${pdfPageIndex + 1} / ${pdfPages.size}", color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+                        }
+                        if (pdfPageIndex > 0) Box(Modifier.fillMaxHeight().fillMaxWidth(0.2f).align(Alignment.CenterStart).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fullScreenImageUrl = pdfPages[pdfPageIndex - 1] })
+                        if (pdfPageIndex < pdfPages.size - 1) Box(Modifier.fillMaxHeight().fillMaxWidth(0.2f).align(Alignment.CenterEnd).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fullScreenImageUrl = pdfPages[pdfPageIndex + 1] })
+                    }
+
                     // Close button
                     IconButton(
-                        onClick = { fullScreenImageUrl = null },
+                        onClick = {
+                            if (pdfPages.isNotEmpty()) viewModel.clearPreviews()
+                            fullScreenImageUrl = null
+                        },
                         modifier = Modifier
                             .align(Alignment.TopEnd)
                             .statusBarsPadding()
@@ -609,23 +625,9 @@ fun MainNavigation(viewModel: ChatViewModel) {
                 }
             }
 
-            // PDF page viewer
-            val pdfPages by viewModel.previewPdfPages.collectAsState()
-            val pdfIndex by viewModel.previewPdfIndex.collectAsState()
-            if (pdfPages.isNotEmpty()) {
-                var currentPage by remember { mutableIntStateOf(pdfIndex) }
-                Box(modifier = Modifier.fillMaxSize().background(Color.Black).statusBarsPadding().navigationBarsPadding()) {
-                    com.newoether.agora.ui.chat.ZoomableImage(model = pdfPages[currentPage], modifier = Modifier.fillMaxSize())
-                    Surface(shape = RoundedCornerShape(50), color = Color.Black.copy(alpha = 0.6f), modifier = Modifier.align(Alignment.TopStart).padding(12.dp)) {
-                        Text("${currentPage + 1} / ${pdfPages.size}", color = Color.White, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
-                    }
-                    IconButton(onClick = { viewModel.clearPreviews() }, modifier = Modifier.align(Alignment.TopEnd).padding(12.dp).background(Color.Black.copy(alpha = 0.4f), CircleShape)) {
-                        Icon(Icons.Default.Close, "Close", tint = Color.White)
-                    }
-                    BackHandler(enabled = true) { viewModel.clearPreviews() }
-                    if (currentPage > 0) Box(Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterStart).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { currentPage-- })
-                    if (currentPage < pdfPages.size - 1) Box(Modifier.fillMaxHeight().fillMaxWidth(0.15f).align(Alignment.CenterEnd).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { currentPage++ })
-                }
+            // Pipe PDF pages through the image viewer
+            LaunchedEffect(pdfPages, pdfIndex) {
+                if (pdfPages.isNotEmpty()) fullScreenImageUrl = pdfPages[pdfIndex.coerceIn(0, pdfPages.size - 1)]
             }
 
             // Text file viewer
