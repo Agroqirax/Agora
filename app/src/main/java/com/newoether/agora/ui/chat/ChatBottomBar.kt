@@ -292,7 +292,7 @@ fun ChatBottomBar(
 
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.width(64.dp)
+                        modifier = Modifier.width(64.dp).padding(top = 5.dp)
                     ) {
                         Box {
                             val clickableMod = if (!isFile || isVideo) Modifier.clickable { onImageClick(uriStr) } else Modifier
