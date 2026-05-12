@@ -68,7 +68,7 @@ fun VideoSliceDialog(
             retriever.setDataSource(context, android.net.Uri.parse(videoUri))
             val bitmap = retriever.frameAtTime
             retriever.release()
-            bitmap?.let { Bitmap.createScaledBitmap(it, 200, (200f * it.height / it.width).roundToInt(), true) }
+            bitmap?.let { Bitmap.createScaledBitmap(it, 512, (512f * it.height / it.width).roundToInt(), true) }
                 ?.also { if (it != bitmap) bitmap.recycle() }
         } catch (_: Exception) { null }
     }
@@ -91,14 +91,14 @@ fun VideoSliceDialog(
                     stringResource(R.string.video_slice_title),
                     style = MaterialTheme.typography.headlineSmall
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     stringResource(R.string.video_duration, durationFormatted),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(16.dp))
 
                 if (thumbnail != null) {
                     Box(
