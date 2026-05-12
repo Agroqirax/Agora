@@ -6,6 +6,7 @@ import androidx.core.content.FileProvider
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +62,14 @@ class DataImporter(
             bytes[0] == 0x47.toByte() && bytes[1] == 0x49.toByte() -> "gif"
             bytes[0] == 0x52.toByte() && bytes[1] == 0x49.toByte() -> "webp"
             else -> "jpg"
+        }
+    }
+
+    private fun detectVideoExtension(bytes: ByteArray): String {
+        if (bytes.size < 4) return "mp4"
+        return when {
+            bytes[0] == 0x1A.toByte() && bytes[1] == 0x45.toByte() && bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte() -> "webm"
+            else -> "mp4"
         }
     }
 
@@ -172,6 +181,7 @@ class DataImporter(
             // Conversations
             val convDecision = decisions[DataExporter.ExportCategory.CONVERSATIONS]
             if (convDecision != null && convDecision != ImportStrategy.SKIP) {
+                val videoCleanupList = mutableListOf<java.io.File>()
                 try {
                     entries["conversations.json"]?.decodeToString()?.let { json ->
                         val data = Json.decodeFromString<ExportConversations>(json)
@@ -207,10 +217,38 @@ class DataImporter(
                             }
                         }
 
+                        // Restore video files from ZIP to app storage
+                        val videoEntries = entries.filter { it.key.startsWith("videos/") }
+                        val restoredVideos = mutableMapOf<String, String>() // messageId -> local file path
+                        for ((path, bytes) in videoEntries) {
+                            // path format: videos/<messageId>/<index>
+                            val parts = path.removePrefix("videos/").split("/")
+                            if (parts.size == 2 && bytes.isNotEmpty()) {
+                                val msgId = parts[0]
+                                val ext = detectVideoExtension(bytes)
+                                val vidFile = java.io.File(context.filesDir, "vid_import_${java.util.UUID.randomUUID()}.$ext")
+                                vidFile.writeBytes(bytes)
+                                videoCleanupList.add(vidFile)
+                                restoredVideos[msgId] = "file://${vidFile.absolutePath}"
+                            }
+                        }
+
                         // Update message entities with restored image paths
                         val finalMsgEntities = msgEntities.map { msg ->
                             val imgs = restoredImages[msg.id]
-                            if (imgs != null) msg.copy(images = imgs) else msg
+                            var updated = if (imgs != null) msg.copy(images = imgs) else msg
+                            // Update attachmentMeta originalUri for videos
+                            val videoPath = restoredVideos[msg.id]
+                            if (videoPath != null && updated.attachmentMeta != null) {
+                                try {
+                                    val meta = Json.decodeFromString<AttachmentMeta>(updated.attachmentMeta!!)
+                                    val adjustedItems = meta.items.map { item ->
+                                        if (item.type == "video") item.copy(originalUri = videoPath) else item
+                                    }
+                                    updated = updated.copy(attachmentMeta = Json.encodeToString(AttachmentMeta(items = adjustedItems)))
+                                } catch (_: Exception) {}
+                            }
+                            updated
                         }
 
                         if (convDecision == ImportStrategy.REPLACE) {
@@ -230,6 +268,8 @@ class DataImporter(
                         }
                     }
                 } catch (e: Exception) {
+                    // Clean up restored video files on error
+                    for (f in videoCleanupList) { try { f.delete() } catch (_: Exception) {} }
                     errors.add("Conversations: ${e.localizedMessage ?: "Unknown error"}")
                 }
                 step()

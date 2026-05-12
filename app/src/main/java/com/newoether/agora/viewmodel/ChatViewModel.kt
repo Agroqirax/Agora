@@ -1023,11 +1023,23 @@ class ChatViewModel(
         }
         viewModelScope.launch(Dispatchers.IO) {
             // Delete attachment files for all messages in this conversation
-            val messagesWithMedia = chatDao.getMessagesForConversation(id).first()
-                .filter { it.images.isNotEmpty() }
-            for (msg in messagesWithMedia) {
+            val allMsgs = chatDao.getMessagesForConversation(id).first()
+            for (msg in allMsgs) {
                 for (imagePath in msg.images) {
                     try { java.io.File(imagePath).delete() } catch (_: Exception) {}
+                }
+                // Delete video files referenced in attachmentMeta
+                if (msg.attachmentMeta != null) {
+                    try {
+                        val meta = kotlinx.serialization.json.Json.decodeFromString<com.newoether.agora.model.AttachmentMeta>(msg.attachmentMeta!!)
+                        for (item in meta.items) {
+                            if (item.type == "video" && item.originalUri?.startsWith("file://") == true) {
+                                try {
+                                    java.io.File(item.originalUri.removePrefix("file://")).delete()
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    } catch (_: Exception) {}
                 }
             }
             chatDao.deleteEmbeddingsByConversation(id)
@@ -1378,9 +1390,28 @@ class ChatViewModel(
                         nextImageIndex++
                     }
                     "video" -> {
+                        // Copy video to local storage for export/playback survival
+                        val videoExt = when {
+                            att.mimeType?.contains("mp4") == true -> "mp4"
+                            att.mimeType?.contains("webm") == true -> "webm"
+                            att.mimeType?.contains("quicktime") == true -> "mov"
+                            else -> "mp4"
+                        }
+                        val videoFile = java.io.File(app.filesDir, "vid_original_${java.util.UUID.randomUUID()}.$videoExt")
+                        var localVideoUri: String? = null
+                        try {
+                            app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
+                                videoFile.outputStream().use { input.copyTo(it) }
+                            }
+                            localVideoUri = "file://${videoFile.absolutePath}"
+                        } catch (_: Exception) {
+                            // Fallback: keep original content URI (may expire)
+                            localVideoUri = att.uri
+                        }
+
                         if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
                             metaItems.add(com.newoether.agora.model.AttachmentItem(
-                                originalUri = att.uri, type = "video",
+                                originalUri = localVideoUri, type = "video",
                                 fileName = att.fileName, mimeType = att.mimeType,
                                 imageIndex = nextImageIndex, pageCount = att.frameCount
                             ))
@@ -1389,7 +1420,7 @@ class ChatViewModel(
                         } else {
                             val frameCount = att.frameCount ?: 1
                             metaItems.add(com.newoether.agora.model.AttachmentItem(
-                                originalUri = att.uri, type = "video",
+                                originalUri = localVideoUri, type = "video",
                                 fileName = att.fileName, mimeType = att.mimeType,
                                 imageIndex = nextImageIndex, pageCount = att.frameCount
                             ))

@@ -5,6 +5,7 @@ import android.net.Uri
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.AttachmentMeta
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
@@ -186,6 +187,32 @@ class DataExporter(
                     imagesExportedTotal += surviving.size
                     if (surviving.isNotEmpty()) {
                         imageMap[msg.id] = surviving
+                    }
+
+                    // Export video files referenced by attachmentMeta
+                    val meta = try {
+                        msg.attachmentMeta?.let { Json.decodeFromString<AttachmentMeta>(it) }
+                    } catch (_: Exception) { null }
+                    if (meta != null) {
+                        for (item in meta.items) {
+                            if (item.type != "video" || item.originalUri.isNullOrBlank()) continue
+                            val uri = item.originalUri
+                            // Handle file:// URIs (local copies)
+                            if (uri.startsWith("file://")) {
+                                val filePath = uri.removePrefix("file://")
+                                val file = java.io.File(filePath)
+                                if (file.exists()) {
+                                    try {
+                                        val bytes = file.readBytes()
+                                        if (bytes.isNotEmpty()) {
+                                            zip.putNextEntry(ZipEntry("videos/${msg.id}/${item.imageIndex ?: 0}"))
+                                            zip.write(bytes)
+                                            zip.closeEntry()
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            }
+                        }
                     }
                 }
 
