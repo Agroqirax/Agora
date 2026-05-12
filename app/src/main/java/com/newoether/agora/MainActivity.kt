@@ -1264,8 +1264,8 @@ fun ChatApp(
                     contentAlignment = Alignment.BottomCenter
                 ) {
                     ChatBottomBar(
-                        onSendMessage = { text, images ->
-                            viewModel.sendMessage(text, images)
+                        onSendMessage = { text, attachments ->
+                            viewModel.sendMessage(text, attachments = attachments)
                             scope.launch {
                                 delay(100)
                                 scrollToLastUserMessage(animate = true)

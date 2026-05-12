@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.CompositionLocalProvider
@@ -463,30 +464,68 @@ fun MessageItem(
                         ) {
                             if (message.images.isNotEmpty()) {
                                 val ctx = LocalContext.current
+                                val meta = remember(message.attachmentMeta) {
+                                    message.attachmentMeta
+                                }
                                 androidx.compose.foundation.lazy.LazyRow(
                                     modifier = Modifier.padding(bottom = if (message.text.isNotEmpty()) 8.dp else 0.dp),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    items(message.images) { imagePath ->
-                                        val mimeType = remember(imagePath) { try { ctx.contentResolver.getType(android.net.Uri.parse(imagePath)) } catch (_: Exception) { null } }
-                                        val isFile = mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")
+                                    items(message.images.withIndex().toList()) { (index, imagePath) ->
+                                        val metaItem = meta?.items?.getOrNull(index)
+                                        val isVideo = metaItem?.type == "video"
+                                        val isPdf = metaItem?.type == "pdf"
+                                        val isFileType = metaItem?.type == "file" || (!isVideo && !isPdf && remember(imagePath) {
+                                            try {
+                                                val mt = ctx.contentResolver.getType(android.net.Uri.parse(imagePath))
+                                                mt != null && !mt.startsWith("image/") && !mt.startsWith("video/")
+                                            } catch (_: Exception) { false }
+                                        })
+
+                                        val clickUri = if (isVideo && metaItem?.originalUri != null) metaItem.originalUri else imagePath
                                         val thumbModifier = Modifier
                                             .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .then(if (!isFile) Modifier.clickable { onImageClick(imagePath) } else Modifier)
+                                            .then(if (!isFileType) Modifier.clickable { onImageClick(clickUri) } else Modifier)
 
-                                        if (isFile) {
-                                            val fileName = remember(imagePath) {
-                                                try {
-                                                    val cursor = ctx.contentResolver.query(android.net.Uri.parse(imagePath), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-                                                    cursor?.use { if (it.moveToFirst()) { val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME); if (idx >= 0) it.getString(idx) else null } else null }
-                                                } catch (_: Exception) { null }
-                                            } ?: imagePath.substringAfterLast("/")
+                                        if (isFileType) {
+                                            val fileName = metaItem?.fileName ?: imagePath.substringAfterLast("/")
                                             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
                                                 Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                                                     Icon(Icons.Default.AttachFile, "File", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(28.dp))
                                                 }
                                                 Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                                            }
+                                        } else if (isPdf) {
+                                            val fileName = metaItem?.fileName ?: imagePath.substringAfterLast("/")
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(80.dp)) {
+                                                Box(modifier = Modifier.size(64.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFFE53935).copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
+                                                    Icon(Icons.Default.AttachFile, "PDF", tint = Color(0xFFE53935), modifier = Modifier.size(28.dp))
+                                                }
+                                                Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                                                if (metaItem?.warning != null) {
+                                                    Text(metaItem.warning!!, style = MaterialTheme.typography.labelSmall, color = Color(0xFFE53935), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                }
+                                            }
+                                        } else if (isVideo) {
+                                            // Show first frame with PlayArrow overlay
+                                            Box {
+                                                coil.compose.AsyncImage(
+                                                    model = imagePath,
+                                                    contentDescription = null,
+                                                    modifier = thumbModifier,
+                                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                                                )
+                                                Icon(
+                                                    Icons.Default.PlayArrow,
+                                                    contentDescription = stringResource(R.string.play),
+                                                    tint = Color.White,
+                                                    modifier = Modifier
+                                                        .align(Alignment.Center)
+                                                        .size(28.dp)
+                                                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                                        .padding(4.dp)
+                                                )
                                             }
                                         } else {
                                             coil.compose.AsyncImage(

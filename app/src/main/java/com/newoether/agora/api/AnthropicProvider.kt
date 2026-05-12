@@ -59,6 +59,7 @@ internal data class AnthropicContentPart(
     val thinking: String? = null,
     val signature: String? = null,
     val source: AnthropicImageSource? = null,
+    val documentSource: AnthropicDocumentSource? = null,
     val id: String? = null,
     val name: String? = null,
     val input: JsonObject? = null,
@@ -68,6 +69,13 @@ internal data class AnthropicContentPart(
 
 @Serializable
 internal data class AnthropicImageSource(
+    val type: String = "base64",
+    @SerialName("media_type") val mediaType: String,
+    val data: String
+)
+
+@Serializable
+internal data class AnthropicDocumentSource(
     val type: String = "base64",
     @SerialName("media_type") val mediaType: String,
     val data: String
@@ -190,15 +198,31 @@ class AnthropicProvider : LlmProvider {
 
             val parts = mutableListOf<AnthropicContentPart>()
 
-            // Add images
-            for (imagePath in msg.images) {
-                val encoded = com.newoether.agora.api.util.encodeImageToBase64(imagePath)
-                if (encoded != null) {
-                    val (mimeType, base64) = encoded
-                    parts.add(AnthropicContentPart(
-                        type = "image",
-                        source = AnthropicImageSource(mediaType = mimeType, data = base64)
-                    ))
+            // Add images (with PDF document support)
+            for ((index, imagePath) in msg.images.withIndex()) {
+                val metaItem = msg.attachmentMeta?.items?.getOrNull(index)
+                if (metaItem?.type == "pdf") {
+                    val file = java.io.File(imagePath)
+                    if (file.exists()) {
+                        val bytes = file.readBytes()
+                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        parts.add(AnthropicContentPart(
+                            type = "document",
+                            documentSource = AnthropicDocumentSource(
+                                mediaType = "application/pdf",
+                                data = base64
+                            )
+                        ))
+                    }
+                } else {
+                    val encoded = com.newoether.agora.api.util.encodeImageToBase64(imagePath)
+                    if (encoded != null) {
+                        val (mimeType, base64) = encoded
+                        parts.add(AnthropicContentPart(
+                            type = "image",
+                            source = AnthropicImageSource(mediaType = mimeType, data = base64)
+                        ))
+                    }
                 }
             }
 

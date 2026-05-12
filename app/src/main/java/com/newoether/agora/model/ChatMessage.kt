@@ -45,7 +45,8 @@ data class ChatMessage(
     val thoughtTimeMs: Long? = null,
     val modelName: String? = null,
     val toolCall: ToolCallData? = null,
-    val segments: List<MessageSegment>? = null
+    val segments: List<MessageSegment>? = null,
+    val attachmentMeta: AttachmentMeta? = null
 )
 
 @Immutable

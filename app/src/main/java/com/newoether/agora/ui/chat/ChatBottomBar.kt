@@ -55,6 +55,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -72,8 +73,10 @@ import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.onSizeChanged
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
@@ -110,7 +113,7 @@ fun Modifier.verticalScrollbar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatBottomBar(
-    onSendMessage: (String, List<String>) -> Unit,
+    onSendMessage: (String, List<com.newoether.agora.model.SelectedAttachment>) -> Unit,
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
     isSwitching: Boolean = false,
@@ -144,16 +147,112 @@ fun ChatBottomBar(
         }
     }
 
-    var selectedImageUris by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
-    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+    val coroutineScope = rememberCoroutineScope()
+
+    var selectedAttachments by remember { mutableStateOf<List<com.newoether.agora.model.SelectedAttachment>>(emptyList()) }
+    var processingStates by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
+    var pendingSend by remember { mutableStateOf(false) }
+
+    // Video slicing dialog state
+    var showVideoSliceDialog by remember { mutableStateOf(false) }
+    var pendingVideoUri by remember { mutableStateOf<String?>(null) }
+    var pendingVideoDurationMs by remember { mutableLongStateOf(0L) }
+    var pendingVideoQueue by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    val context = LocalContext.current
+
+    // Helper: process next video in queue, showing slice dialog
+    fun processNextVideo() {
+        if (pendingVideoQueue.isNotEmpty()) {
+            val uri = pendingVideoQueue.first()
+            pendingVideoQueue = pendingVideoQueue.drop(1).toMutableList()
+            val durationMs = try {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, android.net.Uri.parse(uri))
+                val dur = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                retriever.release()
+                dur
+            } catch (_: Exception) { 0L }
+            pendingVideoUri = uri
+            pendingVideoDurationMs = durationMs
+            showVideoSliceDialog = true
+        }
+    }
+
+    // Start frame extraction for a video, return list of frame paths
+    suspend fun extractVideoFrames(videoUri: String, frameCount: Int, intervalMs: Long): List<String> {
+        return withContext(Dispatchers.IO) {
+            val paths = mutableListOf<String>()
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, android.net.Uri.parse(videoUri))
+                var timeUs = 0L
+                val intervalUs = intervalMs * 1000L
+                for (i in 0 until frameCount) {
+                    val bitmap = retriever.getFrameAtTime(
+                        timeUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST
+                    )
+                    if (bitmap != null) {
+                        val file = java.io.File(context.filesDir, "vid_${java.util.UUID.randomUUID()}_$i.jpg")
+                        file.outputStream().use { out ->
+                            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                        }
+                        bitmap.recycle()
+                        paths.add(file.absolutePath)
+                    }
+                    timeUs += intervalUs
+                    processingStates = processingStates + (videoUri to (i + 1).toFloat() / frameCount)
+                }
+                retriever.release()
+            } catch (_: Exception) {}
+            processingStates = processingStates - videoUri
+            paths
+        }
+    }
+
+    val photoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
-        selectedImageUris = selectedImageUris + uris.map { it.toString() }
+        selectedAttachments = selectedAttachments + uris.map {
+            com.newoether.agora.model.SelectedAttachment(
+                uri = it.toString(), type = "image",
+                mimeType = try { context.contentResolver.getType(it) } catch (_: Exception) { null }
+            )
+        }
+    }
+    val videoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia()
+    ) { uris ->
+        val urisToQueue = uris.map { it.toString() }
+        pendingVideoQueue = pendingVideoQueue + urisToQueue
+        if (!showVideoSliceDialog) processNextVideo()
     }
     val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris ->
-        selectedImageUris = selectedImageUris + uris.map { it.toString() }
+        selectedAttachments = selectedAttachments + uris.map { uri ->
+            val mimeType = try { context.contentResolver.getType(uri) } catch (_: Exception) { null }
+            val type = when {
+                mimeType == "application/pdf" -> "pdf"
+                mimeType != null -> "file"
+                else -> "file"
+            }
+            val fileName = try {
+                val cursor = context.contentResolver.query(
+                    uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+                )
+                cursor?.use {
+                    if (it.moveToFirst()) {
+                        val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                        if (idx >= 0) it.getString(idx) else null
+                    } else null
+                }
+            } catch (_: Exception) { null }
+            com.newoether.agora.model.SelectedAttachment(
+                uri = uri.toString(), type = type,
+                mimeType = mimeType, fileName = fileName
+            )
+        }
     }
 
     Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier).padding(8.dp)) {
@@ -164,22 +263,20 @@ fun ChatBottomBar(
         }
 
         Column(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).animateContentSize(tween(400))) {
-        if (selectedImageUris.isNotEmpty() && !isExpanded) {
+        if (selectedAttachments.isNotEmpty() && !isExpanded) {
             androidx.compose.foundation.lazy.LazyRow(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp, start = 8.dp, end = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(selectedImageUris) { uriStr ->
-                    val context = LocalContext.current
-                    val mimeType = remember(uriStr) {
-                        try {
-                            context.contentResolver.getType(Uri.parse(uriStr))
-                        } catch (_: Exception) {
-                            null
-                        }
-                    }
-                    val isVideo = mimeType?.startsWith("video/") == true
-                    val isFile = mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")
+                items(selectedAttachments.size) { index ->
+                    val attachment = selectedAttachments[index]
+                    val uriStr = attachment.uri
+                    val isVideo = attachment.type == "video"
+                    val isPdf = attachment.type == "pdf"
+                    val isFile = attachment.type == "file"
+                    val isProcessing = uriStr in processingStates
+                    val progress = processingStates[uriStr] ?: 0f
+
                     var videoThumb by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
                     LaunchedEffect(uriStr, isVideo) {
                         if (isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -198,10 +295,11 @@ fun ChatBottomBar(
                         modifier = Modifier.width(64.dp)
                     ) {
                         Box {
+                            val clickableMod = if (!isFile || isVideo) Modifier.clickable { onImageClick(uriStr) } else Modifier
                             val thumbModifier = Modifier
                                 .size(64.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .then(if (!isFile) Modifier.clickable { onImageClick(uriStr) } else Modifier)
+                                .then(clickableMod)
 
                             when {
                                 isVideo && videoThumb != null -> {
@@ -236,6 +334,20 @@ fun ChatBottomBar(
                                         )
                                     }
                                 }
+                                isPdf -> {
+                                    Box(
+                                        modifier = thumbModifier
+                                            .background(Color(0xFFE53935).copy(alpha = 0.1f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.AttachFile,
+                                            stringResource(R.string.file),
+                                            tint = Color(0xFFE53935),
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                }
                                 isFile -> {
                                     Box(
                                         modifier = thumbModifier
@@ -260,6 +372,23 @@ fun ChatBottomBar(
                                 }
                             }
 
+                            // Processing indicator overlay
+                            if (isProcessing) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.4f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
@@ -267,7 +396,17 @@ fun ChatBottomBar(
                                 .size(18.dp)
                                 .background(Color.Black.copy(alpha = 0.8f), CircleShape)
                                 .clip(RoundedCornerShape(18.dp))
-                                .clickable { selectedImageUris = selectedImageUris - uriStr },
+                                .clickable {
+                                    // Clean up pre-extracted frame files
+                                    val removed = selectedAttachments.getOrNull(index)
+                                    if (removed?.processedFrames != null) {
+                                        for (path in removed.processedFrames) {
+                                            try { java.io.File(path).delete() } catch (_: Exception) {}
+                                        }
+                                    }
+                                    selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(index) }
+                                    processingStates = processingStates - uriStr
+                                },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -278,22 +417,9 @@ fun ChatBottomBar(
                             )
                         }
                         }
-                        if (isFile) {
-                            val fileName = remember(uriStr) {
-                                try {
-                                    val cursor = context.contentResolver.query(
-                                        Uri.parse(uriStr), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
-                                    )
-                                    cursor?.use {
-                                        if (it.moveToFirst()) {
-                                            val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                                            if (idx >= 0) it.getString(idx) else null
-                                        } else null
-                                    }
-                                } catch (_: Exception) { null }
-                            } ?: uriStr.substringAfterLast("/")
+                        if ((isFile || isPdf || isVideo) && attachment.fileName != null) {
                             Text(
-                                text = fileName,
+                                text = attachment.fileName!!,
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -360,7 +486,7 @@ fun ChatBottomBar(
                             onClick = {
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
-                                launcher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                photoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
                             }
                         )
                         DropdownMenuItem(
@@ -374,7 +500,7 @@ fun ChatBottomBar(
                             onClick = {
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
-                                launcher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
+                                videoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
                             }
                         )
                         DropdownMenuItem(
@@ -579,28 +705,102 @@ fun ChatBottomBar(
                     }
                 }
             }
-            val canSend = (textFieldState.text.isNotBlank() || selectedImageUris.isNotEmpty()) && !isLoading && isModelValid && !isSwitching
-            val isActionable = (isLoading || canSend) && !isSwitching
+            // Pending send: wait for processing to finish, then auto-send
+            val anyProcessing = processingStates.isNotEmpty()
+            LaunchedEffect(pendingSend, anyProcessing) {
+                if (pendingSend && !anyProcessing) {
+                    onSendMessage(textFieldState.text.toString(), selectedAttachments)
+                    selectedAttachments = emptyList()
+                    textFieldState.edit { replace(0, length, "") }
+                    onCollapse()
+                    pendingSend = false
+                }
+            }
+            val canSend = (textFieldState.text.isNotBlank() || selectedAttachments.isNotEmpty()) && !isLoading && isModelValid && !isSwitching
+            val isActionable = (isLoading || canSend || pendingSend) && !isSwitching
             FloatingActionButton(
-                onClick = { 
+                onClick = {
                     if (isSwitching) return@FloatingActionButton
-                    if (isLoading) onStopGeneration() 
-                    else if (canSend) { 
-                        onSendMessage(textFieldState.text.toString(), selectedImageUris)
-                        selectedImageUris = emptyList()
-                        textFieldState.edit { replace(0, length, "") }
-                        onCollapse()
-                    } 
-                }, 
-                containerColor = if (isActionable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant, 
-                contentColor = if (isActionable) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, 
-                modifier = Modifier.size(48.dp), 
-                shape = CircleShape, 
+                    if (isLoading) onStopGeneration()
+                    else if (pendingSend) {
+                        pendingSend = false
+                    }
+                    else if (canSend) {
+                        if (anyProcessing) {
+                            pendingSend = true
+                        } else {
+                            onSendMessage(textFieldState.text.toString(), selectedAttachments)
+                            selectedAttachments = emptyList()
+                            textFieldState.edit { replace(0, length, "") }
+                            onCollapse()
+                        }
+                    }
+                },
+                containerColor = if (isActionable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isActionable) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
                 elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
-            ) { 
-                Icon(if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send, stringResource(R.string.action), modifier = Modifier.size(24.dp))
+            ) {
+                if (pendingSend) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Icon(if (isLoading) Icons.Default.Stop else Icons.AutoMirrored.Filled.Send, stringResource(R.string.action), modifier = Modifier.size(24.dp))
+                }
             }
         }
+    }
+
+    // Video slice dialog
+    if (showVideoSliceDialog && pendingVideoUri != null) {
+        VideoSliceDialog(
+            videoUri = pendingVideoUri!!,
+            durationMs = pendingVideoDurationMs,
+            onConfirm = { result ->
+                showVideoSliceDialog = false
+                val vidUri = result.uri
+                val fileName = try {
+                    val cursor = context.contentResolver.query(
+                        Uri.parse(vidUri), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
+                    )
+                    cursor?.use {
+                        if (it.moveToFirst()) {
+                            val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                            if (idx >= 0) it.getString(idx) else null
+                        } else null
+                    }
+                } catch (_: Exception) { null }
+                val attachment = com.newoether.agora.model.SelectedAttachment(
+                    uri = vidUri, type = "video",
+                    frameCount = result.frameCount,
+                    sliceIntervalMs = result.intervalMs,
+                    fileName = fileName,
+                    mimeType = "video/*"
+                )
+                selectedAttachments = selectedAttachments + attachment
+                processingStates = processingStates + (vidUri to 0f)
+
+                // Start frame extraction and store result paths
+                coroutineScope.launch(Dispatchers.IO) {
+                    val framePaths = extractVideoFrames(vidUri, result.frameCount, result.intervalMs)
+                    selectedAttachments = selectedAttachments.map { a ->
+                        if (a.uri == vidUri) a.copy(processedFrames = framePaths) else a
+                    }
+                }
+
+                // Process next video in queue
+                processNextVideo()
+            },
+            onDismiss = {
+                showVideoSliceDialog = false
+                // Process next video in queue
+                processNextVideo()
+            }
+        )
     }
 }
 

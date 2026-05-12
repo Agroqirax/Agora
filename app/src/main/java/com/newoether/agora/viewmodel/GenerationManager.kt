@@ -86,26 +86,57 @@ class GenerationManager(
     private fun getProviderInstance(name: String): LlmProvider =
         providers[name] ?: providers.values.first()
 
-    suspend fun processImages(uris: List<String>): List<String> = withContext(Dispatchers.IO) {
-        uris.mapNotNull { uriString ->
+    data class VideoSliceConfig(
+        val intervalMicros: Long,
+        val frameCount: Int
+    )
+
+    suspend fun processImages(
+        uris: List<String>,
+        sliceConfigs: Map<String, VideoSliceConfig> = emptyMap()
+    ): List<String> = withContext(Dispatchers.IO) {
+        uris.flatMap { uriString ->
             try {
                 val uri = android.net.Uri.parse(uriString)
                 val mimeType = app.contentResolver.getType(uri)
 
                 when {
                     mimeType?.startsWith("video/") == true -> {
+                        val config = sliceConfigs[uriString]
                         val retriever = android.media.MediaMetadataRetriever()
                         retriever.setDataSource(app, uri)
-                        val bitmap = retriever.frameAtTime
-                        retriever.release()
-                        if (bitmap != null) {
-                            val file = File(app.filesDir, "vid_${UUID.randomUUID()}.jpg")
-                            file.outputStream().use { out ->
-                                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                        val paths = mutableListOf<String>()
+
+                        if (config != null && config.frameCount > 1) {
+                            var timeUs = 0L
+                            for (i in 0 until config.frameCount) {
+                                val bitmap = retriever.getFrameAtTime(
+                                    timeUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST
+                                )
+                                if (bitmap != null) {
+                                    val file = File(app.filesDir, "vid_${UUID.randomUUID()}_$i.jpg")
+                                    file.outputStream().use { out ->
+                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                                    }
+                                    bitmap.recycle()
+                                    paths.add(file.absolutePath)
+                                }
+                                timeUs += config.intervalMicros
                             }
-                            bitmap.recycle()
-                            file.absolutePath
-                        } else null
+                        } else {
+                            // Single frame (default behavior)
+                            val bitmap = retriever.frameAtTime
+                            if (bitmap != null) {
+                                val file = File(app.filesDir, "vid_${UUID.randomUUID()}.jpg")
+                                file.outputStream().use { out ->
+                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                                }
+                                bitmap.recycle()
+                                paths.add(file.absolutePath)
+                            }
+                        }
+                        retriever.release()
+                        paths
                     }
                     mimeType?.startsWith("image/") == true || mimeType == null -> {
                         app.contentResolver.openInputStream(uri)?.use { inputStream ->
@@ -126,15 +157,15 @@ class GenerationManager(
                                         bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
                                     }
                                     bitmap.recycle()
-                                    file.absolutePath
-                                } else null
-                            }
-                        }
+                                    listOf(file.absolutePath)
+                                } else emptyList()
+                            } ?: emptyList()
+                        } ?: emptyList()
                     }
-                    else -> null
+                    else -> emptyList()
                 }
             } catch (_: Exception) {
-                null
+                emptyList()
             }
         }
     }

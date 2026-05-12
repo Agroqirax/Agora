@@ -68,7 +68,8 @@ class DataExporter(
         val timestamp: Long,
         val thoughtTimeMs: Long? = null,
         val modelName: String? = null,
-        val toolCallJson: String? = null
+        val toolCallJson: String? = null,
+        val attachmentMeta: String? = null
     )
 
     @Serializable
@@ -196,7 +197,7 @@ class DataExporter(
                     val exportedImages = imageMap[m.id] ?: emptyList()
                     ExportMessageEntity(m.id, m.conversationId, m.parentId, m.text, exportedImages,
                         m.thoughts, m.thoughtTitle, m.tokenCount, m.status.name, m.participant.name,
-                        m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson)
+                        m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson, m.attachmentMeta)
                 }
                 zip.putNextEntry(ZipEntry("conversations.json"))
                 zip.write(Json.encodeToString(ExportConversations(conversations, messages)).toByteArray())

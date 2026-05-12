@@ -118,16 +118,29 @@ fun convertToOpenAiMessages(
         }
 
         if (includeImages) {
-            for (imagePath in msg.images) {
-                val encoded = encodeImageToBase64(imagePath)
-                if (encoded != null) {
-                    val (mimeType, base64) = encoded
-                    parts.add(
-                        OpenAiContentPart(
-                            type = "image_url",
-                            imageUrl = OpenAiImageUrl(url = "data:$mimeType;base64,$base64")
+            for ((index, imagePath) in msg.images.withIndex()) {
+                val metaItem = msg.attachmentMeta?.items?.getOrNull(index)
+                if (metaItem?.type == "pdf") {
+                    val file = java.io.File(imagePath)
+                    if (file.exists()) {
+                        val bytes = file.readBytes()
+                        val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                        parts.add(OpenAiContentPart(
+                            type = "file",
+                            fileData = com.newoether.agora.api.OpenAiFileData(data = base64)
+                        ))
+                    }
+                } else {
+                    val encoded = encodeImageToBase64(imagePath)
+                    if (encoded != null) {
+                        val (mimeType, base64) = encoded
+                        parts.add(
+                            OpenAiContentPart(
+                                type = "image_url",
+                                imageUrl = OpenAiImageUrl(url = "data:$mimeType;base64,$base64")
+                            )
                         )
-                    )
+                    }
                 }
             }
         }

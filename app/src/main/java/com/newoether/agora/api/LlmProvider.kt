@@ -111,12 +111,19 @@ data class OpenAiRequestFunction(
 data class OpenAiContentPart(
     val type: String,
     val text: String? = null,
-    @SerialName("image_url") val imageUrl: OpenAiImageUrl? = null
+    @SerialName("image_url") val imageUrl: OpenAiImageUrl? = null,
+    @SerialName("file_data") val fileData: OpenAiFileData? = null
 )
 
 @Serializable
 data class OpenAiImageUrl(
     val url: String
+)
+
+@Serializable
+data class OpenAiFileData(
+    val data: String,
+    @SerialName("mime_type") val mimeType: String = "application/pdf"
 )
 
 @Serializable

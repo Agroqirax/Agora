@@ -25,6 +25,8 @@ import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.AttachmentItem
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
@@ -34,6 +36,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.service.AgoraForegroundService
 import kotlinx.coroutines.CancellationException
@@ -410,6 +413,9 @@ class ChatViewModel(
                                             ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", SearchResultFormatter.format(rawResult, appContext))
                                         }
                                     } catch (_: Exception) { null }
+                                },
+                                attachmentMeta = it.attachmentMeta?.let { json ->
+                                    try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
                                 }
                             )
                         }
@@ -1016,13 +1022,13 @@ class ChatViewModel(
             stopGeneration()
         }
         viewModelScope.launch(Dispatchers.IO) {
-            // Delete image files for all messages in this conversation
-            val messagesWithImages = chatDao.getMessagesForConversation(id).first()
+            // Delete attachment files for all messages in this conversation
+            val messagesWithMedia = chatDao.getMessagesForConversation(id).first()
                 .filter { it.images.isNotEmpty() }
-            val imagesDir = java.io.File(getApplication<Application>().filesDir, "images")
-            for (msg in messagesWithImages) {
-                val msgPrefix = "${msg.id}_"
-                imagesDir.listFiles()?.filter { it.name.startsWith(msgPrefix) }?.forEach { it.delete() }
+            for (msg in messagesWithMedia) {
+                for (imagePath in msg.images) {
+                    try { java.io.File(imagePath).delete() } catch (_: Exception) {}
+                }
             }
             chatDao.deleteEmbeddingsByConversation(id)
             chatDao.deleteMessagesByConversation(id)
@@ -1317,7 +1323,10 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(text: String, images: List<String> = emptyList()) {
+    private fun supportsNativePdf(providerName: String): Boolean =
+        providerName in setOf("Anthropic", "Google", "OpenAI", "DeepSeek", "Qwen", "Open Router")
+
+    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()) {
         val modelId = currentActiveModel.value
         val providerName = getProviderForModel(modelId)
         val activeKeyId = activeApiKeyIds.value[providerName]
@@ -1326,32 +1335,179 @@ class ChatViewModel(
 
         generationJob = generationScope.launch {
             val app = getApplication<Application>()
+            // mediaUris: URIs that need processImages (images, video content:// URIs)
+            // directPaths: paths that skip processImages (pre-extracted frames, PDF copies, rendered pages)
             val mediaUris = mutableListOf<String>()
+            val directPaths = mutableListOf<String>()
+            val sliceConfigs = mutableMapOf<String, GenerationManager.VideoSliceConfig>()
             var fileContent = ""
-            if (images.isNotEmpty()) {
-                for (uri in images) {
-                    val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
-                    if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
-                        mediaUris.add(uri)
+            val metaItems = mutableListOf<com.newoether.agora.model.AttachmentItem>()
+            var nextImageIndex = 0
+
+            // Process legacy images list (backward compatibility)
+            for (uri in images) {
+                val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
+                if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+                    mediaUris.add(uri)
+                    try {
+                        val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
+                        if (isText) {
+                            app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
+                                val content = stream.bufferedReader().readText().take(500_000)
+                                if (content.isNotBlank()) {
+                                    val fileName = getFileName(app, android.net.Uri.parse(uri))
+                                    fileContent += "\n\n--- File: $fileName ---\n$content"
+                                }
+                            }
+                        }
+                    } catch (_: Exception) {}
+                } else {
+                    mediaUris.add(uri)
+                }
+            }
+
+            // Process new SelectedAttachment list
+            for (att in attachments) {
+                when (att.type) {
+                    "image" -> {
+                        mediaUris.add(att.uri)
+                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                            originalUri = att.uri, type = "image", mimeType = att.mimeType,
+                            imageIndex = nextImageIndex
+                        ))
+                        nextImageIndex++
+                    }
+                    "video" -> {
+                        if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
+                            metaItems.add(com.newoether.agora.model.AttachmentItem(
+                                originalUri = att.uri, type = "video",
+                                fileName = att.fileName, mimeType = att.mimeType,
+                                imageIndex = nextImageIndex, pageCount = att.frameCount
+                            ))
+                            directPaths.addAll(att.processedFrames)
+                            nextImageIndex += att.processedFrames.size
+                        } else {
+                            val frameCount = att.frameCount ?: 1
+                            metaItems.add(com.newoether.agora.model.AttachmentItem(
+                                originalUri = att.uri, type = "video",
+                                fileName = att.fileName, mimeType = att.mimeType,
+                                imageIndex = nextImageIndex, pageCount = att.frameCount
+                            ))
+                            mediaUris.add(att.uri)
+                            if (att.frameCount != null && att.frameCount > 1 && att.sliceIntervalMs != null) {
+                                sliceConfigs[att.uri] = GenerationManager.VideoSliceConfig(
+                                    intervalMicros = att.sliceIntervalMs * 1000L,
+                                    frameCount = att.frameCount
+                                )
+                            }
+                            nextImageIndex += frameCount
+                        }
+                    }
+                    "file" -> {
+                        val validation = com.newoether.agora.util.FileValidator.validate(app, android.net.Uri.parse(att.uri))
+                        if (!validation.valid) {
+                            _snackbarMessage.emit(SnackbarEvent(validation.error!!))
+                            continue
+                        }
                         try {
-                            val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
-                            if (isText) {
-                                app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
-                                    val content = stream.bufferedReader().readText().take(500_000)
-                                    if (content.isNotBlank()) {
-                                        val fileName = getFileName(app, android.net.Uri.parse(uri))
-                                        fileContent += "\n\n--- File: $fileName ---\n$content"
-                                    }
+                            app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
+                                val content = stream.bufferedReader().readText().take(500_000)
+                                if (content.isNotBlank()) {
+                                    val fileName = att.fileName ?: getFileName(app, android.net.Uri.parse(att.uri))
+                                    fileContent += "\n\n--- File: $fileName ---\n$content"
                                 }
                             }
                         } catch (_: Exception) {}
-                    } else {
-                        mediaUris.add(uri)
+                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                            originalUri = att.uri, type = "file",
+                            fileName = att.fileName, mimeType = att.mimeType
+                        ))
+                    }
+                    "pdf" -> {
+                        val validation = com.newoether.agora.util.FileValidator.validate(app, android.net.Uri.parse(att.uri))
+                        if (!validation.valid) {
+                            _snackbarMessage.emit(SnackbarEvent(validation.error!!))
+                            continue
+                        }
+                        if (supportsNativePdf(providerName)) {
+                            val pdfFile = java.io.File(app.filesDir, "pdf_${java.util.UUID.randomUUID()}.pdf")
+                            try {
+                                app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
+                                    pdfFile.outputStream().use { input.copyTo(it) }
+                                }
+                                metaItems.add(com.newoether.agora.model.AttachmentItem(
+                                    originalUri = att.uri, type = "pdf",
+                                    fileName = att.fileName, mimeType = "application/pdf",
+                                    imageIndex = nextImageIndex
+                                ))
+                                directPaths.add(pdfFile.absolutePath)
+                                nextImageIndex++
+                            } catch (_: Exception) {
+                                _snackbarMessage.emit(SnackbarEvent("Failed to copy PDF"))
+                            }
+                        } else {
+                            val pagePaths = com.newoether.agora.util.PdfPageRenderer.renderAsImages(app, android.net.Uri.parse(att.uri))
+                            if (pagePaths.isEmpty()) {
+                                _snackbarMessage.emit(SnackbarEvent("Failed to render PDF"))
+                                continue
+                            }
+                            metaItems.add(com.newoether.agora.model.AttachmentItem(
+                                originalUri = att.uri, type = "pdf",
+                                fileName = att.fileName, mimeType = "application/pdf",
+                                imageIndex = nextImageIndex, pageCount = pagePaths.size,
+                                warning = "PDF rendered as images - provider may not support PDF"
+                            ))
+                            directPaths.addAll(pagePaths)
+                            nextImageIndex += pagePaths.size
+                        }
                     }
                 }
             }
+
             val finalText = if (fileContent.isNotBlank()) text + fileContent else text
-            val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris) else emptyList()
+            val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris, sliceConfigs) else emptyList()
+            val allImages = processedImages + directPaths
+
+            // Recalculate imageIndex for all meta items based on final allImages positions.
+            // nextImageIndex tracked the expected order:
+            //   First N items correspond to mediaUris entries (→ processedImages)
+            //   Remaining items correspond to directPaths entries
+            // After processing, processedImages may differ in size from mediaUris.
+            // We build a position map: for each metaItem that has imageIndex < mediaUris.size,
+            // it was tracking an offset within mediaUris. We need the actual offset within processedImages.
+            val uriToResultMap = mutableListOf<IntRange>() // for each mediaUris entry, the range in processedImages
+            var pos = 0
+            for (uri in mediaUris) {
+                val start = pos
+                // Count consecutive results belonging to this URI by scanning forward until
+                // we find files that don't correspond. Since we can't distinguish, use a simple
+                // heuristic: each URI produces either 0 or 1+ results. The slice configs tell us
+                // how many frames per video.
+                val config = sliceConfigs[uri]
+                val expectedCount = config?.frameCount ?: 1
+                val end = minOf(pos + expectedCount, processedImages.size)
+                uriToResultMap.add(start until end)
+                pos = end
+            }
+            // Cap at processedImages size
+            val adjustedMetaItems = metaItems.map { item ->
+                val idx = item.imageIndex
+                if (idx == null) {
+                    item
+                } else if (idx < mediaUris.size && idx < uriToResultMap.size) {
+                    val range = uriToResultMap[idx]
+                    item.copy(imageIndex = range.first)
+                } else if (idx in mediaUris.size until (mediaUris.size + directPaths.size)) {
+                    // This item's imageIndex is relative to directPaths start
+                    item.copy(imageIndex = processedImages.size + (idx - mediaUris.size))
+                } else {
+                    // Fallback: keep original index (shouldn't happen for well-formed input)
+                    item
+                }
+            }
+            val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
+                com.newoether.agora.model.AttachmentMeta(items = adjustedMetaItems)
+            } else null
             var currentId = _currentConversationId.value
             val wasNewChat = _isNewChatMode.value
             if (wasNewChat) {
@@ -1373,7 +1529,8 @@ class ChatViewModel(
             val userMessageId = UUID.randomUUID().toString()
             chatDao.upsertMessage(MessageEntity(
                 id = userMessageId, conversationId = currentId, parentId = lastMessageId,
-                text = finalText, images = processedImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
+                text = finalText, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
+                attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
             ))
             val modelMessageId = UUID.randomUUID().toString()
             val startTime = System.currentTimeMillis() + 1

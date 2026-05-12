@@ -88,7 +88,8 @@ data class MessageEntity(
     val timestamp: Long,
     val thoughtTimeMs: Long? = null,
     val modelName: String? = null,
-    val toolCallJson: String? = null
+    val toolCallJson: String? = null,
+    val attachmentMeta: String? = null
 )
 
 @Dao
@@ -183,7 +184,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 11
+        const val CURRENT_VERSION = 12
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -241,6 +242,11 @@ abstract class ChatDatabase : RoomDatabase() {
                     db.execSQL("ALTER TABLE embeddings ADD COLUMN modelId TEXT NOT NULL DEFAULT ''")
                     db.execSQL("DROP INDEX IF EXISTS index_embeddings_messageId")
                     db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_embeddings_messageId_modelId ON embeddings (messageId, modelId)")
+                }
+            },
+            object : Migration(11, 12) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE messages ADD COLUMN attachmentMeta TEXT")
                 }
             }
         )
