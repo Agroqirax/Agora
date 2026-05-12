@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -311,11 +312,11 @@ private fun ImportPreviewDialog(
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 Text(
-                    stringResource(R.string.import_from, manifest.exportedAt.take(19), manifest.appVersion),
+                    stringResource(R.string.import_from, manifest.exportedAt.take(19).replace("T", " "), manifest.appVersion),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(24.dp))
 
                 if (preview.conversationCount > 0) {
                     StrategyRow(
@@ -386,9 +387,9 @@ private fun StrategyRow(
         Text(label, style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            StrategyChip("Merge", strategy == DataImporter.ImportStrategy.MERGE) { onSelect(DataImporter.ImportStrategy.MERGE) }
-            StrategyChip("Replace", strategy == DataImporter.ImportStrategy.REPLACE) { onSelect(DataImporter.ImportStrategy.REPLACE) }
-            StrategyChip("Skip", strategy == DataImporter.ImportStrategy.SKIP) { onSelect(DataImporter.ImportStrategy.SKIP) }
+            StrategyChip(stringResource(R.string.import_strategy_merge), strategy == DataImporter.ImportStrategy.MERGE) { onSelect(DataImporter.ImportStrategy.MERGE) }
+            StrategyChip(stringResource(R.string.import_strategy_replace), strategy == DataImporter.ImportStrategy.REPLACE) { onSelect(DataImporter.ImportStrategy.REPLACE) }
+            StrategyChip(stringResource(R.string.import_strategy_skip), strategy == DataImporter.ImportStrategy.SKIP) { onSelect(DataImporter.ImportStrategy.SKIP) }
         }
     }
 }
@@ -399,9 +400,6 @@ private fun StrategyChip(label: String, selected: Boolean, onClick: () -> Unit) 
         selected = selected,
         onClick = onClick,
         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        shape = RoundedCornerShape(50)
     )
 }

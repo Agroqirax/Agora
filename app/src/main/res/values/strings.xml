@@ -375,7 +375,7 @@
 
     <string name="export_failed">Export failed: %1$s</string>
     <string name="import_preview_title">Import Data</string>
-    <string name="import_from">Exported on %1$s from Agora v%2$s</string>
+    <string name="import_from">Exported on %1$s\nFrom Agora v%2$s</string>
     <string name="import_strategy_merge">Merge</string>
     <string name="import_strategy_replace">Replace</string>
     <string name="import_strategy_skip">Skip</string>

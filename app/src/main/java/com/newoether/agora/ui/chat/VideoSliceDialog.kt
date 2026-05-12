@@ -89,7 +89,7 @@ fun VideoSliceDialog(
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
                     stringResource(R.string.video_slice_title),
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.headlineSmall
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(

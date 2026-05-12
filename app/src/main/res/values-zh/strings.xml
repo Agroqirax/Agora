@@ -379,4 +379,35 @@
     <string name="file_too_large">文件过大 (最大 20 MB)</string>
     <string name="pdf_copy_failed">PDF 复制失败</string>
     <string name="pdf_render_failed">PDF 渲染失败</string>
+
+    <!-- Data Control -->
+    <string name="settings_data_control">数据控制</string>
+    <string name="settings_data_control_desc">导出或导入您的数据</string>
+    <string name="data_export_title">导出数据</string>
+    <string name="data_export_subtitle">将会话、记忆、提示词和设置保存到文件。</string>
+    <string name="data_import_title">导入数据</string>
+    <string name="data_import_subtitle">从之前的 .agora 导出文件恢复。</string>
+    <string name="export_category_conversations">会话与消息</string>
+    <string name="export_category_memories">记忆</string>
+    <string name="export_category_system_prompts">系统提示词</string>
+    <string name="export_category_settings">设置</string>
+    <string name="export_category_api_keys">API 密钥</string>
+    <string name="export_api_keys_warning">API 密钥将以明文形式导出。仅在信任目标位置时启用。</string>
+    <string name="export_estimated_size">预计大小: %1$s</string>
+    <string name="export_button">导出</string>
+    <string name="exporting_label">导出中…</string>
+    <string name="export_success">数据导出成功。</string>
+    <string name="export_failed">导出失败: %1$s</string>
+    <string name="import_preview_title">导入数据</string>
+    <string name="import_from">导出时间 %1$s\n来自 Agora v%2$s</string>
+    <string name="import_button">导入</string>
+    <string name="importing_label">导入中…</string>
+    <string name="import_success">导入完成: %1$s</string>
+    <string name="import_failed">导入失败: %1$s</string>
+    <string name="import_invalid_file">无效的 .agora 文件。请选择有效的导出文件。</string>
+    <string name="import_no_data">此导出文件不包含可导入数据。</string>
+    <string name="import_strategy_merge">合并</string>
+    <string name="import_strategy_replace">替换</string>
+    <string name="import_strategy_skip">跳过</string>
+    <string name="import_api_keys_warning">此导出包含 API 密钥。密钥将以明文形式导入。仅在信任来源时继续。</string>
 </resources>
