@@ -100,6 +100,7 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -371,6 +372,20 @@ fun MessageItem(
         inlineCode = currentTypography.bodyMedium.copy(fontFamily = MonoFamily, fontSize = 12.sp),
     )
 
+    val fg = MaterialTheme.colorScheme.onBackground
+    val bg = MaterialTheme.colorScheme.surface
+    // Composite fg at 0.1 alpha over bg to produce the exact opaque equivalent
+    val codeBg = remember(fg, bg) {
+        Color(
+            red   = fg.red   * 0.1f + bg.red   * 0.9f,
+            green = fg.green * 0.1f + bg.green * 0.9f,
+            blue  = fg.blue  * 0.1f + bg.blue  * 0.9f,
+        )
+    }
+    val customMarkdownColors = markdownColor(
+        codeBackground = codeBg,
+        inlineCodeBackground = codeBg,
+    )
     val customMarkdownPadding = markdownPadding(block = 7.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 4.dp)
 
@@ -925,6 +940,7 @@ fun MessageItem(
                                                 Markdown(
                                                     content = text.escapeThinkTags(),
                                                     modifier = Modifier.fillMaxWidth(),
+                                                    colors = customMarkdownColors,
                                                     typography = thoughtTypography,
                                                     padding = thoughtMarkdownPadding,
                                                     components = customMarkdownComponents,
@@ -1078,6 +1094,7 @@ fun MessageItem(
                                             Markdown(
                                                 content = text.escapeThinkTags(),
                                                 modifier = Modifier.fillMaxWidth(),
+                                                colors = customMarkdownColors,
                                                 typography = customTypography,
                                                 padding = customMarkdownPadding,
                                                 components = customMarkdownComponents,
@@ -1144,7 +1161,7 @@ fun MessageItem(
                                                             Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
                                                         } else {
                                                             SelectionContainer {
-                                                                Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
+                                                                Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), colors = customMarkdownColors, typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
                                                             }
                                                         }
                                                     } else {
