@@ -637,22 +637,27 @@ fun MessageItem(
                         // "Thinking… → Answering…" don't flash "Sending…" while
                         // the first answer token is still in-flight.
                         var heldLabel by remember { mutableStateOf("") }
+                        // Update heldLabel after composition to avoid double-recomposition flash
+                        val thinkingNow = message.status == MessageStatus.THINKING
+                        val hasText = message.text.isNotEmpty()
+                        LaunchedEffect(thinkingNow, hasText) {
+                            heldLabel = when {
+                                thinkingNow -> "thinking"
+                                hasText -> "answering"
+                                message.status == MessageStatus.SUCCESS -> ""
+                                else -> heldLabel
+                            }
+                        }
                         val statusText = when {
-                            message.status == MessageStatus.SUCCESS -> {
-                                heldLabel = ""; if (message.tokenCount > 0) stringResource(R.string.cost_tokens, message.tokenCount) else null
-                            }
-                            isStreaming && message.status == MessageStatus.THINKING -> {
-                                heldLabel = "thinking"; thinkingStatus
-                            }
-                            isStreaming && message.text.isNotEmpty() -> {
-                                heldLabel = "answering"; answeringStatus
-                            }
+                            message.status == MessageStatus.SUCCESS -> if (message.tokenCount > 0) stringResource(R.string.cost_tokens, message.tokenCount) else null
+                            isStreaming && thinkingNow -> thinkingStatus
+                            isStreaming && hasText -> answeringStatus
                             isStreaming -> when (heldLabel) {
                                 "thinking" -> thinkingStatus
                                 "answering" -> answeringStatus
                                 else -> stringResource(R.string.sending_ellipsis)
                             }
-                            else -> { heldLabel = ""; null }
+                            else -> null
                         }
 
                         if (statusText != null) {
@@ -790,37 +795,22 @@ fun MessageItem(
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                                     fontWeight = FontWeight.SemiBold
                                                 )
-                                                if (isStreaming) {
-                                                        RecomposeSafeMarkdown(
-                                                            content = seg.content,
-                                                            isStreaming = true
-                                                        ) { text ->
-                                                            Markdown(
-                                                                content = text.escapeThinkTags(),
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                typography = thoughtTypography,
-                                                                padding = thoughtMarkdownPadding,
-                                                                components = customMarkdownComponents,
-                                                                imageTransformer = latexImageTransformer
-                                                            )
-                                                        }
-                                                    } else {
-                                                        SelectionContainer {
-                                                            RecomposeSafeMarkdown(
-                                                                content = seg.content,
-                                                                isStreaming = false
-                                                            ) { text ->
-                                                                Markdown(
-                                                                    content = text.escapeThinkTags(),
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    typography = thoughtTypography,
-                                                                    padding = thoughtMarkdownPadding,
-                                                                    components = customMarkdownComponents,
-                                                                    imageTransformer = latexImageTransformer
-                                                                )
-                                                            }
-                                                        }
+                                                SelectionContainer {
+                                                    RecomposeSafeMarkdown(
+                                                        content = seg.content,
+                                                        isStreaming = isStreaming
+                                                    ) { text ->
+                                                        Markdown(
+                                                            content = text.escapeThinkTags(),
+                                                            modifier = Modifier.fillMaxWidth(),
+                                                            colors = customMarkdownColors,
+                                                            typography = thoughtTypography,
+                                                            padding = thoughtMarkdownPadding,
+                                                            components = customMarkdownComponents,
+                                                            imageTransformer = latexImageTransformer
+                                                        )
                                                     }
+                                                }
                                             } else if (seg.type == "tool") {
                                                 val isToolError = (seg.toolResult ?: "").startsWith("Error")
                                                 Text(
@@ -961,10 +951,10 @@ fun MessageItem(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                             fontWeight = FontWeight.SemiBold
                                         )
-                                        if (isStreaming) {
+                                        SelectionContainer {
                                             RecomposeSafeMarkdown(
                                                 content = debouncedThoughts,
-                                                isStreaming = true
+                                                isStreaming = isStreaming
                                             ) { text ->
                                                 Markdown(
                                                     content = text.escapeThinkTags(),
@@ -975,22 +965,6 @@ fun MessageItem(
                                                     components = customMarkdownComponents,
                                                     imageTransformer = latexImageTransformer
                                                 )
-                                            }
-                                        } else {
-                                            SelectionContainer {
-                                                RecomposeSafeMarkdown(
-                                                    content = debouncedThoughts,
-                                                    isStreaming = false
-                                                ) { text ->
-                                                    Markdown(
-                                                        content = text.escapeThinkTags(),
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        typography = thoughtTypography,
-                                                        padding = thoughtMarkdownPadding,
-                                                        components = customMarkdownComponents,
-                                                        imageTransformer = latexImageTransformer
-                                                    )
-                                                }
                                             }
                                         }
                                     }
@@ -1113,12 +1087,10 @@ fun MessageItem(
                             } else if (debouncedText.isNotEmpty()) {
                                 val spans = remember(debouncedText) { parseLatexSpans(debouncedText) }
                                 if (spans.all { !it.isLatex }) {
-                                    // No SelectionContainer during streaming — double-buffer
-                                    // layers would duplicate selectable content and crash.
-                                    if (isStreaming) {
+                                    SelectionContainer {
                                         RecomposeSafeMarkdown(
                                             content = debouncedText,
-                                            isStreaming = true
+                                            isStreaming = isStreaming
                                         ) { text ->
                                             Markdown(
                                                 content = text.escapeThinkTags(),
@@ -1129,25 +1101,6 @@ fun MessageItem(
                                                 components = customMarkdownComponents,
                                                 imageTransformer = latexImageTransformer
                                             )
-                                        }
-                                    } else {
-                                        // Post-generation: RecomposeSafeMarkdown handles the
-                                        // !isStreaming reset internally — stable layer at
-                                        // alpha 0, live at alpha 1. Same tree, no switch.
-                                        SelectionContainer {
-                                            RecomposeSafeMarkdown(
-                                                content = debouncedText,
-                                                isStreaming = false
-                                            ) { text ->
-                                                Markdown(
-                                                    content = text.escapeThinkTags(),
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    typography = customTypography,
-                                                    padding = customMarkdownPadding,
-                                                    components = customMarkdownComponents,
-                                                    imageTransformer = latexImageTransformer
-                                                )
-                                            }
                                         }
                                     }
                                 } else {
