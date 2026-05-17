@@ -41,6 +41,10 @@
     <string name="tool_search_done">Search done</string>
     <string name="tool_web_search_done">Web search done</string>
     <string name="tool_conversation_search_done">Conversation search done</string>
+    <string name="tool_execute_shell">Shell</string>
+    <string name="tool_shell_executing">Executing: %1$s</string>
+    <string name="tool_shell_done">Shell command done</string>
+    <string name="tool_shell_failed">Shell command failed</string>
     <string name="tool_thinking">Thinking</string>
     <string name="tool_read_memory_success">Read memory</string>
     <string name="tool_read_memory_count">Read %1$d memories</string>
@@ -224,6 +228,9 @@
     <string name="shell_api_key_hint">Optional bearer token</string>
     <string name="shell_timeout">Command Timeout (seconds)</string>
     <string name="shell_timeout_value">%d s</string>
+    <string name="shell_result_command">Command: %1$s</string>
+    <string name="shell_result_error">Error: %1$s</string>
+    <string name="shell_result_exit_code">Exit code: %1$d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Auto-Generate Title</string>

@@ -40,6 +40,10 @@
     <string name="tool_search_done">搜索完成</string>
     <string name="tool_web_search_done">网页搜索完成</string>
     <string name="tool_conversation_search_done">对话搜索完成</string>
+    <string name="tool_execute_shell">终端</string>
+    <string name="tool_shell_executing">执行: %1$s</string>
+    <string name="tool_shell_done">终端命令完成</string>
+    <string name="tool_shell_failed">终端命令失败</string>
     <string name="tool_thinking">思考</string>
 
     <!-- System Prompt -->
@@ -190,6 +194,9 @@
     <string name="shell_api_key_hint">可选 Bearer Token</string>
     <string name="shell_timeout">命令超时（秒）</string>
     <string name="shell_timeout_value">%d 秒</string>
+    <string name="shell_result_command">命令: %1$s</string>
+    <string name="shell_result_error">错误: %1$s</string>
+    <string name="shell_result_exit_code">退出码: %1$d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">自动生成标题</string>
