@@ -1,5 +1,8 @@
 package com.newoether.agora.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -120,31 +123,37 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 modifier = Modifier.clickable { expandedProviders[providerName] = !isExpanded }
                             )
 
-                            if (isExpanded) {
-                                models.forEach { model ->
-                                    val isEnabled = enabledModels.contains(model)
-                                    val alias = modelAliases[model]
-                                    val cleanId = model.substringAfter(":")
-                                    val displayName = alias ?: cleanId.removePrefix("models/")
+                            AnimatedVisibility(
+                                visible = isExpanded,
+                                enter = expandVertically(),
+                                exit = shrinkVertically()
+                            ) {
+                                Column {
+                                    models.forEach { model ->
+                                        val isEnabled = enabledModels.contains(model)
+                                        val alias = modelAliases[model]
+                                        val cleanId = model.substringAfter(":")
+                                        val displayName = alias ?: cleanId.removePrefix("models/")
 
-                                    ListItem(
-                                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                        headlineContent = { Text(displayName) },
-                                        supportingContent = if (alias != null) { { Text(cleanId.removePrefix("models/")) } } else null,
-                                        trailingContent = {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(onClick = { showModelAliasDialog = model }) {
-                                                    Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.models_rename), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                        ListItem(
+                                            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                                            headlineContent = { Text(displayName) },
+                                            supportingContent = if (alias != null) { { Text(cleanId.removePrefix("models/")) } } else null,
+                                            trailingContent = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    IconButton(onClick = { showModelAliasDialog = model }) {
+                                                        Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.models_rename), tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                                                    }
+                                                    Checkbox(checked = isEnabled, onCheckedChange = {
+                                                        viewModel.setEnabledModels(if (it) enabledModels + model else enabledModels - model)
+                                                    })
                                                 }
-                                                Checkbox(checked = isEnabled, onCheckedChange = {
-                                                    viewModel.setEnabledModels(if (it) enabledModels + model else enabledModels - model)
-                                                })
-                                            }
-                                        },
-                                        modifier = Modifier.clickable {
-                                            viewModel.setEnabledModels(if (!isEnabled) enabledModels + model else enabledModels - model)
-                                        }.padding(start = 16.dp)
-                                    )
+                                            },
+                                            modifier = Modifier.clickable {
+                                                viewModel.setEnabledModels(if (!isEnabled) enabledModels + model else enabledModels - model)
+                                            }.padding(start = 16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
