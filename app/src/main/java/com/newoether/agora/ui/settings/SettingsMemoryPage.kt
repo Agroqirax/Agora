@@ -39,9 +39,11 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var memoryFiles by remember { mutableStateOf<List<com.newoether.agora.data.MemoryManager.MemoryFileInfo>>(emptyList()) }
     var showFileEditor by remember { mutableStateOf<String?>(null) }
     var fileEditorContent by remember { mutableStateOf("") }
+    var fileEditorDesc by remember { mutableStateOf("") }
     var showNewFileDialog by remember { mutableStateOf(false) }
     var newFileName by remember { mutableStateOf("") }
     var newFileContent by remember { mutableStateOf("") }
+    var newFileDesc by remember { mutableStateOf("") }
     var showDeleteFileConfirm by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
@@ -159,6 +161,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                 try {
                                                     showFileEditor = file.name
                                                     fileEditorContent = viewModel.memoryManager.readFile(file.name)
+                                                    fileEditorDesc = viewModel.memoryManager.getDescription(file.name)
                                                 } catch (_: Exception) {}
                                             }
                                         )
@@ -205,11 +208,13 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         val isActiveMemory = fileName == "ACTIVE_MEMORY"
         var editFileName by remember { mutableStateOf(if (isActiveMemory) "" else fileName.removeSuffix(".md")) }
         var editContent by remember { mutableStateOf(fileEditorContent) }
+        var editDesc by remember { mutableStateOf(fileEditorDesc) }
 
         AlertDialog(
             onDismissRequest = {
                 showFileEditor = null
                 fileEditorContent = ""
+                fileEditorDesc = ""
             },
             title = { Text(if (isActiveMemory) stringResource(R.string.memory_edit_active) else stringResource(R.string.memory_edit)) },
             text = {
@@ -227,6 +232,16 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = editFileName,
                             onValueChange = { editFileName = it },
                             label = { Text(stringResource(R.string.memory_title_hint)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                    if (!isActiveMemory) {
+                        OutlinedTextField(
+                            value = editDesc,
+                            onValueChange = { editDesc = it },
+                            label = { Text(stringResource(R.string.memory_desc_hint)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -253,20 +268,22 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     } else {
                         if (editFileName.isNotBlank() && editFileName != fileName.removeSuffix(".md")) {
                             viewModel.memoryManager.deleteFile(fileName)
-                            viewModel.memoryManager.createFile(editFileName, editContent)
+                            viewModel.memoryManager.createFile(editFileName, editContent, editDesc)
                         } else {
-                            viewModel.memoryManager.editFile(fileName, editContent)
+                            viewModel.memoryManager.editFile(fileName, editContent, description = editDesc)
                         }
                         memoryFiles = viewModel.memoryManager.listFiles()
                     }
                     showFileEditor = null
                     fileEditorContent = ""
+                    fileEditorDesc = ""
                 }) { Text(stringResource(R.string.provider_save)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showFileEditor = null
                     fileEditorContent = ""
+                    fileEditorDesc = ""
                 }) { Text(stringResource(R.string.provider_cancel)) }
             }
         )
@@ -289,6 +306,14 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                     OutlinedTextField(
+                        value = newFileDesc,
+                        onValueChange = { newFileDesc = it },
+                        label = { Text(stringResource(R.string.memory_desc_hint)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
                         value = newFileContent,
                         onValueChange = { newFileContent = it },
                         label = { Text(stringResource(R.string.memory_content_hint)) },
@@ -303,13 +328,14 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 TextButton(onClick = {
                     if (newFileName.isNotBlank()) {
                         try {
-                            viewModel.memoryManager.createFile(newFileName, newFileContent)
+                            viewModel.memoryManager.createFile(newFileName, newFileContent, newFileDesc)
                             memoryFiles = viewModel.memoryManager.listFiles()
                         } catch (_: Exception) {}
                     }
                     showNewFileDialog = false
                     newFileName = ""
                     newFileContent = ""
+                    newFileDesc = ""
                 }) { Text(stringResource(R.string.memory_create)) }
             },
             dismissButton = {
@@ -317,6 +343,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     showNewFileDialog = false
                     newFileName = ""
                     newFileContent = ""
+                    newFileDesc = ""
                 }) { Text(stringResource(R.string.provider_cancel)) }
             }
         )

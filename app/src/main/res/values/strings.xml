@@ -269,6 +269,7 @@
     <string name="memory_edit_active">Edit Active Memory</string>
     <string name="memory_edit">Edit Memory</string>
     <string name="memory_title_hint">Title</string>
+    <string name="memory_desc_hint">Description</string>
     <string name="memory_content_hint">Content</string>
     <string name="memory_active_desc">This content is included in every API call. Write facts, preferences, or context the model should always remember.</string>
     <string name="memory_delete_title">Delete Memory?</string>

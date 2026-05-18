@@ -235,6 +235,7 @@
     <string name="memory_edit_active">编辑活跃记忆</string>
     <string name="memory_edit">编辑记忆</string>
     <string name="memory_title_hint">标题</string>
+    <string name="memory_desc_hint">描述</string>
     <string name="memory_content_hint">内容</string>
     <string name="memory_active_desc">此内容将包含在每次 API 调用中。写入模型应始终记住的事实、偏好或上下文。</string>
     <string name="memory_delete_title">删除记忆？</string>
