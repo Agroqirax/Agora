@@ -189,7 +189,7 @@
     <string name="shell_enable">启用终端工具</string>
     <string name="shell_enable_desc">允许模型通过远程服务器执行 Shell 命令</string>
     <string name="shell_server_url">服务器 URL</string>
-    <string name="shell_server_url_hint">http://192.168.1.100:8080</string>
+    <string name="shell_server_url_hint">http://192.168.1.100:14216</string>
     <string name="shell_api_key">API 密钥</string>
     <string name="shell_api_key_hint">可选 Bearer Token</string>
     <string name="shell_timeout">命令超时（秒）</string>
