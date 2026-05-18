@@ -199,7 +199,7 @@ private fun toolSummary(seg: MessageSegment): String {
         }
         "list_shells" -> {
             if (isError) stringResource(R.string.tool_shell_listing)
-            else if (content.isNotEmpty()) SearchResultFormatter.getFirstLine(content, LocalContext.current)
+            else if (content.isNotEmpty()) SearchResultFormatter.format(content, LocalContext.current).lines().take(3).joinToString("\n").take(120)
             else stringResource(R.string.tool_shell_list_done)
         }
         "execute_shell_command" -> {
@@ -237,7 +237,7 @@ private fun toolResultSummary(toolName: String, toolArgs: String, result: String
         "web_search" -> SearchResultFormatter.getFirstLine(result, LocalContext.current).ifBlank { stringResource(R.string.tool_web_search_done) }
         "web_fetch" -> stringResource(R.string.tool_web_fetch_done, argsJson?.get("url")?.let { (it as? JsonPrimitive)?.content }?.take(60)?.ifEmpty { "page" } ?: "page")
         "search_conversations" -> SearchResultFormatter.getFirstLine(result, LocalContext.current).ifBlank { stringResource(R.string.tool_conversation_search_done) }
-        "list_shells" -> SearchResultFormatter.getFirstLine(result, LocalContext.current).ifBlank { stringResource(R.string.tool_shell_list_done) }
+        "list_shells" -> SearchResultFormatter.format(result, LocalContext.current).lines().take(3).joinToString("\n").take(120).ifBlank { stringResource(R.string.tool_shell_list_done) }
         "execute_shell_command" -> {
             val command = argsJson?.get("command")?.let { (it as? JsonPrimitive)?.content }
             if (command != null) stringResource(R.string.tool_shell_executing, command.take(80))
