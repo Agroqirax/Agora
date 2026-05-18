@@ -135,7 +135,7 @@ object SearchResultFormatter {
         if (devices.isEmpty()) return context.getString(R.string.shell_no_devices)
         val list = devices.joinToString("\n") { element ->
             val obj = element.jsonObject
-            val name = (obj["name"] as? JsonPrimitive)?.content ?: ""
+            val name = (obj["name"] as? JsonPrimitive)?.content?.ifBlank { null } ?: "Untitled"
             val desc = (obj["description"] as? JsonPrimitive)?.content ?: ""
             if (desc.isNotEmpty()) "$name — $desc" else name
         }

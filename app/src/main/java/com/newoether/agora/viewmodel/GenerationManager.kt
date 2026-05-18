@@ -574,7 +574,7 @@ class GenerationManager(
     private suspend fun listShells(ctx: GenerationContext): String {
         val devices = ctx.shellDevices.map { d ->
             buildJsonObject {
-                put("name", d.name)
+                put("name", d.name.ifBlank { "Untitled" })
                 put("description", d.description)
             }
         }
