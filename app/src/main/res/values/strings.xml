@@ -237,7 +237,7 @@
     <string name="shell_timeout_value">%d s</string>
     <string name="shell_devices">Devices</string>
     <string name="shell_add_device">Add Device</string>
-    <string name="shell_remove_device">Remove Device</string>
+    <string name="shell_remove_device">Remove</string>
     <string name="shell_no_devices">No devices configured. Add one to enable shell access.</string>
     <string name="shell_result_command">Command: %1$s</string>
     <string name="shell_result_error">Error: %1$s</string>
