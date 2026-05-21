@@ -983,8 +983,13 @@ fun MessageItem(
                         }
 
                         // Merged segment block: single block, newest title/icon when collapsed
-                        if (message.segments != null && message.segments!!.isNotEmpty()) {
-                            val segs = mergeAdjacentSegments(message.segments!!)
+                        val segmentsOrNull = message.segments
+                        AnimatedVisibility(
+                            visible = segmentsOrNull != null && segmentsOrNull.isNotEmpty(),
+                            enter = fadeIn(tween(500)) + expandVertically(tween(500)),
+                            exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
+                        ) {
+                            val segs = mergeAdjacentSegments(segmentsOrNull ?: return@AnimatedVisibility)
                             val lastSeg = segs.last()
                             val isLastTool = lastSeg.type == "tool"
                             val isToolInProgress = isLastTool && lastSeg.toolResult == null
