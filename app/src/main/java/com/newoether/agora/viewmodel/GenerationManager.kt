@@ -1101,7 +1101,7 @@ class GenerationManager(
                         thoughtTimeMs = totalThoughtTimeMs,
                         modelName = modelName,
                         toolCall = toolCallData,
-                        segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
+                        segments = buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature)
                     ))
                     lastEmitMs = now
                 }
@@ -1120,7 +1120,7 @@ class GenerationManager(
                 thoughtTimeMs = totalThoughtTimeMs,
                 modelName = modelName,
                 toolCall = toolCallData,
-                segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
+                segments = buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature)
             ))
 
             // Multi-tool loop
@@ -1348,7 +1348,7 @@ class GenerationManager(
                             thoughtTimeMs = totalThoughtTimeMs,
                             modelName = modelName,
                             toolCall = toolCallData,
-                            segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
+                            segments = buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature)
                         ))
                         lastEmitMs = now
                     }
@@ -1367,7 +1367,7 @@ class GenerationManager(
                     thoughtTimeMs = totalThoughtTimeMs,
                     modelName = modelName,
                     toolCall = toolCallData,
-                    segments = if (segments.isNotEmpty()) buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature) else null
+                    segments = buildLiveSegments(segments, currentThoughtBuf, currentThoughtSignature)
                 ))
             }
 

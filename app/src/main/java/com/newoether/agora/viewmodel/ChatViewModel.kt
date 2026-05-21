@@ -470,7 +470,7 @@ class ChatViewModel(
                                 modelName = it.modelName,
                                 segments = it.toolCallJson?.let { json ->
                                     try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null }
-                                },
+                                } ?: it.thoughts?.takeIf { t -> t.isNotBlank() }?.let { listOf(MessageSegment(type = "thought", content = it)) },
                                 toolCall = it.toolCallJson?.let { json ->
                                     try {
                                         val segs = Json.decodeFromString<List<MessageSegment>>(json)
