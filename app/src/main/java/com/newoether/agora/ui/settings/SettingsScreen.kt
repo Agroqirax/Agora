@@ -135,7 +135,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 else -> {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
-                        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                        contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
                         topBar = {
                             TopAppBar(
                                 title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold) },

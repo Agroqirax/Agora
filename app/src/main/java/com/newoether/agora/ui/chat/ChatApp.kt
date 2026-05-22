@@ -149,7 +149,7 @@ fun ChatApp(
             val t = ((drawerProgress - 0.5f) * 2f).coerceIn(0f, 1f)
             (bottomBarHeight.value + (settingsButtonBottomDp - bottomBarHeight.value) * t).dp
         },
-        animationSpec = tween(200),
+        animationSpec = spring(dampingRatio = 1.5f, stiffness = 400f),
         label = "snackbarOffset"
     )
     LaunchedEffect(snackbarOffset) { onSnackbarOffsetChanged(snackbarOffset) }
