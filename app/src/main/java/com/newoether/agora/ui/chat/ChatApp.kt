@@ -75,7 +75,8 @@ fun ChatApp(
     onOpenSettings: () -> Unit,
     onImageClick: (String) -> Unit,
     onFileContentClick: ((String, String) -> Unit)? = null,
-    onPdfPagesClick: ((List<String>, Int) -> Unit)? = null
+    onPdfPagesClick: ((List<String>, Int) -> Unit)? = null,
+    snackbarHostState: SnackbarHostState = SnackbarHostState()
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -752,6 +753,13 @@ fun ChatApp(
                     )
                 }
             }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = bottomBarHeight)
+            )
         }
     }
 

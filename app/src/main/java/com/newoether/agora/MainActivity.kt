@@ -170,7 +170,8 @@ fun MainNavigation(viewModel: ChatViewModel) {
                     focusManager.clearFocus()
                     viewModel.showPdfPreview(pages, idx)
                     fullScreenImageUrl = pages[idx]
-                }
+                },
+                snackbarHostState = snackbarHostState
             )
 
             // Scrim that fades in behind the settings page
@@ -244,13 +245,6 @@ fun MainNavigation(viewModel: ChatViewModel) {
                     com.newoether.agora.ui.chat.TextFileViewer(content = savedContent!!, fileName = savedName!!, onClose = { viewModel.clearPreviews() })
                 }
             }
-
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-            )
         }
     }
 }
