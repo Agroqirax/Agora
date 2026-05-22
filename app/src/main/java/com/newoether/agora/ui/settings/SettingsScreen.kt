@@ -133,29 +133,15 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
                 "datacontrol" -> SettingsDataControlPage(viewModel, onBack = { selectedCategory = null })
                 else -> {
-                    Scaffold(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        contentWindowInsets = WindowInsets(0.dp, 0.dp, 0.dp, 0.dp),
-                        topBar = {
-                            TopAppBar(
-                                title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold) },
-                                navigationIcon = {
-                                    IconButton(onClick = onBack) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                                    }
-                                },
-                                colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = MaterialTheme.colorScheme.background,
-                                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                                )
-                            )
-                        }
-                    ) { padding ->
+                    Box(modifier = Modifier.fillMaxSize()) {
                         LazyColumn(
                             modifier = Modifier
-                                .padding(padding)
+                                .fillMaxSize()
+                                .statusBarsPadding()
                                 .navigationBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .padding(horizontal = 16.dp)
+                                .padding(top = 12.dp, bottom = 12.dp),
+                            contentPadding = PaddingValues(top = 64.dp)
                         ) {
                             items(settingsGroups.size) { groupIndex ->
                                 val group = settingsGroups[groupIndex]
@@ -220,6 +206,19 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 }
                             }
                         }
+                        TopAppBar(
+                            title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold) },
+                            navigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.85f),
+                                titleContentColor = MaterialTheme.colorScheme.onBackground,
+                            ),
+                            modifier = Modifier.statusBarsPadding()
+                        )
                     }
                 }
             }

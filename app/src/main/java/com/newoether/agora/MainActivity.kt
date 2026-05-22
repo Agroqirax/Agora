@@ -134,7 +134,12 @@ fun MainNavigation(viewModel: ChatViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     var chatSnackbarOffset by remember { mutableStateOf(0.dp) }
     val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val snackbarBottomPadding = if (showSettings) navBarPadding else chatSnackbarOffset
+    val targetSnackbarPadding = if (showSettings) navBarPadding else chatSnackbarOffset
+    val snackbarBottomPadding by animateDpAsState(
+        targetValue = targetSnackbarPadding,
+        animationSpec = spring(dampingRatio = 1.5f, stiffness = 1500f),
+        label = "snackbarPadding"
+    )
     val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) {
