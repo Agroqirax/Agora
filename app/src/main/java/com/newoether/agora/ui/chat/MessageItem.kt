@@ -886,9 +886,6 @@ fun MessageItem(
                 Column {
                     // Status Header
                     if (message.participant == Participant.MODEL) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "sending")
-                        val rotation by infiniteTransition.animateFloat(0f, 360f, infiniteRepeatable(tween(1000, easing = LinearEasing)), "rot")
-
                         val thinkingStatus = stringResource(R.string.thinking_ellipsis)
                         val answeringStatus = stringResource(R.string.answering_ellipsis)
                         // Hold the last non-fallback label so transitions between
@@ -941,7 +938,11 @@ fun MessageItem(
                             val text = displayText ?: return@AnimatedVisibility
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                                 if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING) {
-                                    Icon(Icons.Default.Refresh, null, modifier = Modifier.size(12.dp).rotate(rotation), tint = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
+                                    LinearProgressIndicator(
+                                        modifier = Modifier.width(80.dp),
+                                        color = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    )
                                 } else {
                                     val icon = when (message.status) {
                                         MessageStatus.SUCCESS -> Icons.Default.CheckCircle
