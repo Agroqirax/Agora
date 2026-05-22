@@ -895,6 +895,7 @@ fun MessageItem(
                         // "Thinking… → Answering…" don't flash "Sending…" while
                         // the first answer token is still in-flight.
                         var heldLabel by remember { mutableStateOf("") }
+                        var heldStatusText by remember { mutableStateOf("") }
                         // Update heldLabel after composition to avoid double-recomposition flash
                         val thinkingNow = message.status == MessageStatus.THINKING
                         val isToolCalling = message.status == MessageStatus.TOOL_CALLING
@@ -923,13 +924,21 @@ fun MessageItem(
                             }
                             else -> null
                         }
+                        // Hold the last non-null label so the status bar doesn't collapse
+                        // during the timing gap between isStreaming→false and the DB
+                        // emitting the updated message status.
+                        val displayText = when {
+                            statusText != null -> statusText.also { heldStatusText = it }
+                            message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING -> heldStatusText.takeIf { it.isNotEmpty() }
+                            else -> null.also { heldStatusText = "" }
+                        }
 
                         AnimatedVisibility(
-                            visible = statusText != null,
+                            visible = displayText != null,
                             enter = fadeIn(tween(300)) + expandVertically(tween(300)),
                             exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
                         ) {
-                            val text = statusText ?: return@AnimatedVisibility
+                            val text = displayText ?: return@AnimatedVisibility
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                                 if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING) {
                                     Icon(Icons.Default.Refresh, null, modifier = Modifier.size(12.dp).rotate(rotation), tint = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary)
