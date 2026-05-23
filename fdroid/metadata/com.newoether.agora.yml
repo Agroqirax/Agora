@@ -5,12 +5,35 @@ SourceCode: https://github.com/newo-ether/Agora
 IssueTracker: https://github.com/newo-ether/Agora/issues
 
 Name: Agora
-Summary: LLM chat client with tool calling and LAN shell execution
+Summary: BYOK LLM client with multi-provider access and agentic workflows
 Description: |
-  Agora connects to any OpenAI-compatible API (OpenAI, Ollama, local
-  models). Supports streaming chat, tool calling with structured output,
-  markdown/LaTeX/code rendering, image generation, text-to-speech, and
-  encrypted shell execution over LAN via the companion Conch server.
+  Agora is a fully open-source, BYOK (Bring Your Own Key) Android LLM
+  client built for power users. It connects directly to 8+ AI providers
+  — OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen, OpenRouter,
+  Ollama, and local GGUF models via llama.cpp — with no intermediary
+  servers or tracking. Custom providers with arbitrary base URLs and API
+  keys are supported.
+
+  Features:
+  * Multi-round tool calling: web search (Brave, Serper, Tavily,
+    SearXNG), code execution, remote shell execution, memory management
+  * Non-linear branching: edit any past message and explore alternative
+    conversation paths without losing context — powered by a
+    tree-structured Room database
+  * On-device LLM inference via llama.cpp (GGUF) and local embeddings
+    for RAG-powered semantic search across conversation history
+  * Deep reasoning model support: OpenAI o1/o3, Anthropic extended
+    thinking, Gemini thinking, DeepSeek-R1, Qwen QwQ with streaming
+    think-tag rendering
+  * Active memory and saved memory files for persistent context across
+    conversations
+  * Context window management with real-time token counting and
+    sliding window
+  * .agora export/import (conversations, memories, prompts, settings,
+    keys) and third-party import from Claude and ChatGPT exports
+  * Markdown rendering with syntax highlighting, LaTeX math, image and
+    file attachments
+  * English and Chinese (中文) language support
 
 RepoType: git
 Repo: https://github.com/newo-ether/Agora
