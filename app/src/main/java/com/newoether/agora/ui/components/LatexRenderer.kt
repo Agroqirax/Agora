@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.util.Base64
 
 import androidx.compose.foundation.Image
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +15,10 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
@@ -22,6 +26,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
@@ -31,6 +36,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.mikepenz.markdown.annotator.AnnotatorSettings
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
 import com.mikepenz.markdown.model.ImageData
@@ -290,6 +296,81 @@ class LatexImageTransformer(
     }
 }
 
+// Data class for paragraph groups, tracking \n count for proportional spacing
+private data class ParaGroup(val spans: List<LatexSpan>, val spacingBefore: Float)
+
+private fun buildParaGroups(inlineSpans: List<LatexSpan>, paragraphSpacing: Float): List<ParaGroup> {
+    val groups = mutableListOf<ParaGroup>()
+    val currentSpans = mutableListOf<LatexSpan>()
+    var pendingSpacing = paragraphSpacing
+
+    fun flush() {
+        if (currentSpans.isNotEmpty()) {
+            groups.add(ParaGroup(currentSpans.toList(), pendingSpacing))
+            currentSpans.clear()
+            pendingSpacing = 0f
+        } else {
+            pendingSpacing += paragraphSpacing
+        }
+    }
+
+    for (span in inlineSpans) {
+        if (span.isLatex) {
+            currentSpans.add(span)
+        } else {
+            var remaining = span.content
+            while (remaining.isNotEmpty()) {
+                val nlIdx = remaining.indexOf('\n')
+                if (nlIdx < 0) {
+                    currentSpans.add(LatexSpan(false, remaining))
+                    break
+                }
+                if (nlIdx > 0) {
+                    currentSpans.add(LatexSpan(false, remaining.substring(0, nlIdx)))
+                }
+                remaining = remaining.substring(nlIdx + 1)
+                flush()
+                pendingSpacing = paragraphSpacing
+                while (remaining.startsWith('\n')) {
+                    pendingSpacing += paragraphSpacing
+                    remaining = remaining.substring(1)
+                }
+            }
+        }
+    }
+    flush()
+    return groups
+}
+
+private fun buildParagraphStrings(
+    groups: List<ParaGroup>,
+    textStyle: TextStyle,
+    settings: AnnotatorSettings,
+): List<AnnotatedString> {
+    var latexIdx = 0
+    return groups.map { group ->
+        buildAnnotatedString {
+            for (span in group.spans) {
+                if (span.isLatex) {
+                    appendInlineContent("LATEX_$latexIdx", span.content)
+                    latexIdx++
+                } else if (span.content.isNotBlank()) {
+                    append(span.content.buildMarkdownAnnotatedString(textStyle, settings))
+                }
+            }
+        }
+    }
+}
+
+private data class LatexBitmapEntry(val tag: String, val bitmap: Bitmap?, val content: String)
+
+private data class LatexRenderState(
+    val entries: List<LatexBitmapEntry>,
+    val inlineContent: Map<String, InlineTextContent>,
+    val paragraphStrings: List<AnnotatedString>,
+    val paragraphGroups: List<ParaGroup>,
+)
+
 @Composable
 fun LatexAwareText(
     spans: List<LatexSpan>,
@@ -302,34 +383,30 @@ fun LatexAwareText(
 ) {
     val density = LocalDensity.current
     val inlineSpans = remember(spans) { spans.filter { !it.display } }
-
     val settings = annotatorSettings(
         linkTextSpanStyle = TextLinkStyles(style = textStyle.toSpanStyle()),
         codeSpanStyle = codeSpanStyle,
         referenceLinkHandler = ReferenceLinkHandlerImpl(),
     )
 
-    // Pre-render LaTeX bitmaps and create per-expression InlineTextContent
-    val latexEntries = remember(inlineSpans, latexTextSize, latexColor) {
-        inlineSpans.filter { it.isLatex }.mapIndexed { idx, span ->
+    val state = remember(inlineSpans, settings, latexTextSize, latexColor, density, paragraphSpacing) {
+        if (inlineSpans.isEmpty()) return@remember null
+        val entries = inlineSpans.filter { it.isLatex }.mapIndexed { idx, span ->
             val tag = "LATEX_$idx"
             val bmp = renderLatexToBitmap(span.content, latexTextSize, latexColor)
-            Triple(tag, bmp, span.content)
+            LatexBitmapEntry(tag, bmp, span.content)
         }
-    }
-
-    val inlineContent = remember(latexEntries, density) {
-        buildMap<String, InlineTextContent> {
-            latexEntries.forEach { (tag, bmp, content) ->
-                if (bmp != null) {
-                    val pw = with(density) { maxOf(bmp.width.toSp().value, 24f) }
-                    val ph = with(density) { maxOf(bmp.height.toSp().value, 16f) }
-                    put(tag, InlineTextContent(
+        val ic = buildMap<String, InlineTextContent> {
+            entries.forEach { entry ->
+                if (entry.bitmap != null) {
+                    val pw = with(density) { maxOf(entry.bitmap.width.toSp().value, 24f) }
+                    val ph = with(density) { maxOf(entry.bitmap.height.toSp().value, 16f) }
+                    put(entry.tag, InlineTextContent(
                         Placeholder(width = pw.sp, height = ph.sp, placeholderVerticalAlign = PlaceholderVerticalAlign.Center)
                     ) { _ ->
                         Image(
-                            painter = BitmapPainter(bmp.asImageBitmap()),
-                            contentDescription = content,
+                            painter = BitmapPainter(entry.bitmap.asImageBitmap()),
+                            contentDescription = entry.content,
                             modifier = Modifier.fillMaxWidth(),
                             contentScale = ContentScale.Fit,
                         )
@@ -337,88 +414,24 @@ fun LatexAwareText(
                 }
             }
         }
-    }
+        val groups = buildParaGroups(inlineSpans, paragraphSpacing)
+        val paraStrings = buildParagraphStrings(groups, textStyle, settings)
+        LatexRenderState(entries, ic, paraStrings, groups)
+    } ?: return
 
-    // Split spans into paragraph groups, tracking \n count for proportional spacing.
-    // Each \n creates a new block element → each contributes paragraphSpacing.
-    data class ParaGroup(val spans: List<LatexSpan>, val spacingBefore: Float)
+    if (state.paragraphStrings.isEmpty()) return
 
-    val paragraphGroups = remember(inlineSpans) {
-        val groups = mutableListOf<ParaGroup>()
-        val currentSpans = mutableListOf<LatexSpan>()
-        var pendingSpacing = paragraphSpacing
-
-        fun flush() {
-            if (currentSpans.isNotEmpty()) {
-                groups.add(ParaGroup(currentSpans.toList(), pendingSpacing))
-                currentSpans.clear()
-                pendingSpacing = 0f
-            } else {
-                pendingSpacing += paragraphSpacing
-            }
-        }
-
-        for (span in inlineSpans) {
-            if (span.isLatex) {
-                currentSpans.add(span)
-            } else {
-                var remaining = span.content
-                while (remaining.isNotEmpty()) {
-                    val nlIdx = remaining.indexOf('\n')
-                    if (nlIdx < 0) {
-                        // No more newlines — add remaining text to current group
-                        currentSpans.add(LatexSpan(false, remaining))
-                        break
-                    }
-                    // Text before the newline
-                    if (nlIdx > 0) {
-                        currentSpans.add(LatexSpan(false, remaining.substring(0, nlIdx)))
-                    }
-                    remaining = remaining.substring(nlIdx + 1)
-                    // Each \n flushes the current group and adds spacing
-                    flush()
-                    pendingSpacing = paragraphSpacing
-                    // Consume any additional consecutive \n — each adds another spacing increment
-                    while (remaining.startsWith('\n')) {
-                        pendingSpacing += paragraphSpacing
-                        remaining = remaining.substring(1)
-                    }
-                }
-            }
-        }
-        flush()
-        groups
-    }
-
-    val paragraphStrings = remember(paragraphGroups, settings) {
-        var latexIdx = 0
-        paragraphGroups.map { group ->
-            buildAnnotatedString {
-                for (span in group.spans) {
-                    if (span.isLatex) {
-                        appendInlineContent("LATEX_$latexIdx", span.content)
-                        latexIdx++
-                    } else if (span.content.isNotBlank()) {
-                        append(span.content.buildMarkdownAnnotatedString(textStyle, settings))
-                    }
-                }
-            }
-        }
-    }
-
-    if (paragraphStrings.isEmpty()) return
-
-    if (paragraphStrings.size == 1 && paragraphGroups.first().spacingBefore == 0f) {
+    if (state.paragraphStrings.size == 1 && state.paragraphGroups.first().spacingBefore == 0f) {
         BasicText(
-            text = paragraphStrings.first(),
+            text = state.paragraphStrings.first(),
             modifier = modifier,
             style = textStyle,
-            inlineContent = inlineContent,
+            inlineContent = state.inlineContent,
         )
     } else {
         Column(modifier = modifier) {
-            paragraphStrings.forEachIndexed { idx, annotated ->
-                val spacingBefore = paragraphGroups[idx].spacingBefore
+            state.paragraphStrings.forEachIndexed { idx, annotated ->
+                val spacingBefore = state.paragraphGroups[idx].spacingBefore
                 if (spacingBefore > 0f) {
                     Spacer(Modifier.height(spacingBefore.dp))
                 }
@@ -426,7 +439,7 @@ fun LatexAwareText(
                     text = annotated,
                     modifier = Modifier,
                     style = textStyle,
-                    inlineContent = inlineContent,
+                    inlineContent = state.inlineContent,
                 )
             }
         }

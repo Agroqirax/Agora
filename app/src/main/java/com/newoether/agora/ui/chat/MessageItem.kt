@@ -1198,14 +1198,14 @@ fun MessageItem(
                                     }
                                 }
                             } else if (debouncedText.isNotEmpty()) {
-                                val spans = remember(debouncedText) { parseLatexSpans(debouncedText) }
-                                if (spans.all { !it.isLatex }) {
-                                    Box {
-                                        SelectionContainer {
-                                            RecomposeSafeMarkdown(
-                                                content = debouncedText,
-                                                isStreaming = isStreaming
-                                            ) { text ->
+                                Box {
+                                    SelectionContainer {
+                                        RecomposeSafeMarkdown(
+                                            content = debouncedText,
+                                            isStreaming = isStreaming
+                                        ) { text ->
+                                            val spans = remember(text) { parseLatexSpans(text) }
+                                            if (spans.all { !it.isLatex }) {
                                                 Markdown(
                                                     content = text.escapeThinkTags(),
                                                     modifier = Modifier.fillMaxWidth(),
@@ -1215,44 +1215,48 @@ fun MessageItem(
                                                     components = customMarkdownComponents,
                                                     imageTransformer = latexImageTransformer
                                                 )
-                                            }
-                                        }
-                                        if (isStreaming) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .matchParentSize()
-                                                    .combinedClickable(
-                                                        interactionSource = remember { MutableInteractionSource() },
-                                                        indication = null,
-                                                        onClick = { },
-                                                        onLongClick = { }
-                                                    )
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    val paragraphs = remember(debouncedText) { splitParagraphs(debouncedText) }
-                                    Column {
-                                        paragraphs.forEachIndexed { paraIdx, paragraph ->
-                                            if (paraIdx > 0) Spacer(Modifier.height(8.dp))
-                                            val paraSpans = remember(paragraph) { parseLatexSpans(paragraph) }
-                                            if (paraSpans.all { !it.isLatex }) {
-                                                SelectionContainer {
-                                                    Markdown(
-                                                        content = paragraph.escapeThinkTags(),
-                                                        modifier = Modifier.fillMaxWidth(),
-                                                        typography = customTypography,
-                                                        padding = customMarkdownPadding,
-                                                        components = customMarkdownComponents,
-                                                        imageTransformer = latexImageTransformer
-                                                    )
-                                                }
                                             } else {
-                                                var pendingSpans = mutableListOf<LatexSpan>()
-                                                for (span in paraSpans) {
-                                                    if (span.isLatex && span.display) {
-                                                        if (pendingSpans.isNotEmpty()) {
-                                                            SelectionContainer {
+                                                val paragraphs = remember(text) { splitParagraphs(text) }
+                                                Column {
+                                                    paragraphs.forEachIndexed { paraIdx, paragraph ->
+                                                        if (paraIdx > 0) Spacer(Modifier.height(8.dp))
+                                                        val paraSpans = remember(paragraph) { parseLatexSpans(paragraph) }
+                                                        if (paraSpans.all { !it.isLatex }) {
+                                                            Markdown(
+                                                                content = paragraph.escapeThinkTags(),
+                                                                modifier = Modifier.fillMaxWidth(),
+                                                                typography = customTypography,
+                                                                padding = customMarkdownPadding,
+                                                                components = customMarkdownComponents,
+                                                                imageTransformer = latexImageTransformer
+                                                            )
+                                                        } else {
+                                                            var pendingSpans = mutableListOf<LatexSpan>()
+                                                            for (span in paraSpans) {
+                                                                if (span.isLatex && span.display) {
+                                                                    if (pendingSpans.isNotEmpty()) {
+                                                                        LatexAwareText(
+                                                                            spans = pendingSpans.toList(),
+                                                                            modifier = Modifier.fillMaxWidth(),
+                                                                            textStyle = customTypography.paragraph.copy(color = textColor),
+                                                                            latexTextSize = 56f,
+                                                                            latexColor = textColor.toArgb(),
+                                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
+                                                                        )
+                                                                        pendingSpans.clear()
+                                                                    }
+                                                                    val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                                                    val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
+                                                                    if (bmp != null) {
+                                                                        Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
+                                                                    } else {
+                                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), colors = customMarkdownColors, typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
+                                                                    }
+                                                                } else {
+                                                                    pendingSpans.add(span)
+                                                                }
+                                                            }
+                                                            if (pendingSpans.isNotEmpty()) {
                                                                 LatexAwareText(
                                                                     spans = pendingSpans.toList(),
                                                                     modifier = Modifier.fillMaxWidth(),
@@ -1262,35 +1266,23 @@ fun MessageItem(
                                                                     codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
                                                                 )
                                                             }
-                                                            pendingSpans.clear()
                                                         }
-                                                        val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                        val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
-                                                        if (bmp != null) {
-                                                            Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
-                                                        } else {
-                                                            SelectionContainer {
-                                                                Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), colors = customMarkdownColors, typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
-                                                            }
-                                                        }
-                                                    } else {
-                                                        pendingSpans.add(span)
-                                                    }
-                                                }
-                                                if (pendingSpans.isNotEmpty()) {
-                                                    SelectionContainer {
-                                                        LatexAwareText(
-                                                            spans = pendingSpans.toList(),
-                                                            modifier = Modifier.fillMaxWidth(),
-                                                            textStyle = customTypography.paragraph.copy(color = textColor),
-                                                            latexTextSize = 56f,
-                                                            latexColor = textColor.toArgb(),
-                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
-                                                        )
                                                     }
                                                 }
                                             }
                                         }
+                                    }
+                                    if (isStreaming) {
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .combinedClickable(
+                                                    interactionSource = remember { MutableInteractionSource() },
+                                                    indication = null,
+                                                    onClick = { },
+                                                    onLongClick = { }
+                                                )
+                                        )
                                     }
                                 }
                             }

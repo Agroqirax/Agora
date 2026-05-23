@@ -1843,18 +1843,17 @@ class ChatViewModel(
                 val newEnabled = enabledModels.value.intersect(allFetchedModels)
                 settingsManager.saveEnabledModels(newEnabled)
 
-                val app = getApplication<Application>()
                 when {
                     successProviders.isNotEmpty() && failedProviders.isEmpty() ->
-                        app.getString(R.string.sync_success_providers, successProviders.size)
+                        appContext.getString(R.string.sync_success_providers, successProviders.size)
                     successProviders.isNotEmpty() && failedProviders.isNotEmpty() ->
-                        app.getString(R.string.sync_partial, successProviders.joinToString(), failedProviders.joinToString())
+                        appContext.getString(R.string.sync_partial, successProviders.joinToString(), failedProviders.joinToString())
                     successProviders.isEmpty() && failedProviders.isNotEmpty() ->
-                        app.getString(R.string.sync_failed_providers, failedProviders.joinToString())
-                    else -> if (skippedCount > 0) app.getString(R.string.sync_no_providers) else app.getString(R.string.sync_completed)
+                        appContext.getString(R.string.sync_failed_providers, failedProviders.joinToString())
+                    else -> if (skippedCount > 0) appContext.getString(R.string.sync_no_providers) else appContext.getString(R.string.sync_completed)
                 }
             } catch (e: Exception) {
-                getApplication<Application>().getString(R.string.sync_failed_providers, e.message ?: appContext.getString(R.string.unknown_error))
+                appContext.getString(R.string.sync_failed_providers, e.message ?: appContext.getString(R.string.unknown_error))
             } finally {
                 _isSyncingModels.value = false
             }

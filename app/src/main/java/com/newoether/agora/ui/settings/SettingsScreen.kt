@@ -186,7 +186,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             Row(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
-                                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                                    .padding(horizontal = 16.dp, vertical = 16.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Icon(
@@ -201,6 +201,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                         text = stringResource(cat.titleRes),
                                                         style = MaterialTheme.typography.bodyLarge
                                                     )
+                                                    Spacer(modifier = Modifier.height(3.dp))
                                                     Text(
                                                         text = stringResource(cat.descriptionRes),
                                                         style = MaterialTheme.typography.bodyMedium,
