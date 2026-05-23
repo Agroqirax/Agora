@@ -78,12 +78,15 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.onSizeChanged
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -1433,6 +1436,18 @@ fun MessageItem(
             }
         }
 
+        val dialogWindowRef = remember { mutableStateOf<android.view.Window?>(null) }
+
+        LaunchedEffect(dialogWindowRef.value) {
+            val window = dialogWindowRef.value ?: return@LaunchedEffect
+            while (isActive) {
+                window.attributes = window.attributes.also {
+                    it.dimAmount = (0.32f * visualFraction.value).coerceIn(0f, 1f)
+                }
+                withFrameNanos { }
+            }
+        }
+
         val sheetScrollConnection = remember {
             object : NestedScrollConnection {
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -1492,12 +1507,14 @@ fun MessageItem(
                 dismissOnClickOutside = false
             )
         ) {
+            val dialogWindow = (LocalView.current.parent as? DialogWindowProvider)?.window
+            SideEffect { dialogWindowRef.value = dialogWindow }
+
             Box(modifier = Modifier.fillMaxSize()) {
-                // Scrim (only interactive when visible)
+                // Transparent click-catcher — dim is handled by native Window.dimAmount
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f * visualFraction.value.coerceIn(0f, 1f)))
                         .then(
                             if (visualFraction.value > 0.02f) {
                                 Modifier.clickable(
