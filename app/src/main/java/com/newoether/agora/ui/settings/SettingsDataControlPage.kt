@@ -168,6 +168,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
+            contentWindowInsets = WindowInsets(0.dp),
             topBar = {
                 TopAppBar(
                     title = { Text(stringResource(R.string.settings_data_control), fontWeight = FontWeight.Bold) },
@@ -186,6 +187,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             Column(
                 modifier = Modifier
                     .padding(padding)
+                    .navigationBarsPadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 16.dp)
             ) {

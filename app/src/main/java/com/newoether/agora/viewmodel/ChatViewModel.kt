@@ -263,6 +263,9 @@ class ChatViewModel(
     val webSearchBaseUrl = settingsManager.webSearchBaseUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val shellEnabled = settingsManager.shellEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val shellDevices = settingsManager.shellDevices.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val themeMode = settingsManager.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, "FOLLOW_DEVICE")
+    val colorScheme = settingsManager.colorScheme.stateIn(viewModelScope, SharingStarted.Eagerly, "DEFAULT")
+    val dynamicColor = settingsManager.dynamicColor.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val ragThreshold = settingsManager.ragThreshold.stateIn(viewModelScope, SharingStarted.Eagerly, 0.5f)
 
         val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
@@ -1031,6 +1034,9 @@ class ChatViewModel(
             if (idx >= 0) { current[idx] = device; settingsManager.saveShellDevices(current) }
         }
     }
+    fun setThemeMode(mode: String) { viewModelScope.launch { settingsManager.saveThemeMode(mode) } }
+    fun setColorScheme(scheme: String) { viewModelScope.launch { settingsManager.saveColorScheme(scheme) } }
+    fun setDynamicColor(enabled: Boolean) { viewModelScope.launch { settingsManager.saveDynamicColor(enabled) } }
     fun removeShellDevice(deviceId: String) {
         viewModelScope.launch {
             settingsManager.saveShellDevices(shellDevices.value.filter { it.id != deviceId })

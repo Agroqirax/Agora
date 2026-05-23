@@ -98,6 +98,9 @@ class SettingsManager(private val context: Context) {
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val COLOR_SCHEME = stringPreferencesKey("color_scheme")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
@@ -184,6 +187,10 @@ class SettingsManager(private val context: Context) {
         val jsonStr = pref[SHELL_DEVICES_JSON] ?: "[]"
         try { json.decodeFromString<List<ShellDeviceConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
+
+    val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "FOLLOW_DEVICE" }
+    val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
+    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
         context.dataStore.edit { prefs ->
@@ -346,5 +353,15 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveShellDevices(devices: List<ShellDeviceConfig>) {
         context.dataStore.edit { it[SHELL_DEVICES_JSON] = json.encodeToString(devices) }
+    }
+
+    suspend fun saveThemeMode(mode: String) {
+        context.dataStore.edit { it[THEME_MODE] = mode }
+    }
+    suspend fun saveColorScheme(scheme: String) {
+        context.dataStore.edit { it[COLOR_SCHEME] = scheme }
+    }
+    suspend fun saveDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
     }
 }

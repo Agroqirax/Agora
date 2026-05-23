@@ -112,6 +112,7 @@ fun SystemPromptEditorPage(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             TopAppBar(
                 title = { Text(if (isEdit) stringResource(R.string.prompts_edit_title) else stringResource(R.string.prompts_add_title)) },
@@ -142,6 +143,7 @@ fun SystemPromptEditorPage(
         Column(
             modifier = Modifier
                 .padding(padding)
+                .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp)

@@ -42,6 +42,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.shell_title), fontWeight = FontWeight.Bold) },
@@ -62,6 +63,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .padding(padding)
+                .navigationBarsPadding()
                 .verticalScroll(scrollState)
                 .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { fm.clearFocus() }
                 .padding(horizontal = 16.dp, vertical = 16.dp)

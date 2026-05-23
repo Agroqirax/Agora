@@ -82,6 +82,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0.dp),
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.search_title), fontWeight = FontWeight.Bold) },
@@ -101,6 +102,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         Column(
             modifier = Modifier
                 .padding(padding)
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }
                 .padding(horizontal = 16.dp, vertical = 16.dp)

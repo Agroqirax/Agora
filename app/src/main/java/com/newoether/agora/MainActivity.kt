@@ -84,7 +84,18 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            AgoraTheme {
+            val themeMode by settingsManager.themeMode.collectAsState(initial = "FOLLOW_DEVICE")
+            val colorSchemeName by settingsManager.colorScheme.collectAsState(initial = "DEFAULT")
+            val dynamicColor by settingsManager.dynamicColor.collectAsState(initial = true)
+
+            val themeModeEnum = try { com.newoether.agora.ui.theme.ThemeMode.valueOf(themeMode) } catch (_: Exception) { com.newoether.agora.ui.theme.ThemeMode.FOLLOW_DEVICE }
+            val colorSchemePreset = try { com.newoether.agora.ui.theme.ColorSchemePreset.valueOf(colorSchemeName) } catch (_: Exception) { com.newoether.agora.ui.theme.ColorSchemePreset.DEFAULT }
+
+            AgoraTheme(
+                themeMode = themeModeEnum,
+                colorSchemePreset = colorSchemePreset,
+                dynamicColor = dynamicColor
+            ) {
                 val activity = LocalActivity.current
 
                 if (needsErrorDialog) {

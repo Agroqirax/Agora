@@ -256,6 +256,25 @@
     <string name="snackbar_title_generated">标题已生成。</string>
     <string name="snackbar_title_error">生成标题时遇到错误。</string>
 
+    <!-- Appearance -->
+    <string name="settings_appearance">外观</string>
+    <string name="settings_appearance_desc">主题、配色方案和动态颜色</string>
+    <string name="appearance_title">外观</string>
+    <string name="theme_mode">主题模式</string>
+    <string name="theme_mode_light">浅色</string>
+    <string name="theme_mode_dark">深色</string>
+    <string name="theme_mode_follow_device">跟随系统</string>
+    <string name="color_scheme">配色方案</string>
+    <string name="color_scheme_default">默认</string>
+    <string name="color_scheme_ocean">海洋</string>
+    <string name="color_scheme_forest">森林</string>
+    <string name="color_scheme_sunset">日落</string>
+    <string name="color_scheme_rose">玫瑰</string>
+    <string name="color_scheme_slate">岩灰</string>
+    <string name="dynamic_color">动态颜色</string>
+    <string name="dynamic_color_desc">根据壁纸使用系统生成的颜色（Android 12+）</string>
+    <string name="dynamic_color_overrides_scheme">动态颜色会覆盖所选配色方案</string>
+
     <!-- Language -->
     <string name="language_title">语言</string>
     <string name="language_desc">更改应用显示语言</string>

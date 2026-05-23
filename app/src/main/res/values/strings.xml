@@ -291,6 +291,25 @@
     <string name="snackbar_title_generated">Title generated.</string>
     <string name="snackbar_title_error">Error encountered when generating title.</string>
 
+    <!-- Appearance -->
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_appearance_desc">Theme, color scheme, and dynamic color</string>
+    <string name="appearance_title">Appearance</string>
+    <string name="theme_mode">Theme Mode</string>
+    <string name="theme_mode_light">Light</string>
+    <string name="theme_mode_dark">Dark</string>
+    <string name="theme_mode_follow_device">Follow Device</string>
+    <string name="color_scheme">Color Scheme</string>
+    <string name="color_scheme_default">Default</string>
+    <string name="color_scheme_ocean">Ocean</string>
+    <string name="color_scheme_forest">Forest</string>
+    <string name="color_scheme_sunset">Sunset</string>
+    <string name="color_scheme_rose">Rose</string>
+    <string name="color_scheme_slate">Slate</string>
+    <string name="dynamic_color">Dynamic Color</string>
+    <string name="dynamic_color_desc">Use system-generated colors based on wallpaper (Android 12+)</string>
+    <string name="dynamic_color_overrides_scheme">Dynamic color overrides the selected color scheme</string>
+
     <!-- Language -->
     <string name="language_title">Language</string>
     <string name="language_desc">Change the app display language</string>

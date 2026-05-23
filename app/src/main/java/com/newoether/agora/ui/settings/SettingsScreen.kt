@@ -82,6 +82,7 @@ private val settingsGroups = listOf(
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
     )),
     SettingsGroupData(listOf(
+        SettingsCategory("appearance", R.string.settings_appearance, R.string.settings_appearance_desc, Icons.Default.Palette),
         SettingsCategory("memory", R.string.settings_memory, R.string.settings_memory_desc, Icons.Default.Description),
         SettingsCategory("datacontrol", R.string.settings_data_control, R.string.settings_data_control_desc, Icons.Default.Storage),
         SettingsCategory("language", R.string.language_title, R.string.language_desc, Icons.Default.Translate),
@@ -132,6 +133,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "search" -> SettingsSearchPage(viewModel, onBack = { selectedCategory = null })
                 "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
                 "datacontrol" -> SettingsDataControlPage(viewModel, onBack = { selectedCategory = null })
+                "appearance" -> SettingsAppearancePage(viewModel, onBack = { selectedCategory = null })
                 else -> {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -177,7 +179,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         }
                                         Surface(
                                             shape = shape,
-                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .clip(shape)
