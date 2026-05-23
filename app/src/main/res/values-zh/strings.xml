@@ -226,7 +226,7 @@
     <string name="memory_access_saved">访问已保存的记忆</string>
     <string name="memory_access_saved_desc">允许模型读取、创建和编辑记忆文件</string>
     <string name="memory_access_active">访问活跃记忆</string>
-    <string name="memory_access_active_desc">每次 API 调用时包含活跃记忆内容</string>
+    <string name="memory_access_active_desc">允许模型更新活跃记忆</string>
     <string name="memory_access_past">访问过去的对话</string>
     <string name="memory_access_past_desc">允许模型搜索对话历史</string>
     <string name="memory_active_title">活跃记忆</string>
@@ -510,4 +510,18 @@
     <string name="gpt_import_no_data">此文件中没有可导入的数据。</string>
     <string name="select_all">全选</string>
     <string name="deselect_all">取消全选</string>
+
+    <!-- Caching & Sync -->
+    <string name="embedding_model_caching">嵌入模型 \"%1$s\" 正在缓存…</string>
+    <string name="messages_not_cached">%1$d / %2$d 条消息尚未缓存。</string>
+    <string name="cache_now">立即缓存</string>
+    <string name="no_messages_to_cache">没有需要缓存的消息。</string>
+    <string name="all_messages_already_cached">所有 %1$d 条消息均已缓存。</string>
+    <string name="no_api_key_configured">未配置 API 密钥。</string>
+    <string name="all_messages_cached">已缓存全部 %1$d 条消息。</string>
+    <string name="cached_partial_failed">已缓存 %1$d / %2$d 条，%3$d 条失败。</string>
+    <string name="retry">重试</string>
+    <string name="parse_error">解析错误</string>
+    <string name="unknown_error">未知错误</string>
+    <string name="could_not_read_file">无法读取文件</string>
 </resources>

@@ -261,7 +261,7 @@
     <string name="memory_access_saved">Access Saved Memories</string>
     <string name="memory_access_saved_desc">Allow the model to read, create, and edit memory files</string>
     <string name="memory_access_active">Access Active Memory</string>
-    <string name="memory_access_active_desc">Include active memory content in every API call</string>
+    <string name="memory_access_active_desc">Allow the model to update active memory</string>
     <string name="memory_access_past">Access Past Conversations</string>
     <string name="memory_access_past_desc">Allow the model to search conversation history</string>
     <string name="memory_active_title">Active Memory</string>
@@ -505,4 +505,18 @@
     <string name="file_too_large">File too large (max 20 MB)</string>
     <string name="pdf_copy_failed">Failed to copy PDF</string>
     <string name="pdf_render_failed">Failed to render PDF</string>
+
+    <!-- Caching & Sync -->
+    <string name="embedding_model_caching">Embedding model \"%1$s\" is caching…</string>
+    <string name="messages_not_cached">%1$d of %2$d messages not cached.</string>
+    <string name="cache_now">Cache Now</string>
+    <string name="no_messages_to_cache">No messages to cache.</string>
+    <string name="all_messages_already_cached">All %1$d messages already cached.</string>
+    <string name="no_api_key_configured">No API key configured.</string>
+    <string name="all_messages_cached">All %1$d messages cached.</string>
+    <string name="cached_partial_failed">Cached %1$d of %2$d. %3$d failed.</string>
+    <string name="retry">Retry</string>
+    <string name="parse_error">Parse error</string>
+    <string name="unknown_error">Unknown error</string>
+    <string name="could_not_read_file">Could not read file</string>
 </resources>

@@ -673,7 +673,7 @@ fun ChatBottomBar(
                                         Icon(Icons.Default.Terminal, null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.code_execution))
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
                                         ProviderBadge("Gemini")
                                     }
                                 },
@@ -692,7 +692,7 @@ fun ChatBottomBar(
                                         Icon(Icons.Default.Language, null, modifier = Modifier.size(18.dp))
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(stringResource(R.string.google_search))
-                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Spacer(modifier = Modifier.width(10.dp))
                                         ProviderBadge("Gemini")
                                     }
                                 },
@@ -955,7 +955,6 @@ private fun ProviderBadge(provider: String) {
             provider,
             color = badgeColor,
             fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
         )
     }

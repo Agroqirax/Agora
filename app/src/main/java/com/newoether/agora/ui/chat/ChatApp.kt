@@ -714,8 +714,8 @@ fun ChatApp(
                         ) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(48.dp),
-                                strokeWidth = 3.dp,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                                strokeWidth = 5.dp,
+                                color = MaterialTheme.colorScheme.primary
                             )
                         }
                     }

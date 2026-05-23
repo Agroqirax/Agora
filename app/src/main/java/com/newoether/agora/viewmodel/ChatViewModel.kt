@@ -755,11 +755,11 @@ class ChatViewModel(
             val notCached = (total - cached).coerceAtLeast(0)
             if (notCached > 0) {
                 if (cachingProgress.value.containsKey(id)) {
-                    _snackbarMessage.emit(SnackbarEvent("Embedding model \"${model.name}\" is caching..."))
+                    _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.embedding_model_caching, model.name)))
                 } else {
                     _snackbarMessage.emit(SnackbarEvent(
-                        "$notCached of $total messages not cached.",
-                        "Cache Now"
+                        appContext.getString(R.string.messages_not_cached, notCached, total),
+                        appContext.getString(R.string.cache_now)
                     ) { cacheMessagesForModel(id) })
                 }
             }
@@ -776,14 +776,14 @@ class ChatViewModel(
                 val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
                 val total = allMessages.size
                 if (total == 0) {
-                    if (!silent) _snackbarMessage.emit(SnackbarEvent("No messages to cache."))
+                    if (!silent) _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.no_messages_to_cache)))
                     refreshCacheCounts()
                     return@launch
                 }
                 val existingIds = chatDao.getEmbeddedMessageIdsByModel(modelId).toSet()
                 val toProcess = allMessages.filter { it.id !in existingIds }
                 if (toProcess.isEmpty()) {
-                    if (!silent) _snackbarMessage.emit(SnackbarEvent("All $total messages already cached."))
+                    if (!silent) _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.all_messages_already_cached, total)))
                     refreshCacheCounts()
                     return@launch
                 }
@@ -805,7 +805,7 @@ class ChatViewModel(
                         } else {
                             val apiKey = resolveEmbeddingApiKey()
                             if (apiKey == null) {
-                                if (!silent) _snackbarMessage.emit(SnackbarEvent("No API key configured."))
+                                if (!silent) _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
                                 return@launch
                             }
                             val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
@@ -830,11 +830,11 @@ class ChatViewModel(
                 val failed = toProcess.size - succeeded
                 if (!silent) {
                     if (failed == 0) {
-                        _snackbarMessage.emit(SnackbarEvent("All $total messages cached."))
+                        _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.all_messages_cached, total)))
                     } else {
                         _snackbarMessage.emit(SnackbarEvent(
-                            "Cached $succeeded of ${toProcess.size}. ${failed} failed.",
-                            "Retry"
+                            appContext.getString(R.string.cached_partial_failed, succeeded, toProcess.size, failed),
+                            appContext.getString(R.string.retry)
                         ) { cacheMessagesForModel(modelId) })
                     }
                 }
@@ -1854,7 +1854,7 @@ class ChatViewModel(
                     else -> if (skippedCount > 0) app.getString(R.string.sync_no_providers) else app.getString(R.string.sync_completed)
                 }
             } catch (e: Exception) {
-                getApplication<Application>().getString(R.string.sync_failed_providers, e.message ?: "Unknown error")
+                getApplication<Application>().getString(R.string.sync_failed_providers, e.message ?: appContext.getString(R.string.unknown_error))
             } finally {
                 _isSyncingModels.value = false
             }
@@ -1938,11 +1938,11 @@ class ChatViewModel(
                 val preview = importer.preview(parseResult.getOrThrow())
                 _claudeImportPreview.value = preview
             } else {
-                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: "Parse error")
+                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
                 _claudeImportPreview.value = null
             }
         } catch (e: Exception) {
-            emitSnackbar(e.localizedMessage ?: "Unknown error")
+            emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
             _claudeImportPreview.value = null
         }
     }
@@ -1964,20 +1964,20 @@ class ChatViewModel(
                 _claudeImportProgress.value = 0.2f
                 val bytes = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 if (bytes == null) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, "Could not read file"))
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, appContext.getString(R.string.could_not_read_file)))
                     return@launch
                 }
 
                 val importer = ClaudeChatImporter()
                 val jsonResult = importer.extractJsonFromBytes(bytes)
                 if (jsonResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, jsonResult.exceptionOrNull()?.localizedMessage ?: "Parse error"))
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, jsonResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
                     return@launch
                 }
 
                 val parseResult = importer.parseJson(jsonResult.getOrThrow())
                 if (parseResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: "Parse error"))
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
                     return@launch
                 }
 
@@ -2044,11 +2044,11 @@ class ChatViewModel(
                 val preview = importer.preview(conversations)
                 _gptImportPreview.value = preview
             } else {
-                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: "Parse error")
+                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
                 _gptImportPreview.value = null
             }
         } catch (e: Exception) {
-            emitSnackbar(e.localizedMessage ?: "Unknown error")
+            emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
             _gptImportPreview.value = null
         }
     }
@@ -2070,14 +2070,14 @@ class ChatViewModel(
                 _gptImportProgress.value = 0.2f
                 val bytes = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 if (bytes == null) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, "Could not read file"))
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, appContext.getString(R.string.could_not_read_file)))
                     return@launch
                 }
 
                 val importer = GptChatImporter()
                 val parseResult = importer.extractAndParse(bytes)
                 if (parseResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: "Parse error"))
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
                     return@launch
                 }
 
