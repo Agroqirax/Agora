@@ -12,6 +12,8 @@ class ShellClient(
     private var serverPublicKey: java.security.PublicKey? = null
     private var currentAesKey: ByteArray? = null
     private var currentKeyPair: java.security.KeyPair? = null
+    var lastError: String? = null
+        private set
 
     init {
         if (cachedPublicKey.isNotBlank()) {
@@ -25,29 +27,41 @@ class ShellClient(
 
     suspend fun fetchPublicKey(): Boolean {
         if (serverPublicKey != null) return true
-        if (apiKey.isBlank()) return false
+        if (apiKey.isBlank()) {
+            lastError = "No API key configured"
+            return false
+        }
+        var rawResponse: String? = null
         return try {
-            val response = com.newoether.agora.api.HttpClient.fetchModels(
+            rawResponse = com.newoether.agora.api.HttpClient.fetchModels(
                 "$serverUrl/public-key",
                 mapOf("Authorization" to "Bearer $apiKey")
             )
-            if (response != null) {
-                val json = Json.parseToJsonElement(response).jsonObject
-                val pubKeyStr = json["public_key"]?.jsonPrimitive?.content
-                val nonce = json["nonce"]?.jsonPrimitive?.content
-                val sig = json["signature"]?.jsonPrimitive?.content
-                if (pubKeyStr != null && nonce != null && sig != null) {
-                    if (verifyPublicKeySignature(pubKeyStr, nonce, sig)) {
-                        serverPublicKey = ShellCrypto.decodePublicKey(pubKeyStr)
-                        true
-                    } else {
-                        DebugLog.e("ShellClient", "Public key signature verification failed")
-                        false
-                    }
-                } else false
-            } else false
+            if (rawResponse == null) {
+                lastError = "Server returned no response (check server URL and port)"
+                DebugLog.e("ShellClient", lastError!!)
+                return false
+            }
+            val json = Json.parseToJsonElement(rawResponse).jsonObject
+            val pubKeyStr = json["public_key"]?.jsonPrimitive?.content?.replace(" ", "")
+            val nonce = json["nonce"]?.jsonPrimitive?.content?.replace(" ", "")
+            val sig = json["signature"]?.jsonPrimitive?.content?.replace(" ", "")
+            if (pubKeyStr == null || nonce == null || sig == null) {
+                lastError = "Server response missing public_key, nonce, or signature fields"
+                DebugLog.e("ShellClient", "$lastError: $rawResponse")
+                return false
+            }
+            if (!verifyPublicKeySignature(pubKeyStr, nonce, sig)) {
+                lastError = "Public key signature verification failed — API keys may not match between Conch server and Agora"
+                DebugLog.e("ShellClient", lastError!!)
+                return false
+            }
+            serverPublicKey = ShellCrypto.decodePublicKey(pubKeyStr)
+            lastError = null
+            true
         } catch (e: Exception) {
-            DebugLog.w("ShellClient", "Failed to fetch public key: ${e.message}")
+            lastError = "Failed to fetch public key: ${e.message} (response: ${rawResponse ?: "null"})"
+            DebugLog.w("ShellClient", lastError!!)
             false
         }
     }
@@ -118,7 +132,7 @@ class ShellClient(
 
     fun decryptSseData(encryptedData: String): String {
         val key = currentAesKey ?: throw IllegalStateException("No session key")
-        return String(ShellCrypto.decrypt(key, encryptedData), Charsets.UTF_8)
+        return String(ShellCrypto.decrypt(key, encryptedData.replace(" ", "")), Charsets.UTF_8)
     }
 
     fun getSessionKey(): ByteArray? = currentAesKey

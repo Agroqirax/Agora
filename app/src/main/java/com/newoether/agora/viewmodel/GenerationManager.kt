@@ -648,7 +648,7 @@ class GenerationManager(
                 return buildJsonObject {
                     put("type", "execute_shell_command")
                     put("error", "encryption_failed")
-                    put("message", "Failed to establish encrypted channel. Ensure Conch server is running and supports the /public-key endpoint.")
+                    put("message", shellClient.lastError ?: "Failed to establish encrypted channel.")
                 }.toString()
             }
 
