@@ -4,11 +4,15 @@ import android.annotation.SuppressLint
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -164,44 +168,54 @@ fun SystemPromptEditorPage(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            PrimaryTabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.onSurface
+            val tabLabels = listOf(
+                stringResource(R.string.template_tab_system),
+                stringResource(R.string.template_tab_prepend),
+                stringResource(R.string.template_tab_postpend),
+            )
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = {
-                        Text(
-                            stringResource(R.string.template_tab_system),
-                            maxLines = 1,
-                            color = if (selectedTab == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                Row(
+                    modifier = Modifier.padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    tabLabels.forEachIndexed { index, label ->
+                        val isSelected = selectedTab == index
+                        val bgColor by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                            animationSpec = tween(250)
                         )
-                    }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = {
-                        Text(
-                            stringResource(R.string.template_tab_prepend),
-                            maxLines = 1,
-                            color = if (selectedTab == 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        val textColor by animateColorAsState(
+                            targetValue = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                            animationSpec = tween(250)
                         )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .then(
+                                    if (isSelected) Modifier
+                                        .shadow(2.dp, RoundedCornerShape(20.dp))
+                                    else Modifier
+                                )
+                                .background(bgColor, RoundedCornerShape(20.dp))
+                                .clickable { selectedTab = index }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                maxLines = 1,
+                                softWrap = false,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = textColor
+                            )
+                        }
                     }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = {
-                        Text(
-                            stringResource(R.string.template_tab_postpend),
-                            maxLines = 1,
-                            color = if (selectedTab == 2) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -297,8 +311,7 @@ fun SystemPromptEditorPage(
         ModalBottomSheet(
             onDismissRequest = { showVariablePicker = false; insertAtIndex = -1 },
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            tonalElevation = 0.dp
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
         ) {
             Text(
                 text = stringResource(R.string.template_variable_picker_title),
