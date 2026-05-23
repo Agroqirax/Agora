@@ -131,9 +131,15 @@ fun ChatApp(
     var bottomBarHeightPx by rememberSaveable { mutableFloatStateOf(0f) }
     val bottomBarHeight = with(density) { bottomBarHeightPx.toDp() }
     val drawerWidthPx = with(density) { drawerWidth.toPx() }
-    val drawerProgress = run {
-        val offset = drawerState.offset.value
-        if (drawerWidthPx > 0f && !offset.isNaN()) (offset / drawerWidthPx).coerceIn(0f, 1f) else 0f
+    var drawerProgress by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(drawerWidthPx) {
+        if (drawerWidthPx <= 0f) return@LaunchedEffect
+        snapshotFlow { drawerState.offset.value }
+            .collect { offset ->
+                if (!offset.isNaN()) {
+                    drawerProgress = (offset / drawerWidthPx).coerceIn(0f, 1f)
+                }
+            }
     }
     // Bottom offset to clear the Settings button in the drawer.
     var settingsButtonBottomDp by remember { mutableFloatStateOf(80f) }
