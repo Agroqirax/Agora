@@ -209,6 +209,8 @@
     <string name="shell_add_device">添加设备</string>
     <string name="shell_remove_device">移除</string>
     <string name="shell_no_devices">未配置设备。添加一个以启用终端访问。</string>
+    <string name="shell_delete_confirm_title">删除 Shell 设备</string>
+    <string name="shell_delete_confirm_message">确定要删除 \"%1$s\" 吗？</string>
     <string name="shell_result_command">命令: %1$s</string>
     <string name="shell_result_error">错误: %1$s</string>
     <string name="shell_result_exit_code">退出码: %1$d</string>

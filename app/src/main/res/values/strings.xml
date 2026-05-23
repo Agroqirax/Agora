@@ -243,6 +243,8 @@
     <string name="shell_add_device">Add Device</string>
     <string name="shell_remove_device">Remove</string>
     <string name="shell_no_devices">No devices configured. Add one to enable shell access.</string>
+    <string name="shell_delete_confirm_title">Delete Shell Device</string>
+    <string name="shell_delete_confirm_message">Are you sure you want to delete \"%1$s\"?</string>
     <string name="shell_result_command">Command: %1$s</string>
     <string name="shell_result_error">Error: %1$s</string>
     <string name="shell_result_exit_code">Exit code: %1$d</string>

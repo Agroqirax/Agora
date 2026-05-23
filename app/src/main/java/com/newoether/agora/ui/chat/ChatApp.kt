@@ -150,9 +150,8 @@ fun ChatApp(
 
     var showLaunchContent by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        delay(100)
+        delay(50)
         showLaunchContent = true
-        delay(200)
         inputFocusRequester.requestFocus()
     }
 

@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
@@ -16,6 +17,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -24,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import java.util.UUID
 
@@ -32,6 +36,9 @@ import java.util.UUID
 fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val shellEnabled by viewModel.shellEnabled.collectAsState()
     val shellDevices by viewModel.shellDevices.collectAsState()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    var newlyAddedDeviceId by remember { mutableStateOf<String?>(null) }
+    var deleteConfirmDeviceId by remember { mutableStateOf<String?>(null) }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -51,10 +58,11 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         }
     ) { padding ->
         val fm = androidx.compose.ui.platform.LocalFocusManager.current
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
                 .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { fm.clearFocus() }
                 .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
@@ -84,17 +92,33 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         shellDevices.forEachIndexed { index, device ->
                             val isFirst = index == 0
                             val isLast = index == shellDevices.lastIndex
+                            val isNewlyAdded = device.id == newlyAddedDeviceId
                             var expanded by remember(device.id) { mutableStateOf(false) }
                             var nameInput by remember(device.id) { mutableStateOf(device.name) }
                             var descInput by remember(device.id) { mutableStateOf(device.description) }
                             var urlInput by remember(device.id) { mutableStateOf(device.serverUrl) }
                             var keyInput by remember(device.id) { mutableStateOf(device.apiKey) }
+                            val nameFocusRequester = remember { FocusRequester() }
 
                             LaunchedEffect(device) {
                                 nameInput = device.name
                                 descInput = device.description
                                 urlInput = device.serverUrl
                                 keyInput = device.apiKey
+                            }
+
+                            LaunchedEffect(isNewlyAdded) {
+                                if (isNewlyAdded) {
+                                    expanded = true
+                                    delay(50)
+                                    nameFocusRequester.requestFocus()
+                                    val expandedH = (200 * density.density).toInt()
+                                    scrollState.animateScrollTo(
+                                        scrollState.maxValue + expandedH,
+                                        animationSpec = tween(500)
+                                    )
+                                    newlyAddedDeviceId = null
+                                }
                             }
 
                             if (!isFirst) {
@@ -115,7 +139,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     if (device.description.isNotBlank()) Text(device.description)
                                 },
                                 leadingContent = {
-                                    Icon(Icons.Default.Dns, null, tint = MaterialTheme.colorScheme.primary)
+                                    Icon(Icons.Default.Devices, null, tint = MaterialTheme.colorScheme.primary)
                                 },
                                 trailingContent = {
                                     IconButton(onClick = { expanded = !expanded }) {
@@ -148,7 +172,9 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         placeholder = { Text(stringResource(R.string.shell_device_name_hint)) },
                                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, null) },
                                         singleLine = true,
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .focusRequester(nameFocusRequester)
                                     )
 
                                     Spacer(Modifier.height(10.dp))
@@ -225,10 +251,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         OutlinedButton(
-                                            onClick = {
-                                                viewModel.removeShellDevice(device.id)
-                                                expanded = false
-                                            },
+                                            onClick = { deleteConfirmDeviceId = device.id },
                                             modifier = Modifier.weight(1f),
                                             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
                                         ) {
@@ -263,8 +286,10 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                 OutlinedButton(
                     onClick = {
+                        val newId = UUID.randomUUID().toString()
+                        newlyAddedDeviceId = newId
                         viewModel.addShellDevice(ShellDeviceConfig(
-                            id = UUID.randomUUID().toString(),
+                            id = newId,
                             name = "",
                             description = ""
                         ))
@@ -275,6 +300,28 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.shell_add_device))
                 }
+            }
+
+            if (deleteConfirmDeviceId != null) {
+                val deviceToDelete = shellDevices.find { it.id == deleteConfirmDeviceId }
+                val deviceName = deviceToDelete?.name?.ifBlank { stringResource(R.string.search_untitled) } ?: ""
+                AlertDialog(
+                    onDismissRequest = { deleteConfirmDeviceId = null },
+                    title = { Text(stringResource(R.string.shell_delete_confirm_title)) },
+                    text = { Text(stringResource(R.string.shell_delete_confirm_message, deviceName)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.removeShellDevice(deleteConfirmDeviceId!!)
+                                deleteConfirmDeviceId = null
+                            },
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) { Text(stringResource(R.string.delete)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { deleteConfirmDeviceId = null }) { Text(stringResource(R.string.cancel)) }
+                    }
+                )
             }
         }
     }
