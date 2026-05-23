@@ -248,7 +248,7 @@ class GptChatImporter {
                     "reasoning_recap" -> msg.metadata?.finishedDurationSec?.let { it * 1000L }
                     else -> null
                 }
-                val modelName = msg.metadata?.modelSlug
+                val modelName = msg.metadata?.modelSlug?.let { "OpenAI:$it" }
                 val timestamp = if (msg.createTime != null) (msg.createTime * 1000).toLong() else System.currentTimeMillis()
                 val status = when {
                     msg.metadata?.isComplete == false -> "STOPPED"
