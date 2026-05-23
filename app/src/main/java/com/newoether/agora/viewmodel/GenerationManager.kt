@@ -644,7 +644,13 @@ class GenerationManager(
                 cachedPublicKey = device.conchPublicKey
             )
             // Fetch and verify server public key for E2E encryption
-            shellClient.fetchPublicKey()
+            if (!shellClient.fetchPublicKey() && device.apiKey.isNotBlank()) {
+                return buildJsonObject {
+                    put("type", "execute_shell_command")
+                    put("error", "encryption_failed")
+                    put("message", "Failed to establish encrypted channel. Ensure Conch server is running and supports the /public-key endpoint.")
+                }.toString()
+            }
 
             val prepared = shellClient.prepareRequest(command, timeoutMs, workdir)
             val handle = com.newoether.agora.api.HttpClient.streamPost(
