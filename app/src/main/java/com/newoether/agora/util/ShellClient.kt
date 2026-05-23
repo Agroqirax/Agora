@@ -43,9 +43,9 @@ class ShellClient(
                 return false
             }
             val json = Json.parseToJsonElement(rawResponse).jsonObject
-            val pubKeyStr = json["public_key"]?.jsonPrimitive?.content?.replace(" ", "")
-            val nonce = json["nonce"]?.jsonPrimitive?.content?.replace(" ", "")
-            val sig = json["signature"]?.jsonPrimitive?.content?.replace(" ", "")
+            val pubKeyStr = json["public_key"]?.jsonPrimitive?.content
+            val nonce = json["nonce"]?.jsonPrimitive?.content
+            val sig = json["signature"]?.jsonPrimitive?.content
             if (pubKeyStr == null || nonce == null || sig == null) {
                 lastError = "Server response missing public_key, nonce, or signature fields"
                 DebugLog.e("ShellClient", "$lastError: $rawResponse")
@@ -132,7 +132,7 @@ class ShellClient(
 
     fun decryptSseData(encryptedData: String): String {
         val key = currentAesKey ?: throw IllegalStateException("No session key")
-        return String(ShellCrypto.decrypt(key, encryptedData.replace(" ", "")), Charsets.UTF_8)
+        return String(ShellCrypto.decrypt(key, encryptedData), Charsets.UTF_8)
     }
 
     fun getSessionKey(): ByteArray? = currentAesKey
