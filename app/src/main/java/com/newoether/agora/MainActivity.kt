@@ -137,7 +137,7 @@ fun MainNavigation(viewModel: ChatViewModel) {
     val targetSnackbarPadding = if (showSettings) navBarPadding else chatSnackbarOffset
     val snackbarBottomPadding by animateDpAsState(
         targetValue = targetSnackbarPadding,
-        animationSpec = spring(dampingRatio = 1.0f, stiffness = 2000f),
+        animationSpec = spring(dampingRatio = 1.0f, stiffness = 1000f),
         label = "snackbarPadding"
     )
     val focusManager = LocalFocusManager.current

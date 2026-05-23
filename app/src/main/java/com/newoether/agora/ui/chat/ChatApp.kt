@@ -131,14 +131,9 @@ fun ChatApp(
     var bottomBarHeightPx by rememberSaveable { mutableFloatStateOf(0f) }
     val bottomBarHeight = with(density) { bottomBarHeightPx.toDp() }
     val drawerWidthPx = with(density) { drawerWidth.toPx() }
-    val drawerProgress by remember {
-        derivedStateOf {
-            if (drawerWidthPx > 0f) {
-                val offset = drawerState.currentOffset
-                if (offset.isNaN()) 0f
-                else (offset / drawerWidthPx).coerceIn(0f, 1f)
-            } else 0f
-        }
+    val drawerProgress = run {
+        val offset = drawerState.offset.value
+        if (drawerWidthPx > 0f && !offset.isNaN()) (offset / drawerWidthPx).coerceIn(0f, 1f) else 0f
     }
     // Bottom offset to clear the Settings button in the drawer.
     var settingsButtonBottomDp by remember { mutableFloatStateOf(80f) }
@@ -149,7 +144,7 @@ fun ChatApp(
             val t = ((drawerProgress - 0.5f) * 2f).coerceIn(0f, 1f)
             (bottomBarHeight.value + (settingsButtonBottomDp - bottomBarHeight.value) * t).dp
         },
-        animationSpec = spring(dampingRatio = 1.0f, stiffness = 2000f),
+        animationSpec = spring(dampingRatio = 1.0f, stiffness = 1000f),
         label = "snackbarOffset"
     )
     LaunchedEffect(snackbarOffset) { onSnackbarOffsetChanged(snackbarOffset) }

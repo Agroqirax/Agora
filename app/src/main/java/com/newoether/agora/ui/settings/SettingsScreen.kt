@@ -155,7 +155,8 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier
                                 .padding(padding)
                                 .navigationBarsPadding()
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                .padding(horizontal = 16.dp)
+                                .padding(top = 12.dp)
                         ) {
                             items(settingsGroups.size) { groupIndex ->
                                 val group = settingsGroups[groupIndex]
