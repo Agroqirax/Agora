@@ -156,6 +156,7 @@ fun ChatApp(
         inputFocusRequester.requestFocus()
     }
 
+
     suspend fun scrollToLastUserMessage(animate: Boolean = true, targetMessageId: String? = null) {
         if (messages.isEmpty() || viewportHeightPx == 0) return
 
@@ -379,7 +380,11 @@ fun ChatApp(
                         Button(
                             onClick = {
                                 viewModel.createNewChat()
-                                scope.launch { drawerState.close() }
+                                scope.launch {
+                                    drawerState.close()
+                                    delay(50)
+                                    inputFocusRequester.requestFocus()
+                                }
                             },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !isSwitching,
@@ -583,7 +588,14 @@ fun ChatApp(
                                     IconButton(onClick = { showPromptDialog = true }) {
                                         Icon(Icons.Default.Psychology, contentDescription = stringResource(R.string.system_prompt))
                                     }
-                                    IconButton(onClick = { focusManager.clearFocus(); isExpanded = false; viewModel.createNewChat() }) {
+                                    IconButton(onClick = {
+                                        isExpanded = false
+                                        viewModel.createNewChat()
+                                        scope.launch {
+                                            delay(50)
+                                            inputFocusRequester.requestFocus()
+                                        }
+                                    }) {
                                         Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_chat))
                                     }
                                 },
