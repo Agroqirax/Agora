@@ -1,51 +1,27 @@
 Categories:
-  - Internet
+  - AI Chat
 License: MIT
 SourceCode: https://github.com/newo-ether/Agora
 IssueTracker: https://github.com/newo-ether/Agora/issues
 
+AuthorName: Newo Ether
+AuthorEmail: newoether2000@gmail.com
+
 Name: Agora
-Summary: BYOK LLM client with multi-provider access and agentic workflows
-Description: |
-  Agora is a fully open-source, BYOK (Bring Your Own Key) Android LLM
-  client built for power users. It connects directly to 8+ AI providers
-  — OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen, OpenRouter,
-  Ollama, and local GGUF models via llama.cpp — with no intermediary
-  servers or tracking. Custom providers with arbitrary base URLs and API
-  keys are supported.
-
-  Features:
-  * Multi-round tool calling: web search (Brave, Serper, Tavily,
-    SearXNG), code execution, remote shell execution, memory management
-  * Non-linear branching: edit any past message and explore alternative
-    conversation paths without losing context — powered by a
-    tree-structured Room database
-  * On-device LLM inference via llama.cpp (GGUF) and local embeddings
-    for RAG-powered semantic search across conversation history
-  * Deep reasoning model support: OpenAI o1/o3, Anthropic extended
-    thinking, Gemini thinking, DeepSeek-R1, Qwen QwQ with streaming
-    think-tag rendering
-  * Active memory and saved memory files for persistent context across
-    conversations
-  * Context window management with real-time token counting and
-    sliding window
-  * .agora export/import (conversations, memories, prompts, settings,
-    keys) and third-party import from Claude and ChatGPT exports
-  * Markdown rendering with syntax highlighting, LaTeX math, image and
-    file attachments
-  * English and Chinese (中文) language support
-
 RepoType: git
 Repo: https://github.com/newo-ether/Agora
 
 Builds:
-  - versionName: '1.0'
-    versionCode: 1
-    commit: v1.0.3
-    gradle:
-      - yes
+  - versionName: '1.0.4'
+    versionCode: 4
+    commit: db9af7f46629281d9a3de24986f15b70fdf13838
+    subdir: app
+    gradle: yes
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.0
-CurrentVersionCode: 1
+CurrentVersion: 1.0.4
+CurrentVersionCode: 4
+
+Binaries: https://github.com/newo-ether/Agora/releases/download/v1.0.4/app-release.apk
+AllowedAPKSigningKeys: 5de26f263163c220c06c23d6a82fc034d55591ec4d3ff0bad8b9dc9b7be1aa29
