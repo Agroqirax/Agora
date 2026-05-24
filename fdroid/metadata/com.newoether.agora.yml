@@ -14,7 +14,7 @@ Repo: https://github.com/newo-ether/Agora
 Builds:
   - versionName: '1.0.4'
     versionCode: 4
-    commit: db9af7f46629281d9a3de24986f15b70fdf13838
+    commit: b94bd9939a4bc97e93051bb8762c72071ad4555e
     subdir: app
     gradle: yes
 
