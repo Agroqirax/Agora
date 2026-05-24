@@ -16,12 +16,13 @@ Builds:
     versionCode: 4
     commit: b94bd9939a4bc97e93051bb8762c72071ad4555e
     subdir: app
-    gradle: yes
+    gradle:
+      - yes
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 1.0.4
 CurrentVersionCode: 4
 
-Binaries: https://github.com/newo-ether/Agora/releases/download/v1.0.4/app-release.apk
+Binaries: https://github.com/newo-ether/Agora/releases/download/v%v/app-release.apk
 AllowedAPKSigningKeys: 5de26f263163c220c06c23d6a82fc034d55591ec4d3ff0bad8b9dc9b7be1aa29
