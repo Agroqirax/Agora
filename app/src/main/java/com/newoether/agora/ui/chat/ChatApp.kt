@@ -566,11 +566,11 @@ fun ChatApp(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .defaultMinSize(minHeight = 160.dp)
+                            .defaultMinSize(minHeight = 180.dp)
                             .background(
                                 Brush.verticalGradient(
-                                    0.0f to MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
-                                    0.5f to MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                                    0.0f to MaterialTheme.colorScheme.background.copy(alpha = 0.98f),
+                                    0.6f to MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
                                     1.0f to Color.Transparent
                                 )
                             )
