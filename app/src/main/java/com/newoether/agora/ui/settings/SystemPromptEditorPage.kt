@@ -162,6 +162,7 @@ fun SystemPromptEditorPage(
                 label = { Text(stringResource(R.string.prompts_title_hint)) },
                 isError = titleError,
                 supportingText = if (titleError) {{ Text(stringResource(R.string.template_title_required)) }} else null,
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
@@ -201,6 +202,7 @@ fun SystemPromptEditorPage(
                                     else Modifier
                                 )
                                 .background(bgColor, RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(20.dp))
                                 .clickable { selectedTab = index }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             contentAlignment = Alignment.Center
@@ -429,12 +431,13 @@ private fun TemplateItemRow(
                         onChange(item.copy(value = newValue))
                     },
                     label = { Text(stringResource(R.string.template_custom_text_label)) },
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
             }
             PromptItemType.PREDEFINED -> {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     modifier = Modifier.fillMaxWidth()
                 ) {

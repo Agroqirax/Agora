@@ -275,6 +275,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         OutlinedTextField(
                                             state = baseUrlState,
                                             placeholder = { Text(providerInstance.defaultBaseUrl, style = MaterialTheme.typography.bodyMedium) },
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier.fillMaxWidth(),
                                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         )
@@ -379,6 +380,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     label = { Text(stringResource(R.string.model_id_label)) },
                                     supportingText = if (idError != null) {{ Text(idError!!, color = MaterialTheme.colorScheme.error) }} else null,
                                     isError = idError != null,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -386,6 +388,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     value = modelAlias,
                                     onValueChange = { modelAlias = it },
                                     label = { Text(stringResource(R.string.model_alias_label)) },
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -394,6 +397,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { nCtx = it },
                                     label = { Text(stringResource(R.string.local_ctx_size)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -402,6 +406,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { temperature = it },
                                     label = { Text(stringResource(R.string.local_temperature)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -410,6 +415,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { topP = it },
                                     label = { Text(stringResource(R.string.local_top_p)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -418,6 +424,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { maxTokens = it },
                                     label = { Text(stringResource(R.string.local_max_tokens)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 formError?.let { err ->
@@ -518,6 +525,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     label = { Text(stringResource(R.string.model_id_label)) },
                                     supportingText = if (editIdError != null) {{ Text(editIdError!!, color = MaterialTheme.colorScheme.error) }} else null,
                                     isError = editIdError != null,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -525,6 +533,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     value = editAlias,
                                     onValueChange = { editAlias = it },
                                     label = { Text(stringResource(R.string.model_alias_label)) },
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -533,6 +542,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { editNCtx = it },
                                     label = { Text(stringResource(R.string.local_ctx_size)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -541,6 +551,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { editTemp = it },
                                     label = { Text(stringResource(R.string.local_temperature)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -549,6 +560,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { editTopP = it },
                                     label = { Text(stringResource(R.string.local_top_p)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -557,6 +569,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onValueChange = { editMaxTokens = it },
                                     label = { Text(stringResource(R.string.local_max_tokens)) },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth()
                                 )
                                 editFormError?.let { err ->
@@ -648,6 +661,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     label = { Text(stringResource(R.string.custom_provider_name_label)) },
                                     isError = renameError,
                                     supportingText = if (renameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null,
+                                    shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true
                                 )
@@ -771,6 +785,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     OutlinedTextField(
                         value = name, onValueChange = { name = it },
                         label = { Text(stringResource(R.string.provider_key_name_hint)) },
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .noOpBringIntoView()
@@ -782,6 +797,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             onValueChange = { key = it },
                             label = { Text("${entry.provider} API Key") },
                             visualTransformation = PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -836,6 +852,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         label = { Text(stringResource(R.string.custom_provider_name_label)) },
                         isError = nameError,
                         supportingText = if (nameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth().noOpBringIntoView(),
                         singleLine = true
                     )
@@ -846,6 +863,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = { Text(stringResource(R.string.provider_base_url)) },
                             isError = urlError,
                             supportingText = if (urlError) {{ Text(stringResource(R.string.custom_provider_url_error)) }} else null,
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true
                         )

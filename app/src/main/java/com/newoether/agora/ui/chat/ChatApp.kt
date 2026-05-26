@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +48,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -56,6 +59,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -297,8 +301,8 @@ fun ChatApp(
     LaunchedEffect(drawerState.currentValue) {
         if (drawerState.currentValue != DrawerValue.Closed) {
             isExpanded = false
+            focusManager.clearFocus()
         }
-        focusManager.clearFocus()
     }
 
     ModalNavigationDrawer(
@@ -382,7 +386,6 @@ fun ChatApp(
                                 viewModel.createNewChat()
                                 scope.launch {
                                     drawerState.close()
-                                    delay(50)
                                     inputFocusRequester.requestFocus()
                                 }
                             },
@@ -459,7 +462,7 @@ fun ChatApp(
                                                     showMenu = true
                                                 }
                                             ),
-                                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                        color = if (isSelected) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
                                         shape = CircleShape
                                     ) {
                                         Text(
@@ -559,66 +562,109 @@ fun ChatApp(
                 containerColor = Color.Transparent,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 topBar = {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Surface(
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.background
-                        ) {
-                            TopAppBar(
-                                modifier = Modifier.statusBarsPadding(),
-                                title = {
-                                    val currentTitle = if (isNewChatMode) stringResource(R.string.app_name) else conversations.find { it.id == currentConversationId }?.title ?: stringResource(R.string.app_name)
-                                    Column {
-                                        if (isNewChatMode) {
-                                            Text(currentTitle, fontWeight = FontWeight.Bold)
-                                        } else {
-                                            Text(currentTitle, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        }
-                                        if (!isNewChatMode && totalTokens > 0) {
-                                            Text(stringResource(R.string.total_tokens, totalTokens), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                },
-                                navigationIcon = {
-                                    IconButton(onClick = { focusManager.clearFocus(); scope.launch { drawerState.open() } }) {
-                                        Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.menu))
-                                    }
-                                },
-                                actions = {
-                                    IconButton(onClick = { showPromptDialog = true }) {
-                                        Icon(Icons.Default.Psychology, contentDescription = stringResource(R.string.system_prompt))
-                                    }
-                                    IconButton(onClick = {
-                                        isExpanded = false
-                                        viewModel.createNewChat()
-                                        scope.launch {
-                                            delay(50)
-                                            inputFocusRequester.requestFocus()
-                                        }
-                                    }) {
-                                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_chat))
-                                    }
-                                },
-                                colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = Color.Transparent,
-                                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 160.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    0.0f to MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                                    0.5f to MaterialTheme.colorScheme.background.copy(alpha = 0.95f),
+                                    1.0f to Color.Transparent
                                 )
                             )
+                    ) {
+                        Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+                                    .height(52.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val currentTitle = if (isNewChatMode) stringResource(R.string.app_name) else conversations.find { it.id == currentConversationId }?.title ?: stringResource(R.string.app_name)
+
+                                // Merged drawer + title capsule
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    tonalElevation = 2.dp,
+                                    shadowElevation = 4.dp,
+                                    modifier = Modifier.fillMaxHeight()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(
+                                            onClick = { focusManager.clearFocus(); scope.launch { drawerState.open() } },
+                                            modifier = Modifier.fillMaxHeight().aspectRatio(1f)
+                                        ) {
+                                            Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.menu), modifier = Modifier.size(24.dp))
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Box(
+                                            modifier = Modifier.padding(end = 16.dp).padding(vertical = 8.dp),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (isNewChatMode) {
+                                                Text(
+                                                    text = currentTitle,
+                                                    fontWeight = FontWeight.Bold,
+                                                    style = MaterialTheme.typography.titleLarge,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            } else {
+                                                Column {
+                                                    Text(
+                                                        text = currentTitle,
+                                                        fontWeight = FontWeight.Bold,
+                                                        style = MaterialTheme.typography.titleSmall,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (totalTokens > 0) {
+                                                        Text(
+                                                            text = stringResource(R.string.total_tokens, totalTokens),
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.weight(1f))
+
+                                // Actions capsule - fills row height
+                                Surface(
+                                    shape = RoundedCornerShape(50),
+                                    color = MaterialTheme.colorScheme.surface,
+                                    tonalElevation = 2.dp,
+                                    shadowElevation = 4.dp,
+                                    modifier = Modifier.fillMaxHeight()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxHeight(),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        IconButton(onClick = { showPromptDialog = true }, modifier = Modifier.fillMaxHeight().aspectRatio(1f)) {
+                                            Icon(Icons.Default.Psychology, contentDescription = stringResource(R.string.system_prompt), modifier = Modifier.size(24.dp))
+                                        }
+                                        IconButton(onClick = {
+                                            isExpanded = false
+                                            viewModel.createNewChat()
+                                            inputFocusRequester.requestFocus()
+                                        }, modifier = Modifier.fillMaxHeight().aspectRatio(1f)) {
+                                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_chat), modifier = Modifier.size(24.dp))
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(48.dp)
-                                .background(
-                                    Brush.verticalGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.background,
-                                            Color.Transparent
-                                        )
-                                    )
-                                )
-                        )
-                    }
                 }
             ) { padding ->
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -741,7 +787,7 @@ fun ChatApp(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)
+                    .then(if (isExpanded) Modifier.fillMaxHeight().statusBarsPadding() else Modifier)
                     .drawBehind {
                         val totalH = size.height
                         if (totalH > 0f) {
@@ -833,6 +879,7 @@ fun ChatApp(
                     value = conversationToRename,
                     onValueChange = { conversationToRename = it },
                     singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()
                 )
                 }

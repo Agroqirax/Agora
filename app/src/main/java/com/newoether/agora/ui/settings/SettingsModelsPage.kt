@@ -220,6 +220,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         OutlinedTextField(
                             state = aliasState,
                             label = { Text(stringResource(R.string.models_alias_hint)) },
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
                             placeholder = { Text(model.removePrefix("models/")) }
                         )

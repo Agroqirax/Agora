@@ -16,6 +16,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -27,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.newoether.agora.ui.settings.RatingForm
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
@@ -117,7 +119,7 @@ class MainActivity : ComponentActivity() {
                     val database = ChatDatabase.build(this)
                     val factory = ChatViewModelFactory(application, settingsManager, database.chatDao(), memoryManager, this@MainActivity)
                     val viewModel: ChatViewModel = viewModel(factory = factory)
-                    MainNavigation(viewModel)
+                    MainNavigation(viewModel, settingsManager)
                 }
             }
         }
@@ -134,8 +136,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNavigation(viewModel: ChatViewModel) {
+fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var fullScreenImageUrl by rememberSaveable { mutableStateOf<String?>(null) }
     val pdfPages by viewModel.previewPdfPages.collectAsState()
@@ -152,6 +155,63 @@ fun MainNavigation(viewModel: ChatViewModel) {
         label = "snackbarPadding"
     )
     val focusManager = LocalFocusManager.current
+    val ratingScope = rememberCoroutineScope()
+
+    // Rating prompt
+    val ratingPromptSubmitted by settingsManager.ratingPromptSubmitted.collectAsState(initial = false)
+    val ratingPromptDismissed by settingsManager.ratingPromptDismissed.collectAsState(initial = false)
+    var showRatingPrompt by remember { mutableStateOf(false) }
+    var ratingPromptHandled by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        val now = System.currentTimeMillis()
+        val firstLaunch = settingsManager.firstLaunchTime.first()
+        if (firstLaunch == null) {
+            settingsManager.saveFirstLaunchTime(now)
+        }
+    }
+
+    LaunchedEffect(ratingPromptSubmitted, ratingPromptDismissed, ratingPromptHandled) {
+        if (!ratingPromptSubmitted && !ratingPromptDismissed && !ratingPromptHandled) {
+            ratingPromptHandled = true
+            val firstLaunch = settingsManager.firstLaunchTime.first()
+            if (firstLaunch != null) {
+                val hoursElapsed = (System.currentTimeMillis() - firstLaunch) / (1000 * 60 * 60)
+                if (hoursElapsed >= 48) {
+                    showRatingPrompt = true
+                }
+            }
+        }
+    }
+
+    if (showRatingPrompt) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showRatingPrompt = false
+                ratingScope.launch {
+                    settingsManager.saveRatingPromptDismissed(true)
+                }
+            },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = 20.dp, vertical = 20.dp)
+                    .navigationBarsPadding()
+            ) {
+                RatingForm(
+                    onSubmitted = {
+                        showRatingPrompt = false
+                        ratingScope.launch {
+                            settingsManager.saveRatingPromptSubmitted(true)
+                        }
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.snackbarMessage.collect { event ->

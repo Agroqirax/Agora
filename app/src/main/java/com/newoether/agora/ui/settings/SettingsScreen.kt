@@ -39,10 +39,10 @@ fun SettingsGroup(
 ) {
     Column(modifier = modifier.fillMaxWidth().padding(bottom = 24.dp)) {
         Text(
-            text = title.uppercase(),
+            text = title,
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
         )
         Column(modifier = Modifier.fillMaxWidth()) {
             items.forEachIndexed { index, item ->
@@ -124,29 +124,35 @@ private data class SettingsCategory(
 )
 
 private data class SettingsGroupData(
+    val titleRes: Int? = null,
     val items: List<SettingsCategory>
 )
 
 private val settingsGroups = listOf(
-    SettingsGroupData(listOf(
+    SettingsGroupData(titleRes = R.string.settings_group_services, items = listOf(
         SettingsCategory("provider", R.string.settings_provider, R.string.settings_provider_desc, Icons.Default.Cloud),
         SettingsCategory("models", R.string.settings_models, R.string.settings_models_desc, Icons.Default.Chat),
     )),
-    SettingsGroupData(listOf(
+    SettingsGroupData(titleRes = R.string.settings_group_responses, items = listOf(
         SettingsCategory("prompts", R.string.settings_prompts, R.string.settings_prompts_desc, Icons.Default.Psychology),
         SettingsCategory("context", R.string.settings_context, R.string.settings_context_desc, Icons.Default.Memory),
         SettingsCategory("titlegen", R.string.settings_title_gen, R.string.settings_title_gen_desc, Icons.Default.Edit),
     )),
-    SettingsGroupData(listOf(
+    SettingsGroupData(titleRes = R.string.settings_group_tools, items = listOf(
         SettingsCategory("websearch", R.string.settings_web_search, R.string.settings_web_search_desc, Icons.Default.Language),
         SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
     )),
-    SettingsGroupData(listOf(
-        SettingsCategory("appearance", R.string.settings_appearance, R.string.settings_appearance_desc, Icons.Default.Palette),
+    SettingsGroupData(titleRes = R.string.settings_group_memory_data, items = listOf(
         SettingsCategory("memory", R.string.settings_memory, R.string.settings_memory_desc, Icons.Default.Description),
         SettingsCategory("datacontrol", R.string.settings_data_control, R.string.settings_data_control_desc, Icons.Default.Storage),
+    )),
+    SettingsGroupData(titleRes = R.string.settings_group_appearance_language, items = listOf(
+        SettingsCategory("appearance", R.string.settings_appearance, R.string.settings_appearance_desc, Icons.Default.Palette),
         SettingsCategory("language", R.string.language_title, R.string.language_desc, Icons.Default.Translate),
+    )),
+    SettingsGroupData(titleRes = R.string.settings_group_about, items = listOf(
+        SettingsCategory("about", R.string.settings_about, R.string.settings_about_desc, Icons.Default.Info),
     )),
 )
 
@@ -196,6 +202,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
                 "datacontrol" -> SettingsDataControlPage(viewModel, onBack = { selectedCategory = null })
                 "appearance" -> SettingsAppearancePage(viewModel, onBack = { selectedCategory = null })
+                "about" -> SettingsAboutPage(onBack = { selectedCategory = null })
                 else -> {
                     Scaffold(
                         containerColor = MaterialTheme.colorScheme.background,
@@ -228,6 +235,14 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Column(
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
+                                    if (group.titleRes != null) {
+                                        Text(
+                                            text = stringResource(group.titleRes),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                        )
+                                    }
                                     group.items.forEachIndexed { index, cat ->
                                         if (index > 0) {
                                             Spacer(modifier = Modifier.height(2.dp))

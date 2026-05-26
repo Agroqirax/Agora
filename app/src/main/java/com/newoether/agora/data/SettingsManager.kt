@@ -4,6 +4,7 @@ import android.content.Context
 import com.newoether.agora.util.DebugLog
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -102,6 +103,9 @@ class SettingsManager(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val COLOR_SCHEME = stringPreferencesKey("color_scheme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val FIRST_LAUNCH_TIME = longPreferencesKey("first_launch_time")
+        val RATING_PROMPT_SUBMITTED = booleanPreferencesKey("rating_prompt_submitted")
+        val RATING_PROMPT_DISMISSED = booleanPreferencesKey("rating_prompt_dismissed")
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
@@ -192,6 +196,9 @@ class SettingsManager(private val context: Context) {
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "FOLLOW_DEVICE" }
     val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
+    val firstLaunchTime: Flow<Long?> = context.dataStore.data.map { it[FIRST_LAUNCH_TIME] }
+    val ratingPromptSubmitted: Flow<Boolean> = context.dataStore.data.map { it[RATING_PROMPT_SUBMITTED] ?: false }
+    val ratingPromptDismissed: Flow<Boolean> = context.dataStore.data.map { it[RATING_PROMPT_DISMISSED] ?: false }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
         context.dataStore.edit { prefs ->
@@ -364,5 +371,17 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveDynamicColor(enabled: Boolean) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun saveFirstLaunchTime(time: Long) {
+        context.dataStore.edit { it[FIRST_LAUNCH_TIME] = time }
+    }
+
+    suspend fun saveRatingPromptSubmitted(submitted: Boolean) {
+        context.dataStore.edit { it[RATING_PROMPT_SUBMITTED] = submitted }
+    }
+
+    suspend fun saveRatingPromptDismissed(dismissed: Boolean) {
+        context.dataStore.edit { it[RATING_PROMPT_DISMISSED] = dismissed }
     }
 }

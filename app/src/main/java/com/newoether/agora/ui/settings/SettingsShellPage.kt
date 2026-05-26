@@ -166,6 +166,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             placeholder = { Text(stringResource(R.string.shell_device_name_hint)) },
                                             leadingIcon = { Icon(Icons.AutoMirrored.Filled.Label, null) },
                                             singleLine = true,
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier
                                                 .fillMaxWidth()
                                                 .focusRequester(nameFocusRequester)
@@ -179,6 +180,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             placeholder = { Text(stringResource(R.string.shell_device_desc_hint)) },
                                             leadingIcon = { Icon(Icons.Default.Description, null) },
                                             singleLine = true,
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         )
 
@@ -190,6 +192,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             placeholder = { Text(stringResource(R.string.shell_device_url_hint)) },
                                             leadingIcon = { Icon(Icons.Default.Link, null) },
                                             singleLine = true,
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         )
 
@@ -202,6 +205,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             leadingIcon = { Icon(Icons.Default.Key, null) },
                                             visualTransformation = PasswordVisualTransformation(),
                                             singleLine = true,
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier.fillMaxWidth()
                                         )
 

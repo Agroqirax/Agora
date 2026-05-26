@@ -247,6 +247,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             onValueChange = { editFileName = it },
                             label = { Text(stringResource(R.string.memory_title_hint)) },
                             singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -257,6 +258,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             onValueChange = { editDesc = it },
                             label = { Text(stringResource(R.string.memory_desc_hint)) },
                             singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -265,6 +267,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         value = editContent,
                         onValueChange = { editContent = it },
                         label = { Text(stringResource(R.string.memory_content_hint)) },
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 200.dp, max = 400.dp),
@@ -316,6 +319,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         onValueChange = { newFileName = it },
                         label = { Text(stringResource(R.string.memory_title_hint)) },
                         singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -324,6 +328,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         onValueChange = { newFileDesc = it },
                         label = { Text(stringResource(R.string.memory_desc_hint)) },
                         singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                     Spacer(modifier = Modifier.height(12.dp))
@@ -331,6 +336,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         value = newFileContent,
                         onValueChange = { newFileContent = it },
                         label = { Text(stringResource(R.string.memory_content_hint)) },
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(min = 150.dp),

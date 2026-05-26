@@ -431,6 +431,42 @@
     <string name="file_too_large">文件过大 (最大 20 MB)</string>
     <string name="pdf_render_failed">PDF 渲染失败</string>
 
+    <!-- Settings - Group Labels -->
+    <string name="settings_group_memory_data">记忆与数据</string>
+    <string name="settings_group_appearance_language">外观与语言</string>
+    <string name="settings_group_services">服务</string>
+    <string name="settings_group_responses">回复</string>
+    <string name="settings_group_tools">工具</string>
+    <string name="settings_group_about">关于</string>
+    <string name="rating_category">评分</string>
+
+    <!-- About -->
+    <string name="settings_about">关于</string>
+    <string name="settings_about_desc">应用信息、链接和评价</string>
+    <string name="about_title">关于</string>
+    <string name="about_info">信息</string>
+    <string name="about_links">链接</string>
+    <string name="about_developer">开发者</string>
+    <string name="about_developer_name">Newo Ether · 独立开发者</string>
+    <string name="about_github">GitHub</string>
+    <string name="about_issue_tracker">问题追踪</string>
+    <string name="about_contribute">参与贡献</string>
+    <string name="about_privacy_policy">隐私政策</string>
+    <string name="about_source_code">源代码</string>
+    <string name="about_version">版本</string>
+    <string name="about_rating">评价应用</string>
+    <string name="about_rating_desc">这个项目由一个人独立开发。我真的很感谢你的反馈。</string>
+    <string name="rating_title">评价 Agora</string>
+    <string name="rating_star">%1$d 星</string>
+    <string name="rating_your_name">您的姓名（可选）</string>
+    <string name="rating_your_email">您的邮箱（可选）</string>
+    <string name="rating_comment">评论（可选）</string>
+    <string name="rating_submit">提交</string>
+    <string name="rating_submitting">提交中…</string>
+    <string name="rating_success">感谢您的反馈！</string>
+    <string name="rating_failed">提交失败，请重试。</string>
+    <string name="rating_privacy">您的评分将以匿名方式上传至 newoether.space。仅上传您填写的字段，不会收集其他数据。</string>
+
     <!-- Data Control -->
     <string name="settings_data_control">数据控制</string>
     <string name="settings_data_control_desc">导出或导入您的数据</string>
