@@ -19,6 +19,7 @@ Write-Host "Version: $versionName ($versionCode)" -ForegroundColor Cyan
 
 # ── Build in Arch WSL ──
 Write-Host "`nBuilding in Arch WSL..." -ForegroundColor Yellow
+$origSdk = Get-Content "$projectDir\local.properties" -Raw
 $buildCmd = @'
 set -e
 cd /mnt/f/workspace/repo/Agora
@@ -32,9 +33,12 @@ export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 '@
 
 wsl -d $wslDistro -- bash -c $buildCmd
-if ($LASTEXITCODE -ne 0) { Write-Host "Build failed!" -ForegroundColor Red; exit 1 }
+if ($LASTEXITCODE -ne 0) { $origSdk | Set-Content "$projectDir\local.properties" -NoNewline; Write-Host "Build failed!" -ForegroundColor Red; exit 1 }
 
-$unsignedApk = "$projectDir\app\build\outputs\apk\release\app-release.apk"
+# Restore Windows SDK path (WSL build overwrites it)
+$origSdk | Set-Content "$projectDir\local.properties" -NoNewline
+
+$unsignedApk = "$projectDir\app\build\outputs\apk\release\app-release-unsigned.apk"
 if (-not (Test-Path $unsignedApk)) {
     Write-Host "APK not found: $unsignedApk" -ForegroundColor Red
     exit 1
@@ -44,8 +48,7 @@ if (-not (Test-Path $unsignedApk)) {
 if (-not $skipSign) {
     Write-Host "`nSigning..." -ForegroundColor Yellow
     $signedApk = "$projectDir\app\release\app-release.apk"
-    $apkSignArgs = "sign --ks `"$keystore`" --ks-key-alias $alias --ks-pass pass:$password --key-pass pass:$password --out `"$signedApk`" `"$unsignedApk`""
-    Start-Process -FilePath "cmd.exe" -ArgumentList "/c $apksigner $apkSignArgs" -Wait -NoNewWindow
+    & $apksigner sign --ks "$keystore" --ks-key-alias $alias --ks-pass pass:$password --key-pass pass:$password --out "$signedApk" "$unsignedApk"
     if ($LASTEXITCODE -ne 0) { Write-Host "Signing failed!" -ForegroundColor Red; exit 1 }
 } else {
     Write-Host "`nSigning skipped" -ForegroundColor DarkGray

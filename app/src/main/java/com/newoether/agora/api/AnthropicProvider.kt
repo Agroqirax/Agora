@@ -220,6 +220,67 @@ class AnthropicProvider : LlmProvider {
             entries
         }
 
+        // Fix tool_use / tool_result pairing before sending to Anthropic.
+        // Two classes of problem exist:
+        //   1. Orphaned blocks: a tool_use with no following tool_result, or vice versa.
+        //      Caused by limitContext truncation or user interrupting a tool round.
+        //   2. ID mismatches: a tool_result whose tool_use_id does not match any
+        //      tool_use in the preceding assistant message. Caused by legacy data
+        //      where result_ messages were persisted without toolCallId.
+        //
+        // Pass 1 — fix ID mismatches by matching on position within the message.
+        // Pass 2 — strip orphaned blocks (tool_use with no next tool_result, and
+        //           tool_result with no preceding tool_use).
+        val cleanedMessages = apiMessages.toMutableList()
+
+        // Pass 1: fix tool_result IDs
+        for (i in 0 until cleanedMessages.size) {
+            val msg = cleanedMessages[i]
+            if (msg.role != "user" || msg.content.none { it.type == "tool_result" }) continue
+            if (i == 0) continue
+            val prev = cleanedMessages[i - 1]
+            if (prev.role != "assistant") continue
+            val useBlocks = prev.content.filter { it.type == "tool_use" }
+            if (useBlocks.isEmpty()) continue
+            val useIds = useBlocks.mapNotNull { it.id }
+            val resultBlocks = msg.content.filter { it.type == "tool_result" }
+            val fixed = msg.content.map { part ->
+                if (part.type != "tool_result" || part.toolUseId in useIds) return@map part
+                val idx = resultBlocks.indexOf(part)
+                if (idx in useIds.indices) {
+                    val candidate = useIds[idx]
+                    val alreadyUsed = resultBlocks.any { it !== part && it.toolUseId == candidate }
+                    if (alreadyUsed) part else part.copy(toolUseId = candidate)
+                } else part
+            }
+            if (fixed != msg.content) cleanedMessages[i] = msg.copy(content = fixed)
+        }
+
+        // Pass 2: strip orphaned blocks
+        var i = 0
+        while (i < cleanedMessages.size) {
+            val msg = cleanedMessages[i]
+            if (msg.role == "assistant" && msg.content.any { it.type == "tool_use" }) {
+                val nextHasResult = i + 1 < cleanedMessages.size &&
+                    cleanedMessages[i + 1].content.any { it.type == "tool_result" }
+                if (!nextHasResult) {
+                    val nonTool = msg.content.filter { it.type != "tool_use" }
+                    if (nonTool.isEmpty()) { cleanedMessages.removeAt(i); continue }
+                    else cleanedMessages[i] = msg.copy(content = nonTool)
+                }
+            }
+            if (msg.role == "user" && msg.content.any { it.type == "tool_result" }) {
+                val prevHasUse = i > 0 && cleanedMessages[i - 1].role == "assistant" &&
+                    cleanedMessages[i - 1].content.any { it.type == "tool_use" }
+                if (!prevHasUse) {
+                    val nonResult = msg.content.filter { it.type != "tool_result" }
+                    if (nonResult.isEmpty()) { cleanedMessages.removeAt(i); continue }
+                    else cleanedMessages[i] = msg.copy(content = nonResult)
+                }
+            }
+            i++
+        }
+
         // Claude thinking logic - all Claude models support thinking except the 3 legacy ones
         val isLegacyClaude = modelName == "claude-3-opus-20240229" ||
             modelName == "claude-3-sonnet-20240229" ||
@@ -268,7 +329,7 @@ class AnthropicProvider : LlmProvider {
 
         val requestBody = AnthropicRequest(
             model = modelName,
-            messages = apiMessages,
+            messages = cleanedMessages,
             system = config.systemPrompt,
             thinking = thinking,
             maxTokens = if (thinking != null) maxOf(thinking.budgetTokens + 1024, 4096) else 4096,
@@ -281,7 +342,7 @@ class AnthropicProvider : LlmProvider {
             headers["x-api-key"] = config.apiKey
             headers["anthropic-version"] = "2023-06-01"
             val requestBodyJson = json.encodeToString(AnthropicRequest.serializer(), requestBody)
-            DebugLog.d("AgoraAPI", "[Anthropic] REQ → $baseUrl/messages | model=$modelName | msgs=${apiMessages.size} | thinking=${thinking != null} | tools=${anthropicTools?.size ?: 0}")
+            DebugLog.d("AgoraAPI", "[Anthropic] REQ → $baseUrl/messages | model=$modelName | msgs=${cleanedMessages.size} | thinking=${thinking != null} | tools=${anthropicTools?.size ?: 0}")
             DebugLog.d("AgoraAPI", "[Anthropic] BODY: ${requestBodyJson.take(4000)}")
             val handle = HttpClient.streamPost(url, requestBodyJson, headers)
             try {

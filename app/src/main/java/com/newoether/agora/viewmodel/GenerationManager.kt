@@ -1159,9 +1159,14 @@ class GenerationManager(
                         for (child in children) {
                             val isResult = child.id.startsWith(Constants.RESULT_MSG_PREFIX)
                             if (isResult) {
-                                // Traverse through RESULT_MSG for nested tool chains,
-                                // but don't add to expanded — tool results already live
-                                // inside TOOL_MSG segments.
+                                // Include result_ messages so providers can emit
+                                // correct tool_use/tool_result pairs. The result
+                                // data lives in TOOL_MSG segments too, but Anthropic
+                                // requires separate tool_result blocks in the next
+                                // user-role message.
+                                if (child !in expanded) {
+                                    expanded.add(child)
+                                }
                                 pending.add(child)
                             } else if (child !in expanded) {
                                 expanded.add(child)
@@ -1457,7 +1462,7 @@ class GenerationManager(
                         text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
                         participant = Participant.USER, timestamp = System.currentTimeMillis(),
                         toolCallJson = Json.encodeToString(listOf(
-                            MessageSegment(type = "tool", toolName = tcds[index].toolName, toolArgs = tcds[index].arguments, toolResult = tcds[index].result, signature = tcds[index].signature)
+                            MessageSegment(type = "tool", toolName = tcds[index].toolName, toolArgs = tcds[index].arguments, toolResult = tcds[index].result, signature = tcds[index].signature, toolCallId = tcds[index].toolCallId)
                         ))
                     ))
                 }

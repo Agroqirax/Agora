@@ -293,7 +293,7 @@ fun ChatBottomBar(
         selectedAttachments = selectedAttachments + validAttachments
     }
 
-    Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).padding(8.dp)) {
+    Column(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)) {
         if (isExpanded) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onCollapse) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
@@ -472,8 +472,8 @@ fun ChatBottomBar(
         }
         }
 
-        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(46.dp).shadow(4.dp, RoundedCornerShape(100), clip = false).background(MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp), RoundedCornerShape(100)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp).shadow(4.dp, RoundedCornerShape(100), clip = false).background(MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp), RoundedCornerShape(100)).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 var showAddMenu by remember { mutableStateOf(false) }
                 var lastAddDismissTime by remember { mutableLongStateOf(0L) }
                 ExposedDropdownMenuBox(
@@ -489,7 +489,7 @@ fun ChatBottomBar(
                                 showAddMenu = true
                             }
                         },
-                        modifier = Modifier.size(26.dp).menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
+                        modifier = Modifier.size(32.dp).menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
                     ) {
                         Icon(Icons.Default.Add, stringResource(R.string.add_attachment), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -639,7 +639,7 @@ fun ChatBottomBar(
                                 activeMenu = "tools"
                             }
                         }, 
-                        modifier = Modifier.size(26.dp).menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
+                        modifier = Modifier.size(32.dp).menuAnchor(type = ExposedDropdownMenuAnchorType.PrimaryNotEditable, enabled = true)
                     ) {
                         Icon(Icons.Default.MoreVert, stringResource(R.string.tools), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
