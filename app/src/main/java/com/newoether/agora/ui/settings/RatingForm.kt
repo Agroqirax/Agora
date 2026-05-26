@@ -198,7 +198,7 @@ fun RatingForm(
                 CircularProgressIndicator(
                     modifier = Modifier.size(22.dp),
                     strokeWidth = 2.5.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
+                    color = MaterialTheme.colorScheme.primary
                 )
             } else if (submitted) {
                 Text(
