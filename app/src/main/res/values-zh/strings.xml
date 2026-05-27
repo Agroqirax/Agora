@@ -347,6 +347,7 @@
 
     <!-- Tool Details -->
     <string name="tool_read_memory_success">读取记忆</string>
+    <string name="tool_read_memory_failed">读取记忆失败</string>
     <string name="tool_read_memory_count">读取了 %1$d 条记忆</string>
     <string name="tool_read_memory_name">读取 %1$s</string>
     <string name="tool_save_memory_failed">保存记忆失败</string>

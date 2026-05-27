@@ -334,7 +334,7 @@ private fun toolSummary(seg: MessageSegment): String {
     val isError = content.startsWith("Error")
     return when (name) {
         "read_memory_file" -> when {
-            isError -> stringResource(R.string.tool_read_memory_success)
+            isError -> stringResource(R.string.tool_read_memory_failed)
             nameCount != null && nameCount > 1 -> stringResource(R.string.tool_read_memory_count, nameCount)
             fileName != null -> stringResource(R.string.tool_read_memory_name, fileName)
             else -> stringResource(R.string.tool_read_memory_success)
@@ -1137,7 +1137,6 @@ fun MessageItem(
                                                     }
                                                 }
                                             } else if (seg.type == "tool") {
-                                                val isToolError = (seg.toolResult ?: "").startsWith("Error")
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()

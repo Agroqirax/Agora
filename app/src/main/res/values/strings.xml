@@ -49,6 +49,7 @@
     <string name="tool_shell_failed">Shell command failed</string>
     <string name="tool_thinking">Thinking</string>
     <string name="tool_read_memory_success">Read memory</string>
+    <string name="tool_read_memory_failed">Read memory failed</string>
     <string name="tool_read_memory_count">Read %1$d memories</string>
     <string name="tool_read_memory_name">Read %1$s</string>
     <string name="tool_save_memory_failed">Save memory failed</string>
