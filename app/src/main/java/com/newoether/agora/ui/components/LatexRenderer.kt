@@ -50,6 +50,38 @@ data class LatexSpan(
 
 private val dollarAmountPattern = Regex("""\$\d+(?!\$)(?!\w)""")
 
+fun String.escapeDollarForMarkdown(): String = buildString {
+    val src = this@escapeDollarForMarkdown
+    var i = 0
+    while (i < src.length) {
+        val ch = src[i]
+        val remaining = src.substring(i)
+
+        // ``` fenced code block — pass through
+        if (remaining.startsWith("```")) {
+            val end = remaining.indexOf("```", 3)
+            if (end >= 0) {
+                append(remaining.substring(0, end + 3))
+                i += end + 3; continue
+            }
+        }
+        // ` inline code — pass through
+        if (ch == '`') {
+            val end = remaining.indexOf('`', 1)
+            if (end >= 0) {
+                append(remaining.substring(0, end + 1))
+                i += end + 1; continue
+            }
+        }
+        // Bare $ → \$ (but not already-escaped \$)
+        if (ch == '$' && (i == 0 || src[i - 1] != '\\')) {
+            append('\\')
+        }
+        append(ch)
+        i++
+    }
+}
+
 fun parseLatexSpans(text: String): List<LatexSpan> {
     val spans = mutableListOf<LatexSpan>()
     val buf = StringBuilder()
@@ -148,6 +180,14 @@ fun parseLatexSpans(text: String): List<LatexSpan> {
         i++
     }
     if (buf.isNotEmpty()) spans.add(LatexSpan(false, buf.toString()))
+
+    // Escape $ in non-LaTeX spans for markdown compatibility
+    for (idx in spans.indices) {
+        val span = spans[idx]
+        if (!span.isLatex) {
+            spans[idx] = span.copy(content = span.content.escapeDollarForMarkdown())
+        }
+    }
 
     // Trim whitespace around inline LaTeX spans
     for (idx in spans.indices) {

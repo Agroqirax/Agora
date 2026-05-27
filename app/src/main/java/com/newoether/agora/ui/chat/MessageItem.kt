@@ -1729,46 +1729,6 @@ private fun RecomposeSafeMarkdown(
     }
 }
 
-private fun String.escapeForMarkdown(): String = buildString {
-    val src = this@escapeForMarkdown
-    var i = 0
-    while (i < src.length) {
-        val ch = src[i]
-        val remaining = src.substring(i)
-
-        // <think> / </think> → insert zero-width space
-        if (remaining.startsWith("<think>")) {
-            append("<​think>"); i += 7; continue
-        }
-        if (remaining.startsWith("</think>")) {
-            append("</​think>"); i += 8; continue
-        }
-
-        // ``` fenced code block — pass through unchanged
-        if (remaining.startsWith("```")) {
-            val end = remaining.indexOf("```", 3)
-            if (end >= 0) {
-                append(remaining.substring(0, end + 3))
-                i += end + 3; continue
-            }
-        }
-
-        // ` inline code — pass through unchanged
-        if (ch == '`') {
-            val end = remaining.indexOf('`', 1)
-            if (end >= 0) {
-                append(remaining.substring(0, end + 1))
-                i += end + 1; continue
-            }
-        }
-
-        // Bare $ → \$ (but not already-escaped \$)
-        if (ch == '$' && (i == 0 || src[i - 1] != '\\')) {
-            append('\\')
-        }
-
-        append(ch)
-        i++
-    }
-}
+private fun String.escapeForMarkdown(): String =
+    replace("<think>", "<​think>").replace("</think>", "</​think>").escapeDollarForMarkdown()
 
