@@ -162,6 +162,10 @@ The model can invoke these tools autonomously in multi-round loops:
 
 Contributions are welcome! Feel free to fork the repository, submit pull requests, or open an issue.
 
+## Privacy
+
+Agora does not collect, store, or transmit any personal data. All conversations, API keys, and settings are stored locally on your device. Messages are sent directly from your device to the AI provider you configure — no intermediary servers, no telemetry, no tracking. See the full [Privacy Policy](PRIVACY.md).
+
 ## License
 
 This project is open-source under the [MIT License](LICENSE).
