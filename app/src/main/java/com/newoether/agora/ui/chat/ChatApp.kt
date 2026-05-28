@@ -5,7 +5,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -242,7 +241,7 @@ fun ChatApp(
 
                     val diff = targetScrollPx - currentOffsetPx
                     if (kotlin.math.abs(diff) > 2) {
-                        listState.animateScrollBy(diff, tween(500, easing = FastOutSlowInEasing))
+                        listState.animateScrollBy(diff, tween(600, easing = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)))
                     }
                 } else {
                     listState.scrollToItem(0, targetScrollPx.toInt())
@@ -809,7 +808,7 @@ fun ChatApp(
                         }
                     }
 
-                    val animAlpha by animateFloatAsState(if (showButton) 1f else 0f, tween(300), label = "scrollBtnAlpha")
+                    val animAlpha by animateFloatAsState(if (showButton) 1f else 0f, tween(400), label = "scrollBtnAlpha")
 
                     FloatingActionButton(
                         onClick = {
