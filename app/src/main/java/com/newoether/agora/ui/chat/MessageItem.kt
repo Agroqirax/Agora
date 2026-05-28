@@ -706,7 +706,6 @@ fun MessageItem(
                 Surface(
                     shape = shape,
                     color = backgroundColor,
-                    shadowElevation = 1.dp,
                     modifier = Modifier
                         .widthIn(max = 300.dp)
                         .then(contextAlpha)
