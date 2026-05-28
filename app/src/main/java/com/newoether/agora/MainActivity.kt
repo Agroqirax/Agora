@@ -160,11 +160,8 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
     val focusManager = LocalFocusManager.current
     val ratingScope = rememberCoroutineScope()
 
-    // Rating prompt
-    val ratingPromptSubmitted by settingsManager.ratingPromptSubmitted.collectAsState(initial = false)
-    val ratingPromptDismissed by settingsManager.ratingPromptDismissed.collectAsState(initial = false)
+    // Rating prompt — read from flow directly to avoid collectAsState initial-value race
     var showRatingPrompt by remember { mutableStateOf(false) }
-    var ratingPromptHandled by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val now = System.currentTimeMillis()
@@ -172,17 +169,13 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
         if (firstLaunch == null) {
             settingsManager.saveFirstLaunchTime(now)
         }
-    }
 
-    LaunchedEffect(ratingPromptSubmitted, ratingPromptDismissed, ratingPromptHandled) {
-        if (!ratingPromptSubmitted && !ratingPromptDismissed && !ratingPromptHandled) {
-            ratingPromptHandled = true
-            val firstLaunch = settingsManager.firstLaunchTime.first()
-            if (firstLaunch != null) {
-                val hoursElapsed = (System.currentTimeMillis() - firstLaunch) / (1000 * 60 * 60)
-                if (hoursElapsed >= 48) {
-                    showRatingPrompt = true
-                }
+        val submitted = settingsManager.ratingPromptSubmitted.first()
+        val dismissed = settingsManager.ratingPromptDismissed.first()
+        if (!submitted && !dismissed && firstLaunch != null) {
+            val hoursElapsed = (now - firstLaunch) / (1000 * 60 * 60)
+            if (hoursElapsed >= 48) {
+                showRatingPrompt = true
             }
         }
     }
