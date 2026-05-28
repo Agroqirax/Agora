@@ -731,7 +731,7 @@ fun MessageItem(
                                 horizontalArrangement = Arrangement.End
                             ) {
                                 TextButton(onClick = { onCancelEdit() }) { Text(stringResource(R.string.cancel)) }
-                                TextButton(onClick = { onEdit(message.id, editState.text.toString()) }) { Text(stringResource(R.string.send)) }
+                                TextButton(onClick = { onEdit(message.id, editState.text.toString()) }, enabled = !isLoading) { Text(stringResource(R.string.send)) }
                             }
                         }
                     } else {

@@ -93,7 +93,7 @@ fun MessageList(
                     },
                     isStreaming = isLastMessage && isLoading && message.participant == Participant.MODEL,
                     isLoading = isLoading,
-                    isEditingAllowed = editingMessageId == null || editingMessageId == message.id,
+                    isEditingAllowed = (editingMessageId == null || editingMessageId == message.id) && !isLoading,
                     isEditing = editingMessageId == message.id,
                     isSwitching = isSwitching,
                     isInContext = isInContext,

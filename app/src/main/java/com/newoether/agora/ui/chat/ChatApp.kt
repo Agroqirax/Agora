@@ -872,7 +872,7 @@ fun ChatApp(
                         onSendMessage = { text, attachments ->
                             viewModel.sendMessage(text, attachments = attachments)
                             scope.launch {
-                                delay(100)
+                                delay(200)
                                 scrollToLastUserMessage(animate = true)
                             }
                         },
