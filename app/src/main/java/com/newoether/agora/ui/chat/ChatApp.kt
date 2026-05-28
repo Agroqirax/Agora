@@ -7,6 +7,7 @@ import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -46,6 +47,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
@@ -584,7 +586,15 @@ fun ChatApp(
                 .pointerInput(Unit) { detectTapGestures { focusManager.clearFocus() } }
                 .onSizeChanged { viewportHeightPx = it.height }
         ) {
-            AnimatedBlobBackground()
+            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            val (targetCa, targetQa) = if (isNewChatMode) {
+                if (dark) 0.20f to 0.10f else 1.00f to 0.40f
+            } else {
+                0.02f to 0.01f
+            }
+            val ca by animateFloatAsState(targetCa, tween(800))
+            val qa by animateFloatAsState(targetQa, tween(800))
+            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark)
 
             Scaffold(
                 containerColor = Color.Transparent,

@@ -486,7 +486,7 @@ fun ChatBottomBar(
         }
 
         Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp, start = 8.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp).shadow(4.dp, RoundedCornerShape(100), clip = false).background(MaterialTheme.colorScheme.surfaceColorAtElevation(10.dp), RoundedCornerShape(100)).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.height(48.dp).shadow(1.dp, RoundedCornerShape(100), clip = false).background(MaterialTheme.colorScheme.surfaceColorAtElevation(10.dp), RoundedCornerShape(100)).padding(horizontal = 8.dp, vertical = 4.dp)) {
                 var showAddMenu by remember { mutableStateOf(false) }
                 var lastAddDismissTime by remember { mutableLongStateOf(0L) }
                 ExposedDropdownMenuBox(
@@ -842,7 +842,7 @@ fun ChatBottomBar(
                 contentColor = animateColorAsState(if (isActionable) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant, tween(400), label = "fabContent").value,
                 modifier = Modifier.size(46.dp),
                 shape = CircleShape,
-                elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
+                elevation = FloatingActionButtonDefaults.elevation(1.dp, 1.dp, 1.dp, 1.dp)
             ) {
                 val fabIcon = when {
                     pendingSend -> "pending"
