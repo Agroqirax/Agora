@@ -149,12 +149,14 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 item(key = "hdr_$name") {
                     // Bottom corners: 0dp while expanded (flat, merge with models).
                     // When collapsed: 24dp if last provider, else 5dp.
-                    // Animation: snap on expand (instant), tween on collapse (after content finishes shrinking).
+                    // Expand: wantFlat→true immediately via targetState → snap() instant.
+                    // Collapse: wait for currentState→false (content finished shrinking) then tween.
                     val collapsedBottomRadius = if (isLastProvider) 24.dp else 5.dp
-                    val targetBottomRadius = if (isExpanded) 0.dp else collapsedBottomRadius
+                    val wantFlat = transitionState.targetState || transitionState.currentState
+                    val targetBottomRadius = if (wantFlat) 0.dp else collapsedBottomRadius
                     val animBottomRadius by animateDpAsState(
                         targetValue = targetBottomRadius,
-                        animationSpec = if (isExpanded) snap() else tween(durationMillis = 200)
+                        animationSpec = if (transitionState.targetState) snap() else tween(durationMillis = 200)
                     )
                     val headerShape = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = animBottomRadius, bottomEnd = animBottomRadius)
 
