@@ -543,6 +543,8 @@
     <string name="no_messages_to_cache">No messages to cache.</string>
     <string name="all_messages_already_cached">All %1$d messages already cached.</string>
     <string name="no_api_key_configured">No API key configured.</string>
+    <string name="no_api_key_for_provider">No credentials configured for %s. Please add API key or base URL in Settings.</string>
+    <string name="local_model_not_found">Local model file not found. Please re-import the model.</string>
     <string name="all_messages_cached">All %1$d messages cached.</string>
     <string name="cached_partial_failed">Cached %1$d of %2$d. %3$d failed.</string>
     <string name="retry">Retry</string>

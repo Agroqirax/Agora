@@ -171,6 +171,15 @@ class ChatViewModel(
             else null
     }
 
+    private fun isProviderConfigured(providerName: String, activeKey: String): Boolean {
+        val isCustom = providerName !in builtInProviders
+        return when {
+            providerName == "Local" -> true
+            isCustom || providerName == "Ollama" -> !getEffectiveBaseUrl(providerName).isNullOrBlank()
+            else -> activeKey.isNotBlank()
+        }
+    }
+
     val customProviders = settingsManager.customProviders.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
 
@@ -678,7 +687,7 @@ class ChatViewModel(
                 settingsManager.saveAvailableModels(newName, models[newName] ?: emptyList())
                 settingsManager.saveAvailableModels(oldName, emptyList())
                 val enabled = enabledModels.value.map { if (it.startsWith("$oldName:")) it.replace("$oldName:", "$newName:") else it }.toSet()
-                settingsManager.saveEnabledModels(enabled)
+                setEnabledModels(enabled)
                 val aliases = modelAliases.value.mapKeys { if (it.key.startsWith("$oldName:")) it.key.replace("$oldName:", "$newName:") else it.key }
                 settingsManager.saveModelAliases(aliases)
                 settingsManager.setActiveApiKeyId(oldName, null)
@@ -696,11 +705,9 @@ class ChatViewModel(
             current.removeAll { it.name == name }
             settingsManager.saveCustomProviders(current)
             // Clean up associated data
-            val models = availableModels.value.toMutableMap()
-            models.remove(name)
             settingsManager.saveAvailableModels(name, emptyList())
             val enabled = enabledModels.value.filter { !it.startsWith("$name:") }.toSet()
-            settingsManager.saveEnabledModels(enabled)
+            setEnabledModels(enabled)
             val aliases = modelAliases.value.filterKeys { !it.startsWith("$name:") }
             settingsManager.saveModelAliases(aliases)
             val baseUrls = providerBaseUrls.value.toMutableMap()
@@ -887,7 +894,7 @@ class ChatViewModel(
                 settingsManager.setActiveLocalChatModelId(config.id)
             }
             val modelPrefixedId = "Local:${config.modelId}"
-            settingsManager.saveEnabledModels(enabledModels.value + modelPrefixedId)
+            setEnabledModels(enabledModels.value + modelPrefixedId)
             settingsManager.saveModelAliases(modelAliases.value + (modelPrefixedId to config.alias))
         }
     }
@@ -899,11 +906,11 @@ class ChatViewModel(
             }
             val models = localChatModels.value.filter { it.id != uuid }
             settingsManager.saveLocalChatModels(models)
-            if (activeLocalChatModelId.value == uuid && models.isNotEmpty()) {
-                settingsManager.setActiveLocalChatModelId(models.first().id)
+            if (activeLocalChatModelId.value == uuid) {
+                settingsManager.setActiveLocalChatModelId(models.firstOrNull()?.id ?: "")
             }
             val modelPrefixedId = "Local:${model?.modelId ?: uuid}"
-            settingsManager.saveEnabledModels(enabledModels.value - modelPrefixedId)
+            setEnabledModels(enabledModels.value - modelPrefixedId)
             val updatedAvailable = settingsManager.availableModels.first().toMutableMap()
             updatedAvailable["Local"] = models.map { "Local:${it.modelId}" }
             settingsManager.saveAvailableModels("Local", updatedAvailable["Local"] ?: emptyList())
@@ -925,7 +932,7 @@ class ChatViewModel(
             if (oldModel.modelId != newModelId) {
                 val oldPrefixed = "Local:${oldModel.modelId}"
                 val newPrefixed = "Local:$newModelId"
-                settingsManager.saveEnabledModels(enabledModels.value - oldPrefixed + newPrefixed)
+                setEnabledModels(enabledModels.value - oldPrefixed + newPrefixed)
                 val avail = settingsManager.availableModels.first().toMutableMap()
                 avail["Local"] = models.map { "Local:${it.modelId}" }
                 settingsManager.saveAvailableModels("Local", avail["Local"] ?: emptyList())
@@ -1148,8 +1155,10 @@ class ChatViewModel(
             val modelId = modelIdWithPrefix.substringAfter(":")
             val activeKeyId = activeApiKeyIds.value[providerName]
             val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-            val isCustomProvider = providerName !in builtInProviders
-            if (activeKey.isBlank() && providerName != "Ollama" && providerName != "Local" && !isCustomProvider) return@launch
+            if (!isProviderConfigured(providerName, activeKey)) {
+                emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
+                return@launch
+            }
 
             val summaryText = if (firstModelMsg != null) {
                 "User: ${firstUserMsg.text}\nAssistant: ${firstModelMsg.text.take(500)}"
@@ -1372,7 +1381,10 @@ class ChatViewModel(
         val providerName = getProviderForModel(modelId)
         val activeKeyId = activeApiKeyIds.value[providerName]
         val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (activeKey.isBlank() && providerName != "Ollama" && providerName != "Local" && providerName in builtInProviders) return
+        if (!isProviderConfigured(providerName, activeKey)) {
+            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
+            return
+        }
 
         stopGeneration()
 
@@ -1520,7 +1532,10 @@ class ChatViewModel(
         val providerName = getProviderForModel(modelId)
         val activeKeyId = activeApiKeyIds.value[providerName]
         val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (activeKey.isBlank() && providerName != "Ollama" && providerName != "Local" && providerName in builtInProviders) return
+        if (!isProviderConfigured(providerName, activeKey)) {
+            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
+            return
+        }
 
         stopGeneration()
         generationJob = generationScope.launch {
@@ -1651,11 +1666,27 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()) {
+    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
         val modelId = currentActiveModel.value
+        if (modelId.isBlank()) {
+            emitSnackbar(getApplication<Application>().getString(R.string.no_model_selected))
+            return false
+        }
         val providerName = getProviderForModel(modelId)
         val activeKeyId = activeApiKeyIds.value[providerName]
         val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        if (!isProviderConfigured(providerName, activeKey)) {
+            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
+            return false
+        }
+        if (providerName == "Local") {
+            val localModelId = modelId.substringAfter("Local:")
+            val config = localChatModels.value.find { it.modelId == localModelId }
+            if (config == null || !java.io.File(config.localFilePath).exists()) {
+                emitSnackbar(getApplication<Application>().getString(R.string.local_model_not_found))
+                return false
+            }
+        }
         stopGeneration()
 
         generationJob = generationScope.launch {
@@ -1924,6 +1955,7 @@ class ChatViewModel(
                 generateTitle(currentId)
             }
         }
+        return true
     }
 
     fun fetchAvailableModels() {
@@ -1963,6 +1995,7 @@ class ChatViewModel(
 
                     if (!isConfigured) {
                         skippedCount++
+                        settingsManager.saveAvailableModels(name, emptyList())
                         return@forEach
                     }
 
@@ -1984,7 +2017,7 @@ class ChatViewModel(
 
                 val allFetchedModels = settingsManager.availableModels.first().values.flatten().toSet()
                 val newEnabled = enabledModels.value.intersect(allFetchedModels)
-                settingsManager.saveEnabledModels(newEnabled)
+                setEnabledModels(newEnabled)
 
                 when {
                     successProviders.isNotEmpty() && failedProviders.isEmpty() ->

@@ -120,7 +120,7 @@ fun Modifier.verticalScrollbar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatBottomBar(
-    onSendMessage: (String, List<com.newoether.agora.model.SelectedAttachment>) -> Unit,
+    onSendMessage: (String, List<com.newoether.agora.model.SelectedAttachment>) -> Boolean,
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
     isSwitching: Boolean = false,
@@ -811,10 +811,11 @@ fun ChatBottomBar(
             val anyProcessing = processingStates.isNotEmpty()
             LaunchedEffect(pendingSend, anyProcessing) {
                 if (pendingSend && !anyProcessing) {
-                    onSendMessage(textFieldState.text.toString(), selectedAttachments)
-                    selectedAttachments = emptyList()
-                    textFieldState.edit { replace(0, length, "") }
-                    onCollapse()
+                    if (onSendMessage(textFieldState.text.toString(), selectedAttachments)) {
+                        selectedAttachments = emptyList()
+                        textFieldState.edit { replace(0, length, "") }
+                        onCollapse()
+                    }
                     pendingSend = false
                 }
             }
@@ -831,10 +832,11 @@ fun ChatBottomBar(
                         if (anyProcessing) {
                             pendingSend = true
                         } else {
-                            onSendMessage(textFieldState.text.toString(), selectedAttachments)
-                            selectedAttachments = emptyList()
-                            textFieldState.edit { replace(0, length, "") }
-                            onCollapse()
+                            if (onSendMessage(textFieldState.text.toString(), selectedAttachments)) {
+                                selectedAttachments = emptyList()
+                                textFieldState.edit { replace(0, length, "") }
+                                onCollapse()
+                            }
                         }
                     }
                 },

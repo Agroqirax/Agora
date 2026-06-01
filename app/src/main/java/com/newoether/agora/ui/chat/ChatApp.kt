@@ -913,10 +913,13 @@ fun ChatApp(
                     ) {
                         ChatBottomBar(
                         onSendMessage = { text, attachments ->
-                            viewModel.sendMessage(text, attachments = attachments)
-                            scope.launch {
-                                delay(200)
-                                scrollToLastUserMessage(animate = true)
+                            viewModel.sendMessage(text, attachments = attachments).also { sent ->
+                                if (sent) {
+                                    scope.launch {
+                                        delay(200)
+                                        scrollToLastUserMessage(animate = true)
+                                    }
+                                }
                             }
                         },
                         onStopGeneration = { viewModel.stopGeneration() },

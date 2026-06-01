@@ -546,6 +546,8 @@
     <string name="no_messages_to_cache">没有需要缓存的消息。</string>
     <string name="all_messages_already_cached">所有 %1$d 条消息均已缓存。</string>
     <string name="no_api_key_configured">未配置 API 密钥。</string>
+    <string name="no_api_key_for_provider">未配置 %s 的凭证，请在设置中添加 API 密钥或 Base URL。</string>
+    <string name="local_model_not_found">本地模型文件不存在，请重新导入模型。</string>
     <string name="all_messages_cached">已缓存全部 %1$d 条消息。</string>
     <string name="cached_partial_failed">已缓存 %1$d / %2$d 条，%3$d 条失败。</string>
     <string name="retry">重试</string>
