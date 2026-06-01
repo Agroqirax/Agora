@@ -1290,17 +1290,17 @@ fun MessageItem(
                                 exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
                             ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                                    horizontalArrangement = Arrangement.Start,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)) }, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)) }, modifier = Modifier.size(32.dp)) {
                                         Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
-                                    IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(40.dp)) {
-                                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(20.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                    IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(32.dp)) {
+                                        Icon(Icons.Default.Refresh, null, modifier = Modifier.size(19.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
-                                    IconButton(onClick = { showInfoDialog = true }, modifier = Modifier.size(40.dp)) {
+                                    IconButton(onClick = { showInfoDialog = true }, modifier = Modifier.size(32.dp)) {
                                         Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
 
@@ -1326,7 +1326,7 @@ fun MessageItem(
                             }
                         }
                         
-                        Spacer(modifier = Modifier.height(32.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
