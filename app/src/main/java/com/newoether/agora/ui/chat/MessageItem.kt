@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -510,12 +511,15 @@ fun MessageItem(
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
-    onHeightChanged: (Int) -> Unit = {}
+    onHeightChanged: (Int) -> Unit = {},
+    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
 
-    var isThoughtExpanded by remember(message.id) { mutableStateOf(false) }
+    val isThoughtExpanded by remember(message.id) {
+        derivedStateOf { thoughtExpandedStates[message.id] ?: false }
+    }
     var showSegmentDetail by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var currentThoughtBlockHeight by remember { mutableIntStateOf(0) }
@@ -1124,7 +1128,7 @@ fun MessageItem(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(18.dp))
-                                        .clickable { isThoughtExpanded = !isThoughtExpanded }
+                                        .clickable { thoughtExpandedStates[message.id] = !isThoughtExpanded }
                                         .padding(10.dp)
                                 ) {
                                     if (isToolCalling || isToolInProgress) {

@@ -117,6 +117,7 @@ fun ChatApp(
     val selectedModel by viewModel.currentActiveModel.collectAsState()
     val enabledModels by viewModel.enabledModels.collectAsState()
     val modelAliases by viewModel.modelAliases.collectAsState()
+    val thoughtExpandedStates = remember(currentConversationId) { mutableStateMapOf<String, Boolean>() }
     val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
@@ -770,6 +771,7 @@ fun ChatApp(
                                 onMediaClick = onMediaClick,
                                 onFileContentClick = onFileContentClick,
                                 onPdfPagesClick = onPdfPagesClick,
+                                thoughtExpandedStates = thoughtExpandedStates,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,
                                     end = 8.dp,

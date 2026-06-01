@@ -44,7 +44,8 @@ fun MessageList(
     onDelete: (String) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
-    onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null
+    onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
+    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(isLoading) { if (isLoading) editingMessageId = null }
@@ -110,7 +111,8 @@ fun MessageList(
                     onMediaClick = onMediaClick,
                     onFileContentClick = onFileContentClick,
                     onPdfPagesClick = onPdfPagesClick,
-                    onHeightChanged = { height -> messageHeights[message.id] = height }
+                    onHeightChanged = { height -> messageHeights[message.id] = height },
+                    thoughtExpandedStates = thoughtExpandedStates
                 )
             }
             item {
