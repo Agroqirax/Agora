@@ -1261,7 +1261,89 @@ class ChatViewModel(
             if (_currentConversationId.value == id) createNewChat()
         }
     }
-    
+
+    /**
+     * Deletes a message and all its descendants (BFS cascade).
+     * Hidden tool_/result_ children are included in the cascade.
+     * Attachments, embeddings, and branch selections are cleaned up.
+     * Returns the count of deleted messages (for the confirmation dialog).
+     */
+    fun deleteMessage(messageId: String): Int {
+        val currentId = _currentConversationId.value ?: return 0
+        stopGeneration()
+
+        val allMsgs = _allMessages.value
+        val targetMsg = allMsgs.find { it.id == messageId } ?: return 0
+
+        // BFS walk to collect all descendant IDs (including hidden tool_/result_ messages)
+        val staleIds = linkedSetOf(messageId)
+        val queue = mutableListOf(messageId)
+        while (queue.isNotEmpty()) {
+            val pid = queue.removeAt(0)
+            allMsgs.filter { it.parentId == pid }.forEach {
+                if (staleIds.add(it.id)) queue.add(it.id)
+            }
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            // Delete attachment files for all cascaded messages
+            val staleList = allMsgs.filter { it.id in staleIds }
+            for (msg in staleList) {
+                for (imagePath in msg.images) {
+                    try { java.io.File(imagePath).delete() } catch (_: Exception) {}
+                }
+                if (msg.attachmentMeta != null) {
+                    for (item in msg.attachmentMeta.items) {
+                        if ((item.type == "video" || item.type == "image" || item.type == "file") && item.originalUri?.startsWith("file://") == true) {
+                            try { java.io.File(item.originalUri.removePrefix("file://")).delete() } catch (_: Exception) {}
+                        }
+                    }
+                }
+            }
+
+            // Delete embeddings for all cascaded messages
+            for (id in staleIds) {
+                chatDao.deleteEmbedding(id)
+            }
+
+            // DB delete
+            chatDao.deleteMessagesByIds(staleIds.toList())
+
+            // Update _allMessages
+            _allMessages.update { it.filter { m -> m.id !in staleIds } }
+
+            // Fix _selectedChildren — remove entries where key or value is deleted.
+            // If a deleted message was the selected branch, switch to the next available sibling.
+            val remainingMsgs = _allMessages.value
+            val newSelected = _selectedChildren.value.toMutableMap()
+            var changed = false
+            for ((parentId, childId) in _selectedChildren.value) {
+                // Remove entry if the parent itself was deleted
+                if (parentId != null && parentId in staleIds) {
+                    newSelected.remove(parentId)
+                    changed = true
+                    continue
+                }
+                if (childId in staleIds) {
+                    val siblings = remainingMsgs.filter {
+                        it.parentId == parentId &&
+                            !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
+                            !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
+                    }.sortedBy { it.timestamp }
+                    if (siblings.isNotEmpty()) {
+                        newSelected[parentId] = siblings.last().id
+                    } else {
+                        newSelected.remove(parentId)
+                    }
+                    changed = true
+                }
+            }
+            if (changed) _selectedChildren.value = newSelected
+        }
+
+        return staleIds.size
+    }
+
     fun stopGeneration() {
         generationJob?.cancel()
         _isLoading.value = false

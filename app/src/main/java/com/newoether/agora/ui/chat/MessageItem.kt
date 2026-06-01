@@ -36,7 +36,6 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloseFullscreen
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.OpenInFull
@@ -53,6 +52,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -505,6 +505,7 @@ fun MessageItem(
     totalBranches: Int = 1,
     onSwitchBranch: (Int) -> Unit = {},
     onRegenerate: (String) -> Unit = {},
+    onDelete: (String) -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
@@ -519,6 +520,8 @@ fun MessageItem(
     var currentThoughtBlockHeight by remember { mutableIntStateOf(0) }
     var stableCollapsedThoughtHeight by remember { mutableIntStateOf(0) }
     var showInfoDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     // Suppress height reports to LazyColumn during expand/collapse animation
     // to prevent scroll-position drift when the animation is interrupted mid-way.
     var suppressHeightReport by remember { mutableStateOf(false) }
@@ -555,6 +558,27 @@ fun MessageItem(
             },
             confirmButton = {
                 TextButton(onClick = { showInfoDialog = false }) { Text(stringResource(R.string.provider_close)) }
+            }
+        )
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.delete_message_title)) },
+            text = { Text(stringResource(R.string.delete_message_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        onDelete(message.id)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text(stringResource(R.string.cancel)) }
             }
         )
     }
@@ -869,8 +893,29 @@ fun MessageItem(
                         IconButton(onClick = { onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
                             Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(16.dp), tint = LocalContentColor.current.copy(alpha = if (isEditingAllowed) 0.6f else 0.3f))
                         }
-                        IconButton(onClick = { showInfoDialog = true }, modifier = Modifier.size(32.dp)) {
-                            Icon(Icons.Default.Info, contentDescription = stringResource(R.string.info), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                        Box {
+                            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                            }
+                            DropdownMenu(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 16.dp,
+                                shape = RoundedCornerShape(12.dp),
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.info)) },
+                                    onClick = { showMenu = false; showInfoDialog = true },
+                                    leadingIcon = { Icon(Icons.Default.Info, null) }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
+                                    onClick = { showMenu = false; showDeleteConfirm = true },
+                                    enabled = !isLoading,
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
+                                )
+                            }
                         }
                     }
                 }
@@ -1310,8 +1355,29 @@ fun MessageItem(
                                     IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(32.dp)) {
                                         Icon(Icons.Default.Refresh, null, modifier = Modifier.size(19.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                     }
-                                    IconButton(onClick = { showInfoDialog = true }, modifier = Modifier.size(32.dp)) {
-                                        Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                    Box {
+                                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                                            Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                        }
+                                        DropdownMenu(
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                            tonalElevation = 16.dp,
+                                            shape = RoundedCornerShape(12.dp),
+                                            expanded = showMenu,
+                                            onDismissRequest = { showMenu = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.info)) },
+                                                onClick = { showMenu = false; showInfoDialog = true },
+                                                leadingIcon = { Icon(Icons.Default.Info, null) }
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
+                                                onClick = { showMenu = false; showDeleteConfirm = true },
+                                                enabled = !isLoading,
+                                                leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
+                                            )
+                                        }
                                     }
 
                                     if (totalBranches > 1) {

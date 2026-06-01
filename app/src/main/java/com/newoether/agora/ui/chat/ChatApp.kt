@@ -766,6 +766,7 @@ fun ChatApp(
                                         scrollToLastUserMessage(animate = true)
                                     }
                                 },
+                                onDelete = { id -> viewModel.deleteMessage(id) },
                                 onImageClick = onImageClick,
                                 onFileContentClick = onFileContentClick,
                                 onPdfPagesClick = onPdfPagesClick,
