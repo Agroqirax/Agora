@@ -2,11 +2,10 @@ package com.newoether.agora.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.snap
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -56,6 +55,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showActiveModelDialog by remember { mutableStateOf(false) }
     var showModelAliasDialog by remember { mutableStateOf<String?>(null) }
     val expandedProviders = remember { mutableStateMapOf<String, MutableTransitionState<Boolean>>() }
+    val modelBlockHeights = remember { mutableStateMapOf<String, Float>() }
 
     val providers = availableModels.entries.filter { it.value.isNotEmpty() }
 
@@ -147,18 +147,15 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                 // ── Provider header ──
                 item(key = "hdr_$name") {
-                    // Bottom corners: 0dp while expanded (flat, merge with models).
-                    // When collapsed: 24dp if last provider, else 5dp.
-                    // Expand: wantFlat→true immediately via targetState → snap() instant.
-                    // Collapse: wait for currentState→false (content finished shrinking) then tween.
-                    val collapsedBottomRadius = if (isLastProvider) 24.dp else 5.dp
-                    val wantFlat = transitionState.targetState || transitionState.currentState
-                    val targetBottomRadius = if (wantFlat) 0.dp else collapsedBottomRadius
-                    val animBottomRadius by animateDpAsState(
-                        targetValue = targetBottomRadius,
-                        animationSpec = if (transitionState.targetState) snap() else tween(durationMillis = 200)
-                    )
-                    val headerShape = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = animBottomRadius, bottomEnd = animBottomRadius)
+                    // Bottom corners track model block height:
+                    // height >= radius → ratio=0 → flat (merge with content)
+                    // height = 0     → ratio=1 → fully rounded
+                    // Interpolates linearly in [0, radius].
+                    val collapsedRadiusDp = if (isLastProvider) 24f else 5f
+                    val currentHeight = modelBlockHeights[name] ?: 0f
+                    val ratio = (1f - currentHeight / collapsedRadiusDp).coerceIn(0f, 1f)
+                    val bottomRadius = (collapsedRadiusDp * ratio).dp
+                    val headerShape = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = bottomRadius, bottomEnd = bottomRadius)
 
                     CardSurface(shape = headerShape, addTopGap = true) {
                         SettingsItem(
@@ -179,10 +176,14 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                 // ── Model block (one AnimatedVisibility → Column, like the original) ──
                 item(key = "models_$name") {
+                    val density = LocalDensity.current
                     AnimatedVisibility(
                         visibleState = transitionState,
                         enter = expandVertically(),
-                        exit = shrinkVertically()
+                        exit = shrinkVertically(),
+                        modifier = Modifier.onGloballyPositioned { coordinates ->
+                            modelBlockHeights[name] = coordinates.size.height / density.density
+                        }
                     ) {
                         Column {
                             for ((modelIndex, model) in models.withIndex()) {
