@@ -513,7 +513,7 @@ fun MessageItem(
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
 
-    var isThoughtExpanded by rememberSaveable { mutableStateOf(false) }
+    var isThoughtExpanded by remember(message.id) { mutableStateOf(false) }
     var showSegmentDetail by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var currentThoughtBlockHeight by remember { mutableIntStateOf(0) }
@@ -1034,19 +1034,20 @@ fun MessageItem(
                                 targetValue = if (isThoughtExpanded) 12.dp else 4.dp,
                                 animationSpec = tween(500), label = "mergedPad"
                             )
-                            Column(
+                            Surface(
+                                tonalElevation = 2.dp,
+                                shape = RoundedCornerShape(18.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 8.dp, bottom = mergedBottomPadding + 6.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                     .noOpBringIntoView()
                             ) {
+                                Column {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(8.dp))
+                                        .clip(RoundedCornerShape(18.dp))
                                         .clickable { isThoughtExpanded = !isThoughtExpanded }
                                         .padding(10.dp)
                                 ) {
@@ -1070,8 +1071,8 @@ fun MessageItem(
                                 }
                                 AnimatedVisibility(
                                     visible = isThoughtExpanded,
-                                    enter = fadeIn(tween(500)) + expandVertically(tween(500)),
-                                    exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
+                                    enter = fadeIn(tween(400)) + expandVertically(tween(400)),
+                                    exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
                                 ) {
                                     Column(
                                         modifier = Modifier
@@ -1092,7 +1093,7 @@ fun MessageItem(
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clip(RoundedCornerShape(18.dp))
                                                         .clickable { selectedSegmentIndex = idx; showSegmentDetail = true }
                                                         .padding(horizontal = 10.dp, vertical = 8.dp)
                                                 ) {
@@ -1101,46 +1102,23 @@ fun MessageItem(
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                                         fontWeight = FontWeight.SemiBold
                                                     )
-                                                    Box {
-                                                        if (!isStreaming) {
-                                                            SelectionContainer {
-                                                                RecomposeSafeMarkdown(
-                                                                    content = seg.content,
-                                                                    isStreaming = isStreaming
-                                                                ) { text ->
-                                                                    Markdown(
-                                                                        content = text.escapeForMarkdown(),
-                                                                        modifier = Modifier.fillMaxWidth(),
-                                                                        colors = customMarkdownColors,
-                                                                        typography = thoughtTypography,
-                                                                        padding = thoughtMarkdownPadding,
-                                                                        components = customMarkdownComponents
-                                                                    )
-                                                                }
-                                                            }
-                                                        } else {
-                                                            RecomposeSafeMarkdown(
-                                                                content = seg.content,
-                                                                isStreaming = isStreaming
-                                                            ) { text ->
-                                                                Markdown(
-                                                                    content = text.escapeForMarkdown(),
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    colors = customMarkdownColors,
-                                                                    typography = thoughtTypography,
-                                                                    padding = thoughtMarkdownPadding,
-                                                                    components = customMarkdownComponents
-                                                                )
-                                                            }
-                                                        }
-
-                                                    }
+                                                    val flat = seg.content.replace('\n', ' ')
+                                                    val preview = if (isStreaming && idx == segs.lastIndex) {
+                                                        if (flat.length > 60) "…${flat.takeLast(60)}" else flat
+                                                    } else flat
+                                                    Text(
+                                                        text = preview,
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
                                                 }
                                             } else if (seg.type == "tool") {
                                                 Column(
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .clip(RoundedCornerShape(18.dp))
                                                         .clickable { selectedSegmentIndex = idx; showSegmentDetail = true }
                                                         .padding(horizontal = 10.dp, vertical = 8.dp)
                                                 ) {
@@ -1165,6 +1143,7 @@ fun MessageItem(
                                             }
                                         }
                                     }
+                                }
                                 }
                             }
                         }
@@ -1622,12 +1601,36 @@ fun MessageItem(
                                     )
                                 }
                             } else {
-                                SelectionContainer {
-                                    Text(
-                                        text = seg.content,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                                if (!isStreaming) {
+                                    SelectionContainer {
+                                        RecomposeSafeMarkdown(
+                                            content = seg.content,
+                                            isStreaming = isStreaming
+                                        ) { text ->
+                                            Markdown(
+                                                content = text.escapeForMarkdown(),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                colors = customMarkdownColors,
+                                                typography = thoughtTypography,
+                                                padding = thoughtMarkdownPadding,
+                                                components = customMarkdownComponents
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    RecomposeSafeMarkdown(
+                                        content = seg.content,
+                                        isStreaming = isStreaming
+                                    ) { text ->
+                                        Markdown(
+                                            content = text.escapeForMarkdown(),
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = customMarkdownColors,
+                                            typography = thoughtTypography,
+                                            padding = thoughtMarkdownPadding,
+                                            components = customMarkdownComponents
+                                        )
+                                    }
                                 }
                             }
                         }
