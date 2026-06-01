@@ -112,7 +112,7 @@ fun AttachmentThumbnailItem(
     modifier: Modifier = Modifier
 ) {
     val thumbModifier = modifier
-        .sizeIn(maxWidth = 200.dp, maxHeight = 200.dp)
+        .size(120.dp, 90.dp)
         .clip(RoundedCornerShape(8.dp))
 
     when (type) {
@@ -145,7 +145,7 @@ fun AttachmentThumbnailItem(
                     model = imagePath,
                     contentDescription = null,
                     modifier = thumbModifier,
-                    contentScale = ContentScale.Fit
+                    contentScale = ContentScale.Crop
                 )
                 Icon(
                     Icons.Default.PlayArrow,
@@ -166,7 +166,7 @@ fun AttachmentThumbnailItem(
                         model = imagePath,
                         contentDescription = null,
                         modifier = thumbModifier,
-                        contentScale = ContentScale.Fit
+                        contentScale = ContentScale.Crop
                     )
                 }
             } else {
