@@ -29,6 +29,7 @@ export ANDROID_SDK_ROOT=/home/newoether/android-sdk
 export ANDROID_NDK_HOME=/home/newoether/android-sdk/ndk/28.2.13676358
 export SOURCE_DATE_EPOCH=0
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
+rm -rf app/build
 ./gradlew assembleRelease --no-daemon --stacktrace 2>&1
 '@
 
