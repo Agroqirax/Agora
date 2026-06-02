@@ -1990,8 +1990,8 @@ class ChatViewModel(
             }
             // Apply pending per-conversation settings if any (from Advanced dialog in new chat)
             val pendingSettings = _pendingConversationSettings.value
-            if (pendingSettings != null) {
-                viewModelScope.launch { settingsManager.saveConversationSettings(currentId!!, pendingSettings) }
+            if (pendingSettings != null && currentId != null) {
+                viewModelScope.launch { settingsManager.saveConversationSettings(currentId, pendingSettings) }
                 _pendingConversationSettings.value = null
             }
             val currentPath = messages.value
