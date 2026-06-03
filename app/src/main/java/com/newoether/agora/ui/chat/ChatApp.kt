@@ -144,6 +144,7 @@ fun ChatApp(
     // Web Search and Shell: global switch OFF → always false, regardless of override
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
+    val contextWindow = convOverride?.contextWindow ?: maxContextWindow
     val defaultTemperature by viewModel.defaultTemperature.collectAsState()
     val defaultMaxTokens by viewModel.defaultMaxTokens.collectAsState()
     val defaultTopP by viewModel.defaultTopP.collectAsState()
@@ -764,7 +765,7 @@ fun ChatApp(
                                 isLoading = isLoading && generatingInConversationId == currentConversationId,
                                 isSwitching = isSwitching,
                                 visualizeContextRollout = visualizeContextRollout,
-                                maxContextWindow = maxContextWindow,
+                                maxContextWindow = contextWindow,
                                 modelAliases = modelAliases,
                                 bottomBarHeight = bottomBarHeight,
                                 viewportHeight = viewportHeightPx,

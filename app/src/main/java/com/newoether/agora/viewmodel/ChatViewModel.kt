@@ -884,14 +884,12 @@ class ChatViewModel(
                             if (!silent) _snackbarMessage.emit(SnackbarEvent("Local model file not found. Please re-import the model."))
                             return@launch
                         }
-                        // Batch: load GGUF model once, compute all embeddings, free once
-                        val texts = toProcess.map { it.text.take(8000) }
-                        val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
-                            localProvider.releaseEngineBlocking()
-                        }
-                        for ((msg, embd) in toProcess.zip(embeddings)) {
+                        for (msg in toProcess) {
                             if (embeddingModels.value.none { it.id == modelId }) return@launch
                             attempted++
+                            val embd = LlamaEngine.computeEmbedding(msg.text.take(8000), model.localFilePath) {
+                                localProvider.releaseEngineBlocking()
+                            }
                             if (embd != null) {
                                 chatDao.upsertEmbedding(EmbeddingEntity(
                                     messageId = msg.id,
@@ -911,12 +909,12 @@ class ChatViewModel(
                             return@launch
                         }
                         val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                        // Batch: send all texts to remote embedding API at once
-                        val texts = toProcess.map { it.text.take(8000) }
-                        val embeddings = EmbeddingClient.computeEmbeddings(texts, apiKey, model.remoteModelName, baseUrl)
-                        for ((msg, embd) in toProcess.zip(embeddings)) {
+                        for (msg in toProcess) {
                             if (embeddingModels.value.none { it.id == modelId }) return@launch
                             attempted++
+                            val embd = EmbeddingClient.computeEmbedding(
+                                msg.text.take(8000), apiKey, model.remoteModelName, baseUrl
+                            )
                             if (embd != null) {
                                 chatDao.upsertEmbedding(EmbeddingEntity(
                                     messageId = msg.id,
