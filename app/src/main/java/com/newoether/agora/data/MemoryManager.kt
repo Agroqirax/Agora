@@ -109,12 +109,22 @@ class MemoryManager(context: Context) {
     }
 
     @Synchronized
-    fun editFile(name: String, content: String? = null, newName: String? = null, description: String? = null): String {
+    fun editFile(name: String, content: String? = null, newName: String? = null, description: String? = null, oldString: String? = null, newString: String? = null): String {
         val file = resolveFile(name)
         if (!file.exists()) throw IllegalArgumentException("File not found: $name")
         val meta = loadMeta()
         var renamedFile: File? = null
-        if (content != null) file.writeText(content)
+        if (oldString != null) {
+            val fileText = file.readText()
+            val count = fileText.countOccurrences(oldString)
+            if (count == 0)
+                throw IllegalArgumentException("old_string not found in ${file.name}")
+            if (count > 1)
+                throw IllegalArgumentException("old_string matches $count times in ${file.name} — must be unique")
+            file.writeText(fileText.replace(oldString, newString ?: ""))
+        } else if (content != null) {
+            file.writeText(content)
+        }
         if (newName != null && newName != name) {
             renamedFile = resolveFile(newName)
             if (renamedFile.exists()) throw IllegalArgumentException("Target file already exists: ${renamedFile.name}")
@@ -128,11 +138,25 @@ class MemoryManager(context: Context) {
         }
         saveMeta(meta)
         val targetName = newName?.let { resolveFile(it).name } ?: file.name
+        if (oldString != null && newName != null) return "Replaced in and renamed to $targetName"
+        if (oldString != null) return "Replaced in $targetName"
         if (content != null && newName != null) return "Updated and renamed to $targetName"
         if (content != null) return "Updated $targetName"
         if (newName != null) return "Renamed to $targetName"
         if (description != null) return "Updated description of $targetName"
         return "No changes made."
+    }
+
+    private fun String.countOccurrences(substring: String): Int {
+        var count = 0
+        var idx = 0
+        while (true) {
+            idx = indexOf(substring, idx)
+            if (idx < 0) break
+            count++
+            idx += substring.length
+        }
+        return count
     }
 
     @Synchronized

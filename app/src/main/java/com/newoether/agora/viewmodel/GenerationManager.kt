@@ -218,11 +218,13 @@ class GenerationManager(
                 )),
                 ToolDefinition(function = ToolFunction(
                     name = "edit_memory_file",
-                    description = "Edit, rename, or update the description of a file in the memory database. At least one of 'content', 'new_name', or 'description' must be provided.",
+                    description = "Edit, rename, or update the description of a file in the memory database. Use 'old_string' + 'new_string' for precise string replacement — the old_string must match exactly once in the file. Use 'content' for full rewrites (mutually exclusive with old_string). At least one of 'content', 'old_string', 'new_name', or 'description' must be provided.",
                     parameters = ToolParameters(
                         properties = mapOf(
                             "name" to ToolProperty("string", "The current file name to edit."),
-                            "content" to ToolProperty("string", "The new markdown content. Omit to keep existing content."),
+                            "content" to ToolProperty("string", "The new markdown content (full rewrite). Omit to keep existing content. Mutually exclusive with 'old_string'."),
+                            "old_string" to ToolProperty("string", "Exact string to find and replace. Must match exactly once in the file. Mutually exclusive with 'content'."),
+                            "new_string" to ToolProperty("string", "Replacement string for old_string. Pass empty string to delete the matched text. Required when old_string is provided."),
                             "new_name" to ToolProperty("string", "New file name to rename to. Omit to keep existing name."),
                             "description" to ToolProperty("string", "A short description of the file contents. Omit to keep existing description. Pass empty string to remove.")
                         ),
@@ -1349,11 +1351,20 @@ class GenerationManager(
                 "create_memory_file" -> memoryManager.createFile(arg("name"), arg("content"), arg("description"))
                 "edit_memory_file" -> {
                     val editContent = arg("content").ifBlank { null }
+                    val oldStr = arg("old_string").ifBlank { null }
+                    val newStr = arg("new_string") // empty is valid (means delete)
                     val newName = arg("new_name").ifBlank { null }
                     val descArg = arg("description")
                     val desc = if (args.containsKey("description")) descArg else null
-                    if (editContent == null && newName == null && desc == null) "Error: At least 'content', 'new_name', or 'description' must be provided."
-                    else memoryManager.editFile(arg("name"), editContent, newName, desc)
+                    if (editContent != null && oldStr != null) {
+                        "Error: 'content' and 'old_string' are mutually exclusive. Use one or the other."
+                    } else if (oldStr != null && !args.containsKey("new_string")) {
+                        "Error: 'old_string' requires 'new_string' (pass empty string to delete)."
+                    } else if (editContent == null && oldStr == null && newName == null && desc == null) {
+                        "Error: At least 'content', 'old_string', 'new_name', or 'description' must be provided."
+                    } else {
+                        memoryManager.editFile(arg("name"), editContent, newName, desc, oldStr, newStr)
+                    }
                 }
                 "delete_memory_file" -> memoryManager.deleteFile(arg("name"))
                 "update_active_memory" -> {
