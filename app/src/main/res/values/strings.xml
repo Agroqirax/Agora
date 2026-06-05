@@ -299,8 +299,8 @@
     <string name="memory_saved_title">Saved Memories</string>
     <string name="memory_add">Add Memory</string>
     <string name="memory_add_desc">Add a new memory to saved memories</string>
-    <string name="memory_no_files">No files yet</string>
-    <string name="memory_create_hint">Create a file or let the model create one via tool calling</string>
+    <string name="memory_no_files">No memories yet</string>
+    <string name="memory_create_hint">Create a memory or let the model create one via tool calling</string>
     <string name="memory_edit_active">Edit Active Memory</string>
     <string name="memory_edit">Edit Memory</string>
     <string name="memory_title_hint">Title</string>

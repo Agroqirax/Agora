@@ -145,7 +145,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             SettingsItem(
                                 headlineContent = { Text(stringResource(R.string.memory_no_files), color = emptyColor) },
                                 supportingContent = { Text(stringResource(R.string.memory_create_hint), color = emptyColor) },
-                                modifier = Modifier.padding(vertical = 8.dp)
+                                modifier = Modifier.padding(vertical = 4.dp)
                             )
                         }
                     } else {

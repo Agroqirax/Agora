@@ -263,8 +263,8 @@
     <string name="memory_saved_title">已保存的记忆</string>
     <string name="memory_add">添加记忆</string>
     <string name="memory_add_desc">向已保存的记忆中添加新记忆</string>
-    <string name="memory_no_files">暂无文件</string>
-    <string name="memory_create_hint">创建一个文件或让模型通过工具调用来创建</string>
+    <string name="memory_no_files">暂无记忆</string>
+    <string name="memory_create_hint">创建一个记忆或让模型通过工具调用来创建</string>
     <string name="memory_edit_active">编辑活跃记忆</string>
     <string name="memory_edit">编辑记忆</string>
     <string name="memory_title_hint">标题</string>
