@@ -677,11 +677,10 @@ fun ChatApp(
                                                 fontWeight = FontWeight.Bold,
                                                 style = MaterialTheme.typography.titleSmall.copy(fontSize = 20.sp),
                                                 maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                modifier = Modifier.weight(1f)
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         } else {
-                                            Column(modifier = Modifier.weight(1f)) {
+                                            Column {
                                                 Text(
                                                     text = currentTitle,
                                                     fontWeight = FontWeight.Bold,
