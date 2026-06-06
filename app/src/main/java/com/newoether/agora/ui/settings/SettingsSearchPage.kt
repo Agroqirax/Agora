@@ -34,6 +34,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 import java.io.File
@@ -582,7 +583,16 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     input.copyTo(output)
                                 }
                             }
-                            localFilePath = destFile.absolutePath
+                            // Validate GGUF magic bytes
+                            val magic = ByteArray(4)
+                            destFile.inputStream().use { it.read(magic) }
+                            if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
+                                || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
+                                destFile.delete()
+                                DebugLog.e("SettingsSearch", "Imported file is not a valid GGUF")
+                            } else {
+                                localFilePath = destFile.absolutePath
+                            }
                         } catch (_: Exception) { }
                         isImporting = false
                     }

@@ -112,8 +112,17 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     input.copyTo(output)
                                 }
                             }
-                            copiedFilePath = destFile.absolutePath
-                            showAddDialog = true
+                            // Validate GGUF magic bytes
+                            val magic = ByteArray(4)
+                            destFile.inputStream().use { it.read(magic) }
+                            if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
+                                || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
+                                destFile.delete()
+                                DebugLog.e("SettingsProvider", "Imported file is not a valid GGUF")
+                            } else {
+                                copiedFilePath = destFile.absolutePath
+                                showAddDialog = true
+                            }
                         } catch (e: Exception) {
                             DebugLog.e("SettingsProvider", "Failed to import GGUF", e)
                         } finally {
