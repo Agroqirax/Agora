@@ -3,7 +3,9 @@
 import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -16,8 +18,12 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -26,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.font.FontWeight
@@ -212,6 +219,70 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
     )
     val focusManager = LocalFocusManager.current
     val ratingScope = rememberCoroutineScope()
+
+    // Update dialog
+    val updateDialogData by viewModel.updateDialogData.collectAsState()
+    if (updateDialogData != null) {
+        val info = updateDialogData!!
+        val ctx = LocalContext.current
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.dismissUpdateDialog() },
+            icon = { Icon(Icons.Default.Download, null, modifier = Modifier.size(32.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = {
+                Text(
+                    text = stringResource(R.string.about_update_available, info.version),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
+                    Text(stringResource(R.string.about_available_body))
+                    if (info.body.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column {
+                            info.body.split("\n").forEach { line ->
+                                val style = when {
+                                    line.startsWith("## ") -> MaterialTheme.typography.titleMedium
+                                    line.startsWith("- ") -> MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                                    line.isBlank() -> null
+                                    else -> MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
+                                }
+                                if (style != null) {
+                                    val text = when {
+                                        line.startsWith("- ") -> "• ${line.removePrefix("- ")}"
+                                        else -> line.removePrefix("## ")
+                                    }
+                                    Text(
+                                        text = text,
+                                        style = style,
+                                        modifier = Modifier.padding(top = when {
+                                            line.startsWith("## ") -> 12.dp
+                                            line.startsWith("- ") -> 1.dp
+                                            else -> 1.dp
+                                        })
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(info.url)))
+                    viewModel.dismissUpdateDialog()
+                }) { Text(stringResource(R.string.about_view_release)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissUpdateDialog() }) {
+                    Text(stringResource(R.string.about_later))
+                }
+            }
+        )
+    }
 
     // Rating prompt — read from flow directly to avoid collectAsState initial-value race
     var showRatingPrompt by remember { mutableStateOf(false) }

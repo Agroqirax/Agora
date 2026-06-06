@@ -502,6 +502,9 @@
     <string name="about_update_available">Update available: v%1$s</string>
     <string name="about_up_to_date">You\'re up to date (v%1$s)</string>
     <string name="about_checking">Checking...</string>
+    <string name="about_available_body">A new version of Agora is available on GitHub.</string>
+    <string name="about_view_release">View Release</string>
+    <string name="about_later">Later</string>
     <string name="rating_title">Rate Agora</string>
     <string name="rating_star">%1$d star(s)</string>
     <string name="rating_your_name">Your Name (optional)</string>

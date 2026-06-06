@@ -525,6 +525,9 @@
     <string name="about_update_available">有新版本：v%1$s</string>
     <string name="about_up_to_date">已是最新版本 (v%1$s)</string>
     <string name="about_checking">检查中...</string>
+    <string name="about_available_body">Agora 的新版本已在 GitHub 上发布。</string>
+    <string name="about_view_release">查看版本</string>
+    <string name="about_later">稍后</string>
     <string name="rating_title">评价 Agora</string>
     <string name="rating_star">%1$d 星</string>
     <string name="rating_your_name">您的姓名（可选）</string>

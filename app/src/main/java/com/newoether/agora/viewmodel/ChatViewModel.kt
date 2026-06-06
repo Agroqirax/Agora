@@ -97,14 +97,7 @@ class ChatViewModel(
             if (settingsManager.autoUpdateCheck.first()) {
                 val info = com.newoether.agora.util.UpdateChecker.check(getCurrentVersion())
                 if (info != null) {
-                    _snackbarMessage.emit(SnackbarEvent(
-                        "Update available: v${info.version}",
-                        "View"
-                    ) {
-                        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(info.url))
-                        intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        getApplication<android.app.Application>().startActivity(intent)
-                    })
+                    _updateDialogData.value = info
                 }
             }
         }
@@ -372,6 +365,10 @@ class ChatViewModel(
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
     }
+
+    private val _updateDialogData = MutableStateFlow<com.newoether.agora.util.UpdateInfo?>(null)
+    val updateDialogData: StateFlow<com.newoether.agora.util.UpdateInfo?> = _updateDialogData.asStateFlow()
+    fun dismissUpdateDialog() { _updateDialogData.value = null }
 
     private val _previewPdfPages = MutableStateFlow<List<String>>(emptyList())
     val previewPdfPages: StateFlow<List<String>> = _previewPdfPages.asStateFlow()
