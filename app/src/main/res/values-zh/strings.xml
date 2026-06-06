@@ -347,6 +347,7 @@
     <string name="embedding_using_key">使用 %1$s 的密钥</string>
     <string name="embedding_using_fallback_key">使用 %1$s 的密钥（无 %2$s 密钥）</string>
     <string name="embedding_key_autofill_hint">留空则自动使用已配置的对话密钥</string>
+    <string name="embedding_api_key_hint">输入 API 密钥</string>
     <string name="embedding_no_key">未配置 API 密钥</string>
     <string name="embedding_custom">自定义...</string>
     <string name="embedding_custom_model_desc">输入提供商支持的任意模型名称</string>

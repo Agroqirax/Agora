@@ -88,7 +88,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var selectedProviderIdx by remember { mutableIntStateOf(0) }
     var remoteModelName by remember { mutableStateOf("") }
     var remoteBaseUrl by remember { mutableStateOf("https://api.openai.com/v1") }
-    var remoteApiKey by remember { mutableStateOf("") }
+    val remoteApiKeys = remember { mutableStateListOf(*Array(embeddingProviders.size) { "" }) }
     var remoteBatchSize by remember { mutableStateOf("8") }
     var showRemoteModelDropdown by remember { mutableStateOf(false) }
     var isCustomModel by remember { mutableStateOf(false) }
@@ -359,9 +359,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             TextButton(onClick = {
                                 remoteName = ""
                                 selectedProviderIdx = 0
-                                remoteModelName = ""
+                                remoteModelName = embeddingProviders[0].models.firstOrNull() ?: ""
                                 remoteBaseUrl = "https://api.openai.com/v1"
-                                remoteApiKey = ""
+                                for (i in remoteApiKeys.indices) { remoteApiKeys[i] = "" }
                                 remoteBatchSize = "8"
                                 isCustomModel = false
                                 testStatus = null
@@ -516,67 +516,81 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 title = { Text(stringResource(R.string.add_remote_model), fontWeight = FontWeight.Bold) },
                 text = {
                     Column {
-                        // Provider selector
+                        // Provider selector (fully clickable)
+                        var provExpanded by remember { mutableStateOf(false) }
                         OutlinedTextField(
                             value = provider.name,
                             onValueChange = { },
                             readOnly = true,
                             label = { Text(stringResource(R.string.embedding_provider_label)) },
                             trailingIcon = {
-                                Box {
-                                    var expanded by remember { mutableStateOf(false) }
-                                    IconButton(onClick = { expanded = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, null)
-                                    }
-                                    DropdownMenu(
-                                        expanded = expanded,
-                                        onDismissRequest = { expanded = false },
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        embeddingProviders.forEachIndexed { idx, p ->
-                                            DropdownMenuItem(
-                                                text = { Text(p.name) },
-                                                onClick = {
-                                                    selectedProviderIdx = idx
-                                                    remoteBaseUrl = p.baseUrl
-                                                    remoteApiKey = viewModel.resolveEmbeddingKeyForProvider(p.name)?.key ?: ""
-                                                    if (p.models.isNotEmpty()) {
-                                                        remoteModelName = p.models.first()
-                                                        isCustomModel = false
-                                                    } else {
-                                                        remoteModelName = ""
-                                                        isCustomModel = true
-                                                    }
-                                                    expanded = false
-                                                }
-                                            )
-                                        }
-                                    }
+                                IconButton(onClick = { provExpanded = true }) {
+                                    Icon(Icons.Default.ArrowDropDown, null)
                                 }
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().clickable { provExpanded = true }
                         )
+                        DropdownMenu(
+                            expanded = provExpanded,
+                            onDismissRequest = { provExpanded = false },
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            embeddingProviders.forEachIndexed { idx, p ->
+                                DropdownMenuItem(
+                                    text = { Text(p.name) },
+                                    onClick = {
+                                        selectedProviderIdx = idx
+                                        remoteBaseUrl = p.baseUrl
+                                        if (remoteApiKeys[idx].isBlank()) {
+                                            remoteApiKeys[idx] = viewModel.resolveEmbeddingKeyForProvider(p.name)?.key ?: ""
+                                        }
+                                        if (p.models.isNotEmpty()) {
+                                            remoteModelName = p.models.first()
+                                            isCustomModel = false
+                                        } else {
+                                            remoteModelName = ""
+                                            isCustomModel = true
+                                        }
+                                        provExpanded = false
+                                    }
+                                )
+                            }
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
-                        // API Key (editable, pre-filled from chat key)
-                        val keyHint = if (keyInfo != null) {
-                            stringResource(R.string.embedding_using_key, keyInfo.provider)
-                        } else null
-                        OutlinedTextField(
-                            value = remoteApiKey,
-                            onValueChange = { remoteApiKey = it },
-                            label = { Text(stringResource(R.string.embedding_api_key)) },
-                            placeholder = if (keyHint != null) ({ Text(keyHint) }) else null,
-                            supportingText = if (remoteApiKey.isBlank() && keyHint != null)
-                                ({ Text(stringResource(R.string.embedding_key_autofill_hint)) })
-                            else null,
-                            visualTransformation = PasswordVisualTransformation(),
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        // API Key
+                        val currentKey = remoteApiKeys[selectedProviderIdx]
+                        if (selectedProviderIdx == 0) {
+                            // OpenAI: read-only, auto-resolved key
+                            val openAiKeyInfo = viewModel.resolveEmbeddingKeyForProvider("OpenAI")
+                            OutlinedTextField(
+                                value = if (openAiKeyInfo != null) stringResource(R.string.embedding_using_key, openAiKeyInfo.provider) else stringResource(R.string.embedding_no_key),
+                                onValueChange = { },
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.embedding_api_key)) },
+                                trailingIcon = {
+                                    if (openAiKeyInfo != null)
+                                        Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        } else {
+                            // Other providers: editable
+                            OutlinedTextField(
+                                value = currentKey,
+                                onValueChange = { remoteApiKeys[selectedProviderIdx] = it },
+                                label = { Text(stringResource(R.string.embedding_api_key)) },
+                                placeholder = { Text(stringResource(R.string.embedding_api_key_hint)) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                         Spacer(modifier = Modifier.height(12.dp))
                         // Base URL
                         OutlinedTextField(
@@ -694,7 +708,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             type = com.newoether.agora.data.EmbeddingModelType.REMOTE,
                                             remoteModelName = finalModel,
                                             remoteBaseUrl = remoteBaseUrl,
-                                            remoteApiKey = remoteApiKey,
+                                            remoteApiKey = remoteApiKeys[selectedProviderIdx],
                                             batchSize = remoteBatchSize.toIntOrNull() ?: 8
                                         )
                                     )
