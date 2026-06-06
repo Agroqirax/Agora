@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ManageSearch
@@ -556,14 +557,21 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         // API Key display
+                        val keyText = when {
+                            keyInfo == null -> stringResource(R.string.embedding_no_key)
+                            keyInfo.provider.equals(provider.name, ignoreCase = true) -> stringResource(R.string.embedding_using_key, keyInfo.provider)
+                            else -> stringResource(R.string.embedding_using_fallback_key, keyInfo.provider, provider.name)
+                        }
                         OutlinedTextField(
-                            value = if (keyInfo != null) stringResource(R.string.embedding_using_key, keyInfo.provider) else stringResource(R.string.embedding_no_key),
+                            value = keyText,
                             onValueChange = { },
                             readOnly = true,
                             label = { Text(stringResource(R.string.embedding_api_key)) },
                             trailingIcon = {
                                 if (keyInfo != null) {
                                     Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                } else {
+                                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.error)
                                 }
                             },
                             singleLine = true,
@@ -582,53 +590,53 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        // Model selector
-                        if (!isCustomModel) {
-                            OutlinedTextField(
-                                value = remoteModelName,
-                                onValueChange = { },
-                                readOnly = true,
-                                label = { Text(stringResource(R.string.embedding_model_label)) },
-                                trailingIcon = {
-                                    Box {
-                                        IconButton(onClick = { showRemoteModelDropdown = true }) {
-                                            Icon(Icons.Default.ArrowDropDown, null)
-                                        }
-                                        DropdownMenu(
-                                            expanded = showRemoteModelDropdown,
-                                            onDismissRequest = { showRemoteModelDropdown = false },
-                                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                            shape = RoundedCornerShape(12.dp)
-                                        ) {
-                                            provider.models.forEach { model ->
-                                                DropdownMenuItem(
-                                                    text = { Text(model) },
-                                                    onClick = {
-                                                        remoteModelName = model
-                                                        showRemoteModelDropdown = false
-                                                    }
-                                                )
-                                            }
+                        // Model selector (always shows dropdown)
+                        OutlinedTextField(
+                            value = if (isCustomModel) stringResource(R.string.embedding_custom) else remoteModelName,
+                            onValueChange = { },
+                            readOnly = true,
+                            label = { Text(stringResource(R.string.embedding_model_label)) },
+                            trailingIcon = {
+                                Box {
+                                    IconButton(onClick = { showRemoteModelDropdown = true }) {
+                                        Icon(Icons.Default.ArrowDropDown, null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = showRemoteModelDropdown,
+                                        onDismissRequest = { showRemoteModelDropdown = false },
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        provider.models.forEach { model ->
                                             DropdownMenuItem(
-                                                text = { Text(stringResource(R.string.embedding_custom)) },
+                                                text = { Text(model) },
                                                 onClick = {
-                                                    remoteModelName = ""
-                                                    isCustomModel = true
+                                                    remoteModelName = model
+                                                    isCustomModel = false
                                                     showRemoteModelDropdown = false
                                                 }
                                             )
                                         }
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.embedding_custom)) },
+                                            onClick = {
+                                                remoteModelName = ""
+                                                isCustomModel = true
+                                                showRemoteModelDropdown = false
+                                            }
+                                        )
                                     }
-                                },
-                                singleLine = true,
-                                shape = RoundedCornerShape(16.dp),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        } else {
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (isCustomModel) {
+                            Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(
                                 value = remoteModelName,
                                 onValueChange = { remoteModelName = it },
-                                label = { Text(stringResource(R.string.embedding_model_label)) },
                                 placeholder = { Text("model-name") },
                                 supportingText = { Text(stringResource(R.string.embedding_custom_model_desc)) },
                                 singleLine = true,
