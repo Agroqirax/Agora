@@ -137,7 +137,7 @@ fun TextFileViewer(
                 Surface(
                     shape = RoundedCornerShape(50),
                     color = MaterialTheme.colorScheme.surfaceContainer,
-                    modifier = Modifier.shadow(8.dp, RoundedCornerShape(50)).widthIn(max = 320.dp)
+                    modifier = Modifier.weight(1f, fill = false).shadow(8.dp, RoundedCornerShape(50)).widthIn(max = 320.dp)
                 ) {
                     Text(
                         fileName,
@@ -149,7 +149,6 @@ fun TextFileViewer(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
                     )
                 }
-                Spacer(Modifier.weight(1f))
                 Spacer(Modifier.width(12.dp))
                 Surface(
                     onClick = onClose,
