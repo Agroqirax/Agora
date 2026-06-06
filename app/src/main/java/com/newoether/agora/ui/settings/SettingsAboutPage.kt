@@ -160,7 +160,7 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.about_contribute), modifier = Modifier.padding(vertical = 6.dp)) },
                     leadingContent = { Icon(Icons.Default.VolunteerActivism, contentDescription = null) },
                     trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
-                    modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora/blob/master/CONTRIBUTING.md") }
+                    modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora/compare") }
                 )
             }, {
                 SettingsItem(
