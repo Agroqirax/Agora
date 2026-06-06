@@ -1107,15 +1107,25 @@ class ChatViewModel(
 
     data class EmbeddingKeyInfo(val provider: String, val key: String, val baseUrl: String)
 
-    fun resolveEmbeddingKeyForProvider(targetProvider: String): EmbeddingKeyInfo? {
+    /** Exact match only — for UI display in the embedding dialog. No fallback. */
+    fun resolveEmbeddingKeyForProviderExact(targetProvider: String): EmbeddingKeyInfo? {
         val keys = apiKeys.value
-        // First try exact provider match
         val match = keys.find { it.provider.equals(targetProvider, ignoreCase = true) }
         if (match != null) {
             val baseUrl = providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
             return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
         }
-        // Fallback to any OpenAI-compatible key
+        return null
+    }
+
+    /** With fallback — for runtime API calls. */
+    private fun resolveEmbeddingKeyForProvider(targetProvider: String): EmbeddingKeyInfo? {
+        val keys = apiKeys.value
+        val match = keys.find { it.provider.equals(targetProvider, ignoreCase = true) }
+        if (match != null) {
+            val baseUrl = providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
+            return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
+        }
         val fallbackKeys = listOf("OpenAI", "DeepSeek", "Qwen", "Open Router", "Mistral", "OpenRouter")
         for (fk in fallbackKeys) {
             val entry = keys.find { it.provider.equals(fk, ignoreCase = true) }
@@ -1124,7 +1134,6 @@ class ChatViewModel(
                 return EmbeddingKeyInfo(entry.provider, entry.key, baseUrl)
             }
         }
-        // Last resort: any key
         val first = keys.firstOrNull() ?: return null
         return EmbeddingKeyInfo(first.provider, first.key, resolveDefaultBaseUrlForProvider(first.provider))
     }

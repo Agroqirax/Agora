@@ -28,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -509,7 +510,6 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         if (showRemoteDialog) {
             val provider = embeddingProviders[selectedProviderIdx]
-            val keyInfo = viewModel.resolveEmbeddingKeyForProvider(provider.name)
             AlertDialog(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 onDismissRequest = { showRemoteDialog = false; testStatus = null },
@@ -518,7 +518,12 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     Column {
                         // Provider selector (fully clickable)
                         var provExpanded by remember { mutableStateOf(false) }
-                        Box(modifier = Modifier.fillMaxWidth().clickable { provExpanded = true }) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable { provExpanded = true }
+                        ) {
                             OutlinedTextField(
                                 value = provider.name,
                                 onValueChange = { },
@@ -550,8 +555,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     onClick = {
                                         selectedProviderIdx = idx
                                         remoteBaseUrl = p.baseUrl
-                                        if (remoteApiKeys[idx].isBlank()) {
-                                            remoteApiKeys[idx] = viewModel.resolveEmbeddingKeyForProvider(p.name)?.key ?: ""
+                                        // Only OpenAI gets auto-filled from chat keys
+                                        if (idx == 0 && remoteApiKeys[0].isBlank()) {
+                                            remoteApiKeys[0] = viewModel.resolveEmbeddingKeyForProviderExact("OpenAI")?.key ?: ""
                                         }
                                         if (p.models.isNotEmpty()) {
                                             remoteModelName = p.models.first()
@@ -570,7 +576,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val currentKey = remoteApiKeys[selectedProviderIdx]
                         if (selectedProviderIdx == 0) {
                             // OpenAI: read-only, auto-resolved key
-                            val openAiKeyInfo = viewModel.resolveEmbeddingKeyForProvider("OpenAI")
+                            val openAiKeyInfo = viewModel.resolveEmbeddingKeyForProviderExact("OpenAI")
                             OutlinedTextField(
                                 value = if (openAiKeyInfo != null) stringResource(R.string.embedding_using_key, openAiKeyInfo.provider) else stringResource(R.string.embedding_no_key),
                                 onValueChange = { },
