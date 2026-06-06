@@ -121,6 +121,7 @@ class SettingsManager(private val context: Context) {
         val RAG_THRESHOLD = stringPreferencesKey("rag_threshold")
         val AUTO_CACHE_ENABLED = booleanPreferencesKey("auto_cache_enabled")
         val AUTO_UPDATE_CHECK = booleanPreferencesKey("auto_update_check")
+        val LAST_UPDATE_CHECK_TIME = longPreferencesKey("last_update_check_time")
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val ACTIVE_LOCAL_CHAT_MODEL_ID = stringPreferencesKey("active_local_chat_model_id")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
@@ -224,6 +225,7 @@ class SettingsManager(private val context: Context) {
     }
     val autoCacheEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTO_CACHE_ENABLED] ?: true }
     val autoUpdateCheck: Flow<Boolean> = context.dataStore.data.map { it[AUTO_UPDATE_CHECK] ?: true }
+    val lastUpdateCheckTime: Flow<Long> = context.dataStore.data.map { it[LAST_UPDATE_CHECK_TIME] ?: 0L }
     val localChatModels: Flow<List<LocalChatModelConfig>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[LOCAL_CHAT_MODELS_JSON] ?: "[]"
         try { json.decodeFromString<List<LocalChatModelConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
@@ -350,6 +352,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveAutoUpdateCheck(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_UPDATE_CHECK] = enabled }
+    }
+    suspend fun saveLastUpdateCheckTime(time: Long) {
+        context.dataStore.edit { it[LAST_UPDATE_CHECK_TIME] = time }
     }
     suspend fun saveModelSearchMethod(method: String) {
         context.dataStore.edit { it[MODEL_SEARCH_METHOD] = method }

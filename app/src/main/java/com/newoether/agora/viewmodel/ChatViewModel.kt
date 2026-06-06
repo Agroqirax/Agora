@@ -92,12 +92,17 @@ class ChatViewModel(
     private val providers = builtInProviders.toMutableMap()
 
     init {
-        // Auto-check for updates on launch
+        // Auto-check for updates on launch (at most once per day)
         viewModelScope.launch(Dispatchers.IO) {
             if (settingsManager.autoUpdateCheck.first()) {
-                val info = com.newoether.agora.util.UpdateChecker.check(getCurrentVersion())
-                if (info != null) {
-                    _updateDialogData.value = info
+                val lastCheck = settingsManager.lastUpdateCheckTime.first()
+                val now = System.currentTimeMillis()
+                if (now - lastCheck > 24 * 60 * 60 * 1000L) {
+                    settingsManager.saveLastUpdateCheckTime(now)
+                    val info = com.newoether.agora.util.UpdateChecker.check(getCurrentVersion())
+                    if (info != null) {
+                        _updateDialogData.value = info
+                    }
                 }
             }
         }
