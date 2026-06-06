@@ -342,6 +342,8 @@
     <string name="embedding_title">嵌入模型</string>
     <string name="embedding_model_label">模型</string>
     <string name="embedding_base_url_label">基础 URL</string>
+    <string name="embedding_batch_size">批次大小</string>
+    <string name="embedding_batch_size_desc">每次请求缓存的消息数（1-100）</string>
     <string name="local_model_ready">模型已导入。</string>
     <string name="import_model">导入模型 (.gguf)</string>
     <string name="importing_model">导入中...</string>

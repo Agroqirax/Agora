@@ -12,5 +12,6 @@ data class EmbeddingModelConfig(
     val type: EmbeddingModelType,
     val remoteModelName: String = "",
     val remoteBaseUrl: String = "",
-    val localFilePath: String = ""
+    val localFilePath: String = "",
+    val batchSize: Int = 8
 )

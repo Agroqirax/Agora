@@ -74,8 +74,10 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var remoteName by remember { mutableStateOf("") }
     var remoteModelName by remember { mutableStateOf("") }
     var remoteBaseUrl by remember { mutableStateOf("") }
+    var remoteBatchSize by remember { mutableStateOf("8") }
     var localName by remember { mutableStateOf("") }
     var localFilePath by remember { mutableStateOf("") }
+    var localBatchSize by remember { mutableStateOf("8") }
     var isImporting by remember { mutableStateOf(false) }
     var showGgufError by remember { mutableStateOf(false) }
     var testStatus by remember { mutableStateOf<String?>(null) }
@@ -341,6 +343,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 remoteName = ""
                                 remoteModelName = ""
                                 remoteBaseUrl = ""
+                                remoteBatchSize = "8"
                                 testStatus = null
                                 isTesting = false
                                 showRemoteDialog = true
@@ -348,6 +351,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             TextButton(onClick = {
                                 localName = ""
                                 localFilePath = ""
+                                localBatchSize = "8"
                                 showLocalDialog = true
                             }) { Text(stringResource(R.string.add_local_model)) }
                         }
@@ -518,6 +522,16 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = remoteBatchSize,
+                            onValueChange = { remoteBatchSize = it.filter { c -> c.isDigit() } },
+                            label = { Text(stringResource(R.string.embedding_batch_size)) },
+                            supportingText = { Text(stringResource(R.string.embedding_batch_size_desc)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         testStatus?.let { status ->
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
@@ -543,7 +557,8 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             name = remoteName,
                                             type = com.newoether.agora.data.EmbeddingModelType.REMOTE,
                                             remoteModelName = remoteModelName,
-                                            remoteBaseUrl = remoteBaseUrl
+                                            remoteBaseUrl = remoteBaseUrl,
+                                            batchSize = remoteBatchSize.toIntOrNull() ?: 8
                                         )
                                     )
                                     showRemoteDialog = false
@@ -639,6 +654,16 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Text(stringResource(R.string.import_model))
                             }
                         }
+                        Spacer(modifier = Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = localBatchSize,
+                            onValueChange = { localBatchSize = it.filter { c -> c.isDigit() } },
+                            label = { Text(stringResource(R.string.embedding_batch_size)) },
+                            supportingText = { Text(stringResource(R.string.embedding_batch_size_desc)) },
+                            singleLine = true,
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        )
                         if (isImporting) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp).padding(start = 16.dp), strokeWidth = 2.dp)
                         }
@@ -651,7 +676,8 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 com.newoether.agora.data.EmbeddingModelConfig(
                                     name = localName,
                                     type = com.newoether.agora.data.EmbeddingModelType.LOCAL,
-                                    localFilePath = localFilePath
+                                    localFilePath = localFilePath,
+                                    batchSize = localBatchSize.toIntOrNull() ?: 8
                                 )
                             )
                             showLocalDialog = false

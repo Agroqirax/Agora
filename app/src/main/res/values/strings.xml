@@ -378,6 +378,8 @@
     <string name="embedding_title">Embedding</string>
     <string name="embedding_model_label">Model</string>
     <string name="embedding_base_url_label">Base URL</string>
+    <string name="embedding_batch_size">Batch Size</string>
+    <string name="embedding_batch_size_desc">Messages to cache per request (1-100)</string>
     <string name="local_model_ready">Model imported.</string>
     <string name="import_model">Import Model (.gguf)</string>
     <string name="importing_model">Importing...</string>

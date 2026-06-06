@@ -906,26 +906,28 @@ class ChatViewModel(
                 var attempted = 0
                 _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
                 try {
+                    val batchSize = model.batchSize.coerceIn(1, 100)
                     if (model.type == EmbeddingModelType.LOCAL) {
                         if (!LlamaEngine.isModelReady(model.localFilePath)) {
                             if (!silent) _snackbarMessage.emit(SnackbarEvent("Local model file not found. Please re-import the model."))
                             return@launch
                         }
-                        for (msg in toProcess) {
+                        toProcess.chunked(batchSize).forEach { batch ->
                             if (embeddingModels.value.none { it.id == modelId }) return@launch
-                            attempted++
-                            val embd = LlamaEngine.computeEmbedding(msg.text.take(8000), model.localFilePath) {
+                            val texts = batch.map { it.text.take(8000) }
+                            val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
                                 localProvider.releaseEngineBlocking()
                             }
-                            if (embd != null) {
-                                chatDao.upsertEmbedding(EmbeddingEntity(
-                                    messageId = msg.id,
-                                    modelId = modelId,
-                                    embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                    chunkText = msg.text.take(500),
-                                    dimension = embd.size
-                                ))
-                                succeeded++
+                            batch.zip(embeddings).forEach { (msg, embd) ->
+                                attempted++
+                                if (embd != null) {
+                                    chatDao.upsertEmbedding(EmbeddingEntity(
+                                        messageId = msg.id, modelId = modelId,
+                                        embedding = EmbeddingIndexer.floatsToBytes(embd),
+                                        chunkText = msg.text.take(500), dimension = embd.size
+                                    ))
+                                    succeeded++
+                                }
                             }
                             _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
                         }
@@ -936,21 +938,22 @@ class ChatViewModel(
                             return@launch
                         }
                         val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                        for (msg in toProcess) {
+                        toProcess.chunked(batchSize).forEach { batch ->
                             if (embeddingModels.value.none { it.id == modelId }) return@launch
-                            attempted++
-                            val embd = EmbeddingClient.computeEmbedding(
-                                msg.text.take(8000), apiKey, model.remoteModelName, baseUrl
+                            val texts = batch.map { it.text.take(8000) }
+                            val embeddings = EmbeddingClient.computeEmbeddings(
+                                texts, apiKey, model.remoteModelName, baseUrl
                             )
-                            if (embd != null) {
-                                chatDao.upsertEmbedding(EmbeddingEntity(
-                                    messageId = msg.id,
-                                    modelId = modelId,
-                                    embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                    chunkText = msg.text.take(500),
-                                    dimension = embd.size
-                                ))
-                                succeeded++
+                            batch.zip(embeddings).forEach { (msg, embd) ->
+                                attempted++
+                                if (embd != null) {
+                                    chatDao.upsertEmbedding(EmbeddingEntity(
+                                        messageId = msg.id, modelId = modelId,
+                                        embedding = EmbeddingIndexer.floatsToBytes(embd),
+                                        chunkText = msg.text.take(500), dimension = embd.size
+                                    ))
+                                    succeeded++
+                                }
                             }
                             _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
                         }
