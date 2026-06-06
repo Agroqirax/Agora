@@ -344,9 +344,10 @@
     <string name="embedding_base_url_label">基础 URL</string>
     <string name="embedding_provider_label">提供商</string>
     <string name="embedding_api_key">API 密钥</string>
-    <string name="embedding_using_key">使用 %1$s 的密钥</string>
-    <string name="embedding_using_fallback_key">使用 %1$s 的密钥（无 %2$s 密钥）</string>
+    <string name="embedding_api_key_hint">自动检测或手动输入</string>
+    <string name="embedding_using_key">使用以 %1$s 结尾的密钥</string>
     <string name="embedding_no_key">未配置 API 密钥</string>
+    <string name="embedding_display_name_hint">我的嵌入模型</string>
     <string name="embedding_custom">自定义...</string>
     <string name="embedding_custom_model_desc">输入提供商支持的任意模型名称</string>
     <string name="embedding_batch_size">批次大小</string>

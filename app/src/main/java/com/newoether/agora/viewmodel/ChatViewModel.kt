@@ -932,8 +932,8 @@ class ChatViewModel(
                             _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
                         }
                     } else {
-                        val apiKey = resolveEmbeddingApiKey()
-                        if (apiKey == null) {
+                        val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() }
+                        if (apiKey.isNullOrBlank()) {
                             if (!silent) _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
                             return@launch
                         }
@@ -942,7 +942,7 @@ class ChatViewModel(
                             if (embeddingModels.value.none { it.id == modelId }) return@launch
                             val texts = batch.map { it.text.take(8000) }
                             val embeddings = EmbeddingClient.computeEmbeddings(
-                                texts, apiKey, model.remoteModelName, baseUrl
+                                texts, apiKey!!, model.remoteModelName, baseUrl
                             )
                             batch.zip(embeddings).forEach { (msg, embd) ->
                                 attempted++
@@ -1084,14 +1084,14 @@ class ChatViewModel(
                 localProvider.releaseEngineBlocking()
             }
         } else {
-            val apiKey = resolveEmbeddingApiKey()
-            if (apiKey == null) {
+            val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() }
+            if (apiKey.isNullOrBlank()) {
                 DebugLog.w("AgoraVM", "resolveEmbedding: no API key available")
                 return@withContext null
             }
             val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
             DebugLog.d("AgoraVM", "resolveEmbedding: calling ${model.remoteModelName} @ $baseUrl")
-            EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
+            EmbeddingClient.computeEmbedding(text, apiKey!!, model.remoteModelName, baseUrl)
         }
     }
 
@@ -1162,13 +1162,13 @@ class ChatViewModel(
                     localProvider.releaseEngineBlocking()
                 }
             } else {
-                val apiKey = resolveEmbeddingApiKey()
-                if (apiKey == null) {
+                val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() }
+                if (apiKey.isNullOrBlank()) {
                     DebugLog.w("AgoraVM", "RAG index: no API key, skipping")
                     return@launch
                 }
                 val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                EmbeddingClient.computeEmbedding(toEmbed, apiKey, model.remoteModelName, baseUrl)
+                EmbeddingClient.computeEmbedding(toEmbed, apiKey!!, model.remoteModelName, baseUrl)
             }
             if (embedding != null) {
                 chatDao.upsertEmbedding(EmbeddingEntity(
@@ -1245,8 +1245,8 @@ class ChatViewModel(
     fun setSearchMatchLimit(n: Int) { viewModelScope.launch { settingsManager.saveSearchMatchLimit(n) } }
     fun setSearchContextWindow(n: Int) { viewModelScope.launch { settingsManager.saveSearchContextWindow(n) } }
     fun setRagThreshold(threshold: Float) { viewModelScope.launch { settingsManager.saveRagThreshold(threshold) } }
-    suspend fun testRemoteEmbedding(modelName: String, baseUrl: String): String? {
-        val apiKey = resolveEmbeddingApiKey() ?: return "No API key configured"
+    suspend fun testRemoteEmbedding(modelName: String, baseUrl: String, apiKey: String): String? {
+        if (apiKey.isBlank()) return "No API key configured"
         val url = baseUrl.ifBlank { resolveEmbeddingBaseUrl() }
         return withContext(Dispatchers.IO) {
             try {

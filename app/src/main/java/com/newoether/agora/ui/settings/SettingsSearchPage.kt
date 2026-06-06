@@ -87,9 +87,11 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var selectedProviderIdx by remember { mutableIntStateOf(0) }
     var remoteModelName by remember { mutableStateOf("") }
     var remoteBaseUrl by remember { mutableStateOf("https://api.openai.com/v1") }
+    var remoteApiKey by remember { mutableStateOf("") }
     var remoteBatchSize by remember { mutableStateOf("8") }
     var showRemoteModelDropdown by remember { mutableStateOf(false) }
     var isCustomModel by remember { mutableStateOf(false) }
+    var showRemoteProviderDropdown by remember { mutableStateOf(false) }
     var localName by remember { mutableStateOf("") }
     var localFilePath by remember { mutableStateOf("") }
     var localBatchSize by remember { mutableStateOf("8") }
@@ -359,6 +361,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 selectedProviderIdx = 0
                                 remoteModelName = ""
                                 remoteBaseUrl = "https://api.openai.com/v1"
+                                remoteApiKey = ""
                                 remoteBatchSize = "8"
                                 isCustomModel = false
                                 testStatus = null
@@ -506,14 +509,21 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
         if (showRemoteDialog) {
             val provider = embeddingProviders[selectedProviderIdx]
-            val keyInfo = viewModel.resolveEmbeddingKeyForProvider(provider.name)
+            val isCustom = selectedProviderIdx == embeddingProviders.size - 1
+            val resolvedKey = viewModel.resolveEmbeddingKeyForProvider(provider.name)?.key ?: ""
+            val fm = LocalFocusManager.current
             AlertDialog(
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 onDismissRequest = { showRemoteDialog = false; testStatus = null },
                 title = { Text(stringResource(R.string.add_remote_model), fontWeight = FontWeight.Bold) },
                 text = {
-                    Column {
-                        // Provider selector
+                    Column(
+                        modifier = Modifier.clickable(
+                            indication = null,
+                            interactionSource = remember { MutableInteractionSource() }
+                        ) { fm.clearFocus() }
+                    ) {
+                        // Provider
                         OutlinedTextField(
                             value = provider.name,
                             onValueChange = { },
@@ -521,13 +531,12 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = { Text(stringResource(R.string.embedding_provider_label)) },
                             trailingIcon = {
                                 Box {
-                                    var expanded by remember { mutableStateOf(false) }
-                                    IconButton(onClick = { expanded = true }) {
+                                    IconButton(onClick = { showRemoteProviderDropdown = true }) {
                                         Icon(Icons.Default.ArrowDropDown, null)
                                     }
                                     DropdownMenu(
-                                        expanded = expanded,
-                                        onDismissRequest = { expanded = false },
+                                        expanded = showRemoteProviderDropdown,
+                                        onDismissRequest = { showRemoteProviderDropdown = false },
                                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
@@ -540,11 +549,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     if (idx < embeddingProviders.size - 1) {
                                                         remoteModelName = p.models.first()
                                                         isCustomModel = false
-                                                    } else {
-                                                        remoteModelName = ""
-                                                        isCustomModel = true
                                                     }
-                                                    expanded = false
+                                                    remoteApiKey = ""
+                                                    showRemoteProviderDropdown = false
                                                 }
                                             )
                                         }
@@ -556,23 +563,15 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        // API Key display
-                        val keyText = when {
-                            keyInfo == null -> stringResource(R.string.embedding_no_key)
-                            keyInfo.provider.equals(provider.name, ignoreCase = true) -> stringResource(R.string.embedding_using_key, keyInfo.provider)
-                            else -> stringResource(R.string.embedding_using_fallback_key, keyInfo.provider, provider.name)
-                        }
+                        // API Key
                         OutlinedTextField(
-                            value = keyText,
-                            onValueChange = { },
-                            readOnly = true,
+                            value = remoteApiKey.ifBlank { resolvedKey },
+                            onValueChange = { remoteApiKey = it },
                             label = { Text(stringResource(R.string.embedding_api_key)) },
-                            trailingIcon = {
-                                if (keyInfo != null) {
-                                    Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
-                                } else {
-                                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.error)
-                                }
+                            placeholder = { Text(stringResource(R.string.embedding_api_key_hint)) },
+                            supportingText = {
+                                if (remoteApiKey.isBlank() && resolvedKey.isNotBlank())
+                                    Text(stringResource(R.string.embedding_using_key, resolvedKey.takeLast(4)))
                             },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
@@ -583,74 +582,85 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         OutlinedTextField(
                             value = remoteBaseUrl,
                             onValueChange = { remoteBaseUrl = it },
-                            readOnly = !isCustomModel,
                             label = { Text(stringResource(R.string.embedding_base_url_label)) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        // Model selector (always shows dropdown)
-                        OutlinedTextField(
-                            value = if (isCustomModel) stringResource(R.string.embedding_custom) else remoteModelName,
-                            onValueChange = { },
-                            readOnly = true,
-                            label = { Text(stringResource(R.string.embedding_model_label)) },
-                            trailingIcon = {
-                                Box {
-                                    IconButton(onClick = { showRemoteModelDropdown = true }) {
-                                        Icon(Icons.Default.ArrowDropDown, null)
-                                    }
-                                    DropdownMenu(
-                                        expanded = showRemoteModelDropdown,
-                                        onDismissRequest = { showRemoteModelDropdown = false },
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        provider.models.forEach { model ->
-                                            DropdownMenuItem(
-                                                text = { Text(model) },
-                                                onClick = {
-                                                    remoteModelName = model
-                                                    isCustomModel = false
-                                                    showRemoteModelDropdown = false
-                                                }
-                                            )
-                                        }
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.embedding_custom)) },
-                                            onClick = {
-                                                remoteModelName = ""
-                                                isCustomModel = true
-                                                showRemoteModelDropdown = false
-                                            }
-                                        )
-                                    }
-                                }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (isCustomModel) {
-                            Spacer(modifier = Modifier.height(8.dp))
+                        // Model
+                        if (isCustom) {
                             OutlinedTextField(
                                 value = remoteModelName,
                                 onValueChange = { remoteModelName = it },
+                                label = { Text(stringResource(R.string.embedding_model_label)) },
                                 placeholder = { Text("model-name") },
-                                supportingText = { Text(stringResource(R.string.embedding_custom_model_desc)) },
                                 singleLine = true,
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        } else {
+                            OutlinedTextField(
+                                value = if (isCustomModel) stringResource(R.string.embedding_custom) else remoteModelName,
+                                onValueChange = { },
+                                readOnly = true,
+                                label = { Text(stringResource(R.string.embedding_model_label)) },
+                                trailingIcon = {
+                                    Box {
+                                        IconButton(onClick = { showRemoteModelDropdown = true }) {
+                                            Icon(Icons.Default.ArrowDropDown, null)
+                                        }
+                                        DropdownMenu(
+                                            expanded = showRemoteModelDropdown,
+                                            onDismissRequest = { showRemoteModelDropdown = false },
+                                            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                            shape = RoundedCornerShape(12.dp)
+                                        ) {
+                                            provider.models.forEach { model ->
+                                                DropdownMenuItem(
+                                                    text = { Text(model) },
+                                                    onClick = {
+                                                        remoteModelName = model
+                                                        isCustomModel = false
+                                                        showRemoteModelDropdown = false
+                                                    }
+                                                )
+                                            }
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.embedding_custom)) },
+                                                onClick = {
+                                                    remoteModelName = ""
+                                                    isCustomModel = true
+                                                    showRemoteModelDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            if (isCustomModel) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedTextField(
+                                    value = remoteModelName,
+                                    onValueChange = { remoteModelName = it },
+                                    placeholder = { Text("model-name") },
+                                    supportingText = { Text(stringResource(R.string.embedding_custom_model_desc)) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
-                        // Display name
+                        // Display Name
                         OutlinedTextField(
                             value = remoteName,
                             onValueChange = { remoteName = it },
                             label = { Text(stringResource(R.string.model_name_label)) },
-                            placeholder = { Text(remoteModelName) },
+                            placeholder = { Text(remoteModelName.ifBlank { stringResource(R.string.embedding_display_name_hint) }) },
                             singleLine = true,
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
@@ -684,10 +694,15 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             val finalName = remoteName.ifBlank { remoteModelName }
                             val finalModel = remoteModelName.ifBlank { remoteName }
                             if (finalModel.isBlank()) return@TextButton
+                            val finalKey = remoteApiKey.ifBlank { resolvedKey }
+                            if (finalKey.isBlank()) {
+                                testStatus = "No API key configured"
+                                return@TextButton
+                            }
                             isTesting = true
                             testStatus = null
                             scope.launch {
-                                val result = viewModel.testRemoteEmbedding(finalModel, remoteBaseUrl)
+                                val result = viewModel.testRemoteEmbedding(finalModel, remoteBaseUrl, finalKey)
                                 if (result != null && result.startsWith("OK")) {
                                     viewModel.addEmbeddingModel(
                                         com.newoether.agora.data.EmbeddingModelConfig(
@@ -695,6 +710,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             type = com.newoether.agora.data.EmbeddingModelType.REMOTE,
                                             remoteModelName = finalModel,
                                             remoteBaseUrl = remoteBaseUrl,
+                                            remoteApiKey = finalKey,
                                             batchSize = remoteBatchSize.toIntOrNull() ?: 8
                                         )
                                     )
