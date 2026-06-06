@@ -147,46 +147,84 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 title = stringResource(R.string.search_methods_title),
                 items = buildList {
                     add {
+                        var expanded by remember { mutableStateOf(false) }
                         SettingsItem(
                             headlineContent = { Text(stringResource(R.string.model_search_method)) },
                             supportingContent = { Text(stringResource(R.string.model_search_method_desc)) },
-                            leadingContent = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) }
+                            leadingContent = { Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Box {
+                                    Text(
+                                        searchMethods.find { it.key == modelSearchMethod }?.let { stringResource(it.labelRes) } ?: "",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.widthIn(min = 80.dp)
+                                    )
+                                    DropdownMenu(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                        tonalElevation = 16.dp,
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        searchMethods.forEach { method ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(method.labelRes)) },
+                                                leadingIcon = {
+                                                    if (modelSearchMethod == method.key)
+                                                        Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                                },
+                                                onClick = {
+                                                    viewModel.setModelSearchMethod(method.key)
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.clickable { expanded = true }
                         )
                     }
-                    searchMethods.forEach { method ->
-                        add {
-                            SettingsItem(
-                                headlineContent = { Text(stringResource(method.labelRes)) },
-                                leadingContent = {
-                                    RadioButton(
-                                        selected = modelSearchMethod == method.key,
-                                        onClick = { viewModel.setModelSearchMethod(method.key) }
-                                    )
-                                },
-                                modifier = Modifier.clickable { viewModel.setModelSearchMethod(method.key) }
-                            )
-                        }
-                    }
                     add {
+                        var expanded by remember { mutableStateOf(false) }
                         SettingsItem(
                             headlineContent = { Text(stringResource(R.string.manual_search_method)) },
                             supportingContent = { Text(stringResource(R.string.manual_search_method_desc)) },
-                            leadingContent = { Icon(Icons.Default.ManageSearch, null, tint = MaterialTheme.colorScheme.primary) }
-                        )
-                    }
-                    searchMethods.forEach { method ->
-                        add {
-                            SettingsItem(
-                                headlineContent = { Text(stringResource(method.labelRes)) },
-                                leadingContent = {
-                                    RadioButton(
-                                        selected = manualSearchMethod == method.key,
-                                        onClick = { viewModel.setManualSearchMethod(method.key) }
+                            leadingContent = { Icon(Icons.Default.ManageSearch, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Box {
+                                    Text(
+                                        searchMethods.find { it.key == manualSearchMethod }?.let { stringResource(it.labelRes) } ?: "",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.widthIn(min = 80.dp)
                                     )
-                                },
-                                modifier = Modifier.clickable { viewModel.setManualSearchMethod(method.key) }
-                            )
-                        }
+                                    DropdownMenu(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                        tonalElevation = 16.dp,
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        searchMethods.forEach { method ->
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(method.labelRes)) },
+                                                leadingIcon = {
+                                                    if (manualSearchMethod == method.key)
+                                                        Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary)
+                                                },
+                                                onClick = {
+                                                    viewModel.setManualSearchMethod(method.key)
+                                                    expanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.clickable { expanded = true }
+                        )
                     }
                 }
             )
