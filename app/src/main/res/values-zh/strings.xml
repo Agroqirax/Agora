@@ -72,6 +72,9 @@
     <string name="welcome_to_agora">欢迎使用 Agora。</string>
     <string name="failed_to_generate">生成失败。</string>
     <string name="generation_stopped">生成已停止。</string>
+    <string name="import_invalid_gguf_title">无效的 GGUF 文件</string>
+    <string name="import_invalid_gguf_desc">所选文件不是有效的 GGUF 模型文件。</string>
+    <string name="ok">确定</string>
     <string name="generation_retry_attempt">重试 %1$d/%2$d</string>
 
     <!-- Settings - Main -->

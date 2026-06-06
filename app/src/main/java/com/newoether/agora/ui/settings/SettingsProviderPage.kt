@@ -96,6 +96,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             var showDeleteConfirm by remember { mutableStateOf<com.newoether.agora.data.LocalChatModelConfig?>(null) }
             var importingModel by remember { mutableStateOf(false) }
             var copiedFilePath by remember { mutableStateOf<String?>(null) }
+            var showGgufError by remember { mutableStateOf(false) }
             var showDeleteProvider by remember { mutableStateOf(false) }
             var showRenameProvider by remember { mutableStateOf(false) }
 
@@ -118,7 +119,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
                                 || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
                                 destFile.delete()
-                                DebugLog.e("SettingsProvider", "Imported file is not a valid GGUF")
+                                showGgufError = true
                             } else {
                                 copiedFilePath = destFile.absolutePath
                                 showAddDialog = true
@@ -356,6 +357,16 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             SettingsGroup(title = stringResource(R.string.settings_provider), items = providerItems)
 
             // Local chat model dialogs (moved outside SettingsGroup)
+            if (showGgufError) {
+                AlertDialog(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    onDismissRequest = { showGgufError = false },
+                    title = { Text(stringResource(R.string.import_invalid_gguf_title), fontWeight = FontWeight.Bold) },
+                    text = { Text(stringResource(R.string.import_invalid_gguf_desc)) },
+                    confirmButton = { TextButton(onClick = { showGgufError = false }) { Text(stringResource(R.string.ok)) } }
+                )
+            }
+
             if (viewingProvider == "Local") {
                 // Add local model config dialog
                 if (showAddDialog && copiedFilePath != null) {

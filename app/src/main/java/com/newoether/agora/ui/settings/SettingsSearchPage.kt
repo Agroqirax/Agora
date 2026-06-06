@@ -77,6 +77,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var localName by remember { mutableStateOf("") }
     var localFilePath by remember { mutableStateOf("") }
     var isImporting by remember { mutableStateOf(false) }
+    var showGgufError by remember { mutableStateOf(false) }
     var testStatus by remember { mutableStateOf<String?>(null) }
     var isTesting by remember { mutableStateOf(false) }
 
@@ -567,6 +568,16 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             )
         }
 
+        if (showGgufError) {
+            AlertDialog(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                onDismissRequest = { showGgufError = false },
+                title = { Text(stringResource(R.string.import_invalid_gguf_title), fontWeight = FontWeight.Bold) },
+                text = { Text(stringResource(R.string.import_invalid_gguf_desc)) },
+                confirmButton = { TextButton(onClick = { showGgufError = false }) { Text(stringResource(R.string.ok)) } }
+            )
+        }
+
         if (showLocalDialog) {
             val scope = rememberCoroutineScope()
             val context = LocalContext.current
@@ -589,7 +600,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
                                 || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
                                 destFile.delete()
-                                DebugLog.e("SettingsSearch", "Imported file is not a valid GGUF")
+                                showGgufError = true
                             } else {
                                 localFilePath = destFile.absolutePath
                             }
