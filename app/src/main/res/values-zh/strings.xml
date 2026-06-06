@@ -54,7 +54,7 @@
 
     <!-- System Prompt -->
     <string name="system_prompt">系统指令</string>
-    <string name="no_system_prompt">未设置系统指令</string>
+    <string name="no_system_prompt">无</string>
 
     <!-- Drawer -->
     <string name="conversations">对话</string>
@@ -451,7 +451,7 @@
     <string name="delete_chat_confirm">确定要删除此对话吗？此操作无法撤销。</string>
     <string name="clear_database">清除数据库</string>
     <string name="conversation_prompt">对话指令</string>
-    <string name="global_default_format">全局默认</string>
+    <string name="global_default_format">全局默认（%1$s）</string>
 
     <!-- General -->
     <string name="back">返回</string>

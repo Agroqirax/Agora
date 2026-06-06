@@ -104,7 +104,7 @@
 
     <!-- System Prompt -->
     <string name="system_prompt">System Prompt</string>
-    <string name="no_system_prompt">No system prompt set</string>
+    <string name="no_system_prompt">None</string>
 
     <!-- Drawer -->
     <string name="conversations">Conversations</string>
