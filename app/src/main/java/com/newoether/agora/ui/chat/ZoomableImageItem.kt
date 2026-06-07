@@ -70,9 +70,21 @@ internal fun ZoomableImageItem(
         }
     }
 
-    fun getMaxOffsets(currentScale: Float): Pair<Float, Float> {
+    fun rubberBandValue(fullDelta: Float, dimension: Float): Float {
+        if (dimension <= 0f) return 0f
+        val c = 0.4f
+        return (fullDelta * c * dimension) / (dimension + c * fullDelta)
+    }
+
+    fun visualScale(raw: Float): Float = when {
+        raw < 1f -> 1f - rubberBandValue(1f - raw, 1f)
+        raw > 10f -> 10f + rubberBandValue(raw - 10f, 5f)
+        else -> raw
+    }
+
+    fun getMaxOffsets(currentRaw: Float): Pair<Float, Float> {
         if (imageSize == Size.Zero || containerSize == Size.Zero) return 0f to 0f
-        val effectiveScale = currentScale * baseScale
+        val effectiveScale = visualScale(currentRaw) * baseScale
         val imageAspectRatio = imageSize.width / imageSize.height
         val containerAspectRatio = containerSize.width / containerSize.height
         val contentWidth = if (imageAspectRatio > containerAspectRatio) containerSize.width else containerSize.height * imageAspectRatio
@@ -82,14 +94,8 @@ internal fun ZoomableImageItem(
         return maxX to maxY
     }
 
-    fun rubberBandValue(fullDelta: Float, dimension: Float): Float {
-        if (dimension <= 0f) return 0f
-        val c = 0.45f
-        return (fullDelta * c * dimension) / (dimension + c * fullDelta)
-    }
-
     LaunchedEffect(Unit) {
-        snapshotFlow { scale }.collect { onScaleChanged(it) }
+        snapshotFlow { visualScale(scale) }.collect { onScaleChanged(it) }
     }
 
     Box(
@@ -114,7 +120,7 @@ internal fun ZoomableImageItem(
                             var prevOY = offsetY
                             AnimationState(s0).animateTo(targetScale, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow, 0.001f)) {
                                 scale = value
-                                val r = value / prevS
+                                val r = visualScale(value) / visualScale(prevS)
                                 val (maxX, maxY) = getMaxOffsets(value)
                                 if (isZoomIn) {
                                     val isLandscape = imageSize.width / imageSize.height > containerSize.width / containerSize.height
@@ -153,7 +159,7 @@ internal fun ZoomableImageItem(
                         var pastTouchSlop = false
                         val touchSlop = viewConfiguration.touchSlop
                         lastCentroid = Offset.Unspecified
-                        var logicalScale = scale
+                        var rawScale = scale
                         var logicalOffsetX = offsetX
                         var logicalOffsetY = offsetY
                         do {
@@ -168,16 +174,11 @@ internal fun ZoomableImageItem(
                                 val centroid = event.calculateCentroid(useCurrent = false)
                                 if (zoomChange != 1f && centroid != Offset.Unspecified) lastCentroid = centroid
                                 if (zoomChange != 1f || panChange != Offset.Zero) {
-                                    val oldVisualScale = scale
-                                    logicalScale = (logicalScale * zoomChange).coerceIn(0.1f, 30f)
-                                    val newVisualScale = if (logicalScale < 1f) 1f - rubberBandValue(1f - logicalScale, 1f)
-                                    else if (logicalScale > 10f) 10f + rubberBandValue(logicalScale - 10f, 5f)
-                                    else logicalScale
-                                    val r = if (oldVisualScale != 0f) newVisualScale / oldVisualScale else 1f
+                                    val oldVis = visualScale(scale)
+                                    rawScale = (rawScale * zoomChange).coerceIn(0.1f, 30f)
+                                    val newVis = visualScale(rawScale)
+                                    val r = if (oldVis != 0f) newVis / oldVis else 1f
                                     val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
-                                    // scale monotonic increase → pivot must be centroid or center.
-                                    // offset_new = offset_old * r + pivot * (1 - r), pivot = centroid.
-                                    // r == 1: pivot term collapses, apply panChange directly.
                                     val isZooming = abs(1f - r) > 0.0001f
                                     if (isZooming) {
                                         logicalOffsetX = logicalOffsetX * r + (centroid.x - center.x) * (1f - r)
@@ -186,14 +187,14 @@ internal fun ZoomableImageItem(
                                         logicalOffsetX += panChange.x
                                         logicalOffsetY += panChange.y
                                     }
-                                    val (maxX, maxY) = getMaxOffsets(newVisualScale)
-                                    scale = newVisualScale
+                                    val (maxX, maxY) = getMaxOffsets(rawScale)
+                                    scale = rawScale
                                     offsetX = logicalOffsetX.coerceIn(-maxX, maxX)
                                     offsetY = logicalOffsetY.coerceIn(-maxY, maxY)
                                     logicalOffsetX = offsetX
                                     logicalOffsetY = offsetY
                                     if (consumeConditionally) {
-                                        if (newVisualScale > 1.05f || zoomChange != 1f || abs(panChange.y) > abs(panChange.x)) {
+                                        if (newVis > 1.05f || zoomChange != 1f || abs(panChange.y) > abs(panChange.x)) {
                                             event.changes.forEach { if (it.positionChanged()) it.consume() }
                                         }
                                     } else {
@@ -219,7 +220,7 @@ internal fun ZoomableImageItem(
                                 val targetS = scale.coerceIn(1f, 10f)
                                 val (targetMaxX, targetMaxY) = getMaxOffsets(targetS)
                                 val center = Offset(containerSize.width / 2f, containerSize.height / 2f)
-                                val pivot = if (lastCentroid != Offset.Unspecified) lastCentroid else center
+                                val pivot = center
                                 val targetR = if (sS != 0f) targetS / sS else 1f
                                 val finalPivotX = sX * targetR + (pivot.x - center.x) * (1f - targetR)
                                 val finalPivotY = sY * targetR + (pivot.y - center.y) * (1f - targetR)
@@ -228,7 +229,7 @@ internal fun ZoomableImageItem(
                                 AnimationState(0f).animateTo(1f, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessLow)) {
                                     val currentS = sS + (targetS - sS) * value
                                     scale = currentS
-                                    val r = if (sS != 0f) currentS / sS else 1f
+                                    val r = if (sS != 0f) visualScale(currentS) / visualScale(sS) else 1f
                                     val pivotOX = sX * r + (pivot.x - center.x) * (1f - r)
                                     val pivotOY = sY * r + (pivot.y - center.y) * (1f - r)
                                     offsetX = pivotOX + (targetX - finalPivotX) * value
@@ -271,8 +272,8 @@ internal fun ZoomableImageItem(
                     }
                 }
                 .graphicsLayer(
-                    scaleX = scale * baseScale,
-                    scaleY = scale * baseScale,
+                    scaleX = visualScale(scale) * baseScale,
+                    scaleY = visualScale(scale) * baseScale,
                     translationX = offsetX,
                     translationY = offsetY
                 ),
