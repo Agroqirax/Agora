@@ -165,6 +165,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val isGptImporting = gptImportProgress != null
     val isProgressVisible = isExporting || isImporting || isClaudeImporting || isGptImporting
 
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
@@ -182,7 +183,9 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         titleContentColor = MaterialTheme.colorScheme.onBackground
                     )
                 )
-            }
+            },
+            floatingActionButton = { if (showDocFab) DocumentationFab("import-export.md") },
+            floatingActionButtonPosition = FabPosition.Center,
         ) { padding ->
             Column(
                 modifier = Modifier
@@ -267,6 +270,8 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             }
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
 
         // Progress dialog

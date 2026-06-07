@@ -631,4 +631,9 @@
     <string name="parse_error">解析错误</string>
     <string name="unknown_error">未知错误</string>
     <string name="could_not_read_file">无法读取文件</string>
+
+    <!-- Documentation -->
+    <string name="documentation">文档</string>
+    <string name="show_documentation_links">显示文档链接</string>
+    <string name="show_documentation_links_desc">在设置页面显示文档按钮</string>
 </resources>

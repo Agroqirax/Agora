@@ -135,6 +135,7 @@ class SettingsManager(private val context: Context) {
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val RATING_PROMPT_SUBMITTED = booleanPreferencesKey("rating_prompt_submitted")
         val RATING_PROMPT_DISMISSED = booleanPreferencesKey("rating_prompt_dismissed")
+        val SHOW_DOCUMENTATION_FAB = booleanPreferencesKey("show_documentation_fab")
         val TOTAL_MESSAGES_SENT = intPreferencesKey("total_messages_sent")
         val DEFAULT_TEMPERATURE = stringPreferencesKey("default_temperature")
         val DEFAULT_MAX_TOKENS = intPreferencesKey("default_max_tokens")
@@ -236,6 +237,8 @@ class SettingsManager(private val context: Context) {
         val jsonStr = pref[CUSTOM_PROVIDERS_JSON] ?: "[]"
         try { json.decodeFromString<List<CustomProviderConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
+
+    val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
     val shellDevices: Flow<List<ShellDeviceConfig>> = context.dataStore.data.map { pref ->
@@ -455,6 +458,10 @@ class SettingsManager(private val context: Context) {
             if (model == null) it.remove(TITLE_GENERATION_MODEL)
             else it[TITLE_GENERATION_MODEL] = model
         }
+    }
+
+    suspend fun saveShowDocumentationFab(enabled: Boolean) {
+        context.dataStore.edit { it[SHOW_DOCUMENTATION_FAB] = enabled }
     }
 
     suspend fun saveShellEnabled(enabled: Boolean) {

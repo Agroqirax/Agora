@@ -50,6 +50,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         activeMemoryContent = viewModel.memoryManager.getActiveMemory()
         memoryFiles = viewModel.memoryManager.listFiles()
     }
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -67,7 +68,9 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("memory.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val fm = LocalFocusManager.current
         Column(
@@ -198,6 +201,8 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             )
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 

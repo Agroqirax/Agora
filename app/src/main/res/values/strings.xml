@@ -627,4 +627,9 @@
     <string name="parse_error">Parse error</string>
     <string name="unknown_error">Unknown error</string>
     <string name="could_not_read_file">Could not read file</string>
+
+    <!-- Documentation -->
+    <string name="documentation">Documentation</string>
+    <string name="show_documentation_links">Show Documentation Links</string>
+    <string name="show_documentation_links_desc">Display documentation button on settings pages</string>
 </resources>

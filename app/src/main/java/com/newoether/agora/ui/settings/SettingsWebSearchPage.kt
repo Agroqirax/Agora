@@ -39,6 +39,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     LaunchedEffect(webSearchProvider) { apiKeyText = webSearchApiKeys[webSearchProvider] ?: "" }
 
     // No-op bring-into-view to prevent auto-scrolling on text field focus
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -56,7 +57,9 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("web-search.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val fm = androidx.compose.ui.platform.LocalFocusManager.current
         Column(
@@ -227,6 +230,8 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 })
             }
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 

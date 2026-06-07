@@ -105,6 +105,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     LaunchedEffect(embeddingModels.size) {
         showMenuForModel = null
     }
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -122,7 +123,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("search.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val fm = LocalFocusManager.current
         Column(
@@ -508,6 +511,8 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 )
             )
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
 
         if (showRemoteDialog) {

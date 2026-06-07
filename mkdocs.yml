@@ -31,6 +31,20 @@ theme:
     - search.highlight
     - search.share
 
+plugins:
+  - i18n:
+      docs_structure: suffix
+      fallback_to_default: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: zh
+          name: 中文
+          build: true
+  - search
+
 markdown_extensions:
   - admonition
   - pymdownx.details

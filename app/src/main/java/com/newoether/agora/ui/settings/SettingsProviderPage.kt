@@ -58,6 +58,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val providers = listOf("Google", "OpenAI", "Anthropic", "DeepSeek", "Qwen", "Ollama", "Open Router", "Local") + customProviders.map { it.name }
 
     // No-op bring-into-view to prevent auto-scrolling on text field focus
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -75,7 +76,9 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("provider.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val fm = LocalFocusManager.current
         Column(
@@ -730,6 +733,8 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     )
                 }
             }
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 

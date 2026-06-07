@@ -140,6 +140,20 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             })
 
+            // -- Documentation --
+            val showDocFab by viewModel.showDocumentationFab.collectAsState()
+            SettingsGroup(title = stringResource(R.string.documentation), items = listOf({
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.show_documentation_links)) },
+                    supportingContent = { Text(stringResource(R.string.show_documentation_links_desc)) },
+                    leadingContent = { Icon(Icons.Default.MenuBook, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingContent = {
+                        Switch(checked = showDocFab, onCheckedChange = { viewModel.setShowDocumentationFab(it) })
+                    },
+                    modifier = Modifier.clickable { viewModel.setShowDocumentationFab(!showDocFab) }
+                )
+            }))
+
             // -- Links --
             SettingsGroup(title = stringResource(R.string.about_links), items = listOf({
                 SettingsItem(

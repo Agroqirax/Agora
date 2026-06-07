@@ -336,6 +336,7 @@ class ChatViewModel(
     val webSearchApiKeys = settingsManager.webSearchApiKeys.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
     val webSearchNumResults = settingsManager.webSearchNumResults.stateIn(viewModelScope, SharingStarted.Eagerly, 5)
     val webSearchBaseUrl = settingsManager.webSearchBaseUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val showDocumentationFab = settingsManager.showDocumentationFab.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val shellEnabled = settingsManager.shellEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val shellDevices = settingsManager.shellDevices.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val defaultTemperature = settingsManager.defaultTemperature.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -1202,6 +1203,7 @@ class ChatViewModel(
     fun setWebSearchApiKey(provider: String, apiKey: String) { viewModelScope.launch { settingsManager.saveWebSearchApiKey(provider, apiKey) } }
     fun setWebSearchNumResults(n: Int) { viewModelScope.launch { settingsManager.saveWebSearchNumResults(n) } }
     fun setWebSearchBaseUrl(url: String) { viewModelScope.launch { settingsManager.saveWebSearchBaseUrl(url) } }
+    fun setShowDocumentationFab(enabled: Boolean) { viewModelScope.launch { settingsManager.saveShowDocumentationFab(enabled) } }
     fun setShellEnabled(enabled: Boolean) { viewModelScope.launch { settingsManager.saveShellEnabled(enabled) } }
     fun setThinkingEnabled(enabled: Boolean) { viewModelScope.launch { settingsManager.saveThinkingEnabled(enabled) } }
     fun setThinkingLevel(level: String) { viewModelScope.launch { settingsManager.saveThinkingLevel(level) } }

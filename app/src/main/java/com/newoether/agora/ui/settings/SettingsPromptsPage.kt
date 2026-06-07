@@ -35,6 +35,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val systemPrompts by viewModel.systemPrompts.collectAsState()
     val activeSystemPromptId by viewModel.activeSystemPromptId.collectAsState()
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
     var editingEntry by remember { mutableStateOf<SystemPromptEntry?>(null) }
     var showDeletePromptConfirm by remember { mutableStateOf<SystemPromptEntry?>(null) }
 
@@ -63,7 +64,8 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                     editingEntry = null
                 },
-                onBack = { editingEntry = null }
+                onBack = { editingEntry = null },
+                showDocFab = showDocFab
             )
         } else {
             PromptList(

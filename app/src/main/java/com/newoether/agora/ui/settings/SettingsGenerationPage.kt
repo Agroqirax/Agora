@@ -64,7 +64,7 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 .padding(padding)
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 16.dp)
+                .padding(start = 16.dp, end = 16.dp, top = 16.dp)
         ) {
             // ── Section 1: Default Context Window ──
             SettingsGroup(
@@ -297,7 +297,6 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 )
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
         }
     }
 }

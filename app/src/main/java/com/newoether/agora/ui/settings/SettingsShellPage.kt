@@ -39,6 +39,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val density = androidx.compose.ui.platform.LocalDensity.current
     var newlyAddedDeviceId by remember { mutableStateOf<String?>(null) }
     var deleteConfirmDeviceId by remember { mutableStateOf<String?>(null) }
+    val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -56,7 +57,9 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     titleContentColor = MaterialTheme.colorScheme.onBackground,
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("shell.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val fm = androidx.compose.ui.platform.LocalFocusManager.current
         val scrollState = rememberScrollState()
@@ -321,6 +324,8 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 )
             }
+
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 }

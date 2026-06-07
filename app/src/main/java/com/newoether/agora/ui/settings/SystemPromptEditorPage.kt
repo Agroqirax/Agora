@@ -77,7 +77,8 @@ fun SystemPromptEditorPage(
         userPrependItems: List<PromptTemplateItem>,
         userPostpendItems: List<PromptTemplateItem>
     ) -> Unit,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    showDocFab: Boolean = true
 ) {
     val isEdit = entry != null
     var title by remember { mutableStateOf(entry?.title ?: "") }
@@ -143,7 +144,9 @@ fun SystemPromptEditorPage(
                     titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
-        }
+        },
+        floatingActionButton = { if (showDocFab) DocumentationFab("system-prompts.md") },
+        floatingActionButtonPosition = FabPosition.Center,
     ) { padding ->
         val focusManager = LocalFocusManager.current
         Column(
@@ -329,7 +332,7 @@ fun SystemPromptEditorPage(
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
     }
 
@@ -418,6 +421,7 @@ private fun InsertBetweenButton(
                     onClick = { expanded = false; onInsertVariable() }
                 )
             }
+
         }
     }
 }
