@@ -200,19 +200,19 @@ private fun PdfPager(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
                     Checkbox(
                         checked = currentPage in pdfSelectedPages,
                         onCheckedChange = { onTogglePdfPage(currentPage) },
-                        modifier = Modifier.size(40.dp)
+                        modifier = Modifier.size(32.dp)
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        "${pdfSelectedPages.size} selected",
-                        style = MaterialTheme.typography.labelLarge,
+                        "${pdfSelectedPages.size} / ${pdfPages.size} ${stringResource(R.string.pdf_selected)}",
+                        style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(end = 12.dp)
+                        modifier = Modifier.padding(end = 10.dp)
                     )
                 }
             }

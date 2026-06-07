@@ -505,6 +505,7 @@
     <string name="file_unsupported_type">不支持的文件类型: %1$s</string>
     <string name="file_too_large">文件过大 (最大 20 MB)</string>
     <string name="pdf_render_failed">PDF 渲染失败</string>
+    <string name="pdf_selected">已选择</string>
 
     <!-- Settings - Group Labels -->
     <string name="settings_group_memory_data">记忆与数据</string>

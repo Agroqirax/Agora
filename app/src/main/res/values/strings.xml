@@ -611,6 +611,7 @@
     <string name="file_unsupported_type">Unsupported file type: %1$s</string>
     <string name="file_too_large">File too large (max 20 MB)</string>
     <string name="pdf_render_failed">Failed to render PDF</string>
+    <string name="pdf_selected">Selected</string>
 
     <!-- Caching & Sync -->
     <string name="embedding_model_caching">Embedding model \"%1$s\" is caching…</string>
