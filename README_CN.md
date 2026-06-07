@@ -108,7 +108,7 @@
 
 ## 文档
 
-📖 **[浏览用户手册](docs/index.zh.md)** — 15 个页面，涵盖安装、提供商、工具、搜索、记忆、Shell 等。
+📖 **[浏览用户手册](https://newo-ether.github.io/Agora/)** — 15 个页面，涵盖安装、提供商、工具、搜索、记忆、Shell 等。
 
 🏗️ **[架构指南](ARCHITECTURE.md)** — 完整的代码库导览：数据层、API 提供商、JNI、UI 及数据流。
 
