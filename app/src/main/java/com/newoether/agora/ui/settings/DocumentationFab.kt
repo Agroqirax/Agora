@@ -28,8 +28,8 @@ fun DocumentationFab(docPath: String, modifier: Modifier = Modifier) {
         icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null) },
         text = { Text(stringResource(R.string.documentation)) },
         shape = RoundedCornerShape(50),
-        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.onSurface,
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         elevation = FloatingActionButtonDefaults.elevation(4.dp, 4.dp),
         modifier = modifier.navigationBarsPadding()
     )
