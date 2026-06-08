@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -51,6 +53,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -171,13 +174,12 @@ fun WelcomeScreen(onComplete: () -> Unit, isDarkTheme: Boolean = true) {
                         .alpha(contentAlpha),
                     contentAlignment = Alignment.CenterEnd
                 ) {
-                    if (pagerState.currentPage < pages.size - 1) {
-                        TextButton(
-                            onClick = { exiting = true },
-                            enabled = showContent
-                        ) {
-                            Text("Skip")
-                        }
+                    TextButton(
+                        onClick = { if (pagerState.currentPage < pages.size - 1) exiting = true },
+                        enabled = showContent && pagerState.currentPage < pages.size - 1,
+                        modifier = Modifier.alpha(if (pagerState.currentPage < pages.size - 1) 1f else 0f)
+                    ) {
+                        Text("Skip")
                     }
                 }
 
@@ -339,7 +341,13 @@ private fun LoopVideo(player: ExoPlayer) {
     }
 
     AndroidView(
-        factory = { PlayerView(context).apply { this.player = player; useController = false } },
-        modifier = Modifier.fillMaxSize().alpha(alpha)
+        factory = {
+            PlayerView(context).apply {
+                this.player = player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+        },
+        modifier = Modifier.fillMaxSize().aspectRatio(1f).alpha(alpha)
     )
 }
