@@ -984,11 +984,13 @@ fun MessageItem(
                         // Update heldLabel after composition to avoid double-recomposition flash
                         val thinkingNow = message.status == MessageStatus.THINKING
                         val isToolCalling = message.status == MessageStatus.TOOL_CALLING
+                        val isTranscribing = message.status == MessageStatus.TRANSCRIBING
                         val hasText = message.text.isNotEmpty()
                         LaunchedEffect(thinkingNow, hasText, message.status) {
                             heldLabel = when {
                                 thinkingNow -> "thinking"
                                 isToolCalling -> "calling"
+                                isTranscribing -> "transcribing"
                                 hasText -> "answering"
                                 message.status == MessageStatus.SUCCESS || message.status == MessageStatus.ERROR || message.status == MessageStatus.STOPPED -> ""
                                 message.status == MessageStatus.SENDING -> ""
@@ -996,14 +998,17 @@ fun MessageItem(
                             }
                         }
                         val toolCallingStatus = stringResource(R.string.tool_calling_ellipsis)
+                        val transcribingStatus = stringResource(R.string.transcription_ellipsis)
                         val statusText = when {
                             message.status == MessageStatus.SUCCESS -> if (message.tokenCount > 0) stringResource(R.string.cost_tokens, message.tokenCount) else null
+                            isStreaming && isTranscribing -> transcribingStatus
                             isStreaming && isToolCalling -> toolCallingStatus
                             isStreaming && thinkingNow -> thinkingStatus
                             isStreaming && hasText -> answeringStatus
                             isStreaming -> when (heldLabel) {
                                 "thinking" -> thinkingStatus
                                 "calling" -> toolCallingStatus
+                                "transcribing" -> transcribingStatus
                                 "answering" -> answeringStatus
                                 else -> stringResource(R.string.sending_ellipsis)
                             }
@@ -1017,7 +1022,7 @@ fun MessageItem(
                         // emitting the updated message status.
                         val displayText = when {
                             statusText != null -> statusText.also { heldStatusText = it }
-                            message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING -> heldStatusText.takeIf { it.isNotEmpty() }
+                            message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING || message.status == MessageStatus.TRANSCRIBING -> heldStatusText.takeIf { it.isNotEmpty() }
                             else -> null.also { heldStatusText = "" }
                         }
 
@@ -1029,7 +1034,7 @@ fun MessageItem(
                             val text = displayText ?: return@AnimatedVisibility
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                                 Box(modifier = Modifier.size(18.dp), contentAlignment = Alignment.Center) {
-                                    if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING) {
+                                    if (isStreaming || message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING || message.status == MessageStatus.TRANSCRIBING) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
                                             color = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,

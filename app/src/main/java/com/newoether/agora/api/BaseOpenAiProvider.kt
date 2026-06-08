@@ -67,7 +67,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         val apiMessages = convertToOpenAiMessages(
             messages = validatedMessages,
             systemPrompt = transformSystemPrompt(config.systemPrompt),
-            includeImages = true
+            includeImages = config.includeImages
         )
 
         var request = OpenAiChatRequest(

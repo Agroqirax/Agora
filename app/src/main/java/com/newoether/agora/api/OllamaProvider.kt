@@ -136,20 +136,20 @@ class OllamaProvider : LlmProvider {
                 return@flatMap entries
             }
 
-            val images = msg.images.mapNotNull { imagePath ->
+            val images = if (config.includeImages) msg.images.mapNotNull { imagePath ->
                 try {
                     val file = File(imagePath)
                     if (file.exists()) {
                         android.util.Base64.encodeToString(file.readBytes(), android.util.Base64.NO_WRAP)
                     } else null
                 } catch (e: Exception) { null }
-            }
+            } else null
 
             // Normal message: text + images only
             entries.add(OllamaMessage(
                 role = if (msg.participant == Participant.USER) "user" else "assistant",
                 content = msg.text,
-                images = if (images.isNotEmpty()) images else null
+                images = images?.takeIf { it.isNotEmpty() }
             ))
             entries
         })

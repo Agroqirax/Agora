@@ -298,6 +298,9 @@ class ChatViewModel(
         val providerBaseUrls = settingsManager.providerBaseUrls.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
     val titleGenerationEnabled = settingsManager.titleGenerationEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val titleGenerationModel = settingsManager.titleGenerationModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val imageTranscriptionEnabledModels = settingsManager.imageTranscriptionEnabledModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val imageTranscriptionModel = settingsManager.imageTranscriptionModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val imageTranscriptionBatchSize = settingsManager.imageTranscriptionBatchSize.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
     val accessPastConversations = settingsManager.accessPastConversations.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val accessSavedMemories = settingsManager.accessSavedMemories.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val accessActiveMemory = settingsManager.accessActiveMemory.stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -554,7 +557,7 @@ class ChatViewModel(
                 if (id != null) {
                     // Fix stuck sending states when loading conversation
                     val stuckMessages = chatDao.getMessagesForConversation(id).first()
-                        .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING }
+                        .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
                     
                     stuckMessages.forEach { msg ->
                         chatDao.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
@@ -811,6 +814,33 @@ class ChatViewModel(
     }
     fun setTitleGenerationEnabled(enabled: Boolean) { viewModelScope.launch { settingsManager.saveTitleGenerationEnabled(enabled) } }
     fun setTitleGenerationModel(model: String?) { viewModelScope.launch { settingsManager.saveTitleGenerationModel(model) } }
+    fun setImageTranscriptionModel(model: String?) { viewModelScope.launch { settingsManager.saveImageTranscriptionModel(model) } }
+    fun setImageTranscriptionBatchSize(size: Int) { viewModelScope.launch { settingsManager.saveImageTranscriptionBatchSize(size) } }
+    fun addImageTranscriptionModels(models: Set<String>) { viewModelScope.launch { settingsManager.saveImageTranscriptionEnabledModels(imageTranscriptionEnabledModels.value + models) } }
+    fun removeImageTranscriptionModel(model: String) { viewModelScope.launch { settingsManager.saveImageTranscriptionEnabledModels(imageTranscriptionEnabledModels.value - model) } }
+
+    private fun resolveTranscriptionProviderName(): String =
+        imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
+
+    private fun resolveTranscriptionModelId(): String =
+        imageTranscriptionModel.value?.substringAfter(":") ?: ""
+
+    private fun resolveTranscriptionApiKey(): String {
+        val model = imageTranscriptionModel.value ?: return ""
+        val providerName = getProviderForModel(model)
+        if (providerName == "Local") return ""
+        val activeKeyId = activeApiKeyIds.value[providerName]
+        return apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+    }
+
+    private fun resolveTranscriptionBaseUrl(): String? {
+        val model = imageTranscriptionModel.value ?: return null
+        val providerName = getProviderForModel(model)
+        return providerBaseUrls.value[providerName]
+            ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
+            else null
+    }
+
     fun setAccessPastConversations(enabled: Boolean) { viewModelScope.launch { settingsManager.saveAccessPastConversations(enabled) } }
     fun setAccessSavedMemories(enabled: Boolean) { viewModelScope.launch { settingsManager.saveAccessSavedMemories(enabled) } }
     fun setAccessActiveMemory(enabled: Boolean) { viewModelScope.launch { settingsManager.saveAccessActiveMemory(enabled) } }
@@ -1550,7 +1580,7 @@ class ChatViewModel(
             // _streamingMessage was null — find the in-flight model message directly
             _allMessages.update { it.map { m ->
                 if (m.participant == Participant.MODEL &&
-                    (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING || m.status == MessageStatus.TOOL_CALLING)
+                    (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING || m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
                 ) m.copy(status = MessageStatus.STOPPED) else m
             } }
         }
@@ -1671,7 +1701,14 @@ class ChatViewModel(
                 webSearchNumResults = webSearchNumResults.value,
                 webSearchBaseUrl = webSearchBaseUrl.value,
                 shellEnabled = effectiveSettings.shellEnabled ?: shellEnabled.value,
-                shellDevices = shellDevices.value
+                shellDevices = shellDevices.value,
+                imageTranscriptionEnabled = imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
+                imageTranscriptionModel = imageTranscriptionModel.value,
+                imageTranscriptionBatchSize = imageTranscriptionBatchSize.value,
+                transcriptionProviderName = resolveTranscriptionProviderName(),
+                transcriptionModelId = resolveTranscriptionModelId(),
+                transcriptionApiKey = resolveTranscriptionApiKey(),
+                transcriptionBaseUrl = resolveTranscriptionBaseUrl()
             )
             generationManager.generate(
                 conversationId = currentId,
@@ -1787,7 +1824,14 @@ class ChatViewModel(
                 webSearchNumResults = webSearchNumResults.value,
                 webSearchBaseUrl = webSearchBaseUrl.value,
                 shellEnabled = effectiveSettings.shellEnabled ?: shellEnabled.value,
-                shellDevices = shellDevices.value
+                shellDevices = shellDevices.value,
+                imageTranscriptionEnabled = imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
+                imageTranscriptionModel = imageTranscriptionModel.value,
+                imageTranscriptionBatchSize = imageTranscriptionBatchSize.value,
+                transcriptionProviderName = resolveTranscriptionProviderName(),
+                transcriptionModelId = resolveTranscriptionModelId(),
+                transcriptionApiKey = resolveTranscriptionApiKey(),
+                transcriptionBaseUrl = resolveTranscriptionBaseUrl()
             )
             generationManager.generate(
                 conversationId = currentId,
@@ -2139,7 +2183,14 @@ class ChatViewModel(
                 webSearchNumResults = webSearchNumResults.value,
                 webSearchBaseUrl = webSearchBaseUrl.value,
                 shellEnabled = effectiveSettings.shellEnabled ?: shellEnabled.value,
-                shellDevices = shellDevices.value
+                shellDevices = shellDevices.value,
+                imageTranscriptionEnabled = imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
+                imageTranscriptionModel = imageTranscriptionModel.value,
+                imageTranscriptionBatchSize = imageTranscriptionBatchSize.value,
+                transcriptionProviderName = resolveTranscriptionProviderName(),
+                transcriptionModelId = resolveTranscriptionModelId(),
+                transcriptionApiKey = resolveTranscriptionApiKey(),
+                transcriptionBaseUrl = resolveTranscriptionBaseUrl()
             )
             try {
                 withTimeout(120_000L) {

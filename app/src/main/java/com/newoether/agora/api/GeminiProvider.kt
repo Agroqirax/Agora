@@ -228,7 +228,7 @@ class GeminiProvider : LlmProvider {
             if (msg.text.isNotEmpty()) {
                 parts.add(ApiRequestPart(text = msg.text))
             }
-            for (imagePath in msg.images) {
+            if (config.includeImages) for (imagePath in msg.images) {
                 try {
                     val file = File(imagePath)
                     if (file.exists()) {

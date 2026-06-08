@@ -15,7 +15,8 @@ data class AttachmentItem(
     @SerialName("image_index") val imageIndex: Int? = null,
     @SerialName("page_count") val pageCount: Int? = null,
     val warning: String? = null,
-    @SerialName("text_content") val textContent: String? = null
+    @SerialName("text_content") val textContent: String? = null,
+    @SerialName("transcription") val transcription: String? = null
 )
 
 /** Used for passing attachment metadata from ChatBottomBar to ViewModel. */

@@ -29,7 +29,7 @@ enum class Participant {
 }
 
 enum class MessageStatus {
-    SENDING, THINKING, TOOL_CALLING, SUCCESS, STOPPED, ERROR
+    TRANSCRIBING, SENDING, THINKING, TOOL_CALLING, SUCCESS, STOPPED, ERROR
 }
 
 @Immutable

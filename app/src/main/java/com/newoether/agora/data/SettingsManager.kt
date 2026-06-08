@@ -102,6 +102,9 @@ class SettingsManager(private val context: Context) {
         val PROVIDER_BASE_URLS = stringPreferencesKey("provider_base_urls")
         val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
         val TITLE_GENERATION_MODEL = stringPreferencesKey("title_generation_model")
+        val IMAGE_TRANSCRIPTION_ENABLED_MODELS = stringSetPreferencesKey("image_transcription_enabled_models")
+        val IMAGE_TRANSCRIPTION_MODEL = stringPreferencesKey("image_transcription_model")
+        val IMAGE_TRANSCRIPTION_BATCH_SIZE = intPreferencesKey("image_transcription_batch_size")
         val ACCESS_PAST_CONVERSATIONS = booleanPreferencesKey("access_past_conversations")
         val ACCESS_SAVED_MEMORIES = booleanPreferencesKey("access_saved_memories")
         val ACCESS_ACTIVE_MEMORY = booleanPreferencesKey("access_active_memory")
@@ -190,6 +193,9 @@ class SettingsManager(private val context: Context) {
 
     val titleGenerationEnabled: Flow<Boolean> = context.dataStore.data.map { it[TITLE_GENERATION_ENABLED] ?: true }
     val titleGenerationModel: Flow<String?> = context.dataStore.data.map { it[TITLE_GENERATION_MODEL] }
+    val imageTranscriptionEnabledModels: Flow<Set<String>> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet() }
+    val imageTranscriptionModel: Flow<String?> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_MODEL] }
+    val imageTranscriptionBatchSize: Flow<Int> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_BATCH_SIZE] ?: 3 }
 
     val accessPastConversations: Flow<Boolean> = context.dataStore.data.map { it[ACCESS_PAST_CONVERSATIONS] ?: true }
     val accessSavedMemories: Flow<Boolean> = context.dataStore.data.map { it[ACCESS_SAVED_MEMORIES] ?: true }
@@ -458,6 +464,21 @@ class SettingsManager(private val context: Context) {
             if (model == null) it.remove(TITLE_GENERATION_MODEL)
             else it[TITLE_GENERATION_MODEL] = model
         }
+    }
+
+    suspend fun saveImageTranscriptionEnabledModels(models: Set<String>) {
+        context.dataStore.edit { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = models }
+    }
+
+    suspend fun saveImageTranscriptionModel(model: String?) {
+        context.dataStore.edit {
+            if (model == null) it.remove(IMAGE_TRANSCRIPTION_MODEL)
+            else it[IMAGE_TRANSCRIPTION_MODEL] = model
+        }
+    }
+
+    suspend fun saveImageTranscriptionBatchSize(size: Int) {
+        context.dataStore.edit { it[IMAGE_TRANSCRIPTION_BATCH_SIZE] = size.coerceIn(1, 10) }
     }
 
     suspend fun saveShowDocumentationFab(enabled: Boolean) {

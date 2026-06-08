@@ -17,6 +17,7 @@ class AgoraForegroundService : Service() {
     companion object {
         const val CHANNEL_ID = "agora_generation"
         const val NOTIFICATION_ID = 1
+        private var instance: AgoraForegroundService? = null
 
         fun start(context: Context) {
             val intent = Intent(context, AgoraForegroundService::class.java)
@@ -25,6 +26,10 @@ class AgoraForegroundService : Service() {
             } else {
                 context.startService(intent)
             }
+        }
+
+        fun updateText(text: String) {
+            instance?.updateNotificationText(text)
         }
 
         fun stop(context: Context) {
@@ -82,6 +87,7 @@ class AgoraForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         val pendingIntent = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java).apply {
@@ -103,6 +109,29 @@ class AgoraForegroundService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         return START_NOT_STICKY
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        instance = null
+    }
+
+    private fun updateNotificationText(text: String) {
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .build()
+        startForeground(NOTIFICATION_ID, notification)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

@@ -32,6 +32,7 @@ data class ProviderConfig(
     val tools: List<ToolDefinition>? = null,
     val userPrepend: String? = null,
     val userPostpend: String? = null,
+    val includeImages: Boolean = true,
     val temperature: Float? = null,
     val maxTokens: Int? = null,
     val topP: Float? = null,
@@ -225,7 +226,7 @@ class PendingToolCall(
 interface LlmProvider {
     val name: String
     val defaultBaseUrl: String
-    
+
     fun generateResponse(
         messages: List<ChatMessage>,
         config: ProviderConfig

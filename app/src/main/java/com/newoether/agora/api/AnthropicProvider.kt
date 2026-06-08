@@ -157,7 +157,7 @@ class AnthropicProvider : LlmProvider {
                         i++
                     }
                     else -> {
-                        add(buildNormalMessage(msg))
+                        add(buildNormalMessage(if (config.includeImages) msg else msg.copy(images = emptyList())))
                         i++
                     }
                 }
