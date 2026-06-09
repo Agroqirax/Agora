@@ -59,7 +59,7 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 .padding(padding)
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 16.dp)
+                .padding(vertical = 16.dp)
         ) {
             val changeLanguage: (String) -> Unit = { code ->
                 if (code != appLanguage) {
