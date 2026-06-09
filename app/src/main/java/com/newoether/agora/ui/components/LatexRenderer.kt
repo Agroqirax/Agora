@@ -4,52 +4,26 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.Base64
 
-import androidx.compose.foundation.Image
-
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.InlineTextContent
-import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.isUnspecified
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.Placeholder
-import androidx.compose.ui.text.PlaceholderVerticalAlign
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.mikepenz.markdown.annotator.AnnotatorSettings
-import com.mikepenz.markdown.annotator.annotatorSettings
-import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
 import com.mikepenz.markdown.model.ImageData
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.ImageWidth
 import com.mikepenz.markdown.model.PlaceholderConfig
-import com.mikepenz.markdown.model.ReferenceLinkHandlerImpl
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import ru.noties.jlatexmath.JLatexMathDrawable
 
 data class LatexSpan(
     val isLatex: Boolean,
     val content: String,
     val display: Boolean = false,
-    val bold: Boolean = false,
-    val strikethrough: Boolean = false,
 )
 
 private val dollarAmountPattern = Regex("""\$\d+(?!\$)(?!\w)""")
@@ -224,132 +198,8 @@ fun parseLatexSpans(text: String): List<LatexSpan> {
         }
     }
 
-    // FSM: bridge markdown formatting markers (** __ ~~) across inline LaTeX spans
-    // openBoldAfterRemove: marker at START → content after removePrefix IS inside bold
-    //                      marker at END   → content after removeSuffix is NOT inside bold
-    data class Pending(val marker: String, val fromIdx: Int, val openBoldAfterRemove: Boolean)
-    val stack = mutableListOf<Pending>()
-    val markers = listOf("**", "__", "~~")
-    val isBold: (String) -> Boolean = { it == "**" || it == "__" }
-
-    for (idx in spans.indices) {
-        val span = spans[idx]
-        if (span.isLatex) continue
-        val s = span.content
-        // Skip spans that already have at least one complete marker pair (e.g. **bold** mid-text)
-        // split count > 2 means a closing marker exists somewhere in the span — let the library render it
-        val trimmed = s.trim()
-        if (markers.any { trimmed.split(it).size > 2 }) continue
-
-        var resolved = false
-        for (m in markers) {
-            val pending = stack.lastOrNull { it.marker == m }
-            if (pending == null) continue
-
-            if (s.startsWith(m)) {
-                // Closing ** at start → content after closing is OUTSIDE bold
-                stack.remove(pending)
-                val bold = isBold(m)
-                // pending span: bold only if opening was at start (content after opening IS inside)
-                if (pending.openBoldAfterRemove) {
-                    spans[pending.fromIdx] = spans[pending.fromIdx].copy(
-                        bold = spans[pending.fromIdx].bold || bold,
-                        strikethrough = spans[pending.fromIdx].strikethrough || !bold
-                    )
-                }
-                // intermediate spans (LaTeX): always inside bold
-                for (j in (pending.fromIdx + 1) until idx) {
-                    val old = spans[j]
-                    spans[j] = old.copy(bold = old.bold || bold, strikethrough = old.strikethrough || !bold)
-                }
-                // closing span: NOT bold (marker at start → content after it is outside)
-                spans[pending.fromIdx] = spans[pending.fromIdx].copy(content = spans[pending.fromIdx].content.removeSuffix(m))
-                spans[idx] = spans[idx].copy(content = s.removePrefix(m))
-                resolved = true
-                break
-            }
-            if (s.endsWith(m)) {
-                // Closing ** at end → content before closing is INSIDE bold
-                stack.remove(pending)
-                val bold = isBold(m)
-                // pending span: bold only if opening was at start (content after opening IS inside)
-                if (pending.openBoldAfterRemove) {
-                    spans[pending.fromIdx] = spans[pending.fromIdx].copy(
-                        bold = spans[pending.fromIdx].bold || bold,
-                        strikethrough = spans[pending.fromIdx].strikethrough || !bold
-                    )
-                }
-                // intermediate spans (LaTeX): always inside bold
-                for (j in (pending.fromIdx + 1) until idx) {
-                    val old = spans[j]
-                    spans[j] = old.copy(bold = old.bold || bold, strikethrough = old.strikethrough || !bold)
-                }
-                // closing span: bold (marker at end → content before it is inside)
-                spans[idx] = spans[idx].copy(
-                    bold = spans[idx].bold || bold,
-                    strikethrough = spans[idx].strikethrough || !bold
-                )
-                spans[pending.fromIdx] = spans[pending.fromIdx].copy(content = spans[pending.fromIdx].content.removePrefix(m))
-                spans[idx] = spans[idx].copy(content = s.removeSuffix(m))
-                resolved = true
-                break
-            }
-        }
-        if (resolved) continue
-
-        // No match on stack — push unmatched marker as pending
-        for (m in markers) {
-            val t = spans[idx].content
-            if (t.startsWith(m)) {
-                stack.add(Pending(m, idx, openBoldAfterRemove = true))
-                spans[idx] = spans[idx].copy(content = t.removePrefix(m))
-                break
-            }
-            if (t.endsWith(m)) {
-                stack.add(Pending(m, idx, openBoldAfterRemove = false))
-                spans[idx] = spans[idx].copy(content = t.removeSuffix(m))
-                break
-            }
-        }
-    }
-
     return spans
 }
-
-fun splitParagraphs(text: String): List<String> {
-    val result = mutableListOf<String>()
-    val buf = StringBuilder()
-    var i = 0
-    while (i < text.length) {
-        val remaining = text.substring(i)
-
-        // ``` fenced code block — keep as an atomic paragraph
-        if (remaining.startsWith("```")) {
-            val end = remaining.indexOf("```", 3)
-            if (end >= 0) {
-                if (buf.isNotBlank()) { result.add(buf.toString().trim()); buf.clear() }
-                result.add(remaining.substring(0, end + 3))
-                i += end + 3
-                continue
-            }
-        }
-
-        // \n\n paragraph separator
-        if (remaining.startsWith("\n\n")) {
-            if (buf.isNotBlank()) { result.add(buf.toString().trim()); buf.clear() }
-            i += 2
-            // skip additional consecutive newlines
-            while (i < text.length && text[i] == '\n') i++
-            continue
-        }
-
-        buf.append(remaining[0])
-        i++
-    }
-    if (buf.isNotBlank()) result.add(buf.toString().trim())
-    return result
-}
-
 fun renderLatexToBitmap(latex: String, textSize: Float = 48f, color: Int = 0xFF000000.toInt(), fallbackW: Int = 800, fallbackH: Int = 200, minW: Int = 0): Bitmap? {
     return try {
         val drawable = JLatexMathDrawable.builder(latex)
@@ -440,7 +290,7 @@ class LatexImageTransformer(
         return ImageData(
             painter = BitmapPainter(bmp.asImageBitmap()),
             contentDescription = latex,
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier,
             alignment = Alignment.CenterStart,
             contentScale = ContentScale.Fit,
         )
@@ -454,174 +304,17 @@ class LatexImageTransformer(
         imageSize: Size,
         imageSizeChanged: ((link: String, Size) -> Unit)?
     ): PlaceholderConfig {
-        return PlaceholderConfig(size = Size(60f, 22f), verticalAlign = PlaceholderVerticalAlign.Center)
-    }
-}
-
-// Data class for paragraph groups, tracking \n count for proportional spacing
-private data class ParaGroup(val spans: List<LatexSpan>, val spacingBefore: Float)
-
-private fun buildParaGroups(inlineSpans: List<LatexSpan>, paragraphSpacing: Float): List<ParaGroup> {
-    val groups = mutableListOf<ParaGroup>()
-    val currentSpans = mutableListOf<LatexSpan>()
-    var pendingSpacing = paragraphSpacing
-
-    fun flush() {
-        if (currentSpans.isNotEmpty()) {
-            groups.add(ParaGroup(currentSpans.toList(), pendingSpacing))
-            currentSpans.clear()
-            pendingSpacing = 0f
-        } else {
-            pendingSpacing += paragraphSpacing
-        }
-    }
-
-    for (span in inlineSpans) {
-        if (span.isLatex) {
-            currentSpans.add(span)
-        } else {
-            var remaining = span.content
-            while (remaining.isNotEmpty()) {
-                val nlIdx = remaining.indexOf('\n')
-                if (nlIdx < 0) {
-                    currentSpans.add(LatexSpan(false, remaining, bold = span.bold, strikethrough = span.strikethrough))
-                    break
-                }
-                if (nlIdx > 0) {
-                    currentSpans.add(LatexSpan(false, remaining.substring(0, nlIdx), bold = span.bold, strikethrough = span.strikethrough))
-                }
-                remaining = remaining.substring(nlIdx + 1)
-                flush()
-                pendingSpacing = paragraphSpacing
-                while (remaining.startsWith('\n')) {
-                    pendingSpacing += paragraphSpacing
-                    remaining = remaining.substring(1)
-                }
-            }
-        }
-    }
-    flush()
-    return groups
-}
-
-private fun buildParagraphStrings(
-    groups: List<ParaGroup>,
-    textStyle: TextStyle,
-    settings: AnnotatorSettings,
-): List<AnnotatedString> {
-    var latexIdx = 0
-    return groups.map { group ->
-        buildAnnotatedString {
-            for (span in group.spans) {
-                if (span.isLatex) {
-                    appendInlineContent("LATEX_$latexIdx", span.content)
-                    latexIdx++
-                } else if (span.content.isNotBlank()) {
-                    if (span.bold || span.strikethrough) {
-                        val start = length
-                        append(span.content)
-                        addStyle(
-                            SpanStyle(
-                                fontWeight = if (span.bold) FontWeight.Bold else null,
-                                textDecoration = if (span.strikethrough) TextDecoration.LineThrough else null,
-                            ),
-                            start,
-                            length,
-                        )
-                    } else {
-                        append(span.content.buildMarkdownAnnotatedString(textStyle, settings))
-                    }
-                }
-            }
-        }
-    }
-}
-
-private data class LatexBitmapEntry(val tag: String, val bitmap: Bitmap?, val content: String)
-
-private data class LatexRenderState(
-    val entries: List<LatexBitmapEntry>,
-    val inlineContent: Map<String, InlineTextContent>,
-    val paragraphStrings: List<AnnotatedString>,
-    val paragraphGroups: List<ParaGroup>,
-)
-
-@Composable
-fun LatexAwareText(
-    spans: List<LatexSpan>,
-    modifier: Modifier = Modifier,
-    textStyle: TextStyle,
-    latexTextSize: Float = 56f,
-    latexColor: Int,
-    codeSpanStyle: SpanStyle = SpanStyle(),
-    paragraphSpacing: Float = 10f,
-) {
-    val density = LocalDensity.current
-    val inlineSpans = remember(spans) { spans.filter { !it.display } }
-    val settings = annotatorSettings(
-        linkTextSpanStyle = TextLinkStyles(style = textStyle.toSpanStyle()),
-        codeSpanStyle = codeSpanStyle,
-        referenceLinkHandler = ReferenceLinkHandlerImpl(),
-    )
-
-    val state = remember(inlineSpans, settings, latexTextSize, latexColor, density, paragraphSpacing) {
-        if (inlineSpans.isEmpty()) return@remember null
-        val entries = inlineSpans.filter { it.isLatex }.mapIndexed { idx, span ->
-            val tag = "LATEX_$idx"
-            val bmp = renderLatexToBitmap(span.content, latexTextSize, latexColor)
-            LatexBitmapEntry(tag, bmp, span.content)
-        }
-        val ic = buildMap<String, InlineTextContent> {
-            entries.forEach { entry ->
-                if (entry.bitmap != null) {
-                    val rawW = with(density) { entry.bitmap.width.toSp().value }
-                    val rawH = with(density) { entry.bitmap.height.toSp().value }
-                    val maxH = if (textStyle.lineHeight.isSp) textStyle.lineHeight.value
-                               else textStyle.fontSize.value * 1.4f
-                    val scale = if (rawH > maxH) maxH / rawH else 1f
-                    val pw = maxOf(rawW * scale, 24f)
-                    val ph = maxOf(rawH * scale, 16f)
-                    put(entry.tag, InlineTextContent(
-                        Placeholder(width = pw.sp, height = ph.sp, placeholderVerticalAlign = PlaceholderVerticalAlign.Center)
-                    ) { _ ->
-                        Image(
-                            painter = BitmapPainter(entry.bitmap.asImageBitmap()),
-                            contentDescription = entry.content,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentScale = ContentScale.Fit,
-                        )
-                    })
-                }
-            }
-        }
-        val groups = buildParaGroups(inlineSpans, paragraphSpacing)
-        val paraStrings = buildParagraphStrings(groups, textStyle, settings)
-        LatexRenderState(entries, ic, paraStrings, groups)
-    } ?: return
-
-    if (state.paragraphStrings.isEmpty()) return
-
-    if (state.paragraphStrings.size == 1 && state.paragraphGroups.first().spacingBefore == 0f) {
-        BasicText(
-            text = state.paragraphStrings.first(),
-            modifier = modifier,
-            style = textStyle,
-            inlineContent = state.inlineContent,
+        if (!link.startsWith("latex://")) return super.placeholderConfig(
+            link, density, containerSize, imageWidth, imageSize, imageSizeChanged
         )
-    } else {
-        Column(modifier = modifier) {
-            state.paragraphStrings.forEachIndexed { idx, annotated ->
-                val spacingBefore = state.paragraphGroups[idx].spacingBefore
-                if (spacingBefore > 0f) {
-                    Spacer(Modifier.height(spacingBefore.dp))
-                }
-                BasicText(
-                    text = annotated,
-                    modifier = Modifier,
-                    style = textStyle,
-                    inlineContent = state.inlineContent,
-                )
-            }
+        val w = with(density) {
+            if (imageSize.isUnspecified) (textSize * 2f).toDp().value
+            else imageSize.width.toDp().value
         }
+        val h = with(density) {
+            if (imageSize.isUnspecified) (textSize * 1.2f).toDp().value
+            else imageSize.height.toDp().value
+        }
+        return PlaceholderConfig(size = Size(w, h), verticalAlign = PlaceholderVerticalAlign.Center)
     }
 }

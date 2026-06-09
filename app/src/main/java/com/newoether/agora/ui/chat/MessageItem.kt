@@ -1323,68 +1323,23 @@ fun MessageItem(
                                                     imageTransformer = latexImageTransformer
                                                 )
                                             } else {
-                                                val paragraphs = remember(text) { splitParagraphs(text) }
-                                                Column {
-                                                    paragraphs.forEachIndexed { paraIdx, paragraph ->
-                                                        if (paraIdx > 0) Spacer(Modifier.height(8.dp))
-                                                        val paraSpans = remember(paragraph) {
-                                                            val spans = parseLatexSpans(paragraph)
-                                                            val soloInline = spans.count { it.isLatex } == 1 &&
-                                                                spans.all { s -> s.isLatex || s.content.isBlank() }
-                                                            if (soloInline) {
-                                                                spans.map { s -> if (s.isLatex && !s.display) s.copy(display = true) else s }
-                                                            } else {
-                                                                spans
-                                                            }
-                                                        }
-                                                        if (paraSpans.all { !it.isLatex }) {
-                                                            Markdown(
-                                                                content = paragraph.escapeForMarkdown(),
-                                                                modifier = Modifier.fillMaxWidth(),
-                                                                typography = customTypography,
-                                                                padding = customMarkdownPadding,
-                                                                components = customMarkdownComponents,
-                                                                imageTransformer = latexImageTransformer
-                                                            )
-                                                        } else {
-                                                            var pendingSpans = mutableListOf<LatexSpan>()
-                                                            for (span in paraSpans) {
-                                                                if (span.isLatex && span.display) {
-                                                                    if (pendingSpans.isNotEmpty()) {
-                                                                        LatexAwareText(
-                                                                            spans = pendingSpans.toList(),
-                                                                            modifier = Modifier.fillMaxWidth(),
-                                                                            textStyle = customTypography.paragraph.copy(color = textColor),
-                                                                            latexTextSize = 56f,
-                                                                            latexColor = textColor.toArgb(),
-                                                                            codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
-                                                                        )
-                                                                        pendingSpans.clear()
-                                                                    }
-                                                                    val latexColor = if (message.participant == Participant.USER) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                                                    val bmp = remember(span.content, latexColor) { renderLatexToBitmap(span.content, color = latexColor.toArgb()) }
-                                                                    if (bmp != null) {
-                                                                        Image(bitmap = bmp.asImageBitmap(), contentDescription = span.content, modifier = Modifier.fillMaxWidth().wrapContentWidth(Alignment.CenterHorizontally).padding(vertical = 12.dp))
-                                                                    } else {
-                                                                        Markdown(content = "```\n${span.content}\n```", modifier = Modifier.fillMaxWidth(), colors = customMarkdownColors, typography = customTypography, padding = customMarkdownPadding, components = customMarkdownComponents, imageTransformer = latexImageTransformer)
-                                                                    }
-                                                                } else {
-                                                                    pendingSpans.add(span)
-                                                                }
-                                                            }
-                                                            if (pendingSpans.isNotEmpty()) {
-                                                                LatexAwareText(
-                                                                    spans = pendingSpans.toList(),
-                                                                    modifier = Modifier.fillMaxWidth(),
-                                                                    textStyle = customTypography.paragraph.copy(color = textColor),
-                                                                    latexTextSize = 56f,
-                                                                    latexColor = textColor.toArgb(),
-                                                                    codeSpanStyle = customTypography.inlineCode.toSpanStyle(),
-                                                                )
-                                                            }
-                                                        }
+                                                // Convert LaTeX spans to image markdown so Markdown composable
+                                                // can render tables, lists, etc. with formulas as inline images.
+                                                val reassembled = remember(spans) {
+                                                    spans.joinToString("") { span ->
+                                                        if (span.isLatex) inlineLatexToMarkdown(span.content)
+                                                        else span.content
                                                     }
                                                 }
+                                                Markdown(
+                                                    content = reassembled.escapeForMarkdown(),
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    colors = customMarkdownColors,
+                                                    typography = customTypography,
+                                                    padding = customMarkdownPadding,
+                                                    components = customMarkdownComponents,
+                                                    imageTransformer = latexImageTransformer
+                                                )
                                             }
                                         }
                                     }
