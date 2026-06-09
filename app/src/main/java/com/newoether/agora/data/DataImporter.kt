@@ -15,6 +15,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import java.util.UUID
 import java.io.File
 import java.util.zip.ZipFile
@@ -388,6 +389,14 @@ class DataImporter(
                         // Skip local chat models — GGUF files don't exist on this device
                         s.activeSystemPromptId?.let { settingsManager.setActiveSystemPromptId(it) }
                         settingsImported = true
+
+                        // Restore extra settings if present
+                        entries["extra_settings.json"]?.decodeToString()?.let { json ->
+                            try {
+                                val obj = Json.parseToJsonElement(json).jsonObject
+                                ExportExtraSettings.restoreFromJsonObject(obj, settingsManager)
+                            } catch (_: Exception) { /* older exports may not have extra_settings.json */ }
+                        }
                     }
                 } catch (e: Exception) {
                     errors.add("Settings: ${e.localizedMessage ?: "Unknown error"}")
@@ -539,7 +548,6 @@ class DataImporter(
         val shellDevices: List<ShellDeviceConfig> = emptyList(),
         val customProviders: List<CustomProviderConfig> = emptyList(),
         val localChatModels: List<LocalChatModelConfig> = emptyList(),
-        val activeLocalChatModelId: String = "",
         @SerialName("active_system_prompt_id") val activeSystemPromptId: String? = null
     )
 

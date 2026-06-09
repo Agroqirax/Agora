@@ -126,7 +126,6 @@ class SettingsManager(private val context: Context) {
         val AUTO_UPDATE_CHECK = booleanPreferencesKey("auto_update_check")
         val LAST_UPDATE_CHECK_TIME = longPreferencesKey("last_update_check_time")
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
-        val ACTIVE_LOCAL_CHAT_MODEL_ID = stringPreferencesKey("active_local_chat_model_id")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
@@ -237,8 +236,6 @@ class SettingsManager(private val context: Context) {
         val jsonStr = pref[LOCAL_CHAT_MODELS_JSON] ?: "[]"
         try { json.decodeFromString<List<LocalChatModelConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
-    val activeLocalChatModelId: Flow<String> = context.dataStore.data.map { it[ACTIVE_LOCAL_CHAT_MODEL_ID] ?: "" }
-
     val customProviders: Flow<List<CustomProviderConfig>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[CUSTOM_PROVIDERS_JSON] ?: "[]"
         try { json.decodeFromString<List<CustomProviderConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
@@ -451,10 +448,6 @@ class SettingsManager(private val context: Context) {
     suspend fun saveLocalChatModels(models: List<LocalChatModelConfig>) {
         context.dataStore.edit { it[LOCAL_CHAT_MODELS_JSON] = json.encodeToString(models) }
     }
-    suspend fun setActiveLocalChatModelId(id: String) {
-        context.dataStore.edit { it[ACTIVE_LOCAL_CHAT_MODEL_ID] = id }
-    }
-
     suspend fun saveCustomProviders(providers: List<CustomProviderConfig>) {
         context.dataStore.edit { it[CUSTOM_PROVIDERS_JSON] = json.encodeToString(providers) }
     }

@@ -52,7 +52,6 @@ fun SettingsProviderDetailPage(
     val providerBaseUrls by viewModel.providerBaseUrls.collectAsState()
     val customProviders by viewModel.customProviders.collectAsState()
     val localChatModels by viewModel.localChatModels.collectAsState()
-    val activeLocalId by viewModel.activeLocalChatModelId.collectAsState()
 
     val isLocal = providerName == "Local"
     val isCustom = customProviders.any { it.name == providerName }
@@ -181,7 +180,7 @@ fun SettingsProviderDetailPage(
                             var showMenu by remember { mutableStateOf(false) }
                             add {
                                 SettingsItem(
-                                    headlineContent = { Text(model.alias, fontWeight = if (model.id == activeLocalId) FontWeight.Bold else FontWeight.Normal) },
+                                    headlineContent = { Text(model.alias) },
                                     supportingContent = { Text("${model.modelId}  ·  ctx=${model.nCtx}  ·  temp=${model.temperature}") },
                                     trailingContent = {
                                         Box {
@@ -191,8 +190,7 @@ fun SettingsProviderDetailPage(
                                                 DropdownMenuItem(text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeleteModelConfirm = model })
                                             }
                                         }
-                                    },
-                                    modifier = Modifier.clickable { viewModel.setActiveLocalChatModel(model.id) }
+                                    }
                                 )
                             }
                         }

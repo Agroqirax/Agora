@@ -106,7 +106,6 @@ class DataExporter(
         val shellDevices: List<ShellDeviceConfig> = emptyList(),
         val customProviders: List<CustomProviderConfig> = emptyList(),
         val localChatModels: List<LocalChatModelConfig>,
-        val activeLocalChatModelId: String,
         @SerialName("active_system_prompt_id") val activeSystemPromptId: String?
     )
 
@@ -306,13 +305,18 @@ class DataExporter(
                     },
                     customProviders = settingsManager.customProviders.first(),
                     localChatModels = settingsManager.localChatModels.first().map { it.copy(localFilePath = "") },
-                    activeLocalChatModelId = "", // cleared — models don't exist on target device
                     activeSystemPromptId = settingsManager.activeSystemPromptId.first()
                 )
                 zip.putNextEntry(ZipEntry("settings.json"))
                 zip.write(Json.encodeToString(settings).toByteArray())
                 zip.closeEntry()
                 step()
+
+                // Extra settings (separate file to keep data class size manageable)
+                val extra = ExportExtraSettings.toJsonObject(settingsManager)
+                zip.putNextEntry(ZipEntry("extra_settings.json"))
+                zip.write(Json.encodeToString(extra).toByteArray())
+                zip.closeEntry()
             }
 
             // API Keys (opt-in)

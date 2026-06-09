@@ -317,7 +317,6 @@ class ChatViewModel(
         models.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val localChatModels = settingsManager.localChatModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val activeLocalChatModelId = settingsManager.activeLocalChatModelId.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
     private val _cachingProgress = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cachingProgress: StateFlow<Map<String, Pair<Int, Int>>> = _cachingProgress.asStateFlow()
@@ -1022,13 +1021,9 @@ class ChatViewModel(
     fun addLocalChatModel(config: LocalChatModelConfig) {
         viewModelScope.launch {
             if (isLocalModelIdTaken(config.modelId)) return@launch
-            val wasEmpty = localChatModels.value.isEmpty()
             val models = localChatModels.value.toMutableList()
             models.add(config)
             settingsManager.saveLocalChatModels(models)
-            if (wasEmpty) {
-                settingsManager.setActiveLocalChatModelId(config.id)
-            }
             val modelPrefixedId = "Local:${config.modelId}"
             setEnabledModels(enabledModels.value + modelPrefixedId)
             settingsManager.saveModelAliases(modelAliases.value + (modelPrefixedId to config.alias))
@@ -1043,9 +1038,6 @@ class ChatViewModel(
             }
             val models = localChatModels.value.filter { it.id != uuid }
             settingsManager.saveLocalChatModels(models)
-            if (activeLocalChatModelId.value == uuid) {
-                settingsManager.setActiveLocalChatModelId(models.firstOrNull()?.id ?: "")
-            }
             val modelPrefixedId = "Local:${model?.modelId ?: uuid}"
             setEnabledModels(enabledModels.value - modelPrefixedId)
             val updatedAvailable = settingsManager.availableModels.first().toMutableMap()
@@ -1081,12 +1073,6 @@ class ChatViewModel(
             } else {
                 settingsManager.saveModelAliases(modelAliases.value + ("Local:$newModelId" to newAlias))
             }
-        }
-    }
-    fun setActiveLocalChatModel(id: String) {
-        if (id == activeLocalChatModelId.value) return
-        viewModelScope.launch {
-            settingsManager.setActiveLocalChatModelId(id)
         }
     }
 
