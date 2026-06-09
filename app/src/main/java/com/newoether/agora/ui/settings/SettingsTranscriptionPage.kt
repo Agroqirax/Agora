@@ -9,7 +9,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -17,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,23 +68,33 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 .padding(horizontal = 16.dp, vertical = 16.dp)
         ) {
             SettingsGroup(
-                title = stringResource(R.string.settings_transcription),
+                title = stringResource(R.string.transcription_model),
                 items = listOf({
                     val displayName = transcriptionModel?.let {
                         val alias = modelAliases[it]
                         alias ?: it.substringAfter(":").removePrefix("models/")
                     } ?: stringResource(R.string.transcription_no_model)
+                    val selectedProvider = transcriptionModel?.substringBefore(":")
+                    val selectedIconRes = selectedProvider?.let { providerIcon(it) } ?: 0
+                    val isSelectedLocal = selectedProvider.equals("Local", ignoreCase = true)
                     SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.transcription_model)) },
-                        supportingContent = {
+                        headlineContent = {
                             Text(
                                 displayName,
-                                color = if (transcriptionModel == null)
-                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                                else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (transcriptionModel == null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
                             )
                         },
-                        leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary) },
+                        supportingContent = if (transcriptionModel != null) {
+                            { Text(selectedProvider ?: "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
+                        } else null,
+                        leadingContent = {
+                            when {
+                                transcriptionModel == null -> Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                                isSelectedLocal -> Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                selectedIconRes != 0 -> Icon(painterResource(selectedIconRes), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                else -> Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                            }
+                        },
                         modifier = Modifier.clickable { showModelDialog = true }
                     )
                 })
@@ -106,10 +119,18 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             val displayName = alias ?: model.substringAfter(":").removePrefix("models/")
                             val providerName = model.substringBefore(":")
                             add {
+                                val iconRes = providerIcon(providerName)
+                                val isLocal = providerName.equals("Local", ignoreCase = true)
                                 SettingsItem(
-                                    headlineContent = { Text(displayName) },
-                                    supportingContent = { Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },
-                                    leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary) },
+                                    headlineContent = { Text(displayName, fontWeight = FontWeight.Medium) },
+                                    supportingContent = { Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                                    leadingContent = {
+                                        when {
+                                            isLocal -> Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                            iconRes != 0 -> Icon(painterResource(iconRes), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                            else -> Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                        }
+                                    },
                                     trailingContent = {
                                         Box {
                                             IconButton(onClick = { showMenuForModel = model }) {
@@ -139,11 +160,14 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                     if (availableToAdd.isNotEmpty()) {
                         add {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                            Box(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { showAddDialog = true }.padding(horizontal = 16.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                TextButton(onClick = { showAddDialog = true }) {
-                                    Text(stringResource(R.string.transcription_add_model))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(stringResource(R.string.transcription_add_model), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                                 }
                             }
                         }
@@ -222,7 +246,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val displayName = alias ?: model.substringAfter(":").removePrefix("models/")
                         SettingsItem(
                             headlineContent = { Text(displayName, fontWeight = if (transcriptionModel == model) FontWeight.Bold else FontWeight.Normal) },
-                            supportingContent = { Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },
+                            supportingContent = { Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall) },
                             leadingContent = {
                                 RadioButton(selected = transcriptionModel == model, onClick = {
                                     viewModel.setImageTranscriptionModel(model)
@@ -256,7 +280,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val checked = model in selected
                         SettingsItem(
                             headlineContent = { Text(displayName) },
-                            supportingContent = { Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },
+                            supportingContent = { Text(model.substringBefore(":"), style = MaterialTheme.typography.bodySmall) },
                             leadingContent = {
                                 Checkbox(checked = checked, onCheckedChange = {
                                     selected = if (checked) selected - model else selected + model
@@ -273,7 +297,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 TextButton(onClick = {
                     viewModel.addImageTranscriptionModels(selected)
                     showAddDialog = false
-                }) { Text(stringResource(R.string.provider_save)) }
+                }) { Text(stringResource(R.string.provider_add)) }
             },
             dismissButton = {
                 TextButton(onClick = { showAddDialog = false }) { Text(stringResource(R.string.provider_cancel)) }

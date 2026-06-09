@@ -15,7 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -97,20 +99,30 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 val cleanId = selectedModel.substringAfter(":")
                 val providerName = selectedModel.substringBefore(":")
                 val activeDisplayName = activeAlias ?: cleanId.removePrefix("models/")
+                val activeIconRes = providerIcon(providerName)
+                val isActiveLocal = providerName.equals("Local", ignoreCase = true)
+                val hasEnabledModels = enabledModels.isNotEmpty()
 
                 CardSurface(shape = FullRounded) {
                     SettingsItem(
                         headlineContent = {
                             Text(
-                                if (enabledModels.isEmpty()) stringResource(R.string.models_no_models) else activeDisplayName,
-                                color = if (enabledModels.isEmpty()) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
+                                if (!hasEnabledModels) stringResource(R.string.models_no_models) else activeDisplayName,
+                                color = if (!hasEnabledModels) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
                             )
                         },
-                        supportingContent = if (enabledModels.isNotEmpty()) {
-                            { Text(providerName, style = MaterialTheme.typography.bodySmall) }
+                        supportingContent = if (hasEnabledModels) {
+                            { Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
                         } else null,
-                        leadingContent = { Icon(Icons.Default.Chat, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                        modifier = Modifier.heightIn(min = 66.dp).clickable(enabled = enabledModels.isNotEmpty()) { showActiveModelDialog = true }
+                        leadingContent = {
+                            val tint = if (hasEnabledModels) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                            when {
+                                isActiveLocal -> Icon(Icons.Default.AutoAwesome, null, tint = tint, modifier = Modifier.size(24.dp))
+                                activeIconRes != 0 -> Icon(painterResource(activeIconRes), null, tint = tint, modifier = Modifier.size(24.dp))
+                                else -> Icon(Icons.Default.Cloud, null, tint = tint, modifier = Modifier.size(24.dp))
+                            }
+                        },
+                        modifier = Modifier.heightIn(min = 66.dp).clickable(enabled = hasEnabledModels) { showActiveModelDialog = true }
                     )
                 }
             }
@@ -158,9 +170,18 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     val headerShape = RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = bottomRadius, bottomEnd = bottomRadius)
 
                     CardSurface(shape = headerShape, addTopGap = true) {
+                        val headerIconRes = providerIcon(name)
+                        val isLocalHeader = name.equals("Local", ignoreCase = true)
                         SettingsItem(
-                            headlineContent = { Text(name, fontWeight = FontWeight.Bold) },
+                            headlineContent = { Text(name) },
                             supportingContent = { Text(stringResource(R.string.models_count, models.size)) },
+                            leadingContent = {
+                                when {
+                                    isLocalHeader -> Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    headerIconRes != 0 -> Icon(painterResource(headerIconRes), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                    else -> Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
+                                }
+                            },
                             trailingContent = {
                                 Icon(
                                     if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,

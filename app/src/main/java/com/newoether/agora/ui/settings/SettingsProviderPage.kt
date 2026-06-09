@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
 
-private fun providerIcon(name: String): Int = when (name.lowercase()) {
+internal fun providerIcon(name: String): Int = when (name.lowercase()) {
     "google" -> R.drawable.provider_google
     "openai" -> R.drawable.provider_openai
     "anthropic" -> R.drawable.provider_anthropic
