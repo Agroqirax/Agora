@@ -38,7 +38,7 @@ fun PdfPageSelectDialog(
     onConfirm: (PdfPageSelection) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val effectiveTotal = totalPages.coerceIn(1, 50)
+    val effectiveTotal = totalPages.coerceAtLeast(1)
     val selectAll = selectedPages.size == effectiveTotal
 
     val hasThumbnails = thumbnailPaths.isNotEmpty() && !isLoading
@@ -76,9 +76,10 @@ fun PdfPageSelectDialog(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
-                    TextButton(onClick = {
-                        onSelectAll?.invoke(!selectAll)
-                    }) {
+                    TextButton(
+                        onClick = { onSelectAll?.invoke(!selectAll) },
+                        enabled = !isLoading
+                    ) {
                         Text(if (selectAll) "Deselect All" else "Select All")
                     }
                 }

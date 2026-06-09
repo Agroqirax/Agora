@@ -309,13 +309,13 @@ fun ChatBottomBar(
                     pendingPdfMimeType = mimeType
                     pendingPdfRenderedPaths = emptyList()
                     pendingPdfIsRendering = true
-                    pendingPdfRenderProgress = 0 to minOf(pageCount, 50)
+                    pendingPdfRenderProgress = 0 to pageCount
                     showPdfPageDialog = true
                     // Initialize selection to first 5 pages
                     onInitPdfSelection?.invoke((0 until minOf(pageCount, 5)).toSet())
                     coroutineScope.launch(Dispatchers.IO) {
                         val paths = com.newoether.agora.util.PdfPageRenderer.renderAllPages(
-                            context, uri, maxPages = 20,
+                            context, uri, maxPages = pageCount,
                             onProgress = { cur, total -> pendingPdfRenderProgress = cur to total }
                         )
                         pendingPdfRenderedPaths = paths
@@ -970,7 +970,7 @@ fun ChatBottomBar(
             selectedPages = pdfViewerSelection,
             onTogglePage = { onTogglePdfSelection?.invoke(it) },
             onSelectAll = { select -> onTogglePdfSelection?.let { toggle ->
-                (0 until pendingPdfPages.coerceIn(1, 50)).forEach { i ->
+                (0 until pendingPdfPages.coerceAtLeast(1)).forEach { i ->
                     if ((i in pdfViewerSelection) != select) toggle(i)
                 }
             }},

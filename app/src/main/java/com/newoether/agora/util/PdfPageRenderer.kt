@@ -46,7 +46,7 @@ object PdfPageRenderer {
         return paths
     }
 
-    fun renderAllPages(context: Context, uri: Uri, maxPages: Int = 50, onProgress: ((current: Int, total: Int) -> Unit)? = null): List<String> {
+    fun renderAllPages(context: Context, uri: Uri, maxPages: Int = 200, onProgress: ((current: Int, total: Int) -> Unit)? = null): List<String> {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyList()
 
         val fd = context.contentResolver.openFileDescriptor(uri, "r") ?: return emptyList()
