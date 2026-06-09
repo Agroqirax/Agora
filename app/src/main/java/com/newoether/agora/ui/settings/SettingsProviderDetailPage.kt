@@ -192,42 +192,53 @@ fun SettingsProviderDetailPage(
 
             // API Keys (non-Local)
             if (!isLocal) {
-                SettingsGroup(
-                    title = stringResource(R.string.provider_api_keys),
-                    items = buildList {
-                        apiKeys.filter { it.provider == providerName }.forEach { entry ->
-                            var showMenu by remember { mutableStateOf(false) }
-                            add {
-                                SettingsItem(
-                                    headlineContent = { Text(entry.name, fontWeight = FontWeight.Medium) },
-                                    supportingContent = { Text(entry.key.take(4) + "••••••••" + entry.key.takeLast(4)) },
-                                    leadingContent = {
-                                        RadioButton(selected = entry.id == activeApiKeyIds[providerName], onClick = { viewModel.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp))
-                                    },
-                                    trailingContent = {
-                                        Box {
-                                            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(16.dp)) }
-                                            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 16.dp, shape = RoundedCornerShape(12.dp)) {
-                                                DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; showKeyDialog = entry })
-                                                DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeleteKeyConfirm = entry })
-                                            }
-                                        }
-                                    },
-                                    modifier = Modifier.clickable { viewModel.setActiveApiKey(providerName, entry.id) }
-                                )
-                            }
+                val providerKeys = apiKeys.filter { it.provider == providerName }
+                if (providerKeys.isEmpty()) {
+                    Text(stringResource(R.string.provider_api_keys), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(vertical = 12.dp))
+                    Text(stringResource(R.string.provider_no_keys, providerName), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp))
+                    Box(modifier = Modifier.clickable { showKeyDialog = ApiKeyEntry(name = "", key = "", provider = providerName) }.padding(bottom = 24.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(stringResource(R.string.provider_add_key), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
                         }
-                        add {
-                            Box(modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { showKeyDialog = ApiKeyEntry(name = "", key = "", provider = providerName) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(stringResource(R.string.provider_add_key), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    }
+                } else {
+                    SettingsGroup(
+                        title = stringResource(R.string.provider_api_keys),
+                        items = buildList {
+                            providerKeys.forEach { entry ->
+                                var showMenu by remember { mutableStateOf(false) }
+                                add {
+                                    SettingsItem(
+                                        headlineContent = { Text(entry.name, fontWeight = FontWeight.Medium) },
+                                        supportingContent = { Text(entry.key.take(4) + "••••••••" + entry.key.takeLast(4)) },
+                                        leadingContent = { RadioButton(selected = entry.id == activeApiKeyIds[providerName], onClick = { viewModel.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp)) },
+                                        trailingContent = {
+                                            Box {
+                                                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(16.dp)) }
+                                                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 16.dp, shape = RoundedCornerShape(12.dp)) {
+                                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; showKeyDialog = entry })
+                                                    DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeleteKeyConfirm = entry })
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.clickable { viewModel.setActiveApiKey(providerName, entry.id) }
+                                    )
+                                }
+                            }
+                            add {
+                                Box(modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { showKeyDialog = ApiKeyEntry(name = "", key = "", provider = providerName) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(stringResource(R.string.provider_add_key), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                                    }
                                 }
                             }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }
