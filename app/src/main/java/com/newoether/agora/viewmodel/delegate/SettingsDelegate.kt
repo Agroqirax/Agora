@@ -1,6 +1,5 @@
 package com.newoether.agora.viewmodel.delegate
 
-import androidx.lifecycle.viewModelScope
 import com.newoether.agora.api.CustomOpenAiProvider
 import com.newoether.agora.api.LlmProvider
 import com.newoether.agora.data.ApiKeyEntry
