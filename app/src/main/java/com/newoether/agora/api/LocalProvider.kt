@@ -39,13 +39,13 @@ class LocalProvider(
         val chatModels = settingsManager.localChatModels.first()
         val modelConfig = chatModels.find { it.modelId == config.modelId }
         if (modelConfig == null) {
-            emit(StreamEvent.Error("Local model not found: ${config.modelId}"))
+            emit(StreamEvent.Error(GenerationError.LocalModel("Local model not found: ${config.modelId}")))
             return@flow
         }
 
         val engine = ensureEngineLoaded(modelConfig)
         if (engine == null) {
-            emit(StreamEvent.Error("Failed to load model: ${modelConfig.alias}"))
+            emit(StreamEvent.Error(GenerationError.LocalModel("Failed to load model: ${modelConfig.alias}")))
             return@flow
         }
 
@@ -141,11 +141,11 @@ class LocalProvider(
             )
         } catch (e: kotlinx.coroutines.CancellationException) {
             engine.cancel()
-            emit(StreamEvent.Error("Generation cancelled"))
+            emit(StreamEvent.Error(GenerationError.Cancelled))
             throw e
         } catch (e: Exception) {
             DebugLog.e(TAG, "Generation failed", e)
-            emit(StreamEvent.Error("Generation failed: ${e.message}"))
+            emit(StreamEvent.Error(GenerationError.LocalModel("Generation failed: ${e.message}")))
             return@flow
         }
 

@@ -181,13 +181,17 @@ abstract class BaseOpenAiProvider : LlmProvider {
                         emit(StreamEvent.Retrying(attempt, maxAttempts))
                         delay(1000L * attempt)
                     } else {
-                        val errorMessage = try {
+                        val genError = try {
                             val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
-                            "Error ${errorJson.error.code ?: handle.code} (${errorJson.error.type ?: "UNKNOWN"}): ${errorJson.error.message}"
+                            GenerationError.Api(
+                                code = errorJson.error.code ?: handle.code.toString(),
+                                type = errorJson.error.type,
+                                message = errorJson.error.message
+                            )
                         } catch (_: Exception) {
-                            "Error ${handle.code}: $errorRaw"
+                            GenerationError.Network(statusCode = handle.code, message = errorRaw)
                         }
-                        emit(StreamEvent.Error(errorMessage))
+                        emit(StreamEvent.Error(genError))
                     }
                 }
                 } finally { handle.close() }
@@ -195,14 +199,14 @@ abstract class BaseOpenAiProvider : LlmProvider {
         } catch (e: CancellationException) {
             throw e
         } catch (e: SocketTimeoutException) {
-            emit(StreamEvent.Error("Request timed out. The server took too long to respond."))
+            emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: ConnectException) {
-            emit(StreamEvent.Error("Connection refused. Please check your internet connection or if the service is available."))
+            emit(StreamEvent.Error(GenerationError.Network(statusCode = 0, message = e.localizedMessage ?: "Connection refused")))
         } catch (e: UnknownHostException) {
-            emit(StreamEvent.Error("Network error: Unable to reach the server. Please check your internet connection."))
+            emit(StreamEvent.Error(GenerationError.Network(statusCode = 0, message = e.localizedMessage ?: "Unknown host")))
         } catch (e: Exception) {
             if (currentCoroutineContext().isActive) {
-                emit(StreamEvent.Error("Error: ${e.localizedMessage ?: "An unexpected error occurred."}"))
+                emit(StreamEvent.Error(GenerationError.Unknown(e)))
             }
         }
     }.flowOn(Dispatchers.IO)

@@ -11,7 +11,9 @@ sealed class StreamEvent {
     data class TextChunk(val text: String) : StreamEvent()
     data class ThoughtChunk(val thought: String, val title: String? = null, val signature: String? = null) : StreamEvent()
     data class UsageUpdate(val tokenCount: Int, val thoughtsTokenCount: Int = 0) : StreamEvent()
-    data class Error(val message: String) : StreamEvent()
+    data class Error(val error: GenerationError) : StreamEvent() {
+        val message: String get() = error.userMessage()
+    }
     data class ToolCallRequest(val id: String, val name: String, val arguments: String, val signature: String? = null) : StreamEvent()
     data class ToolCallsRequest(val calls: List<ToolCallRequest>) : StreamEvent()
     /** Emitted when the provider is retrying after a transient error (401, 429, 5xx).
