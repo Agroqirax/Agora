@@ -556,12 +556,14 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
-                    // Fix stuck sending states when loading conversation
-                    val stuckMessages = chatDao.getMessagesForConversation(id).first()
-                        .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
-                    
-                    stuckMessages.forEach { msg ->
-                        chatDao.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
+                    // Fix stuck sending states when loading conversation — skip if currently generating
+                    if (!_isLoading.value) {
+                        val stuckMessages = chatDao.getMessagesForConversation(id).first()
+                            .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
+
+                        stuckMessages.forEach { msg ->
+                            chatDao.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
+                        }
                     }
 
                     // Restore selected branches

@@ -125,7 +125,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 val iconRes = providerIcon(providerName)
                                 val isLocal = providerName.equals("Local", ignoreCase = true)
                                 SettingsItem(
-                                    headlineContent = { Text(displayName, fontWeight = FontWeight.Medium) },
+                                    headlineContent = { Text(displayName) },
                                     supportingContent = { Text(providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
                                     leadingContent = {
                                         when {

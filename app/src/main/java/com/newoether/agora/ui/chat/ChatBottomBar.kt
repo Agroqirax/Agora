@@ -781,12 +781,12 @@ fun ChatBottomBar(
                             onClick = { onThinkingToggle(!thinkingEnabled) }
                         )
                         if (thinkingEnabled) {
-                            val levels = listOf("low", "medium", "high")
+                            val levels = listOf("low" to R.string.gen_thinking_level_low, "medium" to R.string.gen_thinking_level_medium, "high" to R.string.gen_thinking_level_high)
                             Row(
                                 modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp).offset(y = (-10).dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                levels.forEach { level ->
+                                levels.forEach { (level, labelRes) ->
                                     val selected = level == thinkingLevel
                                     val bgColor by animateColorAsState(
                                         if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -811,7 +811,7 @@ fun ChatBottomBar(
                                         contentColor = textColor
                                     ) {
                                         Text(
-                                            text = level.replaceFirstChar { it.uppercase() },
+                                            text = stringResource(labelRes),
                                             modifier = Modifier.padding(vertical = 6.dp).fillMaxWidth(),
                                             textAlign = TextAlign.Center,
                                             style = MaterialTheme.typography.labelSmall,
