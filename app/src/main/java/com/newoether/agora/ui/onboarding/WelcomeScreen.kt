@@ -65,6 +65,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +84,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -228,6 +231,7 @@ fun WelcomeScreen(
     DisposableEffect(Unit) { onDispose { players.forEach { it?.release() } } }
 
     val visitedPages = remember { mutableSetOf<Int>() }
+    val typedPages = remember { mutableSetOf<Int>() }
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
     var exiting by remember { mutableStateOf(false) }
@@ -333,24 +337,26 @@ fun WelcomeScreen(
 
                         // Title + description
                         Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp).alpha(contentAlpha)) {
-                            AnimatedContent(index, transitionSpec = { fadeIn() togetherWith fadeOut() }) { idx ->
-                                val page = pages[idx]
-                                val title = when {
-                                    idx == PAGE_API_KEY && selectedProvider == "Local" -> stringResource(R.string.onboarding_gguf_title)
-                                    idx == PAGE_API_KEY && selectedProvider == "Ollama" -> stringResource(R.string.onboarding_server_url_title)
-                                    else -> page.title
-                                }
-                                val desc = when {
-                                    idx == PAGE_API_KEY && selectedProvider == "Local" -> stringResource(R.string.onboarding_gguf_desc)
-                                    idx == PAGE_API_KEY && selectedProvider == "Ollama" -> stringResource(R.string.onboarding_ollama_desc)
-                                    idx == PAGE_API_KEY && selectedProvider != null -> stringResource(R.string.onboarding_api_key_for, selectedProvider!!)
-                                    else -> page.description
-                                }
-                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface)
-                                    Spacer(Modifier.height(8.dp))
-                                    Text(desc, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
+                            val page = pages[index]
+                            val title = when {
+                                index == PAGE_API_KEY && selectedProvider == "Local" -> stringResource(R.string.onboarding_gguf_title)
+                                index == PAGE_API_KEY && selectedProvider == "Ollama" -> stringResource(R.string.onboarding_server_url_title)
+                                else -> page.title
+                            }
+                            val desc = when {
+                                index == PAGE_API_KEY && selectedProvider == "Local" -> stringResource(R.string.onboarding_gguf_desc)
+                                index == PAGE_API_KEY && selectedProvider == "Ollama" -> stringResource(R.string.onboarding_ollama_desc)
+                                index == PAGE_API_KEY && selectedProvider != null -> stringResource(R.string.onboarding_api_key_for, selectedProvider!!)
+                                else -> page.description
+                            }
+                            val isCurrent = pagerState.currentPage == index
+                            val show = isCurrent || index in typedPages
+                            val anim = isCurrent && index !in typedPages
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                                val delay = if (index == 0) 2000 else 0
+                                TypeInText(text = title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface, speedMs = 50, initialDelayMs = if (anim) delay else 0, animate = anim, showText = show)
+                                Spacer(Modifier.height(8.dp))
+                                TypeInText(text = desc, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, speedMs = 30, initialDelayMs = if (anim) delay + 200 else 0, animate = anim, showText = show, onDone = { if (anim) typedPages.add(index) })
                             }
                         }
 
@@ -593,6 +599,37 @@ private fun ModelPage(models: List<String>, selectedId: String?, onSelect: (Stri
                     Spacer(Modifier.height(10.dp))
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun TypeInText(text: String, modifier: Modifier = Modifier, style: TextStyle, color: Color, fontWeight: FontWeight? = null, textAlign: TextAlign? = null, speedMs: Int = 50, initialDelayMs: Int = 0, animate: Boolean = true, onDone: () -> Unit = {}, showText: Boolean = true) {
+    var startMs by remember(text) { mutableStateOf(0L) }
+    var started by remember(text) { mutableStateOf(false) }
+    var visible by remember(text, animate) { mutableStateOf(if (animate) 0 else text.length) }
+    var done by remember(text, animate) { mutableStateOf(!animate) }
+    LaunchedEffect(text, animate) {
+        if (!animate) { visible = text.length; done = true; return@LaunchedEffect }
+        visible = 0
+        done = false
+        if (!started) { startMs = System.currentTimeMillis() + initialDelayMs; started = true }
+        while (visible < text.length) {
+            val elapsed = System.currentTimeMillis() - startMs
+            val target = if (elapsed < 0) 0 else (elapsed / speedMs).toInt().coerceAtMost(text.length)
+            if (target != visible) visible = target
+            if (visible >= text.length) break
+            kotlinx.coroutines.delay(16)
+        }
+        done = true
+        onDone()
+    }
+    Box(modifier.fillMaxWidth()) {
+        // Invisible full text anchors layout — always present
+        Text(text = text, style = style, fontWeight = fontWeight, color = Color.Transparent, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
+        // Visible typed text — only when showText is true
+        if (showText) {
+            Text(text = text.take(visible) + if (!done) "|" else "", style = style, fontWeight = fontWeight, color = color, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
         }
     }
 }
