@@ -323,7 +323,7 @@ fun WelcomeScreen(
                                 else -> {
                                     Box(Modifier.fillMaxSize()) {
                                         players[index]?.let { LoopVideo(it) }
-                                        if (index == 0) FirstVideoScrim()
+                                        if (index == 0) FirstVideoScrim(isDarkTheme)
                                     }
                                 }
                             }
@@ -408,11 +408,12 @@ fun WelcomeScreen(
 // ═════════════════════════════════════════════════════════════
 
 @Composable
-private fun FirstVideoScrim() {
+private fun FirstVideoScrim(isDarkTheme: Boolean) {
     var visible by remember { mutableStateOf(true) }
     val alpha by animateFloatAsState(if (visible) 1f else 0f, tween(500))
     LaunchedEffect(Unit) { kotlinx.coroutines.delay(200); visible = false }
-    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = alpha)))
+    val scrimColor = if (isDarkTheme) Color.Black else Color.White
+    Box(Modifier.fillMaxSize().background(scrimColor.copy(alpha = alpha)))
 }
 
 // ═════════════════════════════════════════════════════════════
