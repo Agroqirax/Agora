@@ -164,8 +164,8 @@ class AutoBackupManager(
         val deletePeriodHours = settingsManager.autoDeletePeriodHours.safeRead(168)
         val backupPeriodHours = settingsManager.autoBackupPeriodHours.safeRead(24)
 
-        // Defense: never delete faster than backup period
-        if (deletePeriodHours < backupPeriodHours) return
+        // Defense: auto-delete must be strictly greater than backup period
+        if (deletePeriodHours <= backupPeriodHours) return
 
         val cutoffTime = System.currentTimeMillis() - deletePeriodHours.toLong() * 3600_000L
         val dir = resolveBackupDir() ?: return

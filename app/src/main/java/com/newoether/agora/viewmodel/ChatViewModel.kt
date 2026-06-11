@@ -1191,10 +1191,12 @@ class ChatViewModel(
     fun setAutoBackupPeriodHours(hours: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             settingsManager.saveAutoBackupPeriodHours(hours)
-            // Enforce: auto-delete period >= backup period
+            // Enforce: auto-delete period must be strictly greater than backup period
+            val deleteTiers = listOf(168, 720, 8760)
             val deleteHours = try { settingsManager.autoDeletePeriodHours.first() } catch (_: Exception) { 168 }
-            if (deleteHours < hours) {
-                settingsManager.saveAutoDeletePeriodHours(hours)
+            if (deleteHours <= hours) {
+                val nextDelete = deleteTiers.firstOrNull { it > hours } ?: 8760
+                settingsManager.saveAutoDeletePeriodHours(nextDelete)
             }
         }
     }
@@ -1210,7 +1212,10 @@ class ChatViewModel(
     fun setAutoDeletePeriodHours(hours: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             val backupHours = try { settingsManager.autoBackupPeriodHours.first() } catch (_: Exception) { 24 }
-            settingsManager.saveAutoDeletePeriodHours(maxOf(hours, backupHours))
+            val deleteTiers = listOf(168, 720, 8760)
+            // Find the smallest valid delete tier that is > backupHours, and >= the requested hours
+            val minValid = deleteTiers.firstOrNull { it > backupHours } ?: 8760
+            settingsManager.saveAutoDeletePeriodHours(maxOf(hours, minValid))
         }
     }
     fun setThinkingEnabled(enabled: Boolean) = settingsDelegate.setThinkingEnabled(enabled)

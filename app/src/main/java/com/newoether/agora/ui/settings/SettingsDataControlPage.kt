@@ -848,6 +848,25 @@ private fun StrategyChip(label: String, selected: Boolean, onClick: () -> Unit) 
 // Auto Backup section
 // ═══════════════════════════════════════════════════════════════
 
+/** Decode a SAF content:// URI into a human-readable path. */
+private fun resolveDisplayPath(uri: String): String {
+    if (!uri.startsWith("content://")) {
+        return uri.ifBlank { "Download/Agora/Backup" }
+    }
+    // Decode percent-encoded characters (%3A → :, %2F → /, etc.)
+    val decoded = Uri.decode(uri)
+    // Extract the last meaningful path segment after the authority
+    val segment = decoded.substringAfterLast("/")
+        .replace("primary:", "Internal storage/")
+        .replace("home:", "Internal storage/")
+    // If it starts with a storage volume ID like "msd:" or "XXXX-XXXX:", show "SD Card"
+    if (segment.matches(Regex("^[A-Za-z0-9]+[-:].*")) && !segment.startsWith("Internal")) {
+        val volume = segment.substringBefore(":").substringBefore("-")
+        return "SD Card ($volume)"
+    }
+    return segment.ifEmpty { "Selected folder" }
+}
+
 @Composable
 private fun AutoBackupSection(viewModel: ChatViewModel) {
     val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
@@ -934,7 +953,11 @@ private fun AutoBackupPeriodDropdown(currentHours: Int, onSelect: (Int) -> Unit)
             },
             modifier = Modifier.clickable { expanded = true }
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(16.dp)
+        ) {
             periods.forEach { (hours, labelRes) ->
                 DropdownMenuItem(
                     text = { Text(stringResource(labelRes)) },
@@ -951,8 +974,8 @@ private fun AutoDeletePeriodDropdown(currentHours: Int, backupHours: Int, onSele
     val allPeriods = listOf(168 to R.string.auto_delete_period_1w,
         720 to R.string.auto_delete_period_1mo,
         8760 to R.string.auto_delete_period_1y)
-    // Only show periods >= backup period
-    val validPeriods = allPeriods.filter { it.first >= backupHours }
+    // Only show periods STRICTLY greater than backup period
+    val validPeriods = allPeriods.filter { it.first > backupHours }
     var expanded by remember { mutableStateOf(false) }
     val currentLabel = validPeriods.find { it.first == currentHours }?.second ?: validPeriods.firstOrNull()?.second ?: R.string.auto_delete_period_1w
 
@@ -965,7 +988,11 @@ private fun AutoDeletePeriodDropdown(currentHours: Int, backupHours: Int, onSele
             },
             modifier = Modifier.clickable { expanded = true }
         )
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(16.dp)
+        ) {
             validPeriods.forEach { (hours, labelRes) ->
                 DropdownMenuItem(
                     text = { Text(stringResource(labelRes)) },
@@ -998,11 +1025,7 @@ private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
     SettingsItem(
         headlineContent = { Text(stringResource(R.string.auto_backup_directory_label)) },
         supportingContent = {
-            val displayPath = if (directory.startsWith("content://")) {
-                directory.substringAfterLast("/").ifEmpty { directory.substringAfterLast("%2F").ifEmpty { "Selected folder" } }
-            } else {
-                directory.ifBlank { "Download/Agora/Backup" }
-            }
+            val displayPath = resolveDisplayPath(directory)
             Text(displayPath, color = MaterialTheme.colorScheme.onSurfaceVariant)
         },
         leadingContent = {
