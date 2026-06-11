@@ -117,6 +117,7 @@ echo "  [1/4] Building libtalloc.so..."
     "$TALLOC_SRC/talloc.c" \
     -DHAVE_CONFIG_H \
     -I"$TALLOC_SRC"
+cp "$TALLOC_SRC/talloc.h" "$SYSROOT_INC/"
 echo "  [1/4] Done: $(stat -c%s "$SYSROOT_LIB/libtalloc.so") bytes"
 
 # ── Step 2: Build proot via GNUmakefile ────────────────────────
@@ -124,11 +125,15 @@ echo "  [2/4] Building proot (GNUmakefile)..."
 (
     cd "$BLD_DIR"
     export SOURCE_DATE_EPOCH=0
-    make -f "$PROOT_SRC/GNUmakefile" \
+    export CPPFLAGS="-I${SYSROOT_INC} -DSYS_SECCOMP=1"
+    export LDFLAGS="-L${SYSROOT_LIB}"
+    export CC="${TC_PREFIX}/${CROSS_PREFIX}-clang"
+    # Remove stale build artifacts from previous failed builds
+    find src -name '*.d' -o -name '*.o' -delete 2>/dev/null || true
+    rm -f src/proot src/loader/loader 2>/dev/null || true
+    make -C src \
         CROSS_COMPILE="${CROSS_PREFIX}-" \
         PROOT_UNBUNDLE_LOADER="$LOADER_OUT" \
-        LDFLAGS="-ltalloc -L${SYSROOT_LIB}" \
-        CPPFLAGS="-D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I${SYSROOT_INC} -I${PROOT_SRC}" \
         proot
 )
 echo "  [2/4] Done: $(stat -c%s "$BLD_DIR/src/proot") bytes"

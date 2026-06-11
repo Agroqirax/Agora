@@ -54,6 +54,12 @@ interface SandboxManager {
     /** List installed Alpine packages. */
     suspend fun apkList(): List<PackageInfo>
 
+    /** Remove a package from the sandbox. */
+    suspend fun apkDelete(packageName: String): Boolean
+
+    /** Get rootfs disk usage in MB. */
+    suspend fun getDiskUsageMB(): Long
+
     /** Delete rootfs and proot binary, returning to uninstalled state. */
     suspend fun reset(): Boolean
 

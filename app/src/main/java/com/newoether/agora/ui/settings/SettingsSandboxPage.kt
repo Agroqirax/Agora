@@ -93,7 +93,11 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit) {
 
     val quickPkgs = listOf("python3", "git", "curl", "openssh-client", "nodejs", "build-base", "vim", "htop")
     val pkgCount = packages.size
-    val estSize = (pkgCount * 8 + 10).coerceAtLeast(10)
+    var diskUsageMB by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(packages) {
+        try { diskUsageMB = sandboxManager.getDiskUsageMB() } catch (_: Exception) {}
+    }
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -206,13 +210,13 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit) {
                             Column {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     LinearProgressIndicator(
-                                        progress = { (estSize.toFloat() / 200f).coerceIn(0f, 1f) },
+                                        progress = { (diskUsageMB.toFloat() / 500f).coerceIn(0f, 1f) },
                                         modifier = Modifier.weight(0.3f).height(6.dp),
                                         trackColor = MaterialTheme.colorScheme.surfaceVariant
                                     )
                                     Spacer(Modifier.width(10.dp))
                                     Text(
-                                        "~$estSize MB / 200 MB",
+                                        "~${diskUsageMB.coerceAtLeast(1)} MB / 500 MB",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -469,7 +473,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit) {
                     onClick = {
                         scope.launch {
                             try {
-                                sandboxManager.executeCommand("apk del $pkgName", timeoutMs = 30000)
+                                sandboxManager.apkDelete(pkgName)
                                 refreshPackages()
                             } catch (_: Exception) {}
                         }

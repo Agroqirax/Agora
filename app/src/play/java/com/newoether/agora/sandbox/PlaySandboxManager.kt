@@ -54,6 +54,10 @@ class PlaySandboxManager : SandboxManager {
 
     override suspend fun apkList(): List<SandboxManager.PackageInfo> = emptyList()
 
+    override suspend fun apkDelete(packageName: String): Boolean = false
+
+    override suspend fun getDiskUsageMB(): Long = 0L
+
     override suspend fun reset(): Boolean = false
     override fun close() {}
 }
