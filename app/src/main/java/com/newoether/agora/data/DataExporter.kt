@@ -26,7 +26,12 @@ class DataExporter(
         MEMORIES("memories"),
         SYSTEM_PROMPTS("system_prompts"),
         SETTINGS("settings"),
-        API_KEYS("api_keys")
+        API_KEYS("api_keys");
+
+        companion object {
+            fun fromManifestKey(key: String): ExportCategory? =
+                entries.find { it.manifestKey == key }
+        }
     }
 
     @Serializable

@@ -9,6 +9,7 @@ import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.MemoryRepository
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.ChatViewModelFactory
@@ -64,6 +65,12 @@ class AppContainer(private val appContext: Context) {
                 null
             }
         }
+    }
+
+    // ── Auto Backup ───────────────────────────────────────────
+
+    val autoBackupManager: AutoBackupManager by lazy {
+        AutoBackupManager(appContext, settingsManager, chatDao, memoryManager)
     }
 
     // ── ViewModel Factory ─────────────────────────────────────

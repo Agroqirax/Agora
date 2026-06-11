@@ -134,6 +134,11 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             chatDao.deleteOrphanedEmbeddings()
         }
+        // ── Auto Backup ──────────────────────────────────────────
+        try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
+        viewModelScope.launch(Dispatchers.IO) {
+            try { autoBackupManager?.checkAndBackup() } catch (_: Exception) {}
+        }
         // Sync local chat models into available models
         viewModelScope.launch {
             var lastLocalIds: List<String>? = null
@@ -243,11 +248,19 @@ class ChatViewModel(
     }
     val isSandboxFlavor: Boolean = sandboxFactory?.isAvailable() == true
 
+    // ── Auto Backup ───────────────────────────────────────────
+    val autoBackupManager: com.newoether.agora.data.AutoBackupManager? by lazy {
+        try {
+            com.newoether.agora.data.AutoBackupManager(getApplication(), settingsManager, chatDao, memoryManager)
+        } catch (e: Exception) { null }
+    }
+
     override fun onCleared() {
         super.onCleared()
         sandboxManager?.close()
         localProvider.close()
         generationScope.coroutineContext[Job]?.cancel()
+        autoBackupManager?.destroy()
     }
 
     val listState = LazyListState()
@@ -381,6 +394,14 @@ class ChatViewModel(
     val searchContextWindow = settingsManager.searchContextWindow.stateIn(viewModelScope, SharingStarted.Eagerly, 8)
     val searchMatchLimit = settingsManager.searchMatchLimit.stateIn(viewModelScope, SharingStarted.Eagerly, 10)
     val ragThreshold = settingsManager.ragThreshold.stateIn(viewModelScope, SharingStarted.Eagerly, 0.5f)
+
+    // ── Auto Backup ───────────────────────────────────────────
+    val autoBackupEnabled = settingsManager.autoBackupEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val autoBackupPeriodHours = settingsManager.autoBackupPeriodHours.stateIn(viewModelScope, SharingStarted.Eagerly, 24)
+    val autoBackupCategories = settingsManager.autoBackupCategories.stateIn(viewModelScope, SharingStarted.Eagerly, "conversations,memories,system_prompts,settings")
+    val autoBackupDirectory = settingsManager.autoBackupDirectory.stateIn(viewModelScope, SharingStarted.Eagerly, "Download/Agora/Backup")
+    val autoDeleteEnabled = settingsManager.autoDeleteEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val autoDeletePeriodHours = settingsManager.autoDeletePeriodHours.stateIn(viewModelScope, SharingStarted.Eagerly, 168)
 
         val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
             .map { entities ->
@@ -1156,6 +1177,42 @@ class ChatViewModel(
     fun setShowDocumentationFab(enabled: Boolean) = settingsDelegate.setShowDocumentationFab(enabled)
     fun setShellEnabled(enabled: Boolean) = settingsDelegate.setShellEnabled(enabled)
     fun setSandboxEnabled(enabled: Boolean) = settingsDelegate.setSandboxEnabled(enabled)
+    // ── Auto Backup ───────────────────────────────────────────
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsManager.saveAutoBackupEnabled(enabled)
+            if (enabled) {
+                try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
+            } else {
+                try { com.newoether.agora.service.AutoBackupWorker.cancel(getApplication()) } catch (_: Exception) {}
+            }
+        }
+    }
+    fun setAutoBackupPeriodHours(hours: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsManager.saveAutoBackupPeriodHours(hours)
+            // Enforce: auto-delete period >= backup period
+            val deleteHours = try { settingsManager.autoDeletePeriodHours.first() } catch (_: Exception) { 168 }
+            if (deleteHours < hours) {
+                settingsManager.saveAutoDeletePeriodHours(hours)
+            }
+        }
+    }
+    fun setAutoBackupCategories(categories: String) {
+        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoBackupCategories(categories) }
+    }
+    fun setAutoBackupDirectory(path: String) {
+        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoBackupDirectory(path) }
+    }
+    fun setAutoDeleteEnabled(enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoDeleteEnabled(enabled) }
+    }
+    fun setAutoDeletePeriodHours(hours: Int) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val backupHours = try { settingsManager.autoBackupPeriodHours.first() } catch (_: Exception) { 24 }
+            settingsManager.saveAutoDeletePeriodHours(maxOf(hours, backupHours))
+        }
+    }
     fun setThinkingEnabled(enabled: Boolean) = settingsDelegate.setThinkingEnabled(enabled)
     fun setThinkingLevel(level: String) = settingsDelegate.setThinkingLevel(level)
     fun setDefaultTemperature(v: Float?) = settingsDelegate.setDefaultTemperature(v)

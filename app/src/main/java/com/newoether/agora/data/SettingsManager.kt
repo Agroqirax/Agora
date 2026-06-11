@@ -153,6 +153,14 @@ class SettingsManager(private val context: Context) {
         val DEFAULT_FREQUENCY_PENALTY = stringPreferencesKey("default_frequency_penalty")
         val DEFAULT_PRESENCE_PENALTY = stringPreferencesKey("default_presence_penalty")
         val CONVERSATION_SETTINGS_JSON = stringPreferencesKey("conversation_settings_json")
+        // ── Auto Backup ───────────────────────────────────────────
+        val AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
+        val AUTO_BACKUP_PERIOD_HOURS = intPreferencesKey("auto_backup_period_hours")
+        val AUTO_BACKUP_CATEGORIES = stringPreferencesKey("auto_backup_categories")
+        val AUTO_BACKUP_DIRECTORY = stringPreferencesKey("auto_backup_directory")
+        val AUTO_DELETE_ENABLED = booleanPreferencesKey("auto_delete_enabled")
+        val AUTO_DELETE_PERIOD_HOURS = intPreferencesKey("auto_delete_period_hours")
+        val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
@@ -267,6 +275,15 @@ class SettingsManager(private val context: Context) {
     val ratingPromptSubmitted: Flow<Boolean> = context.dataStore.data.map { it[RATING_PROMPT_SUBMITTED] ?: false }
     val ratingPromptDismissed: Flow<Boolean> = context.dataStore.data.map { it[RATING_PROMPT_DISMISSED] ?: false }
     val totalMessagesSent: Flow<Int> = context.dataStore.data.map { it[TOTAL_MESSAGES_SENT] ?: 0 }
+
+    // ── Auto Backup ───────────────────────────────────────────
+    val autoBackupEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTO_BACKUP_ENABLED] ?: true }
+    val autoBackupPeriodHours: Flow<Int> = context.dataStore.data.map { it[AUTO_BACKUP_PERIOD_HOURS] ?: 24 }
+    val autoBackupCategories: Flow<String> = context.dataStore.data.map { it[AUTO_BACKUP_CATEGORIES] ?: "conversations,memories,system_prompts,settings" }
+    val autoBackupDirectory: Flow<String> = context.dataStore.data.map { it[AUTO_BACKUP_DIRECTORY] ?: "Download/Agora/Backup" }
+    val autoDeleteEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTO_DELETE_ENABLED] ?: true }
+    val autoDeletePeriodHours: Flow<Int> = context.dataStore.data.map { it[AUTO_DELETE_PERIOD_HOURS] ?: 168 }
+    val lastBackupTimestamp: Flow<Long> = context.dataStore.data.map { it[LAST_BACKUP_TIMESTAMP] ?: 0L }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
         context.dataStore.edit { prefs ->
@@ -531,5 +548,28 @@ class SettingsManager(private val context: Context) {
 
     suspend fun incrementMessagesSent() {
         context.dataStore.edit { it[TOTAL_MESSAGES_SENT] = (it[TOTAL_MESSAGES_SENT] ?: 0) + 1 }
+    }
+
+    // ── Auto Backup ───────────────────────────────────────────
+    suspend fun saveAutoBackupEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_BACKUP_ENABLED] = enabled }
+    }
+    suspend fun saveAutoBackupPeriodHours(hours: Int) {
+        context.dataStore.edit { it[AUTO_BACKUP_PERIOD_HOURS] = hours }
+    }
+    suspend fun saveAutoBackupCategories(categories: String) {
+        context.dataStore.edit { it[AUTO_BACKUP_CATEGORIES] = categories }
+    }
+    suspend fun saveAutoBackupDirectory(path: String) {
+        context.dataStore.edit { it[AUTO_BACKUP_DIRECTORY] = path }
+    }
+    suspend fun saveAutoDeleteEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_DELETE_ENABLED] = enabled }
+    }
+    suspend fun saveAutoDeletePeriodHours(hours: Int) {
+        context.dataStore.edit { it[AUTO_DELETE_PERIOD_HOURS] = hours }
+    }
+    suspend fun saveLastBackupTimestamp(timestamp: Long) {
+        context.dataStore.edit { it[LAST_BACKUP_TIMESTAMP] = timestamp }
     }
 }

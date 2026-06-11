@@ -738,4 +738,24 @@
     <string name="onboarding_invalid_gguf_desc">The selected file does not appear to be a valid GGUF model.</string>
     <string name="onboarding_hide_key">Hide key</string>
     <string name="onboarding_show_key">Show key</string>
+    <!-- ── Auto Backup ── -->
+    <string name="auto_backup_title">Auto Backup</string>
+    <string name="auto_backup_subtitle">Automatically export data on a schedule</string>
+    <string name="auto_backup_period_label">Backup every</string>
+    <string name="auto_backup_period_1d">1 day</string>
+    <string name="auto_backup_period_3d">3 days</string>
+    <string name="auto_backup_period_5d">5 days</string>
+    <string name="auto_backup_period_1w">1 week</string>
+    <string name="auto_backup_period_1mo">1 month</string>
+    <string name="auto_backup_categories_label">Export content</string>
+    <string name="auto_backup_categories_desc">Choose what to back up</string>
+    <string name="auto_backup_categories_dialog_title">Auto backup content</string>
+    <string name="auto_backup_api_key_warning">API keys will be stored unencrypted in the backup file</string>
+    <string name="auto_backup_directory_label">Backup location</string>
+    <string name="auto_delete_title">Auto delete old backups</string>
+    <string name="auto_delete_subtitle">Remove backups older than the specified period</string>
+    <string name="auto_delete_period_label">Delete older than</string>
+    <string name="auto_delete_period_1w">1 week</string>
+    <string name="auto_delete_period_1mo">1 month</string>
+    <string name="auto_delete_period_1y">1 year</string>
 </resources>

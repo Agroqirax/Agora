@@ -742,4 +742,24 @@
     <string name="onboarding_invalid_gguf_desc">所选文件不是有效的 GGUF 模型。</string>
     <string name="onboarding_hide_key">隐藏密钥</string>
     <string name="onboarding_show_key">显示密钥</string>
+    <!-- ── Auto Backup ── -->
+    <string name="auto_backup_title">自动备份</string>
+    <string name="auto_backup_subtitle">按计划自动导出数据</string>
+    <string name="auto_backup_period_label">备份额率</string>
+    <string name="auto_backup_period_1d">1 天</string>
+    <string name="auto_backup_period_3d">3 天</string>
+    <string name="auto_backup_period_5d">5 天</string>
+    <string name="auto_backup_period_1w">1 周</string>
+    <string name="auto_backup_period_1mo">1 个月</string>
+    <string name="auto_backup_categories_label">导出内容</string>
+    <string name="auto_backup_categories_desc">选择备份内容</string>
+    <string name="auto_backup_categories_dialog_title">自动备份内容</string>
+    <string name="auto_backup_api_key_warning">API 密钥将以未加密方式存储在备份文件中</string>
+    <string name="auto_backup_directory_label">备份目录</string>
+    <string name="auto_delete_title">自动删除旧备份</string>
+    <string name="auto_delete_subtitle">删除超过指定时限的备份文件</string>
+    <string name="auto_delete_period_label">删除时限</string>
+    <string name="auto_delete_period_1w">1 周</string>
+    <string name="auto_delete_period_1mo">1 个月</string>
+    <string name="auto_delete_period_1y">1 年</string>
 </resources>

@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.settings
 
+import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -12,9 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Upload
-import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -68,6 +67,27 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var gptFileUri by remember { mutableStateOf<Uri?>(null) }
     var gptFileName by remember { mutableStateOf<String?>(null) }
     var showGptSuccessDialog by remember { mutableStateOf(false) }
+
+    // Auto Backup
+    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
+    val autoBackupPeriodHours by viewModel.autoBackupPeriodHours.collectAsState()
+    val autoBackupCategories by viewModel.autoBackupCategories.collectAsState()
+    val autoBackupDirectory by viewModel.autoBackupDirectory.collectAsState()
+    val autoDeleteEnabled by viewModel.autoDeleteEnabled.collectAsState()
+    val autoDeletePeriodHours by viewModel.autoDeletePeriodHours.collectAsState()
+
+    // SAF directory picker for auto backup
+    val dirPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.setAutoBackupDirectory(uri.toString())
+        }
+    }
 
     val isExporting = exportProgress != null
     val isImporting = importProgress != null
@@ -241,6 +261,11 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                 ))
+
+                // ═══════════════════════════════════════════════
+                // Auto Backup group
+                // ═══════════════════════════════════════════════
+                AutoBackupSection(viewModel)
 
                 // Show Claude import dialog when preview is loaded
                 LaunchedEffect(claudeImportPreview) {
@@ -816,5 +841,272 @@ private fun StrategyChip(label: String, selected: Boolean, onClick: () -> Unit) 
         onClick = onClick,
         label = { Text(label, style = MaterialTheme.typography.labelSmall) },
         shape = RoundedCornerShape(50)
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Auto Backup section
+// ═══════════════════════════════════════════════════════════════
+
+@Composable
+private fun AutoBackupSection(viewModel: ChatViewModel) {
+    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
+    val autoBackupPeriodHours by viewModel.autoBackupPeriodHours.collectAsState()
+    val autoDeleteEnabled by viewModel.autoDeleteEnabled.collectAsState()
+    val autoDeletePeriodHours by viewModel.autoDeletePeriodHours.collectAsState()
+
+    SettingsGroup(title = stringResource(R.string.auto_backup_title), items = buildList {
+        // Toggle
+        add {
+            SettingsItem(
+                headlineContent = { Text(stringResource(R.string.auto_backup_title)) },
+                supportingContent = { Text(stringResource(R.string.auto_backup_subtitle)) },
+                leadingContent = {
+                    Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
+                },
+                trailingContent = {
+                    Switch(checked = autoBackupEnabled, onCheckedChange = { viewModel.setAutoBackupEnabled(it) })
+                },
+                modifier = Modifier.clickable { viewModel.setAutoBackupEnabled(!autoBackupEnabled) }
+            )
+        }
+
+        if (autoBackupEnabled) {
+            // Backup period
+            add {
+                AutoBackupPeriodDropdown(
+                    currentHours = autoBackupPeriodHours,
+                    onSelect = { viewModel.setAutoBackupPeriodHours(it) }
+                )
+            }
+
+            // Categories
+            add { AutoBackupCategoriesItem(viewModel) }
+
+            // Directory
+            add { AutoBackupDirectoryItem(viewModel) }
+
+            // Auto delete toggle
+            add {
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.auto_delete_title)) },
+                    supportingContent = { Text(stringResource(R.string.auto_delete_subtitle)) },
+                    leadingContent = {
+                        Icon(Icons.Default.AutoDelete, null, tint = MaterialTheme.colorScheme.primary)
+                    },
+                    trailingContent = {
+                        Switch(checked = autoDeleteEnabled, onCheckedChange = { viewModel.setAutoDeleteEnabled(it) })
+                    },
+                    modifier = Modifier.clickable { viewModel.setAutoDeleteEnabled(!autoDeleteEnabled) }
+                )
+            }
+
+            // Auto delete period (constrained)
+            if (autoDeleteEnabled) {
+                add {
+                    AutoDeletePeriodDropdown(
+                        currentHours = autoDeletePeriodHours,
+                        backupHours = autoBackupPeriodHours,
+                        onSelect = { viewModel.setAutoDeletePeriodHours(it) }
+                    )
+                }
+            }
+        }
+    })
+}
+
+@Composable
+private fun AutoBackupPeriodDropdown(currentHours: Int, onSelect: (Int) -> Unit) {
+    val periods = listOf(24 to R.string.auto_backup_period_1d,
+        72 to R.string.auto_backup_period_3d,
+        120 to R.string.auto_backup_period_5d,
+        168 to R.string.auto_backup_period_1w,
+        720 to R.string.auto_backup_period_1mo)
+    var expanded by remember { mutableStateOf(false) }
+    val currentLabel = periods.find { it.first == currentHours }?.second ?: R.string.auto_backup_period_1d
+
+    Box {
+        SettingsItem(
+            headlineContent = { Text(stringResource(R.string.auto_backup_period_label)) },
+            supportingContent = { Text(stringResource(currentLabel), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            leadingContent = {
+                Icon(Icons.Default.Timer, null, tint = MaterialTheme.colorScheme.primary)
+            },
+            modifier = Modifier.clickable { expanded = true }
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            periods.forEach { (hours, labelRes) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(labelRes)) },
+                    onClick = { onSelect(hours); expanded = false },
+                    leadingIcon = if (hours == currentHours) {{ Icon(Icons.Default.Check, null) }} else {{}}
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutoDeletePeriodDropdown(currentHours: Int, backupHours: Int, onSelect: (Int) -> Unit) {
+    val allPeriods = listOf(168 to R.string.auto_delete_period_1w,
+        720 to R.string.auto_delete_period_1mo,
+        8760 to R.string.auto_delete_period_1y)
+    // Only show periods >= backup period
+    val validPeriods = allPeriods.filter { it.first >= backupHours }
+    var expanded by remember { mutableStateOf(false) }
+    val currentLabel = validPeriods.find { it.first == currentHours }?.second ?: validPeriods.firstOrNull()?.second ?: R.string.auto_delete_period_1w
+
+    Box {
+        SettingsItem(
+            headlineContent = { Text(stringResource(R.string.auto_delete_period_label)) },
+            supportingContent = { Text(stringResource(currentLabel), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            leadingContent = {
+                Icon(Icons.Default.DeleteSweep, null, tint = MaterialTheme.colorScheme.primary)
+            },
+            modifier = Modifier.clickable { expanded = true }
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            validPeriods.forEach { (hours, labelRes) ->
+                DropdownMenuItem(
+                    text = { Text(stringResource(labelRes)) },
+                    onClick = { onSelect(hours); expanded = false },
+                    leadingIcon = if (hours == currentHours) {{ Icon(Icons.Default.Check, null) }} else {{}}
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
+    val context = LocalContext.current
+    val directory by viewModel.autoBackupDirectory.collectAsState()
+    var showPickerDialog by remember { mutableStateOf(false) }
+
+    val dirPickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+            viewModel.setAutoBackupDirectory(uri.toString())
+        }
+    }
+
+    SettingsItem(
+        headlineContent = { Text(stringResource(R.string.auto_backup_directory_label)) },
+        supportingContent = {
+            val displayPath = if (directory.startsWith("content://")) {
+                directory.substringAfterLast("/").ifEmpty { directory.substringAfterLast("%2F").ifEmpty { "Selected folder" } }
+            } else {
+                directory.ifBlank { "Download/Agora/Backup" }
+            }
+            Text(displayPath, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        leadingContent = {
+            Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
+        },
+        trailingContent = {
+            Icon(Icons.Default.FolderOpen, stringResource(R.string.edit), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+        },
+        modifier = Modifier.clickable { dirPickerLauncher.launch(null) }
+    )
+}
+
+@Composable
+private fun AutoBackupCategoriesItem(viewModel: ChatViewModel) {
+    val categories by viewModel.autoBackupCategories.collectAsState()
+    var showDialog by remember { mutableStateOf(false) }
+
+    val selectedKeys = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()
+    val displaySummary = when {
+        selectedKeys.isEmpty() -> stringResource(R.string.auto_backup_categories_desc)
+        selectedKeys.size >= 4 -> stringResource(R.string.auto_backup_categories_desc)
+        else -> selectedKeys.joinToString(", ") { it.replace("_", " ").replaceFirstChar { c -> c.uppercase() } }
+    }
+
+    SettingsItem(
+        headlineContent = { Text(stringResource(R.string.auto_backup_categories_label)) },
+        supportingContent = { Text(displaySummary, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+        leadingContent = {
+            Icon(Icons.Default.Topic, null, tint = MaterialTheme.colorScheme.primary)
+        },
+        trailingContent = {
+            Icon(Icons.Default.ChevronRight, stringResource(R.string.edit), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        modifier = Modifier.clickable { showDialog = true }
+    )
+
+    if (showDialog) {
+        AutoBackupCategoriesDialog(
+            selectedKeys = selectedKeys,
+            onDismiss = { showDialog = false },
+            onConfirm = { newKeys ->
+                viewModel.setAutoBackupCategories(newKeys.joinToString(","))
+                showDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun AutoBackupCategoriesDialog(
+    selectedKeys: Set<String>,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<String>) -> Unit
+) {
+    val categoryOptions = listOf(
+        "conversations" to "对话",
+        "memories" to "记忆",
+        "system_prompts" to "系统提示词",
+        "settings" to "设置",
+        "api_keys" to "API 密钥"
+    )
+    var current by remember { mutableStateOf(selectedKeys) }
+    val apiKeysChecked = "api_keys" in current
+    val anyChecked = current.isNotEmpty()
+
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.auto_backup_categories_dialog_title), fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                categoryOptions.forEach { (key, defaultName) ->
+                    // Try to get localized name; fallback to hardcoded
+                    val label = defaultName // Could use stringResource per key, but keep it simple
+                    CheckRow(
+                        checked = key in current,
+                        onToggle = { checked ->
+                            current = if (checked) current + key else current - key
+                        },
+                        label = label
+                    )
+                }
+                if (apiKeysChecked) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Warning, null, modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            stringResource(R.string.auto_backup_api_key_warning),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(current) }, enabled = anyChecked) {
+                Text(stringResource(R.string.ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        }
     )
 }

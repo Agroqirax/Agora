@@ -79,6 +79,14 @@ class SettingsRepository(
     val ragThreshold: Flow<Float> = settingsManager.ragThreshold
     val localChatModels: Flow<List<LocalChatModelConfig>> = settingsManager.localChatModels
     val customProviders: Flow<List<CustomProviderConfig>> = settingsManager.customProviders
+    // ── Auto Backup ───────────────────────────────────────────
+    val autoBackupEnabled: Flow<Boolean> = settingsManager.autoBackupEnabled
+    val autoBackupPeriodHours: Flow<Int> = settingsManager.autoBackupPeriodHours
+    val autoBackupCategories: Flow<String> = settingsManager.autoBackupCategories
+    val autoBackupDirectory: Flow<String> = settingsManager.autoBackupDirectory
+    val autoDeleteEnabled: Flow<Boolean> = settingsManager.autoDeleteEnabled
+    val autoDeletePeriodHours: Flow<Int> = settingsManager.autoDeletePeriodHours
+    val lastBackupTimestamp: Flow<Long> = settingsManager.lastBackupTimestamp
 
     // ── Write (direct delegation) ─────────────────────────────
 
@@ -136,6 +144,14 @@ class SettingsRepository(
     suspend fun saveSearchContextWindow(n: Int) = settingsManager.saveSearchContextWindow(n)
     suspend fun saveRagThreshold(threshold: Float) = settingsManager.saveRagThreshold(threshold)
     suspend fun saveLocalChatModels(models: List<LocalChatModelConfig>) = settingsManager.saveLocalChatModels(models)
+    // ── Auto Backup ───────────────────────────────────────────
+    suspend fun saveAutoBackupEnabled(enabled: Boolean) = settingsManager.saveAutoBackupEnabled(enabled)
+    suspend fun saveAutoBackupPeriodHours(hours: Int) = settingsManager.saveAutoBackupPeriodHours(hours)
+    suspend fun saveAutoBackupCategories(categories: String) = settingsManager.saveAutoBackupCategories(categories)
+    suspend fun saveAutoBackupDirectory(path: String) = settingsManager.saveAutoBackupDirectory(path)
+    suspend fun saveAutoDeleteEnabled(enabled: Boolean) = settingsManager.saveAutoDeleteEnabled(enabled)
+    suspend fun saveAutoDeletePeriodHours(hours: Int) = settingsManager.saveAutoDeletePeriodHours(hours)
+    suspend fun saveLastBackupTimestamp(timestamp: Long) = settingsManager.saveLastBackupTimestamp(timestamp)
 
     // ── Batch Operations ──────────────────────────────────────
 
