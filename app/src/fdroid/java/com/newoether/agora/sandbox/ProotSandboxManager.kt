@@ -2,13 +2,36 @@ package com.newoether.agora.sandbox
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.file.FileSystems
 class ProotSandboxManager(private val context: Context) : SandboxManager {
 
     private val alpineMirror = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main"
+    private var sandboxScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val _terminalOutput = MutableStateFlow("")
+    override val terminalOutput: StateFlow<String> = _terminalOutput.asStateFlow()
+    private val _isBusy = MutableStateFlow(false)
+    override val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
+    private val _packageList = MutableStateFlow<List<SandboxManager.PackageInfo>>(emptyList())
+    override val packageList: StateFlow<List<SandboxManager.PackageInfo>> = _packageList.asStateFlow()
+
+    override suspend fun refreshPackageList() {
+        if (isAvailable()) _packageList.value = apkList()
+    }
+    private val _snackbarMessage = MutableStateFlow<String?>(null)
+    override val snackbarMessage: StateFlow<String?> = _snackbarMessage.asStateFlow()
+    override var pendingPkgName: String = ""
 
     private val rootfsDir: File = File(context.filesDir, "alpine-rootfs")
 
@@ -21,18 +44,32 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
 
     override var lastError: String? = null
 
+    private fun ensureShell(): Boolean {
+        val sh = File(rootfsDir, "bin/sh")
+        if (sh.exists()) return true
+        try {
+            val busybox = File(rootfsDir, "bin/busybox")
+            if (busybox.isFile && busybox.canRead()) {
+                // Delete broken symlink if present (exists()=false but symlink entry exists)
+                sh.delete()
+                busybox.copyTo(sh, false); sh.setExecutable(true)
+                return true
+            }
+        } catch (_: Throwable) { sh.delete() }
+        return false
+    }
+
     override suspend fun isAvailable(): Boolean = withContext(Dispatchers.IO) {
         if (!rootfsDir.isDirectory) { lastError = "rootfs not found: ${rootfsDir.absolutePath}"; return@withContext false }
-        val sh = listOf("bin/sh", "usr/bin/sh").map { File(rootfsDir, it) }.any { it.exists() }
+        if (!ensureShell()) { lastError = "/bin/sh missing"; return@withContext false }
         val linker = listOf("lib/ld-musl-aarch64.so.1", "usr/lib/ld-musl-aarch64.so.1").map { File(rootfsDir, it) }.any { it.exists() }
-        if (!sh) { lastError = "/bin/sh missing (symlinks not created?)"; return@withContext false }
         if (!linker) { lastError = "musl linker missing"; return@withContext false }
         true
     }
 
     override suspend fun install(): Boolean = withContext(Dispatchers.IO) {
         try {
-            if (rootfsDir.exists()) rootfsDir.deleteRecursively()
+            if (rootfsDir.exists()) { rootfsDir.deleteRecursively(); if (rootfsDir.exists()) { error("Cannot delete stale rootfs") } }
             rootfsDir.mkdirs()
 
             val tmpTar = File(context.filesDir, "alpine-rootfs.tar.gz")
@@ -52,6 +89,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
 
             File(rootfsDir, "tmp").mkdirs()
             File(rootfsDir, "run").mkdirs()
+            listOf("var/cache/apk", "etc/apk/cache", "var/lock").forEach { File(rootfsDir, it).mkdirs() }
             val rc = File(rootfsDir, "etc/resolv.conf"); rc.parentFile?.mkdirs()
             rc.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
             // Alpine repository config
@@ -66,8 +104,57 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         } catch (e: Throwable) { e.printStackTrace(); lastError = e.message; false }
     }
 
-    override fun close() {}
-    override suspend fun reset(): Boolean = withContext(Dispatchers.IO) { try { rootfsDir.deleteRecursively(); prootBin.delete(); true } catch (e: Throwable) { false } }
+    override fun installPackage(name: String) {
+        if (_isBusy.value) return
+        sandboxScope.launch {
+            _terminalOutput.value = ""
+            _isBusy.value = true
+            try {
+                val ok = apkInstall(name) { _terminalOutput.value += it + "\n" }
+                ensureShell()
+                _packageList.value = apkList()
+                _terminalOutput.value += if (ok) "✓ Installed $name\n" else "✗ Failed\n"
+                _snackbarMessage.value = if (ok) "Installed $name" else "Failed to install $name"
+            } catch (e: Throwable) { ensureShell()
+                _packageList.value = apkList()
+                _terminalOutput.value += "✗ Error: ${e.message}\n"
+                _snackbarMessage.value = "Error: ${e.message}"
+            } finally { _isBusy.value = false }
+        }
+    }
+
+    override fun removePackage(name: String) {
+        if (_isBusy.value) return
+        sandboxScope.launch {
+            _terminalOutput.value = ""
+            _isBusy.value = true
+            try {
+                val ok = apkDelete(name)
+                _terminalOutput.value += if (ok) "✓ Removed $name\n" else "✗ Failed to remove $name\n"
+            } catch (e: Throwable) {
+                _terminalOutput.value += "✗ Error: ${e.message}\n"
+            } finally { ensureShell(); _isBusy.value = false; _packageList.value = apkList() }
+        }
+    }
+
+    override fun close() {
+        sandboxScope.cancel()
+    }
+    override suspend fun reset(): Boolean = withContext(Dispatchers.IO) {
+        sandboxScope.cancel(); sandboxScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        _terminalOutput.value = ""
+        _packageList.value = emptyList()
+        try {
+            for (i in 1..3) {
+                rootfsDir.deleteRecursively()
+                if (!rootfsDir.exists()) break
+                kotlinx.coroutines.delay(200)
+            }
+            prootBin.delete()
+            _snackbarMessage.value = "Sandbox reset"
+            true
+        } catch (e: Throwable) { false }
+    }
 
     // ── Shell Execution ─────────────────────────────────
 
@@ -94,13 +181,14 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     private fun executeRaw(command: String, workdir: String = "/root", timeoutMs: Int = 30000): SandboxManager.SandboxResult {
+        ensureShell()
         val tmpDir = File(rootfsDir, "tmp").apply { mkdirs() }.absolutePath
-        // Kai-style CLI: --rootfs=, --bind=, -0
         val args = listOf(prootPath,
             "--rootfs=" + rootfsDir.absolutePath,
             "--bind=/dev", "--bind=/proc", "--bind=/sys",
+            "--bind=/dev/urandom:/dev/random",
             "-w", workdir.ifBlank { "/root" },
-            "-0",  // link2symlink extension
+            "-0", "--link2symlink", "--kill-on-exit", "-L",
             "/bin/sh", "-c", command
         )
         return try {
@@ -176,41 +264,128 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     // ── Package Management ──────────────────────────────
+    // Downloads target + all transitive deps + stale base-package upgrades via
+    // Android HTTP (works with VPN/Clash), then single apk add --no-network.
 
     override suspend fun apkInstall(packageName: String, onProgress: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
         if (!isAvailable()) { onProgress("Sandbox not installed"); return@withContext false }
-        onProgress("apk update...")
-        val updateResult = executeRaw("apk update", timeoutMs = 60000)
-        onProgress(updateResult.stdout)
-        onProgress("apk add $packageName...")
-        val result = executeRaw("apk add --no-cache $packageName", timeoutMs = 120000)
-        onProgress(result.stdout)
-        if (result.exitCode != 0) { lastError = result.stderr.ifBlank { result.stdout }; return@withContext false }
+
+        // 1. Download + parse repo index
+        onProgress("Fetching package index...")
+        val indexUrl = "$alpineMirror/aarch64/APKINDEX.tar.gz"
+        val indexFile = File(context.filesDir, "APKINDEX.tar.gz")
+        try {
+            val conn = URL(indexUrl).openConnection() as HttpURLConnection
+            onProgress("Connecting to ${conn.url.host}...")
+            val code = conn.responseCode
+            onProgress("HTTP $code (${conn.contentLength} bytes)")
+            if (code != 200) { onProgress("FAIL: HTTP $code"); lastError = "HTTP $code from $indexUrl"; return@withContext false }
+            conn.inputStream.use { i -> indexFile.outputStream().use { o -> i.copyTo(o) } }
+        }
+        catch (e: Throwable) { onProgress("FAIL: ${e.javaClass.simpleName}: ${e.message}"); lastError = "${e.javaClass.simpleName}: ${e.message}"; return@withContext false }
+        val (repoPkgs, soToPkg) = parseFullApkIndex(indexFile); indexFile.delete()
+
+        if (packageName !in repoPkgs) { lastError = "Not found: $packageName"; return@withContext false }
+
+        // 2. Read installed DB — don't reinstall/downgrade existing packages
+        val installedDb = File(rootfsDir, "lib/apk/db/installed")
+        val installed = mutableMapOf<String, String>() // name → version
+        if (installedDb.exists()) {
+            var n = ""; var v = ""
+            installedDb.readLines(Charsets.UTF_8).forEach { line ->
+                if (line.startsWith("P:")) n = line.substring(2).trim()
+                else if (line.startsWith("V:")) v = line.substring(2).trim()
+                else if (line.isBlank()) { if (n.isNotEmpty()) installed[n] = v; n = ""; v = "" }
+            }
+            if (n.isNotEmpty()) installed[n] = v
+        }
+
+        // 3. Recursively resolve target + transitive deps, skip already installed UNLESS version constraint forces upgrade
+        val toInstall = linkedSetOf<String>()
+        fun resolve(name: String, visited: MutableSet<String> = mutableSetOf()) {
+            if (name in visited || name !in repoPkgs) return
+            visited.add(name)
+            val instVer = installed[name]
+            if (instVer == null || instVer != repoPkgs[name]!!.version) toInstall.add(name)
+            for (dep in repoPkgs[name]!!.deps) {
+                val dn = dep.takeWhile { it != '=' && it != '>' && it != '<' && it != '~' }
+                if (dn.isNotEmpty()) {
+                    if (dn in repoPkgs) resolve(dn, visited)
+                    else soToPkg[dn]?.let { resolve(it, visited) }
+                }
+            }
+        }
+        resolve(packageName)
+        onProgress("${toInstall.size} packages to install")
+
+        // 4. Download all .apk files
+        val tmpDir = File(rootfsDir, "tmp"); tmpDir.listFiles()?.forEach { it.delete() }; tmpDir.mkdirs()
+        val paths = mutableListOf<String>()
+        for (name in toInstall) {
+            val ver = repoPkgs[name]?.version ?: continue
+            val fn = "$name-$ver.apk"; val f = File(context.filesDir, fn)
+            if (!f.exists() || f.length() == 0L) {
+                onProgress("Downloading $fn...")
+                try {
+                    val conn = URL("$alpineMirror/aarch64/$fn").openConnection() as HttpURLConnection
+                    if (conn.responseCode != 200) { onProgress("HTTP ${conn.responseCode}"); lastError = "HTTP ${conn.responseCode}: $fn"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
+                    conn.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
+                } catch (ex: Throwable) { onProgress("FAIL: ${ex.message}"); lastError = "Download: ${ex.message}"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
+            }
+            val dst = File(tmpDir, fn); f.copyTo(dst, true); f.delete(); paths.add("/tmp/$fn")
+        }
+
+        // 5. Pre-install: if we're replacing /bin/sh provider, install that first
+        // to avoid post-install scripts failing when busybox-binsh is purged.
+        val shPkgs = toInstall.filter { "binsh" in it || it == "yash" }.toList()
+        if (shPkgs.isNotEmpty()) {
+            val shPaths = paths.filter { p -> shPkgs.any { p.contains(it) } }
+            if (shPaths.isNotEmpty()) {
+                onProgress("Installing shell provider first...")
+                val r = executeRaw("apk add --allow-untrusted --no-network ${shPaths.joinToString(" ")}", timeoutMs = 60000)
+                onProgress(r.stdout)
+                paths.removeAll(shPaths)
+            }
+        }
+
+        // 6. Main install
+        onProgress("Installing ${paths.size} packages...")
+        val result = executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ")}", timeoutMs = 120000)
+        onProgress(result.stdout); tmpDir.listFiles()?.forEach { it.delete() }
+        // Verify install — apk may return non-zero on minor post-install script errors
+        val installedOk = File(rootfsDir, "lib/apk/db/installed").readText(Charsets.UTF_8).contains("P:$packageName\n")
+        if (!installedOk) { lastError = result.stderr.ifBlank { result.stdout }; return@withContext false }
         true
     }
 
     override suspend fun apkList(): List<SandboxManager.PackageInfo> = withContext(Dispatchers.IO) {
-        if (!isAvailable()) return@withContext emptyList()
+        if (!isAvailable()) { _terminalOutput.value += "[apkList: isAvailable=false]\n"; return@withContext emptyList() }
         try {
-            val result = executeRaw("apk info -v --installed", timeoutMs = 15000)
-            if (result.exitCode != 0) return@withContext emptyList()
-            result.stdout.lines().mapNotNull { line ->
-                // Format: "python3-3.12.8-r0 description: text..."
-                val parts = line.split(" ", limit = 2)
-                val pv = parts.getOrNull(0) ?: return@mapNotNull null
-                val desc = parts.getOrNull(1)?.removePrefix("description:")?.trim() ?: ""
-                val lastDash = pv.lastIndexOf('-')
-                if (lastDash < 0) return@mapNotNull null
-                val name = pv.substring(0, lastDash)
-                val version = pv.substring(lastDash + 1)
-                SandboxManager.PackageInfo(name = name, version = version, description = desc)
+            val db = File(rootfsDir, "lib/apk/db/installed")
+            if (!db.exists()) { _terminalOutput.value += "[apkList: DB not found at ${db.absolutePath}]\n"; return@withContext emptyList() }
+            val content = db.readText(Charsets.UTF_8)
+            val pkgs = mutableListOf<SandboxManager.PackageInfo>()
+            var n = ""; var v = ""; var d = ""
+            content.lines().forEach { line ->
+                if (line.startsWith("P:")) n = line.substring(2).trim()
+                else if (line.startsWith("V:")) v = line.substring(2).trim()
+                else if (line.startsWith("T:")) d = line.substring(2).trim()
+                else if (line.isBlank()) { if (n.isNotBlank()) { pkgs.add(SandboxManager.PackageInfo(name = n, version = v, description = d)); n = ""; v = ""; d = "" } }
             }
-        } catch (e: Throwable) { emptyList() }
+            if (n.isNotBlank()) pkgs.add(SandboxManager.PackageInfo(name = n, version = v, description = d))
+            if (pkgs.isEmpty()) _terminalOutput.value += "[apkList: parsed 0 from ${content.length}B]\n"
+            pkgs
+        } catch (e: Throwable) { _terminalOutput.value += "[apkList: ${e.message}]\n"; emptyList() }
     }
 
     override suspend fun apkDelete(packageName: String): Boolean = withContext(Dispatchers.IO) {
-        if (!isAvailable()) return@withContext false
+        if (!isAvailable()) { _terminalOutput.value += "Sandbox not available\n"; return@withContext false }
+        val db = File(rootfsDir, "lib/apk/db/installed")
+        if (db.exists()) { _terminalOutput.value += "DB has package: ${db.readText(Charsets.UTF_8).contains(packageName)}\n" }
+        _terminalOutput.value += "Running: apk del $packageName\n"
         val result = executeRaw("apk del $packageName", timeoutMs = 60000)
+        _terminalOutput.value += result.stdout
+        _terminalOutput.value += if (result.exitCode == 0) "Exit: 0\n" else "Exit: ${result.exitCode}\n"
         result.exitCode == 0
     }
 
@@ -234,13 +409,61 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         }
         for ((name, target) in symlinks) {
             val outFile = File(destDir, name); if (outFile.exists()) continue
-            val src = File(destDir, target)
+            val src = if (target.startsWith("/")) File(destDir, target)
+                      else File(outFile.parentFile ?: destDir, target)
             if (!src.exists()) continue
             try {
                 if (src.isDirectory) src.walkTopDown().forEach { f -> val rel = f.relativeTo(src).path; val dst = File(outFile, rel); if (f.isDirectory) dst.mkdirs() else { dst.parentFile?.mkdirs(); f.copyTo(dst, true) } }
                 else { outFile.parentFile?.mkdirs(); src.copyTo(outFile, true) }
             } catch (_: Throwable) {}
         }
+    }
+
+    // ── APKINDEX Parsing ────────────────────────────────
+
+    private data class FullPkgEntry(val name: String, val version: String, val deps: List<String>)
+
+    private fun parseFullApkIndex(indexFile: File): Pair<Map<String, FullPkgEntry>, Map<String, String>> {
+        val result = mutableMapOf<String, FullPkgEntry>()
+        val soToPkg = mutableMapOf<String, String>()
+        java.util.zip.GZIPInputStream(indexFile.inputStream()).use { gz ->
+            org.apache.commons.compress.archivers.tar.TarArchiveInputStream(gz).use { tar ->
+                var entry = tar.nextEntry
+                while (entry != null) {
+                    if (entry.name == "APKINDEX") {
+                        val lines = tar.readBytes().toString(Charsets.UTF_8).lines()
+                        for (i in lines.indices) {
+                            val line = lines[i].trim()
+                            if (!line.startsWith("P:")) continue
+                            val name = line.substring(2).trim()
+                            var version = ""; var provider = ""
+                            val deps = mutableListOf<String>()
+                            val isSoEntry = name.startsWith("so:")
+                            for (j in i + 1 until minOf(i + 30, lines.size)) {
+                                val n = lines[j].trim()
+                                if (n.startsWith("C:")) break
+                                if (n.startsWith("V:")) version = n.substring(2).trim()
+                                if (n.startsWith("p:")) {
+                                    provider = n.substring(2).trim()
+                                    if (!isSoEntry) {
+                                        // p: lists all provides (so:libfoo.so.1=1.0 so:libbar.so.1=1.0)
+                                        for (prov in provider.split(Regex("\\s+"))) {
+                                            val pn = prov.takeWhile { it != '=' }
+                                            if (pn.isNotEmpty()) soToPkg[pn] = name
+                                        }
+                                    }
+                                }
+                                if (n.startsWith("D:")) deps.addAll(n.substring(2).trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
+                            }
+                            if (isSoEntry && provider.isNotEmpty()) soToPkg[name] = provider
+                            else if (!isSoEntry && name.isNotEmpty() && version.isNotEmpty()) result[name] = FullPkgEntry(name, version, deps)
+                        }
+                    }
+                    entry = tar.nextEntry
+                }
+            }
+        }
+        return Pair(result, soToPkg)
     }
 
     // ── Helpers ────────────────────────────────────────

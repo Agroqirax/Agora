@@ -1,5 +1,7 @@
 package com.newoether.agora.sandbox
 
+import kotlinx.coroutines.flow.StateFlow
+
 /**
  * Manages an on-device Linux sandbox (proot + Alpine).
  * Available only in the fdroid flavor; play flavor gets a no-op stub.
@@ -8,6 +10,30 @@ package com.newoether.agora.sandbox
  * rootfs filesystem without proot — only shell commands go through proot.
  */
 interface SandboxManager {
+
+    /** Real-time terminal output stream for install/uninstall operations. */
+    val terminalOutput: StateFlow<String>
+
+    /** Live package list — updated automatically after install/remove. */
+    val packageList: StateFlow<List<PackageInfo>>
+
+    /** Global snackbar messages for install/remove/reset events. UI shows via SnackbarHost. */
+    val snackbarMessage: StateFlow<String?>
+
+    /** Load installed packages (call on UI init after confirming available). */
+    suspend fun refreshPackageList()
+
+    /** Whether an install/uninstall operation is in progress. */
+    val isBusy: StateFlow<Boolean>
+
+    /** Last typed package name — persisted across navigation. */
+    var pendingPkgName: String
+
+    /** Fire-and-forget package install. Runs on internal scope, survives navigation. */
+    fun installPackage(name: String)
+
+    /** Fire-and-forget package removal. */
+    fun removePackage(name: String)
     /** Human-readable error from the last check, if any. */
     val lastError: String?
 

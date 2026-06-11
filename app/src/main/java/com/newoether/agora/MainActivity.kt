@@ -337,6 +337,16 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
         }
     }
 
+    // Sandbox events piped into the same global SnackbarHost
+    LaunchedEffect(Unit) {
+        viewModel.sandboxManager?.snackbarMessage?.collect { msg ->
+            if (msg != null) {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(msg)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         var snackbarJob: Job? = null
         viewModel.snackbarMessage.collect { event ->
