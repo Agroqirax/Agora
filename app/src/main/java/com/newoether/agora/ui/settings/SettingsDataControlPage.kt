@@ -294,9 +294,9 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         showGptSuccessDialog = true
                     }
                 }
-            }
 
-            if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
+                if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
+            }
         }
 
         // Progress dialog
