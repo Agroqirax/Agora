@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.file.FileSystems
 class ProotSandboxManager(private val context: Context) : SandboxManager {
 
-    private val alpineMirror = "http://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64"
+    private val alpineMirror = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main"
 
     private val rootfsDir: File = File(context.filesDir, "alpine-rootfs")
 
@@ -192,18 +192,19 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     override suspend fun apkList(): List<SandboxManager.PackageInfo> = withContext(Dispatchers.IO) {
         if (!isAvailable()) return@withContext emptyList()
         try {
-            val db = File(rootfsDir, "lib/apk/db/installed")
-            if (!db.exists()) return@withContext emptyList()
-            val pkgs = mutableListOf<SandboxManager.PackageInfo>()
-            var n = ""; var v = ""; var d = ""
-            db.readLines(Charsets.UTF_8).forEach { line ->
-                when {
-                    line.startsWith("P:") -> n = line.substring(2).trim()
-                    line.startsWith("V:") -> v = line.substring(2).trim()
-                    line.startsWith("T:") -> d = line.substring(2).trim()
-                    line.isBlank() && n.isNotBlank() -> { pkgs.add(SandboxManager.PackageInfo(name = n, version = v, description = d)); n = ""; v = ""; d = "" }
-                }
-            }; pkgs
+            val result = executeRaw("apk info -v --installed", timeoutMs = 15000)
+            if (result.exitCode != 0) return@withContext emptyList()
+            result.stdout.lines().mapNotNull { line ->
+                // Format: "python3-3.12.8-r0 description: text..."
+                val parts = line.split(" ", limit = 2)
+                val pv = parts.getOrNull(0) ?: return@mapNotNull null
+                val desc = parts.getOrNull(1)?.removePrefix("description:")?.trim() ?: ""
+                val lastDash = pv.lastIndexOf('-')
+                if (lastDash < 0) return@mapNotNull null
+                val name = pv.substring(0, lastDash)
+                val version = pv.substring(lastDash + 1)
+                SandboxManager.PackageInfo(name = name, version = version, description = desc)
+            }
         } catch (e: Throwable) { emptyList() }
     }
 
