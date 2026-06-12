@@ -235,15 +235,18 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
 
     override suspend fun fileGlob(pattern: String, basePath: String): List<String> = withContext(Dispatchers.IO) {
         val base = resolvePath(if (basePath.isBlank()) "/" else basePath)
-        val files = mutableListOf<String>(); walkFiles(base, files, rootfsDir.absolutePath)
-        globMatch(files, "/", pattern).map { p -> if (p.startsWith("/")) p else "/$p" }
+        val files = mutableListOf<String>()
+        val rootFs = rootfsDir.canonicalPath  // resolves /data/data symlink
+        walkFiles(base, files, rootFs)
+        globMatch(files, rootFs, pattern).map { "/$it" }
     }
 
     override suspend fun fileGrep(pattern: String, basePath: String, fileGlob: String): Result<List<SandboxManager.GrepMatch>> = withContext(Dispatchers.IO) {
         try {
             val regex = try { Regex(pattern) } catch (e: Throwable) { Regex(java.util.regex.Pattern.quote(pattern)) }
+            val rootFs = rootfsDir.absolutePath
             val files = if (fileGlob.isNotBlank()) fileGlob(fileGlob, basePath)
-            else { val b = resolvePath(if (basePath.isBlank()) "/" else basePath); val a = mutableListOf<String>(); walkFiles(b, a, rootfsDir.absolutePath); a.map { "/$it" } }
+            else { val b = resolvePath(if (basePath.isBlank()) "/" else basePath); val a = mutableListOf<String>(); walkFiles(b, a, rootFs); a.map { "/$it" } }
             val matches = mutableListOf<SandboxManager.GrepMatch>()
             for (file in files) {
                 try {
@@ -647,7 +650,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     private fun walkFiles(dir: File, result: MutableList<String>, rootFsAbsPath: String) {
-        try { dir.listFiles()?.forEach { if (it.isDirectory) walkFiles(it, result, rootFsAbsPath) else result.add(it.absolutePath.removePrefix(rootFsAbsPath).removePrefix("/")) } } catch (_: Throwable) {}
+        try { dir.listFiles()?.forEach {
+            if (it.isDirectory) walkFiles(it, result, rootFsAbsPath)
+            else {
+                val path = try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
+                result.add(path.removePrefix(rootFsAbsPath).removePrefix("/"))
+            }
+        } } catch (_: Throwable) {}
     }
 
     private fun globMatch(files: List<String>, basePath: String, pattern: String): List<String> {

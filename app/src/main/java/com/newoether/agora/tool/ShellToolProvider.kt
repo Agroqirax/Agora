@@ -253,9 +253,8 @@ class ShellToolProvider(
         // Local Sandbox
         if (serverName.equals("Local Sandbox", ignoreCase = true) && ctx.sandboxEnabled) {
             if (sandbox?.isAvailable() == true) return SandboxBackend()
-            if (sandbox != null) return null // available but not installed
+            if (sandbox != null) return null
         }
-        // If no server specified and only one option exists, try local first
         if (serverName.isBlank()) {
             if (ctx.sandboxEnabled && sandbox?.isAvailable() == true) {
                 return SandboxBackend()
