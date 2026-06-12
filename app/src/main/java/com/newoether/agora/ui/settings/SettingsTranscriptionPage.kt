@@ -86,7 +86,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         headlineContent = {
                             Text(
                                 displayName,
-                                color = if (transcriptionModel == null) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface
+                                color = if (transcriptionModel == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
                             )
                         },
                         supportingContent = if (transcriptionModel != null) {

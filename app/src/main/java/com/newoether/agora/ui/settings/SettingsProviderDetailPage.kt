@@ -290,7 +290,7 @@ fun SettingsProviderDetailPage(
                         items = buildList {
                             add {
                                 SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.provider_no_keys, providerName), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
+                                    headlineContent = { Text(stringResource(R.string.provider_no_keys, providerName), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     leadingContent = { Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
                                     modifier = Modifier.heightIn(min = 64.dp)
                                 )

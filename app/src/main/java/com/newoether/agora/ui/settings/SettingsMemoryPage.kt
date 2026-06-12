@@ -134,21 +134,13 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             SettingsGroup(
                 title = stringResource(R.string.memory_saved_title),
                 items = buildList {
-                    add {
-                        SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.memory_add)) },
-                            supportingContent = { Text(stringResource(R.string.memory_add_desc)) },
-                            leadingContent = { Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary) },
-                            modifier = Modifier.clickable { showNewFileDialog = true }
-                        )
-                    }
                     if (memoryFiles.isEmpty()) {
                         add {
-                            val emptyColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                             SettingsItem(
-                                headlineContent = { Text(stringResource(R.string.memory_no_files), color = emptyColor) },
-                                supportingContent = { Text(stringResource(R.string.memory_create_hint), color = emptyColor) },
-                                modifier = Modifier.padding(vertical = 4.dp)
+                                headlineContent = { Text(stringResource(R.string.memory_no_files), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                supportingContent = { Text(stringResource(R.string.memory_create_hint), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                                leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
+                                modifier = Modifier.heightIn(min = 64.dp)
                             )
                         }
                     } else {
@@ -201,6 +193,12 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             )
+
+            OutlinedButton(onClick = { showNewFileDialog = true }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.memory_add))
+            }
 
             if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
         }
