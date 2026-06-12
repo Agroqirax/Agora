@@ -149,7 +149,7 @@ fun WelcomeScreen(
     var apiKeyText by remember { mutableStateOf("") }
     var apiKeyVisible by remember { mutableStateOf(false) }
     var selectedModelId by remember { mutableStateOf<String?>(null) }
-    var autoBackupEnabled by remember { mutableStateOf(true) }
+    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
     val availableModels by viewModel.availableModels.collectAsState()
     val localChatModels by viewModel.localChatModels.collectAsState()
     val existingApiKeys by viewModel.apiKeys.collectAsState()
@@ -244,14 +244,28 @@ fun WelcomeScreen(
     val contentAlpha by animateFloatAsState(if (showContent) 1f else 0f, tween(600))
 
     val fm = LocalFocusManager.current
+    var prevPage by remember { mutableIntStateOf(0) }
     LaunchedEffect(pagerState.currentPage) {
+        // Save API key / URL when leaving API Key page (handles both swipe and button)
+        if (prevPage == PAGE_API_KEY && selectedProvider != null && apiKeyText.isNotBlank()) {
+            when (selectedProvider) {
+                "Ollama" -> viewModel.setProviderBaseUrl("Ollama", apiKeyText)
+                "Local" -> { /* handled by GGUF import */ }
+                else -> viewModel.addApiKey(selectedProvider!!, apiKeyText, selectedProvider!!)
+            }
+        }
+        prevPage = pagerState.currentPage
         fm.clearFocus()
         if (pagerState.currentPage !in visitedPages) {
             visitedPages.add(pagerState.currentPage)
             players[pagerState.currentPage]?.playWhenReady = true
         }
-        if (pagerState.currentPage == 4 && selectedProvider != null && selectedProvider != "Local") {
-            viewModel.fetchAvailableModels()
+        if (pagerState.currentPage == PAGE_MODEL_CONFIG && selectedProvider != null && selectedProvider != "Local") {
+            scope.launch {
+                viewModel.fetchAvailableModels()
+                kotlinx.coroutines.delay(1500)
+                viewModel.fetchAvailableModels()
+            }
         }
     }
 
@@ -331,7 +345,7 @@ fun WelcomeScreen(
                                 }
                                 PAGE_AUTO_BACKUP -> AutoBackupPage(
                                     enabled = autoBackupEnabled,
-                                    onToggle = { autoBackupEnabled = it },
+                                    onToggle = { viewModel.setAutoBackupEnabled(it) },
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp).alpha(contentAlpha)
                                 )
                                 else -> {
@@ -406,9 +420,6 @@ fun WelcomeScreen(
                                         viewModel.setSelectedModel(selectedModelId!!)
                                         viewModel.setEnabledModels(setOf(selectedModelId!!))
                                     }
-                                }
-                                PAGE_AUTO_BACKUP -> {
-                                    viewModel.setAutoBackupEnabled(autoBackupEnabled)
                                 }
                             }
                             scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1, animationSpec = tween<Float>(500, easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))) }
