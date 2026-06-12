@@ -132,17 +132,23 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     } else {
                         shellDevices.forEach { device -> add { DeviceEditor(viewModel, device, scrollState, density, newlyAddedDeviceId, onNewDeviceId = { newlyAddedDeviceId = it }, onDeleteConfirm = { deleteConfirmDeviceId = it }) } }
                     }
+                    add {
+                        Box(
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+                                val newId = UUID.randomUUID().toString()
+                                newlyAddedDeviceId = newId
+                                viewModel.addShellDevice(ShellDeviceConfig(id = newId, name = "", description = ""))
+                            }.padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Text(stringResource(R.string.shell_add_device), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                            }
+                        }
+                    }
                 })
-
-                OutlinedButton(onClick = {
-                    val newId = UUID.randomUUID().toString()
-                    newlyAddedDeviceId = newId
-                    viewModel.addShellDevice(ShellDeviceConfig(id = newId, name = "", description = ""))
-                }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.shell_add_device))
-                }
             }
 
             // ── Delete confirm dialog ──
