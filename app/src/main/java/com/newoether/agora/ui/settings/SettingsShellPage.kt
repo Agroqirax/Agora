@@ -248,6 +248,7 @@ private fun DeviceEditor(
     var sshPwInput by remember(device.id) { mutableStateOf(device.sshPassword) }
     var timeoutInput by remember(device.id) { mutableStateOf(device.timeout) }
     val nameFocusRequester = remember { FocusRequester() }
+    val urlFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(device) {
         nameInput = device.name; descInput = device.description; typeInput = device.type
@@ -258,8 +259,8 @@ private fun DeviceEditor(
 
     LaunchedEffect(isNewlyAdded) {
         if (isNewlyAdded) {
-            expanded = true; delay(50); nameFocusRequester.requestFocus()
-            scrollState.animateScrollTo(scrollState.maxValue + (200 * density.density).toInt(), tween(500))
+            expanded = true; delay(50); urlFocusRequester.requestFocus()
+            scrollState.animateScrollTo(scrollState.maxValue + (250 * density.density).toInt(), tween(500))
             onNewDeviceId(null)
         }
     }
@@ -319,7 +320,7 @@ private fun DeviceEditor(
                 if (typeInput == "conch") {
                     OutlinedTextField(value = urlInput, onValueChange = { urlInput = it }, label = { Text(stringResource(R.string.shell_device_url)) },
                         placeholder = { Text(stringResource(R.string.shell_device_url_hint)) }, leadingIcon = { Icon(Icons.Default.Link, null) },
-                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester))
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(value = keyInput, onValueChange = { keyInput = it }, label = { Text(stringResource(R.string.shell_device_key)) },
                         placeholder = { Text(stringResource(R.string.shell_device_key_hint)) }, leadingIcon = { Icon(Icons.Default.Key, null) },
@@ -327,7 +328,7 @@ private fun DeviceEditor(
                 } else {
                     OutlinedTextField(value = sshHostInput, onValueChange = { sshHostInput = it }, label = { Text(stringResource(R.string.shell_device_host)) },
                         placeholder = { Text(stringResource(R.string.shell_device_host_hint)) }, leadingIcon = { Icon(Icons.Default.Dns, null) },
-                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester))
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(value = sshPortInput, onValueChange = { sshPortInput = it.filter { c -> c.isDigit() } },
