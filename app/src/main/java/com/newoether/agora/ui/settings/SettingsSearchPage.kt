@@ -272,9 +272,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     if (embeddingModels.isEmpty()) {
                         add {
                             SettingsItem(
-                                headlineContent = { Text(stringResource(R.string.no_embedding_models), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
-                                leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary) },
-                                modifier = Modifier.padding(vertical = 8.dp)
+                                headlineContent = { Text(stringResource(R.string.no_embedding_models), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)) },
+                                leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
+                                modifier = Modifier.heightIn(min = 64.dp)
                             )
                         }
                     } else {

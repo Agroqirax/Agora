@@ -120,21 +120,25 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
 
                 // ── Remote Devices ──────────────────────────
-                if (shellDevices.isEmpty()) {
-                    Text(stringResource(R.string.shell_no_devices), style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 8.dp, bottom = 16.dp))
-                } else {
-                    val items: List<@Composable () -> Unit> = buildList {
+                SettingsGroup(title = stringResource(R.string.shell_devices), items = buildList {
+                    if (shellDevices.isEmpty()) {
+                        add {
+                            SettingsItem(
+                                headlineContent = { Text(stringResource(R.string.shell_no_devices), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                leadingContent = { Icon(Icons.Default.Devices, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
+                                modifier = Modifier.heightIn(min = 64.dp)
+                            )
+                        }
+                    } else {
                         shellDevices.forEach { device -> add { DeviceEditor(viewModel, device, scrollState, density, newlyAddedDeviceId, onNewDeviceId = { newlyAddedDeviceId = it }, onDeleteConfirm = { deleteConfirmDeviceId = it }) } }
                     }
-                    SettingsGroup(title = stringResource(R.string.shell_devices), items = items)
-                }
+                })
 
                 OutlinedButton(onClick = {
                     val newId = UUID.randomUUID().toString()
                     newlyAddedDeviceId = newId
                     viewModel.addShellDevice(ShellDeviceConfig(id = newId, name = "", description = ""))
-                }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                }, modifier = Modifier.fillMaxWidth().padding(top = 16.dp)) {
                     Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.shell_add_device))

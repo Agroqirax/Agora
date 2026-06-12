@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MoreVert
@@ -93,13 +94,13 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         } else null,
                         leadingContent = {
                             when {
-                                transcriptionModel == null -> Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                                transcriptionModel == null -> Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                                 isSelectedLocal -> Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                                 selectedIconRes != 0 -> Icon(painterResource(selectedIconRes), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                                 else -> Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             }
                         },
-                        modifier = Modifier.heightIn(min = 64.dp).clickable { showModelDialog = true }
+                        modifier = Modifier.heightIn(min = 64.dp).clickable(enabled = transcriptionModel != null) { showModelDialog = true }
                     )
                 })
             )
@@ -111,8 +112,8 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         add {
                             SettingsItem(
                                 headlineContent = { Text(stringResource(R.string.transcription_no_models_enabled), color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                                supportingContent = { Text(stringResource(R.string.transcription_no_models_hint)) },
-                                leadingContent = { Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
+                                supportingContent = { Text(stringResource(R.string.transcription_no_models_hint), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                                leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
                                 modifier = Modifier.heightIn(min = 64.dp)
                             )
                         }
@@ -139,7 +140,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     trailingContent = {
                                         Box {
                                             IconButton(onClick = { showMenuForModel = model }, modifier = Modifier.size(24.dp)) {
-                                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options), modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options), modifier = Modifier.size(18.dp))
                                             }
                                             DropdownMenu(
                                                 containerColor = MaterialTheme.colorScheme.surfaceContainer,

@@ -1,6 +1,5 @@
 package com.newoether.agora.ui.settings
 
-import androidx.compose.ui.draw.alpha
 import com.newoether.agora.util.DebugLog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -15,9 +14,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
@@ -194,9 +193,9 @@ fun SettingsProviderDetailPage(
                         if (localChatModels.isEmpty()) {
                             add {
                                 SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.provider_no_local_models)) },
-                                    supportingContent = { Text(stringResource(R.string.provider_no_local_models_desc)) },
-                                    leadingContent = { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)) },
+                                    headlineContent = { Text(stringResource(R.string.provider_no_local_models), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    supportingContent = { Text(stringResource(R.string.provider_no_local_models_desc), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+                                    leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
                                     modifier = Modifier.heightIn(min = 64.dp)
                                 )
                             }
@@ -251,7 +250,7 @@ fun SettingsProviderDetailPage(
                                     },
                                     trailingContent = {
                                         Box {
-                                            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(16.dp)) }
+                                            IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(18.dp)) }
                                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 16.dp, shape = RoundedCornerShape(12.dp)) {
                                                 DropdownMenuItem(text = { Text(stringResource(R.string.edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; showEditModelDialog = model })
                                                 DropdownMenuItem(text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeleteModelConfirm = model })
@@ -292,7 +291,7 @@ fun SettingsProviderDetailPage(
                             add {
                                 SettingsItem(
                                     headlineContent = { Text(stringResource(R.string.provider_no_keys, providerName), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)) },
-                                    leadingContent = { Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.primary) },
+                                    leadingContent = { Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
                                     modifier = Modifier.heightIn(min = 64.dp)
                                 )
                             }
@@ -321,7 +320,7 @@ fun SettingsProviderDetailPage(
                                         leadingContent = { Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) { RadioButton(selected = isCurrentActive, onClick = { viewModel.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp)) } },
                                         trailingContent = {
                                             Box {
-                                                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(16.dp)) }
+                                                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(18.dp)) }
                                                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 16.dp, shape = RoundedCornerShape(12.dp)) {
                                                     DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; showKeyDialog = entry })
                                                     DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; showDeleteKeyConfirm = entry })
@@ -330,7 +329,6 @@ fun SettingsProviderDetailPage(
                                         },
                                         modifier = Modifier
                                             .clickable { viewModel.setActiveApiKey(providerName, entry.id) }
-                                            .alpha(if (isCurrentActive) 1f else 0.45f)
                                     )
                                 }
                             }
