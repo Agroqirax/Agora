@@ -25,6 +25,7 @@ logs/
 
 # Proot build artifacts
 /.build-proot/
+app/src/fdroid/assets/alpine-minirootfs.tar.gz
 
 # Claude Code
 /.claude/
