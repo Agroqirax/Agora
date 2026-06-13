@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <cstdint>
 #include <android/log.h>
 #include "llama.h"
 #include "mtmd.h"
@@ -48,6 +49,44 @@ static size_t utf8_complete_prefix_len(const std::string & text) {
         // ASCII or continuation byte: keep scanning back for the lead byte.
     }
     return len;
+}
+
+// Build a jstring from standard UTF-8 bytes WITHOUT going through NewStringUTF.
+// NewStringUTF expects *Modified* UTF-8, in which supplementary-plane code points
+// (U+10000+ — emoji, CJK extensions) must be a 6-byte CESU-8 surrogate pair; a
+// standard 4-byte UTF-8 sequence is invalid Modified UTF-8 and aborts the VM. We
+// decode UTF-8 → UTF-16 (emitting surrogate pairs) and use NewString, which takes
+// genuine UTF-16 and handles the whole BMP + supplementary range safely.
+static jstring utf8_to_jstring(JNIEnv * env, const char * data, size_t len) {
+    std::vector<jchar> utf16;
+    utf16.reserve(len);
+    size_t i = 0;
+    while (i < len) {
+        unsigned char c = static_cast<unsigned char>(data[i]);
+        uint32_t cp;
+        size_t adv;
+        if (c < 0x80) {
+            cp = c; adv = 1;
+        } else if ((c & 0xE0) == 0xC0 && i + 1 < len) {
+            cp = (uint32_t(c & 0x1F) << 6) | (data[i + 1] & 0x3F); adv = 2;
+        } else if ((c & 0xF0) == 0xE0 && i + 2 < len) {
+            cp = (uint32_t(c & 0x0F) << 12) | (uint32_t(data[i + 1] & 0x3F) << 6) | (data[i + 2] & 0x3F); adv = 3;
+        } else if ((c & 0xF8) == 0xF0 && i + 3 < len) {
+            cp = (uint32_t(c & 0x07) << 18) | (uint32_t(data[i + 1] & 0x3F) << 12)
+               | (uint32_t(data[i + 2] & 0x3F) << 6) | (data[i + 3] & 0x3F); adv = 4;
+        } else {
+            cp = 0xFFFD; adv = 1; // malformed lead/continuation → replacement char
+        }
+        i += adv;
+        if (cp <= 0xFFFF) {
+            utf16.push_back(static_cast<jchar>(cp));
+        } else {
+            cp -= 0x10000;
+            utf16.push_back(static_cast<jchar>(0xD800 + (cp >> 10)));
+            utf16.push_back(static_cast<jchar>(0xDC00 + (cp & 0x3FF)));
+        }
+    }
+    return env->NewString(utf16.data(), static_cast<jsize>(utf16.size()));
 }
 
 extern "C" {
@@ -111,7 +150,7 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatGetTemplate(
 
     const char * tmpl = llama_model_chat_template(handle->model, nullptr);
     if (!tmpl) return nullptr;
-    return env->NewStringUTF(tmpl);
+    return utf8_to_jstring(env, tmpl, strlen(tmpl));
 }
 
 JNIEXPORT jstring JNICALL
@@ -176,7 +215,7 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatApplyTemplate(
     );
 
     if (result > buf_size) {
-        buf.resize(result);
+        buf.resize(result + 1); // +1 so an exact-fit result still has room for NUL/bounds
         result = llama_chat_apply_template(
             tmpl,
             chat_msgs.data(), chat_msgs.size(),
@@ -190,7 +229,9 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatApplyTemplate(
         return nullptr;
     }
 
-    return env->NewStringUTF(buf.data());
+    // result is the byte length written; decode explicitly rather than relying on a
+    // NUL terminator, and handle 4-byte UTF-8 in message content safely.
+    return utf8_to_jstring(env, buf.data(), static_cast<size_t>(result));
 }
 
 JNIEXPORT jint JNICALL
@@ -331,7 +372,7 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatGenerate(
         utf8_buf.append(piece, n);
         size_t emit_len = utf8_complete_prefix_len(utf8_buf);
         if (emit_len > 0) {
-            jstring jtoken = env->NewStringUTF(utf8_buf.substr(0, emit_len).c_str());
+            jstring jtoken = utf8_to_jstring(env, utf8_buf.data(), emit_len);
             env->CallVoidMethod(callback, on_token, jtoken);
             env->DeleteLocalRef(jtoken);
             utf8_buf.erase(0, emit_len);
@@ -557,7 +598,7 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatGenerateWithImages(
         utf8_buf.append(piece, n);
         size_t emit_len = utf8_complete_prefix_len(utf8_buf);
         if (emit_len > 0) {
-            jstring jtoken = env->NewStringUTF(utf8_buf.substr(0, emit_len).c_str());
+            jstring jtoken = utf8_to_jstring(env, utf8_buf.data(), emit_len);
             env->CallVoidMethod(callback, on_token, jtoken);
             env->DeleteLocalRef(jtoken);
             utf8_buf.erase(0, emit_len);

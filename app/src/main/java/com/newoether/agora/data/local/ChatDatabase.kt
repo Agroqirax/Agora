@@ -208,6 +208,14 @@ abstract class ChatDatabase : RoomDatabase() {
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
+            // v1 → v2 added messages.images (List<String> stored as TEXT via converter,
+            // NOT NULL with "" representing an empty list). This step was missing, so any
+            // device still on schema v1 crashed on launch with "migration 1 to 2 not found".
+            object : Migration(1, 2) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT ''")
+                }
+            },
             object : Migration(2, 3) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE conversations ADD COLUMN selectedBranchesJson TEXT")
