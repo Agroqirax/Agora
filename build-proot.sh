@@ -111,12 +111,17 @@ mkdir -p "$SYSROOT_LIB" "$SYSROOT_INC" "$LOADER_OUT" \
 
 # ── Step 1: Build talloc ───────────────────────────────────────
 echo "  [1/4] Building libtalloc.so..."
-"$CC" -fPIC -O2 -shared \
-    -Wl,-soname,libtalloc.so \
-    -o "$SYSROOT_LIB/libtalloc.so" \
-    "$TALLOC_SRC/talloc.c" \
-    -DHAVE_CONFIG_H \
-    -I"$TALLOC_SRC"
+# Build from source directory so __FILE__ expands to relative path (e.g.
+# "talloc.c:N") on both local and CI — avoids embedding the absolute build path.
+(
+    cd "$TALLOC_SRC"
+    "$CC" -fPIC -O2 -shared \
+        -Wl,-soname,libtalloc.so \
+        -o "$SYSROOT_LIB/libtalloc.so" \
+        talloc.c \
+        -DHAVE_CONFIG_H \
+        -I.
+)
 cp "$TALLOC_SRC/talloc.h" "$SYSROOT_INC/"
 echo "  [1/4] Done: $(stat -c%s "$SYSROOT_LIB/libtalloc.so") bytes"
 
@@ -177,8 +182,14 @@ ENDAWK
     export CPPFLAGS="-I${SYSROOT_INC} -DSYS_SECCOMP=1"
     export LDFLAGS="-L${SYSROOT_LIB}"
     export CC="${TC_PREFIX}/${CROSS_PREFIX}-clang"
+    # GIT=/bin/true: suppress git-describe so VERSION is not set in build.h;
+    # both local and CI then fall back to proot.h's "5.1.0" — identical output.
+    # PROOT_UNBUNDLE_LOADER="loader-out": fixed relative string instead of the
+    # absolute build-dir path, so the embedded loader-path string is the same
+    # on every machine. (ProotSandboxManager always overrides via PROOT_LOADER.)
     make CROSS_COMPILE="${CROSS_PREFIX}-" \
-        PROOT_UNBUNDLE_LOADER="$LOADER_OUT" \
+        PROOT_UNBUNDLE_LOADER="loader-out" \
+        GIT=/bin/true \
         proot
 )
 echo "  [2/4] Done: $(stat -c%s "$PROOT_BLD/proot") bytes"
