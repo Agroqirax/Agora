@@ -150,6 +150,27 @@ ASHMEM_C="$PROOT_BLD/extension/ashmem_memfd/ashmem_memfd.c"
 if [ -f "$ASHMEM_C" ] && ! grep -q '#include <string.h>' "$ASHMEM_C"; then
     sed -i '1i #include <string.h>' "$ASHMEM_C"
 fi
+# ── Patch loader-info.awk for POSIX awk (mawk) compatibility ───
+# F-Droid buildserver uses mawk; gawk-only strtonum and \y are not available.
+cat > "$PROOT_BLD/loader/loader-info.awk" <<'ENDAWK'
+function hextonum(hex,   i, n, c, idx) {
+    hex = tolower(hex)
+    n = 0
+    for (i = 1; i <= length(hex); i++) {
+        c = substr(hex, i, 1)
+        idx = index("0123456789abcdef", c)
+        if (idx == 0) break
+        n = n * 16 + (idx - 1)
+    }
+    return n
+}
+$NF == "pokedata_workaround" { pokedata_workaround = hextonum($2) }
+$NF == "_start" { start = hextonum($2) }
+END {
+    print "#include <unistd.h>"
+    print "const ssize_t offset_to_pokedata_workaround=" (pokedata_workaround - start) ";"
+}
+ENDAWK
 (
     cd "$PROOT_BLD"
     export SOURCE_DATE_EPOCH=0
