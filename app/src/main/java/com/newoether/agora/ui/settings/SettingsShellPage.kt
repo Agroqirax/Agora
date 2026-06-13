@@ -32,6 +32,7 @@ import com.newoether.agora.R
 import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import java.util.UUID
 
@@ -39,6 +40,7 @@ import java.util.UUID
 @Composable
 fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val shellEnabled by viewModel.shellEnabled.collectAsState()
+    val shellConfirmEnabled by viewModel.shellConfirmEnabled.collectAsState()
     val shellDevices by viewModel.shellDevices.collectAsState()
     val sandboxEnabled by viewModel.sandboxEnabled.collectAsState()
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -101,15 +103,28 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) { fm.clearFocus() }
                         .padding(horizontal = 16.dp, vertical = 16.dp)
                 ) {
-            SettingsGroup(title = stringResource(R.string.shell_title), items = listOf({
-                SettingsItem(
-                    headlineContent = { Text(stringResource(R.string.shell_enable)) },
-                    supportingContent = { Text(stringResource(R.string.shell_enable_desc)) },
-                    leadingContent = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
-                    trailingContent = { Switch(checked = shellEnabled, onCheckedChange = { viewModel.setShellEnabled(it) }) },
-                    modifier = Modifier.clickable { viewModel.setShellEnabled(!shellEnabled) }
-                )
-            }))
+            SettingsGroup(title = stringResource(R.string.shell_title), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.shell_enable)) },
+                        supportingContent = { Text(stringResource(R.string.shell_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = shellEnabled, onCheckedChange = { viewModel.setShellEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setShellEnabled(!shellEnabled) }
+                    )
+                }
+                if (shellEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.shell_confirm_setting)) },
+                            supportingContent = { Text(stringResource(R.string.shell_confirm_setting_desc)) },
+                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = shellConfirmEnabled, onCheckedChange = { viewModel.setShellConfirmEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.setShellConfirmEnabled(!shellConfirmEnabled) }
+                        )
+                    }
+                }
+            })
 
             if (shellEnabled) {
                 // ── Local Sandbox ───────────────────────────
@@ -247,14 +262,21 @@ private fun DeviceEditor(
     var sshUserInput by remember(device.id) { mutableStateOf(device.sshUser) }
     var sshPwInput by remember(device.id) { mutableStateOf(device.sshPassword) }
     var timeoutInput by remember(device.id) { mutableStateOf(device.timeout) }
+    var sshHostKeyInput by remember(device.id) { mutableStateOf(device.sshHostKey) }
     val nameFocusRequester = remember { FocusRequester() }
     val urlFocusRequester = remember { FocusRequester() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var verifying by remember(device.id) { mutableStateOf(false) }
+    // Captured (key, fingerprint) awaiting the user's trust decision.
+    var pendingVerify by remember(device.id) { mutableStateOf<Pair<String, String>?>(null) }
+    var verifyError by remember(device.id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(device) {
         nameInput = device.name; descInput = device.description; typeInput = device.type
         urlInput = device.serverUrl; keyInput = device.apiKey
         sshHostInput = device.sshHost; sshPortInput = device.sshPort.toString()
         sshUserInput = device.sshUser; sshPwInput = device.sshPassword; timeoutInput = device.timeout
+        sshHostKeyInput = device.sshHostKey
     }
 
     LaunchedEffect(isNewlyAdded) {
@@ -342,6 +364,63 @@ private fun DeviceEditor(
                     OutlinedTextField(value = sshPwInput, onValueChange = { sshPwInput = it }, label = { Text(stringResource(R.string.shell_device_password)) },
                         leadingIcon = { Icon(Icons.Default.Password, null) }, visualTransformation = PasswordVisualTransformation(),
                         singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+
+                    // ── Host-key pinning (TOFU) ──
+                    Spacer(Modifier.height(10.dp))
+                    val pinned = sshHostKeyInput.isNotBlank()
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Icon(
+                            if (pinned) Icons.Default.VerifiedUser else Icons.Default.GppMaybe,
+                            null, modifier = Modifier.size(18.dp),
+                            tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                stringResource(if (pinned) R.string.shell_ssh_host_key_pinned else R.string.shell_ssh_host_key_not_pinned),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (pinned) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
+                            )
+                            if (pinned) {
+                                Text(
+                                    com.newoether.agora.util.SshClient.fingerprintSha256(sshHostKeyInput),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (pinned) {
+                            TextButton(onClick = { sshHostKeyInput = "" }) { Text(stringResource(R.string.shell_ssh_unpin)) }
+                        }
+                    }
+                    verifyError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedButton(
+                        onClick = {
+                            verifyError = null; verifying = true
+                            scope.launch {
+                                val result = viewModel.verifySshHostKey(
+                                    sshHostInput.trim(), sshPortInput.toIntOrNull() ?: 22,
+                                    sshUserInput.trim().ifBlank { "root" }, sshPwInput, timeoutInput
+                                )
+                                verifying = false
+                                result.fold(
+                                    onSuccess = { pendingVerify = it },
+                                    onFailure = { verifyError = it.message }
+                                )
+                            }
+                        },
+                        enabled = !verifying && sshHostInput.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (verifying) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.shell_ssh_verifying))
+                        } else {
+                            Icon(Icons.Default.Shield, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.shell_ssh_verify_host_key))
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(10.dp))
@@ -378,11 +457,42 @@ private fun DeviceEditor(
                             sshPort = sshPortInput.toIntOrNull() ?: 22,
                             sshUser = if (typeInput == "ssh") sshUserInput.trim().ifBlank { "root" } else "root",
                             sshPassword = if (typeInput == "ssh") sshPwInput else "",
+                            sshHostKey = if (typeInput == "ssh") sshHostKeyInput else "",
                             timeout = timeoutInput
                         )); expanded = false
                     }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.save)) }
                 }
             }
+        }
+
+        // ── Host-key fingerprint confirmation ──
+        pendingVerify?.let { (key, fingerprint) ->
+            AlertDialog(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                onDismissRequest = { pendingVerify = null },
+                icon = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text(stringResource(R.string.shell_ssh_verify_title), fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.shell_ssh_verify_message))
+                        Spacer(Modifier.height(12.dp))
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text(
+                                fingerprint,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { sshHostKeyInput = key; pendingVerify = null }) {
+                        Text(stringResource(R.string.shell_ssh_trust))
+                    }
+                },
+                dismissButton = { TextButton(onClick = { pendingVerify = null }) { Text(stringResource(R.string.cancel)) } }
+            )
         }
     }
 }

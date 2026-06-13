@@ -106,10 +106,17 @@ class GenerationManager(
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
+    /** User-confirmation gate for remote shell mutations. Set by the ViewModel.
+     *  Returns true to proceed, false to deny. */
+    var onConfirmShellCommand: (suspend (server: String, summary: String) -> Boolean)? = null
+
     private val memoryToolProvider = MemoryToolProvider(memoryManager)
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider()
-    private val shellToolProvider = ShellToolProvider(sandboxFactory)
+    private val shellToolProvider = ShellToolProvider(sandboxFactory).also { stp ->
+        // Forward to the ViewModel-provided gate at call time (read the var lazily).
+        stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
+    }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, shellToolProvider
     )
@@ -123,86 +130,13 @@ class GenerationManager(
     private fun getProviderInstance(name: String): LlmProvider =
         providers[name] ?: providers.values.first()
 
+    // Image/video frame extraction lives in ImageProcessor (single source of truth).
+    private val imageProcessor = ImageProcessor(app)
+
     suspend fun processImages(
         uris: List<String>,
         sliceConfigs: Map<String, VideoSliceConfig> = emptyMap()
-    ): List<String> = withContext(Dispatchers.IO) {
-        uris.flatMap { uriString ->
-            try {
-                val uri = android.net.Uri.parse(uriString)
-                val mimeType = app.contentResolver.getType(uri)
-
-                when {
-                    mimeType?.startsWith("video/") == true -> {
-                        val config = sliceConfigs[uriString]
-                        val retriever = android.media.MediaMetadataRetriever()
-                        try {
-                        retriever.setDataSource(app, uri)
-                        val paths = mutableListOf<String>()
-
-                        if (config != null && config.frameCount > 1) {
-                            var timeUs = 0L
-                            for (i in 0 until config.frameCount) {
-                                val bitmap = retriever.getFrameAtTime(
-                                    timeUs, android.media.MediaMetadataRetriever.OPTION_CLOSEST
-                                )
-                                if (bitmap != null) {
-                                    val file = File(app.filesDir, "vid_${UUID.randomUUID()}_$i.jpg")
-                                    file.outputStream().use { out ->
-                                        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
-                                    }
-                                    bitmap.recycle()
-                                    paths.add(file.absolutePath)
-                                }
-                                timeUs += config.intervalMicros
-                            }
-                        } else {
-                            // Single frame (default behavior)
-                            val bitmap = retriever.frameAtTime
-                            if (bitmap != null) {
-                                val file = File(app.filesDir, "vid_${UUID.randomUUID()}.jpg")
-                                file.outputStream().use { out ->
-                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
-                                }
-                                bitmap.recycle()
-                                paths.add(file.absolutePath)
-                            }
-                        }
-                        paths
-                        } finally {
-                            retriever.release()
-                        }
-                    }
-                    mimeType?.startsWith("image/") == true || mimeType == null -> {
-                        val bytes = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                        if (bytes != null) {
-                            val options = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-
-                            var scale = 1
-                            while (options.outWidth / scale / 2 >= 1024 && options.outHeight / scale / 2 >= 1024) {
-                                scale *= 2
-                            }
-
-                            val decodeOptions = android.graphics.BitmapFactory.Options().apply { inSampleSize = scale }
-                            val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, decodeOptions)
-                            if (bitmap != null) {
-                                val file = File(app.filesDir, "img_${UUID.randomUUID()}.jpg")
-                                file.outputStream().use { out ->
-                                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
-                                }
-                                bitmap.recycle()
-                                listOf(file.absolutePath)
-                            } else emptyList()
-                        } else emptyList()
-                    }
-                    else -> emptyList()
-                }
-            } catch (_: Exception) {
-                emptyList()
-            }
-        }
-    }
+    ): List<String> = imageProcessor.processImagesAndVideos(uris, sliceConfigs)
 
     fun buildMemoryTools(ctx: GenerationContext): List<ToolDefinition> =
         memoryToolProvider.definitions(ctx)

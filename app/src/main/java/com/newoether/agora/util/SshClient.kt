@@ -2,8 +2,11 @@ package com.newoether.agora.util
 
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.ChannelSftp
+import com.jcraft.jsch.HostKey
+import com.jcraft.jsch.HostKeyRepository
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
+import com.jcraft.jsch.UserInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -14,6 +17,14 @@ import java.nio.file.FileSystems
  * and file operations (SFTP channel). All file operations are SFTP-based,
  * no remote command assumptions (compatible with Windows/Termux/BusyBox).
  *
+ * Host-key handling (trust-on-first-use):
+ *  - [pinnedHostKey] set  → the server key MUST match, else the connection is
+ *    rejected (defends against MITM / key changes).
+ *  - [pinnedHostKey] blank + [allowUnknownHostKey] true → connect and capture the
+ *    key (used by "Verify & pin" in settings, and as back-compat for un-pinned
+ *    devices); the captured value is exposed via [capturedHostKey].
+ *  - blank + false → unknown keys are rejected (fail-closed).
+ *
  * NOT thread-safe — create a new instance per tool call.
  */
 class SshClient(
@@ -21,9 +32,15 @@ class SshClient(
     private val port: Int,
     private val user: String,
     private val password: String,
-    private val timeoutMs: Int = 30000
+    private val timeoutMs: Int = 30000,
+    private val pinnedHostKey: String = "",
+    private val allowUnknownHostKey: Boolean = false
 ) {
     private var session: Session? = null
+
+    /** The server host key (base64 of the public-key blob) seen on the last connect. */
+    var capturedHostKey: String? = null
+        private set
 
     // ── Connection ─────────────────────────────────────────
 
@@ -33,13 +50,43 @@ class SshClient(
             val jsch = JSch()
             val s = jsch.getSession(user, host, port).apply {
                 setPassword(password)
-                setConfig("StrictHostKeyChecking", "no")
                 setConfig("PreferredAuthentications", "password")
+                hostKeyRepository = TofuHostKeyRepository()
+                // "yes" makes JSch reject NOT_INCLUDED/CHANGED keys; "no" accepts (capture mode).
+                setConfig("StrictHostKeyChecking", if (allowUnknownHostKey && pinnedHostKey.isBlank()) "no" else "yes")
                 connect(timeoutMs)
             }
             session = s
             s
         }
+    }
+
+    /** TOFU host-key verifier: captures the presented key and accepts only a match. */
+    private inner class TofuHostKeyRepository : HostKeyRepository {
+        override fun check(host: String?, key: ByteArray): Int {
+            val incoming = java.util.Base64.getEncoder().encodeToString(key)
+            capturedHostKey = incoming
+            return when {
+                pinnedHostKey.isNotBlank() && pinnedHostKey == incoming -> HostKeyRepository.OK
+                pinnedHostKey.isNotBlank() -> HostKeyRepository.CHANGED   // mismatch → reject
+                else -> HostKeyRepository.NOT_INCLUDED                    // unknown
+            }
+        }
+        override fun add(hostkey: HostKey?, ui: UserInfo?) {}
+        override fun remove(host: String?, type: String?) {}
+        override fun remove(host: String?, type: String?, key: ByteArray?) {}
+        override fun getKnownHostsRepositoryID(): String = ""
+        override fun getHostKey(): Array<HostKey> = emptyArray()
+        override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
+    }
+
+    companion object {
+        /** OpenSSH-style "SHA256:…" fingerprint of a base64 host-key blob, for display. */
+        fun fingerprintSha256(base64Key: String): String = try {
+            val bytes = java.util.Base64.getDecoder().decode(base64Key)
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            "SHA256:" + java.util.Base64.getEncoder().withoutPadding().encodeToString(digest)
+        } catch (_: Exception) { "" }
     }
 
     fun close() {

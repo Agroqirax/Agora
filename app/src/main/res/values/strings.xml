@@ -770,4 +770,27 @@
     <string name="auto_delete_period_1w">1 week</string>
     <string name="auto_delete_period_1mo">1 month</string>
     <string name="auto_delete_period_1y">1 year</string>
+    <!-- PDF page selection dialog -->
+    <string name="pdf_select_title">Select PDF Pages</string>
+    <string name="pdf_select_subtitle">%1$d pages — select pages to include</string>
+    <string name="pdf_rendering_progress">Rendering page %1$d of %2$d…</string>
+    <string name="pdf_send_pages">Send %1$d pages</string>
+    <string name="pdf_page_content_desc">Page %1$d</string>
+    <!-- SSH host-key pinning -->
+    <string name="shell_ssh_verify_host_key">Verify &amp; pin host key</string>
+    <string name="shell_ssh_host_key_pinned">Host key pinned</string>
+    <string name="shell_ssh_host_key_not_pinned">Host key not pinned — vulnerable to interception</string>
+    <string name="shell_ssh_verify_title">Verify SSH host key</string>
+    <string name="shell_ssh_verify_message">Confirm this fingerprint matches your server before trusting it. Pinning protects against man-in-the-middle attacks.</string>
+    <string name="shell_ssh_trust">Trust &amp; pin</string>
+    <string name="shell_ssh_verify_failed">Could not reach host: %1$s</string>
+    <string name="shell_ssh_verifying">Connecting…</string>
+    <string name="shell_ssh_unpin">Remove pinned key</string>
+    <!-- Remote shell confirmation gate -->
+    <string name="shell_confirm_title">Allow action on \"%1$s\"?</string>
+    <string name="shell_confirm_allow">Allow once</string>
+    <string name="shell_confirm_always">Always allow this server</string>
+    <string name="shell_confirm_deny">Deny</string>
+    <string name="shell_confirm_setting">Confirm remote shell actions</string>
+    <string name="shell_confirm_setting_desc">Ask before the assistant runs commands or writes files on remote SSH/Conch servers</string>
 </resources>

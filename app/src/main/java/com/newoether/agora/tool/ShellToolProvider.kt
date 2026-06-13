@@ -25,6 +25,20 @@ class ShellToolProvider(
 
     private val sandbox = sandboxFactory?.create()
 
+    /**
+     * Optional user-confirmation gate for state-changing operations on REMOTE
+     * servers (SSH/Conch). Returns true to proceed, false to deny. The local
+     * sandbox is proot-isolated and is never gated. Set by the owning ViewModel;
+     * null = no gate (proceed).
+     */
+    var confirm: (suspend (server: String, summary: String) -> Boolean)? = null
+
+    /** Run [confirm] for remote devices only; sandbox (device == null) always proceeds. */
+    private suspend fun confirmRemote(device: ShellDeviceConfig?, summary: String): Boolean {
+        if (device == null) return true
+        return confirm?.invoke(device.name.ifBlank { "${device.type} server" }, summary) ?: true
+    }
+
     // ── Helpers ────────────────────────────────────────────
 
     private fun parseToolArgs(arguments: String): Map<String, JsonElement> {
@@ -163,8 +177,16 @@ class ShellToolProvider(
         private val password = device.sshPassword
         private val timeout = device.timeout
         private val deviceName = device.name
+        private val hostKey = device.sshHostKey
 
-        private val client: SshClient by lazy { SshClient(host, port, user, password, timeout * 1000) }
+        private val client: SshClient by lazy {
+            SshClient(
+                host, port, user, password, timeout * 1000,
+                pinnedHostKey = hostKey,
+                // Un-pinned devices stay usable (capture-only); once a key is pinned it is enforced.
+                allowUnknownHostKey = hostKey.isBlank()
+            )
+        }
 
         override suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String {
             if (host.isBlank()) return jsonError("execute_shell_command", "SSH device \"$deviceName\" has no host configured.")
@@ -173,7 +195,7 @@ class ShellToolProvider(
                 buildJsonObject {
                     put("type", "execute_shell_command"); put("server", deviceName); put("command", cmd)
                     put("exit_code", result.exitCode)
-                    put("output", (result.stdout + if (result.stderr.isNotBlank()) "\n$result.stderr" else "").trimEnd())
+                    put("output", (result.stdout + if (result.stderr.isNotBlank()) "\n${result.stderr}" else "").trimEnd())
                 }.toString()
             } catch (e: Exception) {
                 jsonError("execute_shell_command", e.message ?: "Unknown error", server = deviceName, command = cmd)
@@ -216,7 +238,7 @@ class ShellToolProvider(
                 buildJsonObject {
                     put("type", "execute_shell_command"); put("server", "Local Sandbox"); put("command", cmd)
                     put("exit_code", result.exitCode)
-                    put("output", (result.stdout + if (result.stderr.isNotBlank()) "\n$result.stderr" else "").trimEnd())
+                    put("output", (result.stdout + if (result.stderr.isNotBlank()) "\n${result.stderr}" else "").trimEnd())
                 }.toString()
             } catch (e: Exception) {
                 jsonError("execute_shell_command", e.message ?: "Unknown error", server = "Local Sandbox", command = cmd)
@@ -447,6 +469,9 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("execute_shell_command", serverNotFoundMessage(serverName, ctx))
         try {
+            if (!confirmRemote(resolveShellDevice(serverName, ctx), "$ $command")) {
+                return jsonError("execute_shell_command", "denied_by_user: the user declined to run this command", server = serverName, command = command)
+            }
             return backend.executeCommand(command, workdir, timeoutMs)
         } finally {
             backend.close()
@@ -483,6 +508,9 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_write", serverNotFoundMessage(serverName, ctx))
         try {
+            if (!confirmRemote(resolveShellDevice(serverName, ctx), "write file: $path")) {
+                return jsonError("file_write", "denied_by_user: the user declined to write this file", server = serverName)
+            }
             val error = backend.fileWrite(path, content)
             if (error != null) return error
             return buildJsonObject {
@@ -506,6 +534,9 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_edit", serverNotFoundMessage(serverName, ctx))
         try {
+            if (!confirmRemote(resolveShellDevice(serverName, ctx), "edit file: $path")) {
+                return jsonError("file_edit", "denied_by_user: the user declined to edit this file", server = serverName)
+            }
             // Read the file
             val rawContent = try {
                 backend.fileRead(path, 0, 0)

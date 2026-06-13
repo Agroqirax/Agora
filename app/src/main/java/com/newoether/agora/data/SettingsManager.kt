@@ -47,7 +47,10 @@ data class ShellDeviceConfig(
     val sshHost: String = "",
     val sshPort: Int = 22,
     val sshUser: String = "root",
-    val sshPassword: String = ""
+    val sshPassword: String = "",
+    // Pinned SSH host key (base64 of the server public-key blob). Blank = not yet
+    // pinned (trust-on-first-use); once set, connections must match or are rejected.
+    val sshHostKey: String = ""
 )
 
 @Serializable
@@ -135,6 +138,7 @@ class SettingsManager(private val context: Context) {
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
+        val SHELL_CONFIRM_ENABLED = booleanPreferencesKey("shell_confirm_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
         val SANDBOX_ENABLED = booleanPreferencesKey("sandbox_enabled")
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -183,7 +187,7 @@ class SettingsManager(private val context: Context) {
     }
 
     val apiKeys: Flow<List<ApiKeyEntry>> = context.dataStore.data.map { pref ->
-        val jsonStr = pref[API_KEYS_JSON] ?: "[]"
+        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[API_KEYS_JSON] ?: "[]")
         try { json.decodeFromString<List<ApiKeyEntry>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
     
@@ -228,7 +232,7 @@ class SettingsManager(private val context: Context) {
     val webSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEB_SEARCH_ENABLED] ?: true }
     val webSearchProvider: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_PROVIDER] ?: "brave" }
     val webSearchApiKeys: Flow<Map<String, String>> = context.dataStore.data.map { pref ->
-        val jsonStr = pref[WEB_SEARCH_API_KEYS_JSON] ?: "{}"
+        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[WEB_SEARCH_API_KEYS_JSON] ?: "{}")
         try { json.decodeFromString<Map<String, String>>(jsonStr) } catch (e: Exception) { DebugLog.e("SettingsManager", "Failed to decode webSearchApiKeys", e); emptyMap() }
     }
     val webSearchNumResults: Flow<Int> = context.dataStore.data.map { it[WEB_SEARCH_NUM_RESULTS] ?: 5 }
@@ -260,8 +264,10 @@ class SettingsManager(private val context: Context) {
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
+    // Confirm before the model runs state-changing commands on remote shell servers. Default on.
+    val shellConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_CONFIRM_ENABLED] ?: true }
     val shellDevices: Flow<List<ShellDeviceConfig>> = context.dataStore.data.map { pref ->
-        val jsonStr = pref[SHELL_DEVICES_JSON] ?: "[]"
+        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[SHELL_DEVICES_JSON] ?: "[]")
         try { json.decodeFromString<List<ShellDeviceConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
     val sandboxEnabled: Flow<Boolean> = context.dataStore.data.map { it[SANDBOX_ENABLED] ?: false }
@@ -316,7 +322,7 @@ class SettingsManager(private val context: Context) {
     }
 
     suspend fun saveApiKeys(keys: List<ApiKeyEntry>) {
-        context.dataStore.edit { it[API_KEYS_JSON] = json.encodeToString(keys) }
+        context.dataStore.edit { it[API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(keys)) }
     }
 
     suspend fun setActiveApiKeyId(provider: String, id: String?) {
@@ -414,10 +420,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveWebSearchApiKey(provider: String, apiKey: String) {
         context.dataStore.edit { prefs ->
-            val current = prefs[WEB_SEARCH_API_KEYS_JSON] ?: "{}"
+            val current = com.newoether.agora.util.SecretCrypto.decrypt(prefs[WEB_SEARCH_API_KEYS_JSON] ?: "{}")
             val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { mutableMapOf() }
             if (apiKey.isBlank()) map.remove(provider) else map[provider] = apiKey
-            prefs[WEB_SEARCH_API_KEYS_JSON] = json.encodeToString(map)
+            prefs[WEB_SEARCH_API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(map))
         }
     }
 
@@ -508,8 +514,12 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
     }
 
+    suspend fun saveShellConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SHELL_CONFIRM_ENABLED] = enabled }
+    }
+
     suspend fun saveShellDevices(devices: List<ShellDeviceConfig>) {
-        context.dataStore.edit { it[SHELL_DEVICES_JSON] = json.encodeToString(devices) }
+        context.dataStore.edit { it[SHELL_DEVICES_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(devices)) }
     }
 
     suspend fun saveSandboxEnabled(enabled: Boolean) {

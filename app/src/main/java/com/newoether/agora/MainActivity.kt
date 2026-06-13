@@ -24,11 +24,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -283,6 +285,50 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                 TextButton(onClick = { viewModel.dismissUpdateDialog() }) {
                     Text(stringResource(R.string.about_later))
                 }
+            }
+        )
+    }
+
+    // Remote shell action confirmation gate
+    val pendingShellCommand by viewModel.pendingShellCommand.collectAsState()
+    pendingShellCommand?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveShellConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.shell_confirm_title, pending.server), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.shell_confirm_always), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveShellConfirmation(allow = true, alwaysAllowServer = alwaysAllow) }) {
+                    Text(stringResource(R.string.shell_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveShellConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.shell_confirm_deny)) }
             }
         )
     }
