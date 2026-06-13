@@ -12,7 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -34,7 +34,7 @@ fun TypewriterText(
     pauseAfterTypeMs: Int = 2000,
     pauseAfterDeleteMs: Int = 600
 ) {
-    var visibleCount by remember { mutableStateOf(0) }
+    var visibleCount by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(text) {
         while (true) {

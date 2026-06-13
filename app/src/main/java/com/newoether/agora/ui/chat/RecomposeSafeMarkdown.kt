@@ -28,40 +28,44 @@ internal fun RecomposeSafeMarkdown(
     var fadeKey by remember { mutableIntStateOf(0) }
     var wasStreaming by remember { mutableStateOf(false) }
     var waitingForFade by remember { mutableStateOf(false) }
-    // State machine
-    if (isStreaming) {
-        waitingForFade = false
-        val cur = if (front == 0) buf0 else buf1
-        if (content != cur && !fading) {
-            if (front == 0) buf1 = content else buf0 = content
-            fadeKey++
-            fading = true
-            fadeAlpha = 0f
-        }
-    } else {
-        if (wasStreaming) {
-            waitingForFade = true
-        }
-        if (waitingForFade) {
-            if (!fading) {
+    // State machine — driven from an effect so composition stays read-only.
+    // Keyed on every input that can trigger a buffer swap / fade transition:
+    // a new content value, a streaming↔idle flip, or a fade completing (fading → false).
+    LaunchedEffect(content, isStreaming, fading) {
+        if (isStreaming) {
+            waitingForFade = false
+            val cur = if (front == 0) buf0 else buf1
+            if (content != cur && !fading) {
                 if (front == 0) buf1 = content else buf0 = content
-                waitingForFade = false
                 fadeKey++
                 fading = true
                 fadeAlpha = 0f
             }
-        }
-        if (!waitingForFade && !fading) {
-            if (front == 0) {
-                if (buf0 != content) buf0 = content
-                buf1 = ""
-            } else {
-                if (buf1 != content) buf1 = content
-                buf0 = ""
+        } else {
+            if (wasStreaming) {
+                waitingForFade = true
+            }
+            if (waitingForFade) {
+                if (!fading) {
+                    if (front == 0) buf1 = content else buf0 = content
+                    waitingForFade = false
+                    fadeKey++
+                    fading = true
+                    fadeAlpha = 0f
+                }
+            }
+            if (!waitingForFade && !fading) {
+                if (front == 0) {
+                    if (buf0 != content) buf0 = content
+                    buf1 = ""
+                } else {
+                    if (buf1 != content) buf1 = content
+                    buf0 = ""
+                }
             }
         }
+        wasStreaming = isStreaming
     }
-    wasStreaming = isStreaming
 
     // Fade animation — keyed by fadeKey so every fade gets a fresh LaunchedEffect
     LaunchedEffect(fadeKey) {

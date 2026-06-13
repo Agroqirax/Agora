@@ -14,11 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.newoether.agora.R
 
 data class PdfPageSelection(
     val selectedPages: Set<Int>,
@@ -52,13 +54,13 @@ fun PdfPageSelectDialog(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    "Select PDF Pages",
+                    stringResource(R.string.pdf_select_title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "$effectiveTotal pages — select pages to include",
+                    stringResource(R.string.pdf_select_subtitle, effectiveTotal),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -80,7 +82,7 @@ fun PdfPageSelectDialog(
                         onClick = { onSelectAll?.invoke(!selectAll) },
                         enabled = !isLoading
                     ) {
-                        Text(if (selectAll) "Deselect All" else "Select All")
+                        Text(stringResource(if (selectAll) R.string.deselect_all else R.string.select_all))
                     }
                 }
 
@@ -96,7 +98,7 @@ fun PdfPageSelectDialog(
                             CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 2.5.dp)
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                "Rendering page ${renderProgress.first} of ${renderProgress.second}…",
+                                stringResource(R.string.pdf_rendering_progress, renderProgress.first, renderProgress.second),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -134,7 +136,7 @@ fun PdfPageSelectDialog(
                                         if (hasThumbnails && pageIdx < thumbnailPaths.size) {
                                             coil.compose.AsyncImage(
                                                 model = thumbnailPaths[pageIdx],
-                                                contentDescription = "Page $page",
+                                                contentDescription = stringResource(R.string.pdf_page_content_desc, page),
                                                 modifier = Modifier.fillMaxSize(),
                                                 contentScale = ContentScale.Fit
                                             )
@@ -197,7 +199,7 @@ fun PdfPageSelectDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onDismiss, shape = RoundedCornerShape(50)) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.cancel))
                     }
                     Spacer(Modifier.width(8.dp))
                     Button(
@@ -205,7 +207,7 @@ fun PdfPageSelectDialog(
                         shape = RoundedCornerShape(50),
                         enabled = selectedPages.isNotEmpty()
                     ) {
-                        Text("Send ${selectedPages.size} pages")
+                        Text(stringResource(R.string.pdf_send_pages, selectedPages.size))
                     }
                 }
             }

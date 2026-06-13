@@ -58,6 +58,16 @@ fun MessageList(
 
     val lastUserMessageIndex = messages.indexOfLast { it.participant == Participant.USER }
 
+    // Precompute branch siblings grouped by parent once per allMessages change.
+    // Previously this filter+sort ran per visible item (O(n²) and re-run on every
+    // streaming-token recomposition of the active message).
+    val siblingsByParent = remember(allMessages) {
+        allMessages
+            .filter { !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
+            .groupBy { it.parentId }
+            .mapValues { (_, v) -> v.sortedBy { it.timestamp } }
+    }
+
     val extraPadding = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
         0.dp
     } else {
@@ -84,7 +94,7 @@ fun MessageList(
             items(messages, key = { it.id }) { message ->
                 val isLastMessage = messages.lastOrNull()?.id == message.id
                 val isInContext = inContextIds.contains(message.id)
-                val siblings = allMessages.filter { it.parentId == message.parentId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }.sortedBy { it.timestamp }
+                val siblings = siblingsByParent[message.parentId].orEmpty()
                 val branchIndex = siblings.indexOfFirst { it.id == message.id }
                 val totalBranches = siblings.size
 
