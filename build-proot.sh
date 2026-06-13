@@ -138,6 +138,18 @@ find "$PROOT_BLD" -name '*.d' -delete
 find "$PROOT_BLD" -name '*.res' -delete
 rm -f "$PROOT_BLD/build.h" "$PROOT_BLD/proot" "$PROOT_BLD/loader/loader" \
       "$PROOT_BLD/.check_process_vm" "$PROOT_BLD/.check_seccomp_filter"
+# ── Cross-compilation source fixes ─────────────────────────────
+# The feature-detection probes are meant to compile/run on the build
+# host; when cross-compiling for Android that is meaningless, so stub
+# them to force the (Android-supported) features on. Also add a
+# <string.h> include that newer clang (NDK r28) rejects as an implicit
+# function declaration error (strcmp/memset).
+printf 'int main(void){return 0;}\n' > "$PROOT_BLD/.check_process_vm.c"
+printf 'int main(void){return 0;}\n' > "$PROOT_BLD/.check_seccomp_filter.c"
+ASHMEM_C="$PROOT_BLD/extension/ashmem_memfd/ashmem_memfd.c"
+if [ -f "$ASHMEM_C" ] && ! grep -q '#include <string.h>' "$ASHMEM_C"; then
+    sed -i '1i #include <string.h>' "$ASHMEM_C"
+fi
 (
     cd "$PROOT_BLD"
     export SOURCE_DATE_EPOCH=0
