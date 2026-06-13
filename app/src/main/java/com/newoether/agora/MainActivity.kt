@@ -23,6 +23,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
@@ -52,6 +53,7 @@ import com.newoether.agora.ui.chat.FullScreenMediaViewer
 import com.newoether.agora.ui.onboarding.WelcomeScreen
 import com.newoether.agora.ui.settings.SettingsScreen
 import com.newoether.agora.ui.theme.AgoraTheme
+import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -296,7 +298,7 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { viewModel.resolveShellConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
+            icon = { Icon(Icons.Default.Terminal, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
             title = { Text(stringResource(R.string.shell_confirm_title, pending.server), fontWeight = FontWeight.Bold) },
             text = {
                 Column {
@@ -329,6 +331,48 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                     onClick = { viewModel.resolveShellConfirmation(allow = false) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.shell_confirm_deny)) }
+            }
+        )
+    }
+
+    // Crash report — opt-in, shown once on the first launch after an unexpected exit
+    val crashContext = LocalContext.current
+    var pendingCrash by remember { mutableStateOf<String?>(null) }
+    val crashSubmittedMsg = stringResource(R.string.crash_submitted)
+    LaunchedEffect(Unit) {
+        pendingCrash = withContext(Dispatchers.IO) { CrashReporter.pendingReport(crashContext) }
+    }
+    pendingCrash?.let { report ->
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { CrashReporter.clear(crashContext); pendingCrash = null },
+            icon = { Icon(Icons.Default.BugReport, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.error) },
+            title = { Text(stringResource(R.string.crash_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.crash_message))
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.crash_privacy_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingCrash = null
+                    CrashReporter.clear(crashContext)
+                    ratingScope.launch {
+                        val ok = withContext(Dispatchers.IO) { CrashReporter.submit(report) }
+                        if (ok) snackbarHostState.showSnackbar(crashSubmittedMsg)
+                    }
+                }) { Text(stringResource(R.string.crash_submit)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { CrashReporter.clear(crashContext); pendingCrash = null }) {
+                    Text(stringResource(R.string.crash_dismiss))
+                }
             }
         )
     }

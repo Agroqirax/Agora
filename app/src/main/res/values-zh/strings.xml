@@ -797,4 +797,12 @@
     <string name="shell_confirm_deny">拒绝</string>
     <string name="shell_confirm_setting">确认远程 Shell 操作</string>
     <string name="shell_confirm_setting_desc">在助手于远程 SSH/Conch 服务器上运行命令或写入文件前询问</string>
+
+    <!-- Crash reporting -->
+    <string name="crash_title">Agora 意外退出</string>
+    <string name="crash_message">很抱歉。您可以通过发送匿名崩溃报告来帮助修复此问题。</string>
+    <string name="crash_submit">提交报告</string>
+    <string name="crash_dismiss">不发送</string>
+    <string name="crash_privacy_note">仅向 newoether.space 发送崩溃日志，不收集任何其他信息。</string>
+    <string name="crash_submitted">崩溃报告已发送，谢谢！</string>
 </resources>
