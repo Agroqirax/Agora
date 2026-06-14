@@ -9,6 +9,8 @@
   [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
   [![Kotlin](https://img.shields.io/badge/Kotlin-Native-blue.svg)](https://kotlinlang.org/)
   <br/>[English](README.md) | **中文**
+
+  <img src="assets/feature_graphic.png" alt="Agora — 夺回数据主权的 BYOK AI 应用" width="100%" />
 </div>
 
 ## 下载
