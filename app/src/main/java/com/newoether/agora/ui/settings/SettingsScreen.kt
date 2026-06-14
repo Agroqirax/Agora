@@ -24,10 +24,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.annotation.StringRes
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -159,6 +166,71 @@ private val settingsGroups = listOf(
     )),
 )
 
+private val SettingsBarHeight = 64.dp
+private val SettingsTitleDockTop = 18.dp       // docked title's top inside the bar (below the status bar)
+private val SettingsTitleBottomInset = 70.dp   // big title's top-left, measured up from the header bottom
+private val SettingsTitleExpandedFont = 40.sp
+private val SettingsTitleCollapsedFont = 22.sp
+
+/** Gentle ease applied to the title's *scale + horizontal tuck* only — its vertical rise stays
+ *  glued 1:1 to the scrolling header, so the shrink-and-dock follows a curve, not dead-linear. */
+private val TitleEasing = CubicBezierEasing(0.2f, 0f, 0.5f, 1f)
+
+/**
+ * iOS-style collapsing title. A single "Settings" Text whose **vertical** position is glued 1:1 to a
+ * scrolling header (so the list always tracks the finger and the title never floats over content
+ * rows), while its **scale + horizontal** position are an eased, non-linear function of [fraction]
+ * (0 = expanded, 1 = docked). Drawn as an overlay above the list — one glyph, no cross-fade.
+ */
+@Composable
+private fun CollapsingSettingsTitleBar(
+    title: String,
+    backDescription: String,
+    fraction: Float,
+    statusBarTop: Dp,
+    titleAreaHeight: Dp,
+    titleTravel: Dp,
+    onBack: () -> Unit
+) {
+    val scaleEnd = SettingsTitleCollapsedFont.value / SettingsTitleExpandedFont.value
+    val eased = TitleEasing.transform(fraction)
+    val titleScale = 1f - (1f - scaleEnd) * eased
+
+    val expandedY = statusBarTop + SettingsBarHeight + titleAreaHeight - SettingsTitleBottomInset
+    val titleY = expandedY - titleTravel * fraction   // linear 1:1 with scroll → docks at expandedY − travel
+    val titleX = 24.dp + (56.dp - 24.dp) * eased       // eased shrink-and-tuck beside the back arrow
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Opaque bar (incl. the status-bar strip) hides list content scrolling underneath it.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(statusBarTop + SettingsBarHeight)
+                .background(MaterialTheme.colorScheme.background)
+        )
+        IconButton(
+            onClick = onBack,
+            modifier = Modifier.padding(start = 4.dp, top = statusBarTop + 8.dp)
+        ) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backDescription)
+        }
+        Text(
+            text = title,
+            fontWeight = FontWeight.Bold,
+            fontSize = SettingsTitleExpandedFont,
+            maxLines = 1,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier
+                .offset(x = titleX, y = titleY)
+                .graphicsLayer {
+                    scaleX = titleScale
+                    scaleY = titleScale
+                    transformOrigin = TransformOrigin(0f, 0f)
+                }
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
@@ -208,32 +280,35 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "appearance" -> SettingsAppearancePage(viewModel, onBack = { selectedCategory = null })
                 "about" -> SettingsAboutPage(viewModel, onBack = { selectedCategory = null })
                 else -> {
-                    Scaffold(
-                        containerColor = MaterialTheme.colorScheme.background,
-                        contentWindowInsets = WindowInsets(0.dp),
-                        topBar = {
-                            TopAppBar(
-                                title = { Text(stringResource(R.string.settings_title), fontWeight = FontWeight.Bold) },
-                                navigationIcon = {
-                                    IconButton(onClick = onBack) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
-                                    }
-                                },
-                                colors = TopAppBarDefaults.topAppBarColors(
-                                    containerColor = MaterialTheme.colorScheme.background,
-                                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                                )
-                            )
+                    // Content scrolls 1:1 with the finger (nothing consumes the gesture). The title
+                    // morph is DERIVED from the real list scroll position via a non-linear map: a tall
+                    // header spacer (item 0) holds the big title and scrolls away 1:1; the overlay title
+                    // rises glued to it (linear), while its scale + horizontal tuck are eased.
+                    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+                    val titleAreaHeight = 110.dp   // big-title header room — the "区间" knob; taller = longer rise
+                    val titleTravel = SettingsBarHeight + titleAreaHeight - SettingsTitleBottomInset - SettingsTitleDockTop
+                    val titleTravelPx = with(LocalDensity.current) { titleTravel.toPx() }
+                    val fraction by remember(titleTravelPx) {
+                        derivedStateOf {
+                            if (listState.firstVisibleItemIndex > 0) 1f
+                            else (listState.firstVisibleItemScrollOffset / titleTravelPx).coerceIn(0f, 1f)
                         }
-                    ) { padding ->
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.background)
+                    ) {
                         LazyColumn(
                             state = listState,
                             modifier = Modifier
-                                .padding(padding)
+                                .fillMaxSize()
                                 .navigationBarsPadding()
-                                .padding(horizontal = 16.dp)
+                                .padding(horizontal = 16.dp),
+                            contentPadding = PaddingValues(top = statusBarTop + SettingsBarHeight)
                         ) {
-                            item { Spacer(modifier = Modifier.height(8.dp)) }
+                            // Header that holds the big title; scrolls away 1:1 with the finger.
+                            item { Spacer(modifier = Modifier.height(titleAreaHeight)) }
                             items(settingsGroups.size) { groupIndex ->
                                 val group = settingsGroups[groupIndex]
                                 Column(
@@ -308,6 +383,15 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                             }
                             item { Spacer(modifier = Modifier.height(32.dp)) }
                         }
+                        CollapsingSettingsTitleBar(
+                            title = stringResource(R.string.settings_title),
+                            backDescription = stringResource(R.string.back),
+                            fraction = fraction,
+                            statusBarTop = statusBarTop,
+                            titleAreaHeight = titleAreaHeight,
+                            titleTravel = titleTravel,
+                            onBack = onBack
+                        )
                     }
                 }
             }

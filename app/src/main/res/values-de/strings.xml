@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">Benutzerdefiniert</string>
     <string name="custom_provider_add">Hinzufügen</string>
     <string name="custom_provider_add_title">Anbieter hinzufügen</string>
+    <string name="custom_provider_empty">Kein benutzerdefinierter Anbieter hinzugefügt</string>
     <string name="custom_provider_name_label">Anbietername</string>
     <string name="custom_provider_name_error">Der Name existiert bereits oder ist ungültig</string>
     <string name="custom_provider_url_error">Basis-URL ist erforderlich</string>

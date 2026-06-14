@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">Свой</string>
     <string name="custom_provider_add">Добавить</string>
     <string name="custom_provider_add_title">Добавить провайдера</string>
+    <string name="custom_provider_empty">Пользовательские провайдеры не добавлены</string>
     <string name="custom_provider_name_label">Название провайдера</string>
     <string name="custom_provider_name_error">Название уже существует или недопустимо</string>
     <string name="custom_provider_url_error">Требуется базовый URL</string>

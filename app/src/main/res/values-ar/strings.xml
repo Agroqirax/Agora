@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">مخصص</string>
     <string name="custom_provider_add">إضافة</string>
     <string name="custom_provider_add_title">إضافة مزوّد</string>
+    <string name="custom_provider_empty">لم تتم إضافة أي مزوّد مخصص</string>
     <string name="custom_provider_name_label">اسم المزوّد</string>
     <string name="custom_provider_name_error">الاسم موجود بالفعل أو غير صالح</string>
     <string name="custom_provider_url_error">عنوان URL الأساسي مطلوب</string>

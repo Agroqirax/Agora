@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">カスタム</string>
     <string name="custom_provider_add">追加</string>
     <string name="custom_provider_add_title">プロバイダーを追加</string>
+    <string name="custom_provider_empty">カスタムプロバイダーが追加されていません</string>
     <string name="custom_provider_name_label">プロバイダー名</string>
     <string name="custom_provider_name_error">名前が既に存在するか、無効です</string>
     <string name="custom_provider_url_error">ベース URL は必須です</string>

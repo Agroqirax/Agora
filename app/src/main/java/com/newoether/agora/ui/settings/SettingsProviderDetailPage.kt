@@ -210,7 +210,7 @@ fun SettingsProviderDetailPage(
                                         Row(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(top = 4.dp)
+                                            modifier = Modifier.padding(top = 1.dp)
                                         ) {
                                             if (model.mmprojPath.isNotBlank()) {
                                                 Surface(

@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">Custom</string>
     <string name="custom_provider_add">Add</string>
     <string name="custom_provider_add_title">Add Provider</string>
+    <string name="custom_provider_empty">No custom provider added</string>
     <string name="custom_provider_name_label">Provider Name</string>
     <string name="custom_provider_name_error">Name already exists or is invalid</string>
     <string name="custom_provider_url_error">Base URL is required</string>

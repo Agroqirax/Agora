@@ -99,7 +99,6 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         TopAppBar(
                             title = { Text(stringResource(R.string.settings_provider), fontWeight = FontWeight.Bold) },
                             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
-                            actions = { IconButton(onClick = { showAddCustomDialog = true }) { Icon(Icons.Default.Add, stringResource(R.string.custom_provider_add)) } },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background, titleContentColor = MaterialTheme.colorScheme.onBackground)
                         )
                     },
@@ -138,9 +137,18 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             }
                         })
 
-                        if (customProviders.isNotEmpty()) {
-                            SettingsGroup(title = stringResource(R.string.custom_provider_section), items = customProviders.map { config ->
-                                @Composable {
+                        SettingsGroup(title = stringResource(R.string.custom_provider_section), items = buildList {
+                            if (customProviders.isEmpty()) {
+                                add {
+                                    SettingsItem(
+                                        headlineContent = { Text(stringResource(R.string.custom_provider_empty), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                        leadingContent = { Icon(Icons.Default.Cloud, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(24.dp)) },
+                                        modifier = Modifier.heightIn(min = 64.dp)
+                                    )
+                                }
+                            }
+                            customProviders.forEach { config ->
+                                add {
                                     val configured = !providerBaseUrls[config.name].isNullOrBlank()
                                     SettingsItem(
                                         headlineContent = { Text(config.name) },
@@ -156,8 +164,17 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         modifier = Modifier.clickable { selectedProvider = config.name }
                                     )
                                 }
-                            })
-                        }
+                            }
+                            add {
+                                Box(modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { showAddCustomDialog = true }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(stringResource(R.string.custom_provider_add_title), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                                    }
+                                }
+                            }
+                        })
 
                         val localConfigured = localChatModels.isNotEmpty()
                         SettingsGroup(title = stringResource(R.string.local_models_title), items = listOf {

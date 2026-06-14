@@ -158,6 +158,7 @@
     <string name="custom_provider_badge">Personalizado</string>
     <string name="custom_provider_add">Añadir</string>
     <string name="custom_provider_add_title">Añadir proveedor</string>
+    <string name="custom_provider_empty">No se ha añadido ningún proveedor personalizado</string>
     <string name="custom_provider_name_label">Nombre del proveedor</string>
     <string name="custom_provider_name_error">El nombre ya existe o no es válido</string>
     <string name="custom_provider_url_error">La URL base es obligatoria</string>

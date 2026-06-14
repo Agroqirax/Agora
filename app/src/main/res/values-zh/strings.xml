@@ -122,6 +122,7 @@
     <string name="custom_provider_badge">自定义</string>
     <string name="custom_provider_add">添加</string>
     <string name="custom_provider_add_title">添加提供商</string>
+    <string name="custom_provider_empty">未添加自定义提供商</string>
     <string name="custom_provider_name_label">提供商名称</string>
     <string name="custom_provider_name_error">名称已存在或无效</string>
     <string name="custom_provider_url_error">需要提供 Base URL</string>
