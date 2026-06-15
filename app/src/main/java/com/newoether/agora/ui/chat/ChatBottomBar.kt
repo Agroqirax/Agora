@@ -902,7 +902,8 @@ fun ChatBottomBar(
                                     Text(stringResource(R.string.advanced_settings))
                                 }
                             },
-                            onClick = onAdvancedClick
+                            // Unlike the toggle rows, this opens a dialog — collapse the menu first.
+                            onClick = { activeMenu = null; onAdvancedClick() }
                         )
                     }
                 }

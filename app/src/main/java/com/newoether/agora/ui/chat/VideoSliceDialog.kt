@@ -140,7 +140,8 @@ fun VideoSliceDialog(
                 if (useFrameCountMode) {
                     Text(
                         stringResource(R.string.frames_count, effectiveFrameCount),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Slider(
@@ -160,7 +161,8 @@ fun VideoSliceDialog(
                 } else {
                     Text(
                         stringResource(R.string.interval_seconds, effectiveIntervalMs / 1000),
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Slider(

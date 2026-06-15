@@ -74,7 +74,8 @@ fun PdfPageSelectDialog(
                 ) {
                     Text(
                         stringResource(R.string.pdf_pages_selected, selectedPages.size),
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.primary
                     )
                     TextButton(

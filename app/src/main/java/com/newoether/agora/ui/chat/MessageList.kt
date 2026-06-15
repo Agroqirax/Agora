@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -98,6 +99,9 @@ fun MessageList(
                 val branchIndex = siblings.indexOfFirst { it.id == message.id }
                 val totalBranches = siblings.size
 
+                // Fade newly-appended messages in. Placement/fade-out left off so this
+                // doesn't fight the manual height/scroll padding management below.
+                Box(modifier = Modifier.animateItem(fadeInSpec = tween(400), placementSpec = null, fadeOutSpec = null)) {
                 MessageItem(
                     message = message,
                     onEdit = { id, text ->
@@ -127,6 +131,7 @@ fun MessageList(
                     onHeightChanged = { height -> messageHeights[message.id] = height },
                     thoughtExpandedStates = thoughtExpandedStates
                 )
+                }
             }
             item {
                 Spacer(modifier = Modifier.height(extraPadding))

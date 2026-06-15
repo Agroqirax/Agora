@@ -171,8 +171,8 @@ private fun PdfPager(
                     Text(
                         "${pagerState.currentPage + 1} / ${pdfPages.size}",
                         color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -290,8 +290,8 @@ private fun MediaPager(
                         Text(
                             "${pagerState.currentPage + 1} / ${urls.size}",
                             color = MaterialTheme.colorScheme.onSurface,
-                            style = MaterialTheme.typography.labelMedium,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 14.dp)
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)
                         )
                     }
                 }

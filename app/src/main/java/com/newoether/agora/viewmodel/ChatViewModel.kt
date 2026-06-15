@@ -142,6 +142,24 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             chatDao.deleteOrphanedEmbeddings()
         }
+        // Sweep orphaned PDF render files (pdf_* / pdf_preview_*) left in filesDir by a
+        // process death while the page-select dialog was open. At startup nothing is
+        // rendering and no dialog is open, so any pdf_*.jpg not referenced by a stored
+        // message's images is junk and gets deleted.
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val referenced = chatDao.getAllMessagesList()
+                    .asSequence()
+                    .flatMap { it.images.asSequence() }
+                    .map { it.removePrefix("file://") }
+                    .toHashSet()
+                getApplication<Application>().filesDir.listFiles { f ->
+                    f.isFile && f.name.startsWith("pdf_") && f.name.endsWith(".jpg")
+                }?.forEach { f ->
+                    if (f.absolutePath !in referenced) runCatching { f.delete() }
+                }
+            } catch (_: Exception) {}
+        }
         // ── Auto Backup ──────────────────────────────────────────
         try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
         viewModelScope.launch(Dispatchers.IO) {

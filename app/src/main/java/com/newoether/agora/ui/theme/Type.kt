@@ -164,6 +164,10 @@ object ChatType {
     // Bold so it still reads as a title against the 15sp Normal body.
     val conversationTitle = TextStyle(fontFamily = OutfitFamily, fontWeight = FontWeight.Bold, fontSize = 15.sp, lineHeight = 20.sp)
 
+    // Active-conversation title when it stands alone (no token subtitle): a touch
+    // smaller than the 20sp brand wordmark so a lone title doesn't read as loud.
+    val conversationTitleSolo = TextStyle(fontFamily = OutfitFamily, fontWeight = FontWeight.Bold, fontSize = 17.sp, lineHeight = 22.sp)
+
     // Input tier
     val input = TextStyle(fontFamily = OutfitFamily, fontWeight = FontWeight.Normal, fontSize = 16.sp, lineHeight = 23.sp, letterSpacing = 0.5.sp)
 

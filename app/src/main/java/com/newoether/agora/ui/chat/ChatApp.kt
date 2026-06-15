@@ -657,7 +657,13 @@ fun ChatApp(
                                     .height(52.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                val currentTitle = if (isNewChatMode) stringResource(R.string.app_name) else conversations.find { it.id == currentConversationId }?.title ?: stringResource(R.string.app_name)
+                                // Resolve the active conversation's title; null in new-chat mode OR
+                                // before the conversation/title has loaded. Both the brand TEXT and the
+                                // brand font SIZE are gated on this single value, so the title never
+                                // changes size before the text swaps (no transient "Agora at 17sp").
+                                val resolvedTitle = if (isNewChatMode) null
+                                    else conversations.find { it.id == currentConversationId }?.title?.takeIf { it.isNotBlank() }
+                                val showBrandTitle = resolvedTitle == null
 
                                 // Title capsule: menu + title
                                 Surface(
@@ -679,9 +685,9 @@ fun ChatApp(
                                             Icon(Icons.Default.Menu, contentDescription = stringResource(R.string.menu), modifier = Modifier.size(26.dp))
                                         }
                                         Spacer(modifier = Modifier.width(5.dp))
-                                        if (isNewChatMode) {
+                                        if (showBrandTitle) {
                                             Text(
-                                                text = currentTitle,
+                                                text = stringResource(R.string.app_name),
                                                 style = ChatType.brandTitle,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -690,8 +696,10 @@ fun ChatApp(
                                         } else {
                                             Column(modifier = Modifier.widthIn(max = 180.dp)) {
                                                 Text(
-                                                    text = currentTitle,
-                                                    style = ChatType.conversationTitle,
+                                                    text = resolvedTitle,
+                                                    // Single-line (no token subtitle) uses a slightly-smaller-than-brand
+                                                    // solo size; with the token subtitle stacked below, the compact size.
+                                                    style = if (totalTokens > 0) ChatType.conversationTitle else ChatType.conversationTitleSolo,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
