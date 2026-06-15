@@ -730,6 +730,8 @@
     <string name="parse_error">Parse error</string>
     <string name="unknown_error">Unknown error</string>
     <string name="could_not_read_file">Could not read file</string>
+    <string name="import_file_too_large">File too large (%1$d MB). Please choose a smaller export file.</string>
+    <string name="import_out_of_memory">Not enough memory to import this file. Please choose a smaller export.</string>
 
     <!-- Documentation -->
     <string name="documentation">Documentation</string>

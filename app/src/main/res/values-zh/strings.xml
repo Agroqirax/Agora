@@ -734,6 +734,8 @@
     <string name="parse_error">解析错误</string>
     <string name="unknown_error">未知错误</string>
     <string name="could_not_read_file">无法读取文件</string>
+    <string name="import_file_too_large">文件过大（%1$d MB）。请选择较小的导出文件。</string>
+    <string name="import_out_of_memory">内存不足，无法导入此文件。请选择较小的导出文件。</string>
 
     <!-- Documentation -->
     <string name="documentation">查看文档</string>

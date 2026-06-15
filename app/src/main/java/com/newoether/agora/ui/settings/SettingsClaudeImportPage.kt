@@ -19,7 +19,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.newoether.agora.R
-import com.newoether.agora.data.ClaudeChatImporter
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 
@@ -54,21 +53,7 @@ fun SettingsClaudeImportPage(
             }
             fileName = name
             // Preview the file
-            scope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null) {
-                        val jsonResult = ClaudeChatImporter().extractJsonFromBytes(bytes)
-                        if (jsonResult.isSuccess) {
-                            viewModel.previewClaudeChat(jsonResult.getOrThrow())
-                        } else {
-                            viewModel.setClaudeImportError(jsonResult.exceptionOrNull()?.localizedMessage ?: "Failed to read file")
-                        }
-                    }
-                } catch (e: Exception) {
-                    viewModel.setClaudeImportError(e.localizedMessage ?: "Unknown error")
-                }
-            }
+            viewModel.previewClaudeChat(uri)
         }
     }
 

@@ -1,14 +1,15 @@
 package com.newoether.agora.data
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.decodeFromStream
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.io.ByteArrayInputStream
+import java.io.BufferedInputStream
+import java.io.InputStream
 import java.util.zip.ZipInputStream
 
 class GptChatImporter {
@@ -100,47 +101,40 @@ class GptChatImporter {
 
     private val jsonParser = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun extractAndParse(bytes: ByteArray): Result<List<GptConversation>> {
+    /**
+     * Streams and parses a ChatGPT export without ever holding the whole file
+     * in memory. [openStream] is a factory so the source can be re-read when a
+     * ZIP archive must be probed before its entries are decoded.
+     *
+     * Accepts either a raw `conversations.json` array or a ChatGPT ZIP export
+     * containing `conversations.json` (optionally split into `conversations-N.json`).
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    fun extractAndParse(openStream: () -> InputStream): Result<List<GptConversation>> {
         return try {
-            if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4B.toByte()) {
-                val zipInput = ZipInputStream(ByteArrayInputStream(bytes))
-                var entry = zipInput.nextEntry
-                val allConversations = mutableListOf<GptConversation>()
-                while (entry != null) {
-                    if (!entry.isDirectory && entry.name.endsWith(".json")) {
-                        val json = zipInput.readBytes().decodeToString()
-                        when {
-                            entry.name == "conversations.json" -> {
-                                val list = jsonParser.decodeFromString<List<GptConversation>>(json)
-                                allConversations.addAll(list)
-                                zipInput.close()
-                                return Result.success(allConversations.ifEmpty { list })
-                            }
-                            entry.name.matches(Regex("conversations-\\d+\\.json")) -> {
-                                val list = jsonParser.decodeFromString<List<GptConversation>>(json)
-                                allConversations.addAll(list)
-                            }
-                            entry.name == "export_manifest.json" -> {
-                                // skip
-                            }
+            BufferedInputStream(openStream()).use { input ->
+                if (isZip(input)) {
+                    val zipInput = ZipInputStream(input)
+                    val allConversations = mutableListOf<GptConversation>()
+                    var entry = zipInput.nextEntry
+                    while (entry != null) {
+                        if (!entry.isDirectory &&
+                            (entry.name == "conversations.json" ||
+                                entry.name.matches(Regex("conversations-\\d+\\.json")))
+                        ) {
+                            allConversations += jsonParser.decodeFromStream<List<GptConversation>>(
+                                NonClosingInputStream(zipInput)
+                            )
                         }
+                        zipInput.closeEntry()
+                        entry = zipInput.nextEntry
                     }
-                    zipInput.closeEntry()
-                    entry = zipInput.nextEntry
-                }
-                zipInput.close()
-
-                if (allConversations.isNotEmpty()) {
-                    Result.success(allConversations)
+                    if (allConversations.isNotEmpty()) Result.success(allConversations)
+                    else Result.failure(Exception("No conversation data found in ZIP archive"))
                 } else {
-                    Result.failure(Exception("No conversation data found in ZIP archive"))
-                }
-            } else {
-                val list = jsonParser.decodeFromString<List<GptConversation>>(bytes.decodeToString())
-                if (list.isNotEmpty()) {
-                    Result.success(list)
-                } else {
-                    Result.failure(Exception("No conversations found in JSON"))
+                    val list = jsonParser.decodeFromStream<List<GptConversation>>(input)
+                    if (list.isNotEmpty()) Result.success(list)
+                    else Result.failure(Exception("No conversations found in JSON"))
                 }
             }
         } catch (e: Exception) {

@@ -25,8 +25,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.newoether.agora.R
-import com.newoether.agora.data.ClaudeChatImporter
-import com.newoether.agora.data.GptChatImporter
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -116,22 +114,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 if (cursor.moveToFirst()) cursor.getString(nameIdx) else null
             }
             claudeFileName = name
-            scope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null) {
-                        val importer = ClaudeChatImporter()
-                        val jsonResult = importer.extractJsonFromBytes(bytes)
-                        if (jsonResult.isSuccess) {
-                            viewModel.previewClaudeChat(jsonResult.getOrThrow())
-                        } else {
-                            viewModel.setClaudeImportError(jsonResult.exceptionOrNull()?.localizedMessage ?: "Failed to read file")
-                        }
-                    }
-                } catch (e: Exception) {
-                    viewModel.setClaudeImportError(e.localizedMessage ?: "Unknown error")
-                }
-            }
+            viewModel.previewClaudeChat(uri)
         }
     }
 
@@ -146,18 +129,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 if (cursor.moveToFirst()) cursor.getString(nameIdx) else null
             }
             gptFileName = name
-            scope.launch {
-                try {
-                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    if (bytes != null) {
-                        viewModel.previewGptChat(bytes)
-                    } else {
-                        viewModel.setGptImportError("Failed to read file")
-                    }
-                } catch (e: Exception) {
-                    viewModel.setGptImportError(e.localizedMessage ?: "Unknown error")
-                }
-            }
+            viewModel.previewGptChat(uri)
         }
     }
 

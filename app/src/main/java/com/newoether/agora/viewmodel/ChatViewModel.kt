@@ -2591,20 +2591,48 @@ class ChatViewModel(
         _claudeImportPreview.value = preview
     }
 
-    fun previewClaudeChat(json: String) {
-        try {
-            val importer = ClaudeChatImporter()
-            val parseResult = importer.parseJson(json)
-            if (parseResult.isSuccess) {
-                val preview = importer.preview(parseResult.getOrThrow())
-                _claudeImportPreview.value = preview
-            } else {
-                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
+    /** Hard ceiling on import file size; beyond this we refuse rather than risk OOM. */
+    private val maxImportBytes = 256L * 1024 * 1024
+
+    /** Opens a readable stream for [uri], or throws with a localized message. */
+    private fun openImportStream(uri: Uri): java.io.InputStream =
+        getApplication<android.app.Application>().contentResolver.openInputStream(uri)
+            ?: throw java.io.IOException(appContext.getString(R.string.could_not_read_file))
+
+    /**
+     * Returns a localized error if [uri] exceeds [maxImportBytes], else null.
+     * The size is read from provider metadata without opening the file.
+     */
+    private fun importSizeError(uri: Uri): String? {
+        val size = getApplication<android.app.Application>().contentResolver
+            .query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
+            ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
+        return if (size > maxImportBytes) {
+            appContext.getString(R.string.import_file_too_large, size / (1024 * 1024))
+        } else null
+    }
+
+    fun previewClaudeChat(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                importSizeError(uri)?.let {
+                    emitSnackbar(it); _claudeImportPreview.value = null; return@launch
+                }
+                val importer = ClaudeChatImporter()
+                val parseResult = importer.extractAndParse { openImportStream(uri) }
+                if (parseResult.isSuccess) {
+                    _claudeImportPreview.value = importer.preview(parseResult.getOrThrow())
+                } else {
+                    emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
+                    _claudeImportPreview.value = null
+                }
+            } catch (e: OutOfMemoryError) {
+                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
+                _claudeImportPreview.value = null
+            } catch (e: Exception) {
+                emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
                 _claudeImportPreview.value = null
             }
-        } catch (e: Exception) {
-            emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
-            _claudeImportPreview.value = null
         }
     }
 
@@ -2623,20 +2651,13 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _claudeImportProgress.value = 0.2f
-                val bytes = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                if (bytes == null) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, appContext.getString(R.string.could_not_read_file)))
+                importSizeError(uri)?.let {
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, it))
                     return@launch
                 }
 
                 val importer = ClaudeChatImporter()
-                val jsonResult = importer.extractJsonFromBytes(bytes)
-                if (jsonResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, jsonResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
-                    return@launch
-                }
-
-                val parseResult = importer.parseJson(jsonResult.getOrThrow())
+                val parseResult = importer.extractAndParse { openImportStream(uri) }
                 if (parseResult.isFailure) {
                     emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
                     return@launch
@@ -2689,6 +2710,9 @@ class ChatViewModel(
                 }
                 _claudeImportProgress.value = null
                 refreshDataCounts()
+            } catch (e: OutOfMemoryError) {
+                _claudeImportProgress.value = null
+                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
             } catch (e: Exception) {
                 _claudeImportProgress.value = null
                 emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, e.localizedMessage ?: ""))
@@ -2696,21 +2720,27 @@ class ChatViewModel(
         }
     }
 
-    fun previewGptChat(bytes: ByteArray) {
-        try {
-            val importer = GptChatImporter()
-            val parseResult = importer.extractAndParse(bytes)
-            if (parseResult.isSuccess) {
-                val conversations = parseResult.getOrThrow()
-                val preview = importer.preview(conversations)
-                _gptImportPreview.value = preview
-            } else {
-                emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
+    fun previewGptChat(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                importSizeError(uri)?.let {
+                    emitSnackbar(it); _gptImportPreview.value = null; return@launch
+                }
+                val importer = GptChatImporter()
+                val parseResult = importer.extractAndParse { openImportStream(uri) }
+                if (parseResult.isSuccess) {
+                    _gptImportPreview.value = importer.preview(parseResult.getOrThrow())
+                } else {
+                    emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
+                    _gptImportPreview.value = null
+                }
+            } catch (e: OutOfMemoryError) {
+                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
+                _gptImportPreview.value = null
+            } catch (e: Exception) {
+                emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
                 _gptImportPreview.value = null
             }
-        } catch (e: Exception) {
-            emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
-            _gptImportPreview.value = null
         }
     }
 
@@ -2729,14 +2759,13 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 _gptImportProgress.value = 0.2f
-                val bytes = getApplication<android.app.Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                if (bytes == null) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, appContext.getString(R.string.could_not_read_file)))
+                importSizeError(uri)?.let {
+                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, it))
                     return@launch
                 }
 
                 val importer = GptChatImporter()
-                val parseResult = importer.extractAndParse(bytes)
+                val parseResult = importer.extractAndParse { openImportStream(uri) }
                 if (parseResult.isFailure) {
                     emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
                     return@launch
@@ -2790,6 +2819,9 @@ class ChatViewModel(
                 }
                 _gptImportProgress.value = null
                 refreshDataCounts()
+            } catch (e: OutOfMemoryError) {
+                _gptImportProgress.value = null
+                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
             } catch (e: Exception) {
                 _gptImportProgress.value = null
                 emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, e.localizedMessage ?: ""))
