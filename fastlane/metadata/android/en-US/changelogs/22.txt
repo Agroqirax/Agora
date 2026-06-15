@@ -1,4 +1,4 @@
-* Onboarding: add custom OpenAI-compatible providers, single API-key entry, and seamless model fetching
+* Onboarding: add custom OpenAI-compatible providers, single API-key entry, seamless model fetching, and auto-name imported GGUF models after their file
 * Chat: message fade-in, unified type scale, clearer reasoning-block hierarchy, image polish
 * Settings: unified collapsing large-title with UI/UX polish; fix API key not restored from auto-backup
 * Embedding: stop caching embeddings after the model is deleted
