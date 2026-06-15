@@ -2,6 +2,7 @@ package com.newoether.agora.ui.chat
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -213,8 +214,15 @@ fun ChatApp(
     var drawerProgress by remember { mutableFloatStateOf(0f) }
     // Bottom offset to clear the Settings button in the drawer.
     var settingsButtonTopDp by remember { mutableFloatStateOf(80f) }
+    val imeBottom = WindowInsets.ime.asPaddingValues().calculateBottomPadding()
+    val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // When expanded, the Surface fills the screen and the model-selector capsule sits
+    // at the very bottom. Snackbar must clear: nav bar + IME + Surface outer padding + Box
+    // bottom padding + Row height/margin + a small gap.
+    val bottomInset = maxOf(navBarBottom, imeBottom)
+    val expandedCapsuleOffset = bottomInset + 74.dp
     val targetSnackbarOffset = if (drawerProgress <= 0.5f) {
-        bottomBarHeight
+        if (isExpanded) expandedCapsuleOffset else (bottomBarHeight - 4.dp).coerceAtLeast(0.dp)
     } else {
         val t = ((drawerProgress - 0.5f) * 2f).coerceIn(0f, 1f)
         (bottomBarHeight.value + (settingsButtonTopDp - bottomBarHeight.value) * t).dp
@@ -455,21 +463,38 @@ fun ChatApp(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (!isSearchActive) {
+                        val newChatDisabled = isSwitching
+                        val newChatContainer by animateColorAsState(
+                            if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+                            else MaterialTheme.colorScheme.primary,
+                            tween(300), label = "newChatContainer"
+                        )
+                        val newChatContent by animateColorAsState(
+                            if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            else MaterialTheme.colorScheme.onPrimary,
+                            tween(300), label = "newChatContent"
+                        )
                         Button(
                             onClick = {
-                                viewModel.createNewChat()
-                                scope.launch {
-                                    drawerState.close()
-                                    inputFocusRequester.requestFocus()
+                                if (!newChatDisabled) {
+                                    viewModel.createNewChat()
+                                    scope.launch {
+                                        drawerState.close()
+                                        inputFocusRequester.requestFocus()
+                                    }
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = !isSwitching,
-                            shape = CircleShape
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                            enabled = true,
+                            shape = CircleShape,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = newChatContainer,
+                                contentColor = newChatContent
+                            )
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.new_chat))
+                            Text(stringResource(R.string.new_chat), style = MaterialTheme.typography.titleMedium)
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -600,6 +625,7 @@ fun ChatApp(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .height(42.dp)
                             .onGloballyPositioned { coords ->
                                 val screenHeightPx = configuration.screenHeightDp * density.density
                                 val buttonTopPx = coords.positionInWindow().y
@@ -609,7 +635,7 @@ fun ChatApp(
                     ) {
                         Icon(Icons.Default.Settings, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(stringResource(R.string.settings))
+                        Text(stringResource(R.string.settings), style = MaterialTheme.typography.titleMedium)
                     }
                 }
             }
@@ -953,7 +979,7 @@ fun ChatApp(
                             .fillMaxWidth()
                             .then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)
                             .onSizeChanged {
-                            bottomBarHeightPx = it.height.toFloat()
+                            if (!isExpanded) bottomBarHeightPx = it.height.toFloat()
                         }
                         .navigationBarsPadding()
                         .imePadding()

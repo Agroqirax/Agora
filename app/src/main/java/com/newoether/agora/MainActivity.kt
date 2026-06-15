@@ -15,14 +15,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.runtime.key
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Lock
@@ -33,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
@@ -629,12 +633,50 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                 }
             }
 
-            SnackbarHost(
-                hostState = snackbarHostState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = snackbarBottomPadding)
-            )
+            val current = snackbarHostState.currentSnackbarData
+            var showing by remember { mutableStateOf(false) }
+            var content by remember { mutableStateOf<SnackbarData?>(null) }
+
+            LaunchedEffect(current) {
+                if (current != null) {
+                    if (showing) { showing = false; delay(200) }
+                    content = current
+                    showing = true
+                } else {
+                    showing = false
+                    delay(400)
+                    content = null
+                }
+            }
+
+            AnimatedVisibility(
+                visible = showing,
+                enter = fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.8f),
+                exit = fadeOut(tween(400)) + scaleOut(tween(400), targetScale = 0.8f),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = snackbarBottomPadding + 2.dp)
+            ) {
+                content?.let { data ->
+                    Snackbar(
+                        modifier = Modifier.padding(horizontal = 12.dp).padding(vertical = 10.dp).shadow(6.dp, RoundedCornerShape(12.dp), clip = false),
+                        shape = RoundedCornerShape(12.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        actionContentColor = MaterialTheme.colorScheme.primary,
+                        dismissActionContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        dismissAction = @Composable {
+                            Box(modifier = Modifier.padding(end = 8.dp)) {
+                                IconButton(onClick = { data.dismiss() }, modifier = Modifier.size(28.dp).clip(CircleShape)) {
+                                    Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.cancel), modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        },
+                        action = data.visuals.actionLabel?.let { label ->
+                            @Composable { TextButton(onClick = { data.performAction() }) { Text(label) } }
+                        },
+                        content = { Text(data.visuals.message) }
+                    )
+                }
+            }
         }
     }
 }

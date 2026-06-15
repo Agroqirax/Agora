@@ -62,8 +62,8 @@ fun RatingForm(
     Column {
         Text(
             text = stringResource(R.string.rating_title),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(bottom = 4.dp)
         )
         Spacer(modifier = Modifier.height(6.dp))

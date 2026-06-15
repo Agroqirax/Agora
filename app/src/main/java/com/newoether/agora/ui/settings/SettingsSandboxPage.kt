@@ -301,15 +301,11 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                                 ) {
                                     val termScroll = rememberScrollState()
                                     LaunchedEffect(terminalOutput) { termScroll.animateScrollTo(termScroll.maxValue) }
-                                    // Adapt the terminal palette to the active theme (derived from the
-                                    // applied surface luminance, so it follows LIGHT/DARK/dynamic too).
-                                    // GitHub-style dark and light code colors keep it readable in both.
-                                    val terminalDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
-                                    val terminalBg = if (terminalDark) Color(0xFF0D1117) else Color(0xFFF1F3F5)
-                                    val terminalFg = if (terminalDark) Color(0xFFC9D1D9) else Color(0xFF24292F)
+                                    val terminalFg = MaterialTheme.colorScheme.onSurface
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = terminalBg,
+                                        color = MaterialTheme.colorScheme.surface,
+                                        tonalElevation = 4.dp,
                                         modifier = Modifier.padding(top = 16.dp).fillMaxWidth().height(260.dp)
                                     ) {
                                         SelectionContainer {
