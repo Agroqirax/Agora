@@ -62,6 +62,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.NonCancellable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -405,6 +406,9 @@ class ChatViewModel(
     private val _cachingProgress = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cachingProgress: StateFlow<Map<String, Pair<Int, Int>>> = _cachingProgress.asStateFlow()
     private val cacheMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+    // In-app caching coroutine per model, so deleteEmbeddingModel can cancel an
+    // in-flight cache instead of queueing behind it on the mutex.
+    private val cacheJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
     private val _cacheCounts = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cacheCounts: StateFlow<Map<String, Pair<Int, Int>>> = _cacheCounts.asStateFlow()
     fun loadCacheCounts() {
@@ -909,7 +913,28 @@ class ChatViewModel(
         }
     }
     fun deleteEmbeddingModel(id: String) {
+        // Stop the background WorkManager cache job for this model right away. cancel()
+        // is async, so we await termination below before deleting rows — otherwise a
+        // worker batch in flight would re-insert embeddings for the now-deleted model.
+        val workManager = androidx.work.WorkManager.getInstance(appContext)
+        val workName = com.newoether.agora.service.EmbeddingCacheWorker.workNameFor(id)
+        workManager.cancelUniqueWork(workName)
+
         viewModelScope.launch(Dispatchers.IO) {
+            // Stop the in-app caching coroutine and wait for it to fully unwind (it
+            // holds cacheMutexes[id] for its whole loop, so cancel+join — not the lock —
+            // is what actually halts it before we take the mutex ourselves).
+            cacheJobs.remove(id)?.let { it.cancel(); it.join() }
+
+            // Deterministically wait until the worker has reached a finished state
+            // (CANCELLED/SUCCEEDED/FAILED) so no writer remains. Empty info list (work
+            // never existed) satisfies the predicate immediately. Bounded so a stuck
+            // worker can't hang deletion.
+            withTimeoutOrNull(10_000) {
+                workManager.getWorkInfosForUniqueWorkFlow(workName)
+                    .first { infos -> infos.all { it.state.isFinished } }
+            }
+
             val mutex = cacheMutexes.computeIfAbsent(id) { Mutex() }
             mutex.withLock {
                 val model = embeddingModels.value.find { it.id == id }
@@ -922,8 +947,10 @@ class ChatViewModel(
                 if (activeEmbeddingModelId.value == id && models.isNotEmpty()) {
                     settingsManager.setActiveEmbeddingModelId(models.first().id)
                 }
+                _cachingProgress.update { it - id }
                 refreshCacheCounts()
             }
+            cacheMutexes.remove(id)
         }
     }
     fun renameEmbeddingModel(id: String, newName: String, batchSize: Int? = null) {
@@ -969,7 +996,7 @@ class ChatViewModel(
                 workRequest
             )
 
-        viewModelScope.launch(Dispatchers.IO) {
+        val job = viewModelScope.launch(Dispatchers.IO) {
             val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
             mutex.withLock {
                 val model = embeddingModels.value.find { it.id == modelId } ?: return@launch
@@ -1065,6 +1092,10 @@ class ChatViewModel(
                 refreshCacheCounts()
             }
         }
+        // Track the job so deleteEmbeddingModel can cancel an in-flight cache; self-remove
+        // on completion (guard against clobbering a newer job for the same model).
+        cacheJobs[modelId] = job
+        job.invokeOnCompletion { cacheJobs.remove(modelId, job) }
     }
 
     fun isLocalModelIdTaken(modelId: String, excludeId: String? = null): Boolean {

@@ -8,6 +8,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -29,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -299,9 +301,17 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                                 ) {
                                     val termScroll = rememberScrollState()
                                     LaunchedEffect(terminalOutput) { termScroll.animateScrollTo(termScroll.maxValue) }
+                                    // Adapt the terminal palette to the active theme (derived from the
+                                    // applied surface luminance, so it follows LIGHT/DARK/dynamic too).
+                                    // GitHub-style dark and light code colors keep it readable in both.
+                                    val terminalDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+                                    val terminalBg = if (terminalDark) Color(0xFF0D1117) else Color(0xFFF1F3F5)
+                                    val terminalFg = if (terminalDark) Color(0xFFC9D1D9) else Color(0xFF24292F)
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = Color(0xFF0D1117),
+                                        color = terminalBg,
+                                        // Light terminal can blend into a light card — outline it.
+                                        border = if (terminalDark) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                         modifier = Modifier.padding(top = 16.dp).fillMaxWidth().height(260.dp)
                                     ) {
                                         SelectionContainer {
@@ -318,7 +328,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                                                     fontFamily = FontFamily(Font(R.font.jetbrains_mono_regular)),
                                                     lineHeight = 18.sp
                                                 ),
-                                                color = Color(0xFFC9D1D9)
+                                                color = terminalFg
                                             )
                                         }
                                     }

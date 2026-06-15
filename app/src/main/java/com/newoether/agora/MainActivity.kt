@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -255,33 +256,39 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
             },
             text = {
                 Column(modifier = Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())) {
-                    Text(stringResource(R.string.about_available_body))
+                    Text(
+                        stringResource(R.string.about_available_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     if (info.body.isNotBlank()) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Column {
+                            // Lightweight markdown render of the release notes, kept on the
+                            // shared type scale: '## ' → bold section label, '- ' → indented
+                            // bullet, blank line → vertical gap, everything else → paragraph.
                             info.body.split("\n").forEach { line ->
-                                val style = when {
-                                    line.startsWith("## ") -> MaterialTheme.typography.titleMedium
-                                    line.startsWith("- ") -> MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
-                                    line.isBlank() -> null
-                                    else -> MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp)
-                                }
-                                if (style != null) {
-                                    val text = when {
-                                        line.startsWith("- ") -> "• ${line.removePrefix("- ")}"
-                                        else -> line.removePrefix("## ")
-                                    }
-                                    Text(
-                                        text = text,
-                                        style = style,
-                                        modifier = Modifier.padding(top = when {
-                                            line.startsWith("## ") -> 12.dp
-                                            line.startsWith("- ") -> 1.dp
-                                            else -> 1.dp
-                                        })
+                                when {
+                                    line.startsWith("## ") -> Text(
+                                        text = line.removePrefix("## "),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(top = 14.dp, bottom = 2.dp)
                                     )
-                                } else {
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    line.startsWith("- ") -> Text(
+                                        text = "•  ${line.removePrefix("- ")}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 3.dp, start = 2.dp)
+                                    )
+                                    line.isBlank() -> Spacer(modifier = Modifier.height(4.dp))
+                                    else -> Text(
+                                        text = line,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(top = 3.dp)
+                                    )
                                 }
                             }
                         }
@@ -361,13 +368,35 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
             title = { Text(stringResource(R.string.crash_title), fontWeight = FontWeight.Bold) },
             text = {
                 Column {
-                    Text(stringResource(R.string.crash_message))
-                    Spacer(Modifier.height(12.dp))
                     Text(
-                        stringResource(R.string.crash_privacy_note),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        stringResource(R.string.crash_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    Spacer(Modifier.height(14.dp))
+                    // Privacy reassurance as a distinct fine-print block, not just smaller text.
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                null,
+                                modifier = Modifier.size(15.dp).padding(top = 1.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                stringResource(R.string.crash_privacy_note),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
