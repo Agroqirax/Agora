@@ -115,15 +115,29 @@ class AgoraForegroundService : Service() {
     }
 
     private var currentText: String = "Generating response…"
+    private var foregroundStarted: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
         instance = this
-        promoteToForeground(currentText)
+        createChannel(this)
+        val notification = buildGenerationNotification(currentText)
+        // Must NOT catch exceptions here: if startForeground() fails, the real
+        // exception (SecurityException, ForegroundServiceStartNotAllowed, etc.)
+        // must propagate so Crashlytics/logs capture it. Catching + stopSelf()
+        // leaves the system's 5-second timeout to fire, which only surfaces the
+        // useless ForegroundServiceDidNotStartInTimeException instead.
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            foregroundServiceType()
+        )
+        foregroundStarted = true
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        promoteToForeground(currentText)
+        // startForeground() already called in onCreate(); no re-promote needed.
         return START_NOT_STICKY
     }
 
@@ -133,23 +147,13 @@ class AgoraForegroundService : Service() {
     }
 
     private fun updateNotificationText(text: String) {
-        promoteToForeground(text)
-    }
-
-    private fun promoteToForeground(text: String) {
         currentText = text
-        createChannel(this)
-        val notification = buildGenerationNotification(text)
+        if (!foregroundStarted) return
         try {
-            ServiceCompat.startForeground(
-                this,
-                NOTIFICATION_ID,
-                notification,
-                foregroundServiceType()
-            )
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.notify(NOTIFICATION_ID, buildGenerationNotification(text))
         } catch (e: RuntimeException) {
-            DebugLog.w(TAG, "Failed to promote foreground service", e)
-            stopSelf()
+            DebugLog.w(TAG, "Failed to update notification", e)
         }
     }
 
