@@ -455,7 +455,7 @@ private fun TemplateItemRow(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = variableDisplayName(item.value),
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                                 fontWeight = FontWeight.Medium
                             )
                             Text(

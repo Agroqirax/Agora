@@ -4,6 +4,7 @@ import com.newoether.agora.api.*
 
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
@@ -299,10 +300,15 @@ class GeminiProvider : LlmProvider {
         val thinkingConfig = if (!config.thinkingEnabled) {
             null
         } else when {
-            cleanModelName.contains("gemini-3", ignoreCase = true) ->
-                ApiThinkingConfig(includeThoughts = true, thinkingLevel = config.thinkingLevel.uppercase())
-            cleanModelName.contains("gemini-2.5", ignoreCase = true) ->
-                ApiThinkingConfig(includeThoughts = true, thinkingBudget = -1)
+            cleanModelName.contains("gemini-3", ignoreCase = true) || cleanModelName.contains("gemini-3.5", ignoreCase = true) -> {
+                ApiThinkingConfig(includeThoughts = true, thinkingLevel = ThinkingLevels.geminiLevel(config.thinkingLevel))
+            }
+            cleanModelName.contains("gemini-2.5", ignoreCase = true) -> {
+                ApiThinkingConfig(
+                    includeThoughts = true,
+                    thinkingBudget = config.thinkingBudgetTokens.takeIf { config.thinkingBudgetEnabled }
+                )
+            }
             cleanModelName.contains("thinking-exp", ignoreCase = true) ->
                 ApiThinkingConfig(includeThoughts = true)
             else -> null

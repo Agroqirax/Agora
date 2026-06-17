@@ -78,7 +78,7 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 lang.label,
-                                style = MaterialTheme.typography.bodyLarge,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                                 fontWeight = if (appLanguage == lang.code) FontWeight.Bold else FontWeight.Normal
                             )
                         }

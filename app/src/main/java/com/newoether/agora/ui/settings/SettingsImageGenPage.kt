@@ -148,7 +148,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             Icon(Icons.Default.AspectRatio, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
                             Spacer(modifier = Modifier.width(16.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(stringResource(R.string.image_gen_size), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(R.string.image_gen_size), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
                                 val parts = remember { size.split("x", "X", limit = 2) }
                                 val wState = remember { TextFieldState(parts.getOrNull(0)?.trim().orEmpty().ifEmpty { "1024" }) }
                                 val hState = remember { TextFieldState(parts.getOrNull(1)?.trim().orEmpty().ifEmpty { "1024" }) }
@@ -171,7 +171,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         modifier = Modifier.weight(1f),
                                         textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     )
-                                    Text("×", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp))
+                                    Text("×", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 12.dp))
                                     OutlinedTextField(
                                         state = hState,
                                         placeholder = { Text("1024") },

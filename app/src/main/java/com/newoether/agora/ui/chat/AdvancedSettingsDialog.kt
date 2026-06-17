@@ -30,7 +30,7 @@ fun AdvancedSettingsDialog(
     var frequencyPenalty by remember { mutableStateOf(overrides.frequencyPenalty) }
     var presencePenalty by remember { mutableStateOf(overrides.presencePenalty) }
 
-    fun currentSettings() = ConversationSettings(
+    fun currentSettings() = overrides.copy(
         contextWindow = contextWindow,
         temperature = temperature,
         maxTokens = maxTokens,

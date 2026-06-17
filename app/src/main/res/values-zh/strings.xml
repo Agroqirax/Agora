@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name">Agora</string>
+    <string name="agora_responded">Agora 已回复</string>
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">添加附件</string>
@@ -215,9 +216,29 @@
     <string name="gen_thinking_enabled_desc">启用模型思考/推理能力</string>
     <string name="gen_thinking_level">思考深度</string>
     <string name="gen_thinking_level_desc">控制思考深度；越高推理越深入</string>
+    <string name="gen_thinking_level_minimal">极低</string>
     <string name="gen_thinking_level_low">低</string>
     <string name="gen_thinking_level_medium">中</string>
     <string name="gen_thinking_level_high">高</string>
+    <string name="gen_thinking_level_xhigh">超高</string>
+    <string name="gen_thinking_level_max">最大</string>
+    <string name="thinking_effort_label">思考深度</string>
+    <string name="thinking_effort_desc">控制模型回答前推理的彻底程度</string>
+    <string name="thinking_use_budget">使用思考预算</string>
+    <string name="thinking_budget_input_label">预算 (tokens)</string>
+    <string name="thinking_control_off">关闭</string>
+    <string name="thinking_control_auto">自动</string>
+    <string name="thinking_control_quick">快速</string>
+    <string name="thinking_control_balanced">平衡</string>
+    <string name="thinking_control_deep">深入</string>
+    <string name="thinking_control_extreme">极限</string>
+    <string name="thinking_control_effort">强度</string>
+    <string name="thinking_control_budget">Token 预算</string>
+    <string name="thinking_advanced_hide">收起高级</string>
+    <string name="thinking_budget_dynamic">动态</string>
+    <string name="thinking_budget_tokens">%1$d tokens</string>
+    <string name="thinking_budget_custom">自定义</string>
+    <string name="thinking_budget_note">思考预算会先占用隐藏输出 token。数值越高，复杂任务可能更稳，但也可能更慢、更贵。</string>
     <string name="advanced_settings">高级</string>
     <string name="advanced_generation_title">高级设置</string>
     <string name="advanced_per_conversation">逐对话覆盖</string>
@@ -541,6 +562,7 @@
     <string name="copy">复制</string>
     <string name="edit">编辑</string>
     <string name="info">信息</string>
+    <string name="more">更多</string>
     <string name="cancel">取消</string>
     <string name="save">保存</string>
     <string name="delete">删除</string>
@@ -552,6 +574,8 @@
     <string name="rename_chat">重命名对话</string>
     <string name="delete_chat">删除对话</string>
     <string name="delete_chat_confirm">确定要删除此对话吗？此操作无法撤销。</string>
+    <string name="delete_message_title">删除消息？</string>
+    <string name="delete_message_confirm">此消息及其后的所有回复都将被永久删除。</string>
     <string name="clear_database">清除数据库</string>
     <string name="conversation_prompt">对话指令</string>
     <string name="global_default_format">全局默认（%1$s）</string>

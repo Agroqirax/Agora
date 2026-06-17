@@ -90,7 +90,7 @@ fun ThinkingControlPanel(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.gen_thinking_enabled),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
@@ -121,7 +121,7 @@ fun ThinkingControlPanel(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = stringResource(R.string.thinking_effort_label),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
@@ -198,7 +198,7 @@ fun ThinkingControlPanel(
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = stringResource(R.string.thinking_use_budget),
-                            style = MaterialTheme.typography.bodyLarge,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
@@ -249,7 +249,7 @@ fun ThinkingControlPanel(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = stringResource(R.string.thinking_budget_input_label),
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f)
                                     )

@@ -30,6 +30,8 @@ data class ProviderConfig(
     val googleSearchEnabled: Boolean = false,
     val thinkingEnabled: Boolean = true,
     val thinkingLevel: String = "medium",
+    val thinkingBudgetEnabled: Boolean = false,
+    val thinkingBudgetTokens: Int = 4096,
     val baseUrl: String? = null,
     val tools: List<ToolDefinition>? = null,
     val userPrepend: String? = null,
@@ -94,7 +96,8 @@ data class OpenAiPlugin(
 @Serializable
 data class OpenAiReasoning(
     val effort: String? = null,
-    @SerialName("max_tokens") val maxTokens: Int? = null
+    @SerialName("max_tokens") val maxTokens: Int? = null,
+    val enabled: Boolean? = null
 )
 
 @Serializable

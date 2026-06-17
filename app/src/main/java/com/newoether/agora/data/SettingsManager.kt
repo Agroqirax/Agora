@@ -1,6 +1,7 @@
 package com.newoether.agora.data
 
 import android.content.Context
+import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.util.DebugLog
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -80,13 +81,16 @@ data class ConversationSettings(
     val googleSearchEnabled: Boolean? = null,
     val thinkingEnabled: Boolean? = null,
     val thinkingLevel: String? = null,
+    val thinkingBudgetEnabled: Boolean? = null,
+    val thinkingBudgetTokens: Int? = null,
     val webSearchEnabled: Boolean? = null,
     val shellEnabled: Boolean? = null
 ) {
     fun isAllNull() = contextWindow == null && temperature == null && maxTokens == null && topP == null
         && frequencyPenalty == null && presencePenalty == null
         && codeExecutionEnabled == null && googleSearchEnabled == null && thinkingEnabled == null
-        && thinkingLevel == null && webSearchEnabled == null && shellEnabled == null
+        && thinkingLevel == null && thinkingBudgetEnabled == null && thinkingBudgetTokens == null
+        && webSearchEnabled == null && shellEnabled == null
 }
 
 class SettingsManager(private val context: Context) {
@@ -109,6 +113,8 @@ class SettingsManager(private val context: Context) {
         val GOOGLE_SEARCH_ENABLED = booleanPreferencesKey("google_search_enabled")
         val THINKING_ENABLED = booleanPreferencesKey("thinking_enabled")
         val THINKING_LEVEL = stringPreferencesKey("thinking_level")
+        val THINKING_BUDGET_ENABLED = booleanPreferencesKey("thinking_budget_enabled")
+        val THINKING_BUDGET_TOKENS = intPreferencesKey("thinking_budget_tokens")
         val PROVIDER_BASE_URLS = stringPreferencesKey("provider_base_urls")
         val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
         val TITLE_GENERATION_MODEL = stringPreferencesKey("title_generation_model")
@@ -212,7 +218,15 @@ class SettingsManager(private val context: Context) {
     val codeExecutionEnabled: Flow<Boolean> = context.dataStore.data.map { it[CODE_EXECUTION_ENABLED] ?: false }
     val googleSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[GOOGLE_SEARCH_ENABLED] ?: false }
     val thinkingEnabled: Flow<Boolean> = context.dataStore.data.map { it[THINKING_ENABLED] ?: true }
-    val thinkingLevel: Flow<String> = context.dataStore.data.map { it[THINKING_LEVEL] ?: "medium" }
+    val thinkingLevel: Flow<String> = context.dataStore.data.map { ThinkingLevels.normalize(it[THINKING_LEVEL]) }
+    val thinkingBudgetEnabled: Flow<Boolean> = context.dataStore.data.map { pref ->
+        pref[THINKING_BUDGET_ENABLED] ?: (ThinkingLevels.legacyBudgetTokens(pref[THINKING_LEVEL]) != null)
+    }
+    val thinkingBudgetTokens: Flow<Int> = context.dataStore.data.map { pref ->
+        pref[THINKING_BUDGET_TOKENS]
+            ?: ThinkingLevels.legacyBudgetTokens(pref[THINKING_LEVEL])
+            ?: ThinkingLevels.DefaultBudgetTokens
+    }
 
     val titleGenerationEnabled: Flow<Boolean> = context.dataStore.data.map { it[TITLE_GENERATION_ENABLED] ?: true }
     val titleGenerationModel: Flow<String?> = context.dataStore.data.map { it[TITLE_GENERATION_MODEL] }
@@ -375,7 +389,15 @@ class SettingsManager(private val context: Context) {
     }
 
     suspend fun saveThinkingLevel(level: String) {
-        context.dataStore.edit { it[THINKING_LEVEL] = level }
+        context.dataStore.edit { it[THINKING_LEVEL] = ThinkingLevels.normalize(level) }
+    }
+
+    suspend fun saveThinkingBudgetEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[THINKING_BUDGET_ENABLED] = enabled }
+    }
+
+    suspend fun saveThinkingBudgetTokens(tokens: Int) {
+        context.dataStore.edit { it[THINKING_BUDGET_TOKENS] = tokens.coerceAtLeast(1) }
     }
 
     suspend fun saveTitleGenerationEnabled(enabled: Boolean) {

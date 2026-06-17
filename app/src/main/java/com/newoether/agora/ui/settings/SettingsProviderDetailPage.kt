@@ -150,7 +150,7 @@ fun SettingsProviderDetailPage(
                                 Icon(painterResource(R.drawable.link_24), null, tint = MaterialTheme.colorScheme.primary)
                                 Spacer(modifier = Modifier.width(16.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.provider_base_url), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(R.string.provider_base_url), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
                                     Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                         OutlinedTextField(
                                             state = baseUrlState,

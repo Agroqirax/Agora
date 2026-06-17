@@ -9,6 +9,7 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.ThinkingLevels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -366,7 +367,10 @@ class DataImporter(
                         settingsManager.saveCodeExecutionEnabled(s.codeExecutionEnabled)
                         settingsManager.saveGoogleSearchEnabled(s.googleSearchEnabled)
                         settingsManager.saveThinkingEnabled(s.thinkingEnabled)
-                        settingsManager.saveThinkingLevel(s.thinkingLevel)
+                        val legacyBudgetTokens = ThinkingLevels.legacyBudgetTokens(s.thinkingLevel)
+                        settingsManager.saveThinkingLevel(ThinkingLevels.normalize(s.thinkingLevel))
+                        settingsManager.saveThinkingBudgetEnabled(s.thinkingBudgetEnabled || legacyBudgetTokens != null)
+                        settingsManager.saveThinkingBudgetTokens(s.thinkingBudgetTokens ?: legacyBudgetTokens ?: ThinkingLevels.DefaultBudgetTokens)
                         settingsManager.saveAutoCacheEnabled(s.autoCacheEnabled)
                         for ((provider, url) in s.providerBaseUrls) {
                             settingsManager.saveProviderBaseUrl(provider, url)
@@ -529,6 +533,8 @@ class DataImporter(
         val googleSearchEnabled: Boolean = false,
         val thinkingEnabled: Boolean = true,
         val thinkingLevel: String = "medium",
+        val thinkingBudgetEnabled: Boolean = false,
+        val thinkingBudgetTokens: Int? = null,
         val autoCacheEnabled: Boolean = true,
         val providerBaseUrls: Map<String, String> = emptyMap(),
         val titleGenerationEnabled: Boolean = true,

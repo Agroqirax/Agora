@@ -211,7 +211,7 @@ fun SettingsClaudeImportPage(
                     modifier = Modifier.padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(stringResource(R.string.claude_import_progress), style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.claude_import_progress), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium))
                     Spacer(Modifier.height(16.dp))
                     LinearProgressIndicator(
                         progress = { importProgress!! },

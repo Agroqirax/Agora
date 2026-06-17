@@ -144,6 +144,8 @@ fun ChatApp(
     val globalGoogleSearch by viewModel.googleSearchEnabled.collectAsState()
     val globalThinkingEnabled by viewModel.thinkingEnabled.collectAsState()
     val globalThinkingLevel by viewModel.thinkingLevel.collectAsState()
+    val globalThinkingBudgetEnabled by viewModel.thinkingBudgetEnabled.collectAsState()
+    val globalThinkingBudgetTokens by viewModel.thinkingBudgetTokens.collectAsState()
     val globalWebSearch by viewModel.webSearchEnabled.collectAsState()
     val webSearchApiKeys by viewModel.webSearchApiKeys.collectAsState()
     val globalShell by viewModel.shellEnabled.collectAsState()
@@ -157,6 +159,8 @@ fun ChatApp(
     val googleSearchEnabled = convOverride?.googleSearchEnabled ?: globalGoogleSearch
     val thinkingEnabled = convOverride?.thinkingEnabled ?: globalThinkingEnabled
     val thinkingLevel = convOverride?.thinkingLevel ?: globalThinkingLevel
+    val thinkingBudgetEnabled = convOverride?.thinkingBudgetEnabled ?: globalThinkingBudgetEnabled
+    val thinkingBudgetTokens = convOverride?.thinkingBudgetTokens ?: globalThinkingBudgetTokens
     // Web Search and Shell: global switch OFF → always false, regardless of override
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
@@ -1011,10 +1015,14 @@ fun ChatApp(
                         googleSearchEnabled = googleSearchEnabled,
                         thinkingEnabled = thinkingEnabled,
                         thinkingLevel = thinkingLevel,
+                        thinkingBudgetEnabled = thinkingBudgetEnabled,
+                        thinkingBudgetTokens = thinkingBudgetTokens,
                         onCodeExecutionToggle = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
                         onGoogleSearchToggle = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
                         onThinkingToggle = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
                         onThinkingLevelChange = { level -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingLevel = level) } },
+                        onThinkingBudgetEnabledChange = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingBudgetEnabled = enabled) } },
+                        onThinkingBudgetTokensChange = { tokens -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingBudgetTokens = tokens) } },
                         webSearchEnabled = webSearchEnabled,
                         onWebSearchToggle = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(webSearchEnabled = enabled) } },
                         shellEnabled = shellEnabled,

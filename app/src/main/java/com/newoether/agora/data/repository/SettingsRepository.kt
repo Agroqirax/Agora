@@ -37,6 +37,8 @@ class SettingsRepository(
     val googleSearchEnabled: Flow<Boolean> = settingsManager.googleSearchEnabled
     val thinkingEnabled: Flow<Boolean> = settingsManager.thinkingEnabled
     val thinkingLevel: Flow<String> = settingsManager.thinkingLevel
+    val thinkingBudgetEnabled: Flow<Boolean> = settingsManager.thinkingBudgetEnabled
+    val thinkingBudgetTokens: Flow<Int> = settingsManager.thinkingBudgetTokens
     val providerBaseUrls: Flow<Map<String, String>> = settingsManager.providerBaseUrls
     val titleGenerationEnabled: Flow<Boolean> = settingsManager.titleGenerationEnabled
     val titleGenerationModel: Flow<String?> = settingsManager.titleGenerationModel
@@ -130,6 +132,8 @@ class SettingsRepository(
     suspend fun saveSandboxEnabled(enabled: Boolean) = settingsManager.saveSandboxEnabled(enabled)
     suspend fun saveThinkingEnabled(enabled: Boolean) = settingsManager.saveThinkingEnabled(enabled)
     suspend fun saveThinkingLevel(level: String) = settingsManager.saveThinkingLevel(level)
+    suspend fun saveThinkingBudgetEnabled(enabled: Boolean) = settingsManager.saveThinkingBudgetEnabled(enabled)
+    suspend fun saveThinkingBudgetTokens(tokens: Int) = settingsManager.saveThinkingBudgetTokens(tokens)
     suspend fun saveDefaultTemperature(v: Float?) = settingsManager.saveDefaultTemperature(v)
     suspend fun saveDefaultMaxTokens(v: Int?) = settingsManager.saveDefaultMaxTokens(v)
     suspend fun saveDefaultTopP(v: Float?) = settingsManager.saveDefaultTopP(v)

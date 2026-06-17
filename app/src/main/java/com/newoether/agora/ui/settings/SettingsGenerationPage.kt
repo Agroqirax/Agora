@@ -25,7 +25,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.ThinkingControlPanel
+import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlin.math.roundToInt
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -40,6 +43,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val defaultPresencePenalty by viewModel.defaultPresencePenalty.collectAsState()
     val thinkingEnabled by viewModel.thinkingEnabled.collectAsState()
     val thinkingLevel by viewModel.thinkingLevel.collectAsState()
+    val thinkingBudgetEnabled by viewModel.thinkingBudgetEnabled.collectAsState()
+    val thinkingBudgetTokens by viewModel.thinkingBudgetTokens.collectAsState()
     val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -52,6 +57,12 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 title = stringResource(R.string.context_window_default),
                 items = listOf(
                     {
+                        val persistedContextWindow = maxContextWindow.toFloat()
+                        var contextWindowDraft by remember { mutableFloatStateOf(persistedContextWindow) }
+                        LaunchedEffect(persistedContextWindow) {
+                            contextWindowDraft = persistedContextWindow
+                        }
+                        val contextWindowValue = contextWindowDraft.toInt().coerceIn(5, 100)
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -71,18 +82,25 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = stringResource(R.string.context_window),
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = stringResource(R.string.context_retain, maxContextWindow),
+                                        text = stringResource(R.string.context_retain, contextWindowValue),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                     Slider(
-                                        value = maxContextWindow.toFloat(),
-                                        onValueChange = { viewModel.setMaxContextWindow(it.toInt()) },
+                                        value = contextWindowDraft,
+                                        onValueChange = { contextWindowDraft = it },
+                                        onValueChangeFinished = {
+                                            val committed = contextWindowDraft.toInt().coerceIn(5, 100)
+                                            contextWindowDraft = committed.toFloat()
+                                            if (committed != maxContextWindow) {
+                                                viewModel.setMaxContextWindow(committed)
+                                            }
+                                        },
                                         valueRange = 5f..100f,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                     )
@@ -108,21 +126,18 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             )
 
             // ── Section 2: Default Thinking ──
-            val thinkingLevels = listOf("low", "medium", "high")
-            val thinkingLevelLabels = listOf(
-                stringResource(R.string.gen_thinking_level_low),
-                stringResource(R.string.gen_thinking_level_medium),
-                stringResource(R.string.gen_thinking_level_high)
-            )
             SettingsGroup(
                 title = stringResource(R.string.default_thinking),
                 items = listOf(
                     {
-                        val icon = @Composable { Icon(painterResource(id = R.drawable.neurology_24), contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
                         SettingsItem(
                             headlineContent = { Text(stringResource(R.string.gen_thinking_enabled)) },
-                            supportingContent = { Text(stringResource(R.string.gen_thinking_enabled_desc)) },
-                            leadingContent = icon,
+                            supportingContent = {
+                                Text(thinkingControlShortLabel(thinkingEnabled, thinkingLevel, thinkingBudgetEnabled, thinkingBudgetTokens))
+                            },
+                            leadingContent = {
+                                Icon(painterResource(id = R.drawable.neurology_24), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            },
                             trailingContent = {
                                 Switch(checked = thinkingEnabled, onCheckedChange = { viewModel.setThinkingEnabled(it) })
                             },
@@ -130,83 +145,20 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     },
                     {
-                        val icon = @Composable { Icon(painterResource(id = R.drawable.neurology_24), contentDescription = null, tint = if (thinkingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 16.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                icon()
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = stringResource(R.string.gen_thinking_level),
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = if (thinkingEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                    )
-                                    Text(
-                                        text = stringResource(R.string.gen_thinking_level_desc),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (thinkingEnabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        thinkingLevels.forEachIndexed { index, level ->
-                                            val selected = thinkingLevel == level && thinkingEnabled
-                                            val primary = MaterialTheme.colorScheme.primary
-                                            val surface = MaterialTheme.colorScheme.surfaceContainerHigh
-                                            val disabledBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                            val startColor by animateColorAsState(
-                                                when {
-                                                    selected -> primary
-                                                    thinkingEnabled -> surface
-                                                    else -> disabledBg
-                                                },
-                                                tween(300)
-                                            )
-                                            val endColor by animateColorAsState(
-                                                when {
-                                                    selected -> primary
-                                                    thinkingEnabled -> surface
-                                                    else -> disabledBg
-                                                },
-                                                tween(300)
-                                            )
-                                            val textColor = when {
-                                                selected -> MaterialTheme.colorScheme.onPrimary
-                                                thinkingEnabled -> MaterialTheme.colorScheme.onSurface
-                                                else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                            }
-                                            Box(
-                                                modifier = Modifier
-                                                    .weight(1f)
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(Brush.horizontalGradient(listOf(startColor, endColor)))
-                                                    .clickable(enabled = thinkingEnabled) { viewModel.setThinkingLevel(level) }
-                                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Text(
-                                                    thinkingLevelLabels[index],
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    style = MaterialTheme.typography.labelLarge,
-                                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                                    color = textColor
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        ThinkingControlPanel(
+                            enabled = thinkingEnabled,
+                            level = thinkingLevel,
+                            budgetEnabled = thinkingBudgetEnabled,
+                            budgetTokens = thinkingBudgetTokens,
+                            onEnabledChange = { viewModel.setThinkingEnabled(it) },
+                            onLevelChange = { viewModel.setThinkingLevel(it) },
+                            onBudgetEnabledChange = { viewModel.setThinkingBudgetEnabled(it) },
+                            onBudgetTokensChange = { viewModel.setThinkingBudgetTokens(it) },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
+                            showHeader = false,
+                            providerName = null,
+                            animateSections = true
+                        )
                     }
                 )
             )
@@ -294,8 +246,14 @@ private fun GenParamSlider(
     onValueChange: (Float) -> Unit,
     onReset: () -> Unit
 ) {
-    val isDefault = value == null
-    val sliderPos = value ?: (valueRange.start + valueRange.endInclusive) / 2f
+    val defaultSliderPos = (valueRange.start + valueRange.endInclusive) / 2f
+    val persistedSliderPos = value ?: defaultSliderPos
+    var sliderPos by remember { mutableFloatStateOf(persistedSliderPos) }
+    LaunchedEffect(persistedSliderPos) {
+        sliderPos = persistedSliderPos
+    }
+    val draftChangedFromDefault = kotlin.math.abs(sliderPos - defaultSliderPos) > 0.0001f
+    val hasExplicitOrDraftValue = value != null || draftChangedFromDefault
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -316,11 +274,11 @@ private fun GenParamSlider(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
-                    if (isDefault) {
+                    if (!hasExplicitOrDraftValue) {
                         Text(
                             text = stringResource(R.string.gen_not_specified),
                             style = MaterialTheme.typography.labelSmall,
@@ -339,7 +297,10 @@ private fun GenParamSlider(
                             text = stringResource(R.string.gen_reset),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            modifier = Modifier.clickable(onClick = onReset)
+                            modifier = Modifier.clickable {
+                                sliderPos = defaultSliderPos
+                                onReset()
+                            }
                         )
                     }
                 }
@@ -351,7 +312,17 @@ private fun GenParamSlider(
                 )
                 Slider(
                     value = sliderPos,
-                    onValueChange = onValueChange,
+                    onValueChange = { sliderPos = it },
+                    onValueChangeFinished = {
+                        val committed = sliderPos.coerceIn(valueRange.start, valueRange.endInclusive)
+                        val shouldCommit = value != null || kotlin.math.abs(committed - defaultSliderPos) > 0.0001f
+                        sliderPos = committed
+                        if (shouldCommit) {
+                            if (value == null || kotlin.math.abs(value - committed) > 0.0001f) {
+                                onValueChange(committed)
+                            }
+                        }
+                    },
                     valueRange = valueRange,
                     steps = steps,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -373,9 +344,14 @@ private fun GenParamSlider(
     onReset: () -> Unit
 ) {
     fun toIndex(v: Int) = presets.indices.minByOrNull { kotlin.math.abs(presets[it] - v) } ?: 3
-    val isDefault = value == null
-    val index = if (value != null) toIndex(value) else 3 // default to 4096
-    val sliderPos = index.toFloat()
+    val defaultIndex = 3.coerceIn(0, presets.lastIndex)
+    val persistedIndex = if (value != null) toIndex(value) else defaultIndex
+    var sliderPos by remember { mutableFloatStateOf(persistedIndex.toFloat()) }
+    LaunchedEffect(persistedIndex) {
+        sliderPos = persistedIndex.toFloat()
+    }
+    val draftIndex = sliderPos.roundToInt().coerceIn(0, presets.lastIndex)
+    val hasExplicitOrDraftValue = value != null || draftIndex != defaultIndex
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -396,11 +372,11 @@ private fun GenParamSlider(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = label,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f)
                     )
-                    if (isDefault) {
+                    if (!hasExplicitOrDraftValue) {
                         Text(
                             text = stringResource(R.string.gen_not_specified),
                             style = MaterialTheme.typography.labelSmall,
@@ -409,7 +385,7 @@ private fun GenParamSlider(
                         )
                     } else {
                         Text(
-                            text = format(value!!),
+                            text = format(presets[draftIndex]),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold,
@@ -419,7 +395,10 @@ private fun GenParamSlider(
                             text = stringResource(R.string.gen_reset),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                            modifier = Modifier.clickable(onClick = onReset)
+                            modifier = Modifier.clickable {
+                                sliderPos = defaultIndex.toFloat()
+                                onReset()
+                            }
                         )
                     }
                 }
@@ -431,7 +410,18 @@ private fun GenParamSlider(
                 )
                 Slider(
                     value = sliderPos,
-                    onValueChange = { onValueChange(presets[it.toInt().coerceIn(0, presets.lastIndex)]) },
+                    onValueChange = { sliderPos = it },
+                    onValueChangeFinished = {
+                        val committedIndex = sliderPos.roundToInt().coerceIn(0, presets.lastIndex)
+                        val committedValue = presets[committedIndex]
+                        val shouldCommit = value != null || committedIndex != defaultIndex
+                        sliderPos = committedIndex.toFloat()
+                        if (shouldCommit) {
+                            if (value != committedValue) {
+                                onValueChange(committedValue)
+                            }
+                        }
+                    },
                     valueRange = 0f..(presets.size - 1).toFloat(),
                     steps = presets.size - 2,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp)

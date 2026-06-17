@@ -99,7 +99,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     else -> R.string.web_search_brave_key
                                                 }
                                             ),
-                                            style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface
+                                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                             OutlinedTextField(
@@ -138,7 +138,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     Icon(painter = painterResource(id = com.newoether.agora.R.drawable.link_24), null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
                                     Spacer(modifier = Modifier.width(16.dp))
                                     Column(modifier = Modifier.weight(1f)) {
-                                        Text(stringResource(R.string.web_search_searxng_url), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                                        Text(stringResource(R.string.web_search_searxng_url), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
                                         // Don't key on webSearchBaseUrl — that causes TextFieldState to be
                                         // recreated every time the debounced save writes to DataStore.
                                         val urlState = remember { TextFieldState(webSearchBaseUrl) }
@@ -194,7 +194,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         stringResource(R.string.web_search_num_results),
-                                        style = MaterialTheme.typography.bodyLarge,
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(

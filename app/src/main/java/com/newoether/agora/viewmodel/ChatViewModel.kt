@@ -382,6 +382,8 @@ class ChatViewModel(
         val googleSearchEnabled = settingsManager.googleSearchEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
         val thinkingEnabled = settingsManager.thinkingEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
         val thinkingLevel = settingsManager.thinkingLevel.stateIn(viewModelScope, SharingStarted.Eagerly, "medium")
+        val thinkingBudgetEnabled = settingsManager.thinkingBudgetEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+        val thinkingBudgetTokens = settingsManager.thinkingBudgetTokens.stateIn(viewModelScope, SharingStarted.Eagerly, 4096)
         val providerBaseUrls = settingsManager.providerBaseUrls.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
     val titleGenerationEnabled = settingsManager.titleGenerationEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val titleGenerationModel = settingsManager.titleGenerationModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -1362,6 +1364,8 @@ class ChatViewModel(
     }
     fun setThinkingEnabled(enabled: Boolean) = settingsDelegate.setThinkingEnabled(enabled)
     fun setThinkingLevel(level: String) = settingsDelegate.setThinkingLevel(level)
+    fun setThinkingBudgetEnabled(enabled: Boolean) = settingsDelegate.setThinkingBudgetEnabled(enabled)
+    fun setThinkingBudgetTokens(tokens: Int) = settingsDelegate.setThinkingBudgetTokens(tokens)
     fun setDefaultTemperature(v: Float?) = settingsDelegate.setDefaultTemperature(v)
     fun setDefaultMaxTokens(v: Int?) = settingsDelegate.setDefaultMaxTokens(v)
     fun setDefaultTopP(v: Float?) = settingsDelegate.setDefaultTopP(v)
@@ -1383,6 +1387,8 @@ class ChatViewModel(
             googleSearchEnabled = overrides.googleSearchEnabled ?: googleSearchEnabled.value,
             thinkingEnabled = overrides.thinkingEnabled ?: thinkingEnabled.value,
             thinkingLevel = overrides.thinkingLevel ?: thinkingLevel.value,
+            thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: thinkingBudgetEnabled.value,
+            thinkingBudgetTokens = overrides.thinkingBudgetTokens ?: thinkingBudgetTokens.value,
             webSearchEnabled = if (webSearchEnabled.value) (overrides.webSearchEnabled ?: true) else false,
             shellEnabled = if (shellEnabled.value) (overrides.shellEnabled ?: true) else false
         )
@@ -1408,6 +1414,8 @@ class ChatViewModel(
             googleSearchEnabled = effectiveSettings.googleSearchEnabled ?: googleSearchEnabled.value,
             thinkingEnabled = effectiveSettings.thinkingEnabled ?: thinkingEnabled.value,
             thinkingLevel = effectiveSettings.thinkingLevel ?: thinkingLevel.value,
+            thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: thinkingBudgetEnabled.value,
+            thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: thinkingBudgetTokens.value,
             baseUrl = getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,

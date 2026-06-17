@@ -1,5 +1,6 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.model.ThinkingLevels
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -54,6 +55,8 @@ object ExportExtraSettings {
                         cs.googleSearchEnabled?.let { put("googleSearchEnabled", JsonPrimitive(it)) }
                         cs.thinkingEnabled?.let { put("thinkingEnabled", JsonPrimitive(it)) }
                         cs.thinkingLevel?.let { put("thinkingLevel", JsonPrimitive(it)) }
+                        cs.thinkingBudgetEnabled?.let { put("thinkingBudgetEnabled", JsonPrimitive(it)) }
+                        cs.thinkingBudgetTokens?.let { put("thinkingBudgetTokens", JsonPrimitive(it)) }
                         cs.webSearchEnabled?.let { put("webSearchEnabled", JsonPrimitive(it)) }
                         cs.shellEnabled?.let { put("shellEnabled", JsonPrimitive(it)) }
                     }
@@ -94,6 +97,7 @@ object ExportExtraSettings {
         obj["defaultPresencePenalty"]?.jsonPrimitive?.float?.let { sm.saveDefaultPresencePenalty(it) }
         obj["conversationSettings"]?.jsonObject?.forEach { (convId, settingsJson) ->
             val s = settingsJson.jsonObject
+            val legacyBudgetTokens = ThinkingLevels.legacyBudgetTokens(s["thinkingLevel"]?.jsonPrimitive?.contentOrNull)
             val cs = ConversationSettings(
                 contextWindow = s["contextWindow"]?.jsonPrimitive?.int,
                 temperature = s["temperature"]?.jsonPrimitive?.float,
@@ -104,7 +108,10 @@ object ExportExtraSettings {
                 codeExecutionEnabled = s["codeExecutionEnabled"]?.jsonPrimitive?.boolean,
                 googleSearchEnabled = s["googleSearchEnabled"]?.jsonPrimitive?.boolean,
                 thinkingEnabled = s["thinkingEnabled"]?.jsonPrimitive?.boolean,
-                thinkingLevel = s["thinkingLevel"]?.jsonPrimitive?.contentOrNull,
+                thinkingLevel = s["thinkingLevel"]?.jsonPrimitive?.contentOrNull?.let { ThinkingLevels.normalize(it) },
+                thinkingBudgetEnabled = s["thinkingBudgetEnabled"]?.jsonPrimitive?.boolean
+                    ?: legacyBudgetTokens?.let { true },
+                thinkingBudgetTokens = s["thinkingBudgetTokens"]?.jsonPrimitive?.int ?: legacyBudgetTokens,
                 webSearchEnabled = s["webSearchEnabled"]?.jsonPrimitive?.boolean,
                 shellEnabled = s["shellEnabled"]?.jsonPrimitive?.boolean
             )

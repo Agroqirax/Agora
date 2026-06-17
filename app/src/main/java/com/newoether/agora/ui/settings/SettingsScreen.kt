@@ -104,7 +104,7 @@ fun SettingsItem(
         }
         Column(modifier = Modifier.weight(1f)) {
             CompositionLocalProvider(
-                LocalTextStyle provides MaterialTheme.typography.bodyLarge,
+                LocalTextStyle provides MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
                 LocalContentColor provides MaterialTheme.colorScheme.onSurface
             ) {
                 headlineContent()
@@ -275,7 +275,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = stringResource(cat.titleRes),
-                                                    style = MaterialTheme.typography.bodyLarge
+                                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium)
                                                 )
                                                 Spacer(modifier = Modifier.height(3.dp))
                                                 Text(

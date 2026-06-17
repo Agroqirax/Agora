@@ -77,6 +77,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.ThinkingControlPanel
+import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
 import androidx.compose.ui.text.AnnotatedString
@@ -136,12 +138,16 @@ fun ChatBottomBar(
     googleSearchEnabled: Boolean = false,
     thinkingEnabled: Boolean = true,
     thinkingLevel: String = "medium",
+    thinkingBudgetEnabled: Boolean = false,
+    thinkingBudgetTokens: Int = 4096,
     webSearchEnabled: Boolean = false,
     shellEnabled: Boolean = false,
     onCodeExecutionToggle: (Boolean) -> Unit = {},
     onGoogleSearchToggle: (Boolean) -> Unit = {},
     onThinkingToggle: (Boolean) -> Unit = {},
     onThinkingLevelChange: (String) -> Unit = {},
+    onThinkingBudgetEnabledChange: (Boolean) -> Unit = {},
+    onThinkingBudgetTokensChange: (Int) -> Unit = {},
     onWebSearchToggle: (Boolean) -> Unit = {},
     onShellToggle: (Boolean) -> Unit = {},
     onModelSelect: (String) -> Unit,
@@ -202,6 +208,7 @@ fun ChatBottomBar(
     var pendingVideoQueue by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val context = LocalContext.current
+    var showThinkingSheet by rememberSaveable { mutableStateOf(false) }
 
     /** Clear the attachment list after a successful send. The extracted-frame / rendered-page
      *  files are now owned by the stored message (via images field in MessageEntity) — they
@@ -831,7 +838,19 @@ fun ChatBottomBar(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.thinking))
+                                    Column {
+                                        Text(stringResource(R.string.thinking))
+                                        Text(
+                                            text = thinkingControlShortLabel(
+                                                thinkingEnabled,
+                                                thinkingLevel,
+                                                thinkingBudgetEnabled,
+                                                thinkingBudgetTokens
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             },
                             trailingIcon = {
@@ -841,49 +860,11 @@ fun ChatBottomBar(
                                     modifier = Modifier.scale(0.7f)
                                 )
                             },
-                            onClick = { onThinkingToggle(!thinkingEnabled) }
-                        )
-                        if (thinkingEnabled) {
-                            val levels = listOf("low" to R.string.gen_thinking_level_low, "medium" to R.string.gen_thinking_level_medium, "high" to R.string.gen_thinking_level_high)
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp).offset(y = (-10).dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                levels.forEach { (level, labelRes) ->
-                                    val selected = level == thinkingLevel
-                                    val bgColor by animateColorAsState(
-                                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        animationSpec = tween(250),
-                                        label = "levelBg"
-                                    )
-                                    val textColor by animateColorAsState(
-                                        if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        animationSpec = tween(250),
-                                        label = "levelText"
-                                    )
-                                    val fontWeight by animateFloatAsState(
-                                        targetValue = if (selected) 1f else 0f,
-                                        animationSpec = tween(250),
-                                        label = "levelWeight"
-                                    )
-                                    Surface(
-                                        onClick = { onThinkingLevelChange(level) },
-                                        modifier = Modifier.weight(1f),
-                                        shape = RoundedCornerShape(50),
-                                        color = bgColor,
-                                        contentColor = textColor
-                                    ) {
-                                        Text(
-                                            text = stringResource(labelRes),
-                                            modifier = Modifier.padding(vertical = 6.dp).fillMaxWidth(),
-                                            textAlign = TextAlign.Center,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = if (fontWeight > 0.5f) FontWeight.SemiBold else FontWeight.Normal
-                                        )
-                                    }
-                                }
+                            onClick = {
+                                activeMenu = null
+                                showThinkingSheet = true
                             }
-                        }
+                        )
                         if (showWebSearch) {
                             DropdownMenuItem(
                                 text = {
@@ -1006,6 +987,34 @@ fun ChatBottomBar(
         ) {
             val elevatedSurface = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
             IconButton(onClick = { if (!isExpandAnimating) onCollapse() }, modifier = Modifier.size(40.dp).background(Brush.radialGradient(listOf(elevatedSurface, elevatedSurface.copy(alpha = 0.5f), Color.Transparent)), CircleShape)) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
+        }
+    }
+
+    if (showThinkingSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showThinkingSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp)
+            ) {
+                ThinkingControlPanel(
+                    enabled = thinkingEnabled,
+                    level = thinkingLevel,
+                    budgetEnabled = thinkingBudgetEnabled,
+                    budgetTokens = thinkingBudgetTokens,
+                    onEnabledChange = onThinkingToggle,
+                    onLevelChange = onThinkingLevelChange,
+                    onBudgetEnabledChange = onThinkingBudgetEnabledChange,
+                    onBudgetTokensChange = onThinkingBudgetTokensChange,
+                    providerName = com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
+                    animateSections = true
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 
