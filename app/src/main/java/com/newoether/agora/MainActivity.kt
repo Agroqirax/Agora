@@ -230,6 +230,7 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
         pdfViewerSelection = selection
     }
     var pdfPreviewFromDialog by remember { mutableStateOf(false) }
+    val hapticsEnabled by viewModel.hapticsEnabled.collectAsState()
     val pdfPages by viewModel.previewPdfPages.collectAsState()
     val pdfIndex by viewModel.previewPdfIndex.collectAsState()
     var savedPdfPages by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -634,7 +635,8 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                     onTogglePdfPage = lastPdfTogglePage,
                     onClose = { viewModel.clearPreviews(); fullScreenMediaUrls = null; pdfPreviewFromDialog = false },
                     onNavigate = { idx -> fullScreenMediaIndex = idx },
-                    onMessage = { viewModel.emitSnackbar(it) }
+                    onMessage = { viewModel.emitSnackbar(it) },
+                    hapticsEnabled = hapticsEnabled
                 )
             }
 

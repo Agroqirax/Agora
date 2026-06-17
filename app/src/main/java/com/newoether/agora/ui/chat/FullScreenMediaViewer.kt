@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.AgoraHaptics
+import com.newoether.agora.ui.common.NoOpAgoraHaptics
+import com.newoether.agora.ui.common.rememberAgoraHaptics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -66,9 +69,11 @@ fun FullScreenMediaViewer(
     onTogglePdfPage: ((Int) -> Unit)? = null,
     onClose: () -> Unit,
     onNavigate: (Int) -> Unit,
-    onMessage: (String) -> Unit = {}
+    onMessage: (String) -> Unit = {},
+    hapticsEnabled: Boolean = true
 ) {
     val url = urls.getOrNull(initialIndex) ?: return
+    val haptics = rememberAgoraHaptics(hapticsEnabled)
     val isPdf = pdfPages.isNotEmpty()
     val context = LocalContext.current
     val mimeType = remember(url) {
@@ -109,12 +114,12 @@ fun FullScreenMediaViewer(
     }
 
     if (urls.size > 1) {
-        MediaPager(urls, initialIndex, onClose, onNavigate, onMessage)
+        MediaPager(urls, initialIndex, onClose, onNavigate, onMessage, haptics = haptics)
         return
     }
 
     // Single image — full zoom/pan experience
-    SingleImage(url = url, onClose = onClose, onMessage = onMessage)
+    SingleImage(url = url, onClose = onClose, onMessage = onMessage, haptics = haptics)
 }
 
 // --- PDF pager (existing logic) ---
@@ -229,7 +234,8 @@ private fun MediaPager(
     initialIndex: Int,
     onClose: () -> Unit,
     onNavigate: (Int) -> Unit,
-    onMessage: (String) -> Unit = {}
+    onMessage: (String) -> Unit = {},
+    haptics: AgoraHaptics = NoOpAgoraHaptics
 ) {
     val context = LocalContext.current
     var currentScale by remember { mutableFloatStateOf(1f) }
@@ -265,7 +271,7 @@ private fun MediaPager(
                     url = mediaUrl,
                     onTap = { showOverlay = !showOverlay },
                     onScaleChanged = { if (page == pagerState.currentPage) currentScale = it },
-                    onLongPress = { actionsForUrl = mediaUrl },
+                    onLongPress = { haptics.longPress(); actionsForUrl = mediaUrl },
                     consumeConditionally = true
                 )
             }
@@ -315,7 +321,8 @@ private fun MediaPager(
 private fun SingleImage(
     url: String,
     onClose: () -> Unit,
-    onMessage: (String) -> Unit = {}
+    onMessage: (String) -> Unit = {},
+    haptics: AgoraHaptics = NoOpAgoraHaptics
 ) {
     var showOverlay by remember { mutableStateOf(true) }
     var showActions by remember { mutableStateOf(false) }
@@ -324,7 +331,7 @@ private fun SingleImage(
         ZoomableImageItem(
             url = url,
             onTap = { showOverlay = !showOverlay },
-            onLongPress = { showActions = true },
+            onLongPress = { haptics.longPress(); showActions = true },
             consumeConditionally = true
         )
         if (showActions) ImageActionsSheet(url = url, onMessage = onMessage, onDismiss = { showActions = false })
