@@ -440,6 +440,9 @@
     <string name="scheme_style_neutral">中性</string>
     <string name="dynamic_color">動態顏色</string>
     <string name="dynamic_color_desc">根據桌布使用系統生成的顏色（Android 12+）</string>
+    <string name="visual_effects">視覺效果</string>
+    <string name="blur_effects">模糊效果</string>
+    <string name="blur_effects_desc">對聊天列表頂部工具列下方套用模糊。關閉可節省效能。</string>
 
     <!-- Language -->
     <string name="language_title">語言</string>

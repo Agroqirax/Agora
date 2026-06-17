@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">ニュートラル</string>
     <string name="dynamic_color">ダイナミックカラー</string>
     <string name="dynamic_color_desc">壁紙に基づいてシステムが生成した色を使用（Android 12 以上）</string>
+    <string name="visual_effects">視覚効果</string>
+    <string name="blur_effects">ぼかし効果</string>
+    <string name="blur_effects_desc">ツールバー下のチャット一覧上部をぼかします。オフにするとパフォーマンスを節約できます。</string>
 
     <!-- Language -->
     <string name="language_title">言語</string>

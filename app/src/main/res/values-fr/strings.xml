@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">Neutre</string>
     <string name="dynamic_color">Couleur dynamique</string>
     <string name="dynamic_color_desc">Utiliser les couleurs générées par le système d\'après le fond d\'écran (Android 12+)</string>
+    <string name="visual_effects">Effets visuels</string>
+    <string name="blur_effects">Effets de flou</string>
+    <string name="blur_effects_desc">Floute le haut de la liste de discussion sous la barre d’outils. Désactivez cette option pour économiser les performances.</string>
 
     <!-- Language -->
     <string name="language_title">Langue</string>

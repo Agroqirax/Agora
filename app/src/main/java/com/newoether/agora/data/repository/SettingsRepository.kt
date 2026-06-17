@@ -77,6 +77,7 @@ class SettingsRepository(
     val themeMode: Flow<String> = settingsManager.themeMode
     val colorScheme: Flow<String> = settingsManager.colorScheme
     val dynamicColor: Flow<Boolean> = settingsManager.dynamicColor
+    val blurEffectsEnabled: Flow<Boolean> = settingsManager.blurEffectsEnabled
     val schemeStyle: Flow<String> = settingsManager.schemeStyle
     val searchContextWindow: Flow<Int> = settingsManager.searchContextWindow
     val searchMatchLimit: Flow<Int> = settingsManager.searchMatchLimit
@@ -147,6 +148,7 @@ class SettingsRepository(
     suspend fun saveThemeMode(mode: String) = settingsManager.saveThemeMode(mode)
     suspend fun saveColorScheme(scheme: String) = settingsManager.saveColorScheme(scheme)
     suspend fun saveDynamicColor(enabled: Boolean) = settingsManager.saveDynamicColor(enabled)
+    suspend fun saveBlurEffectsEnabled(enabled: Boolean) = settingsManager.saveBlurEffectsEnabled(enabled)
     suspend fun saveSchemeStyle(style: String) = settingsManager.saveSchemeStyle(style)
     suspend fun saveSearchMatchLimit(n: Int) = settingsManager.saveSearchMatchLimit(n)
     suspend fun saveSearchContextWindow(n: Int) = settingsManager.saveSearchContextWindow(n)

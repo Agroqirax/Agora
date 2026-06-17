@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">محايد</string>
     <string name="dynamic_color">اللون الديناميكي</string>
     <string name="dynamic_color_desc">استخدام ألوان يولّدها النظام بناءً على الخلفية (Android 12 وأحدث)</string>
+    <string name="visual_effects">المؤثرات البصرية</string>
+    <string name="blur_effects">تأثيرات التمويه</string>
+    <string name="blur_effects_desc">تمويه أعلى قائمة الدردشة أسفل شريط الأدوات. عطّله لتوفير الأداء.</string>
 
     <!-- Language -->
     <string name="language_title">اللغة</string>

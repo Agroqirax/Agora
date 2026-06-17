@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">Нейтральный</string>
     <string name="dynamic_color">Динамические цвета</string>
     <string name="dynamic_color_desc">Использовать цвета, создаваемые системой по обоям (Android 12+)</string>
+    <string name="visual_effects">Визуальные эффекты</string>
+    <string name="blur_effects">Эффекты размытия</string>
+    <string name="blur_effects_desc">Размывать верхнюю часть списка чата под панелью инструментов. Отключите, чтобы сэкономить производительность.</string>
 
     <!-- Language -->
     <string name="language_title">Язык</string>

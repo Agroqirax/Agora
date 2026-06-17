@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">Neutro</string>
     <string name="dynamic_color">Color dinámico</string>
     <string name="dynamic_color_desc">Usa colores generados por el sistema según el fondo de pantalla (Android 12+)</string>
+    <string name="visual_effects">Efectos visuales</string>
+    <string name="blur_effects">Efectos de desenfoque</string>
+    <string name="blur_effects_desc">Desenfoca la parte superior de la lista de chat bajo la barra. Desactívalo para ahorrar rendimiento.</string>
 
     <!-- Language -->
     <string name="language_title">Idioma</string>

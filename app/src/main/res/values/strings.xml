@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">Neutral</string>
     <string name="dynamic_color">Dynamic Color</string>
     <string name="dynamic_color_desc">Use system-generated colors based on wallpaper (Android 12+)</string>
+    <string name="visual_effects">Visual Effects</string>
+    <string name="blur_effects">Blur Effects</string>
+    <string name="blur_effects_desc">Blur the top of the chat list under the toolbar. Turn off to save performance.</string>
 
     <!-- Language -->
     <string name="language_title">Language</string>

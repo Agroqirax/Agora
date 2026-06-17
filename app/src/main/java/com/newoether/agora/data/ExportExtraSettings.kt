@@ -69,6 +69,7 @@ object ExportExtraSettings {
         put("themeMode", JsonPrimitive(sm.themeMode.first()))
         put("colorScheme", JsonPrimitive(sm.colorScheme.first()))
         put("dynamicColor", JsonPrimitive(sm.dynamicColor.first()))
+        put("blurEffectsEnabled", JsonPrimitive(sm.blurEffectsEnabled.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
         put("autoUpdateCheck", JsonPrimitive(sm.autoUpdateCheck.first()))
 
@@ -123,6 +124,7 @@ object ExportExtraSettings {
         obj["themeMode"]?.jsonPrimitive?.contentOrNull?.let { sm.saveThemeMode(it) }
         obj["colorScheme"]?.jsonPrimitive?.contentOrNull?.let { sm.saveColorScheme(it) }
         obj["dynamicColor"]?.jsonPrimitive?.boolean?.let { sm.saveDynamicColor(it) }
+        obj["blurEffectsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveBlurEffectsEnabled(it) }
         obj["schemeStyle"]?.jsonPrimitive?.contentOrNull?.let { sm.saveSchemeStyle(it) }
         obj["autoUpdateCheck"]?.jsonPrimitive?.boolean?.let { sm.saveAutoUpdateCheck(it) }
 

@@ -170,6 +170,7 @@ fun ChatApp(
     val defaultTopP by viewModel.defaultTopP.collectAsState()
     val defaultFrequencyPenalty by viewModel.defaultFrequencyPenalty.collectAsState()
     val defaultPresencePenalty by viewModel.defaultPresencePenalty.collectAsState()
+    val blurEffectsEnabled by viewModel.blurEffectsEnabled.collectAsState()
 
     val systemPrompts by viewModel.systemPrompts.collectAsState()
     val activeSystemPromptId by viewModel.activeSystemPromptId.collectAsState()
@@ -825,10 +826,15 @@ fun ChatApp(
                         modifier = Modifier.fillMaxSize()
                     ) { (targetNewChat, targetShowLaunch) ->
                         if (!targetNewChat) {
+                            val messageListModifier = if (blurEffectsEnabled) {
+                                Modifier.fillMaxSize().gradientBlur(blurAtTopDp = 8f, blurAtBottomDp = 0f)
+                            } else {
+                                Modifier.fillMaxSize()
+                            }
                             MessageList(
                                 messages = messages,
                                 allMessages = allMessages,
-                                modifier = Modifier.fillMaxSize().gradientBlur(blurAtTopDp = 8f, blurAtBottomDp = 0f),
+                                modifier = messageListModifier,
                                 state = listState,
                                 isLoading = isLoading && generatingInConversationId == currentConversationId,
                                 isSwitching = isSwitching,

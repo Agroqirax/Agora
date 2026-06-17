@@ -441,6 +441,9 @@
     <string name="scheme_style_neutral">中性</string>
     <string name="dynamic_color">动态颜色</string>
     <string name="dynamic_color_desc">根据壁纸使用系统生成的颜色（Android 12+）</string>
+    <string name="visual_effects">视觉效果</string>
+    <string name="blur_effects">模糊效果</string>
+    <string name="blur_effects_desc">对聊天列表顶部工具栏下方应用模糊。关闭可节省性能。</string>
 
     <!-- Language -->
     <string name="language_title">语言</string>

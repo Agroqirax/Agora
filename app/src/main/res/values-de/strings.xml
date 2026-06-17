@@ -476,6 +476,9 @@
     <string name="scheme_style_neutral">Neutral</string>
     <string name="dynamic_color">Dynamische Farbe</string>
     <string name="dynamic_color_desc">Vom System anhand des Hintergrundbilds generierte Farben verwenden (Android 12+)</string>
+    <string name="visual_effects">Visuelle Effekte</string>
+    <string name="blur_effects">Unschärfeeffekte</string>
+    <string name="blur_effects_desc">Den oberen Bereich der Chatliste unter der Toolbar weichzeichnen. Zum Sparen von Leistung deaktivieren.</string>
 
     <!-- Language -->
     <string name="language_title">Sprache</string>

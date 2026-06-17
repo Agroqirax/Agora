@@ -36,6 +36,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val colorSchemeName by viewModel.colorScheme.collectAsState()
     val schemeStyleName by viewModel.schemeStyle.collectAsState()
     val dynamicColor by viewModel.dynamicColor.collectAsState()
+    val blurEffectsEnabled by viewModel.blurEffectsEnabled.collectAsState()
     val showDocFab by viewModel.showDocumentationFab.collectAsState()
 
     val isDynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
@@ -110,6 +111,23 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
             }
 
             // ── Color Scheme ──
+            SettingsGroup(
+                title = stringResource(R.string.visual_effects),
+                items = listOf({
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.blur_effects)) },
+                        supportingContent = { Text(stringResource(R.string.blur_effects_desc)) },
+                        trailingContent = {
+                            Switch(
+                                checked = blurEffectsEnabled,
+                                onCheckedChange = { viewModel.setBlurEffectsEnabled(it) }
+                            )
+                        },
+                        modifier = Modifier.clickable { viewModel.setBlurEffectsEnabled(!blurEffectsEnabled) }
+                    )
+                })
+            )
+
             val schemeAlpha = if (dynamicColor && isDynamicAvailable) 0.38f else 1f
             SettingsGroup(
                 title = stringResource(R.string.color_scheme),

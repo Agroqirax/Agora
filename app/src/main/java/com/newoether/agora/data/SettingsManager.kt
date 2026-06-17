@@ -157,6 +157,7 @@ class SettingsManager(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val COLOR_SCHEME = stringPreferencesKey("color_scheme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
         val FIRST_LAUNCH_TIME = longPreferencesKey("first_launch_time")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
@@ -308,6 +309,7 @@ class SettingsManager(private val context: Context) {
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "FOLLOW_DEVICE" }
     val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
+    val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
     val schemeStyle: Flow<String> = context.dataStore.data.map { it[SCHEME_STYLE] ?: "TONAL_SPOT" }
     val firstLaunchTime: Flow<Long?> = context.dataStore.data.map { it[FIRST_LAUNCH_TIME] }
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
@@ -663,6 +665,10 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveDynamicColor(enabled: Boolean) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
+    }
+
+    suspend fun saveBlurEffectsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[BLUR_EFFECTS_ENABLED] = enabled }
     }
 
     suspend fun saveSchemeStyle(style: String) {
