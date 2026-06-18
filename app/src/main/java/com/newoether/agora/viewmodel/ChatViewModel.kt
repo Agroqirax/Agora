@@ -653,6 +653,10 @@ class ChatViewModel(
     private val _branchSwitchTrigger = MutableStateFlow<String?>(null)
     val branchSwitchTrigger: StateFlow<String?> = _branchSwitchTrigger.asStateFlow()
 
+    fun clearBranchSwitchTrigger() {
+        _branchSwitchTrigger.value = null
+    }
+
     // Export/Import state
     private val _exportProgress = MutableStateFlow<Float?>(null)
     val exportProgress: StateFlow<Float?> = _exportProgress.asStateFlow()
@@ -1970,13 +1974,18 @@ class ChatViewModel(
         }
     }
 
-    fun switchBranch(parentId: String?, direction: Int) {
-        if (_isLoading.value) return
+    fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
+        if (_isLoading.value && _generatingInConversationId.value == _currentConversationId.value) return
         val siblings = _allMessages.value.filter { it.parentId == parentId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }.sortedBy { it.timestamp }
         if (siblings.size < 2) return
-        val currentId = _selectedChildren.value[parentId] ?: siblings.last().id
-        val currentIndex = siblings.indexOfFirst { it.id == currentId }
+        var currentIndex = siblings.indexOfFirst { it.id == currentMessageId }
+        if (currentIndex == -1) {
+            val selectedId = _selectedChildren.value[parentId]
+            currentIndex = siblings.indexOfFirst { it.id == selectedId }
+        }
+        if (currentIndex == -1) return
         val newIndex = (currentIndex + direction).coerceIn(0, siblings.size - 1)
+        if (newIndex == currentIndex) return
         
         switchingJob?.cancel()
         _isSwitching.value = true
@@ -1987,8 +1996,8 @@ class ChatViewModel(
             newMap[parentId] = targetMessage.id
             _selectedChildren.value = newMap
             
+            _branchSwitchTrigger.value = null
             _branchSwitchTrigger.value = targetMessage.id
-            triggerScrollToMessage(targetMessage.id)
         }
     }
 

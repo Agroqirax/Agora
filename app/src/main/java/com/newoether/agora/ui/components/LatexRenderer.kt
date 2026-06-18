@@ -3,22 +3,29 @@ package com.newoether.agora.ui.components
 import android.graphics.Bitmap
 import android.graphics.Canvas
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.isUnspecified
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.painter.ColorPainter
-import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import com.mikepenz.markdown.model.ImageData
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.ImageWidth
@@ -33,6 +40,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import ru.noties.jlatexmath.JLatexMathDrawable
 import kotlin.io.encoding.Base64
+import kotlin.math.roundToInt
 
 data class LatexSpan(
     val isLatex: Boolean,
@@ -586,20 +594,32 @@ class LatexImageTransformer(
     override fun transform(link: String): ImageData? {
         val request = decodeLatexLink(link) ?: return null
         val key = LatexRenderKey(request.latex, textSize, color)
-        val bitmapState = remember(key) { mutableStateOf(LatexBitmapCache.get(key)) }
+        var bitmap by remember(key) { mutableStateOf(LatexBitmapCache.get(key)) }
+        val fade = remember(key) { Animatable(if (bitmap != null) 1f else 0f) }
         LaunchedEffect(key) {
-            bitmapState.value = LatexBitmapCache.get(key)
-            if (bitmapState.value == null) {
-                bitmapState.value = try {
-                    LatexBitmapCache.awaitRendered(key)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: Throwable) {
-                    null
-                }
+            val cached = LatexBitmapCache.get(key)
+            if (cached != null) {
+                bitmap = cached
+                fade.snapTo(1f)
+                return@LaunchedEffect
+            }
+
+            bitmap = null
+            fade.snapTo(0f)
+            val rendered = try {
+                LatexBitmapCache.awaitRendered(key)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+            if (rendered != null) {
+                bitmap = rendered
+                fade.snapTo(0f)
+                fade.animateTo(1f, tween(durationMillis = 180))
             }
         }
-        val bmp: Bitmap? = bitmapState.value
+        val bmp: Bitmap? = bitmap
         val density = LocalDensity.current
         val placeholderModifier = if (bmp == null) {
             val estimated = estimateLatexPlaceholderSize(request.latex, textSize, request.display)
@@ -610,7 +630,8 @@ class LatexImageTransformer(
             Modifier
         }
         return ImageData(
-            painter = bmp?.let { BitmapPainter(it.asImageBitmap()) } ?: ColorPainter(Color.Transparent),
+            painter = bmp?.let { FadingBitmapPainter(it.asImageBitmap(), fade.value) }
+                ?: ColorPainter(Color.Transparent),
             contentDescription = request.latex,
             modifier = placeholderModifier,
             alignment = Alignment.CenterStart,
@@ -644,5 +665,24 @@ class LatexImageTransformer(
             )
         }
         return PlaceholderConfig(size = sizeDp, verticalAlign = PlaceholderVerticalAlign.TextCenter)
+    }
+}
+
+private class FadingBitmapPainter(
+    private val image: ImageBitmap,
+    private val alpha: Float,
+) : Painter() {
+    override val intrinsicSize: Size
+        get() = Size(image.width.toFloat(), image.height.toFloat())
+
+    override fun DrawScope.onDraw() {
+        drawImage(
+            image = image,
+            dstSize = IntSize(
+                width = size.width.roundToInt().coerceAtLeast(1),
+                height = size.height.roundToInt().coerceAtLeast(1),
+            ),
+            alpha = alpha.coerceIn(0f, 1f),
+        )
     }
 }
