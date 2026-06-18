@@ -130,10 +130,13 @@ import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownPadding
+import com.mikepenz.markdown.model.ReferenceLinkHandlerImpl
 import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
 import com.mikepenz.markdown.compose.elements.MarkdownTableRow
+import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.parser.MarkdownParser
 
 private fun mergeAdjacentSegments(segs: List<MessageSegment>): List<MessageSegment> {
     val merged = mutableListOf<MessageSegment>()
@@ -781,6 +784,7 @@ fun MessageItem(
             color = textColor.toArgb(),
         )
     }
+    val markdownFlavour = remember { GFMFlavourDescriptor() }
 
     val shouldAnimate = !isFirstComposition && !isSwitching
 
@@ -1361,6 +1365,8 @@ fun MessageItem(
                                         ) { text ->
                                             val spans = remember(text) { parseLatexSpans(text) }
                                             if (spans.all { !it.isLatex }) {
+                                                val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
+                                                val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
                                                 Markdown(
                                                     content = text.escapeForMarkdown(),
                                                     modifier = Modifier.fillMaxWidth(),
@@ -1369,6 +1375,9 @@ fun MessageItem(
                                                     padding = customMarkdownPadding,
                                                     components = customMarkdownComponents,
                                                     imageTransformer = latexImageTransformer,
+                                                    flavour = markdownFlavour,
+                                                    parser = markdownParser,
+                                                    referenceLinkHandler = referenceLinkHandler,
                                                     animations = markdownAnimations { this }
                                                 )
                                             } else {
@@ -1380,6 +1389,8 @@ fun MessageItem(
                                                         else span.content
                                                     }
                                                 }
+                                                val markdownParser = remember(reassembled) { MarkdownParser(markdownFlavour) }
+                                                val referenceLinkHandler = remember(reassembled) { ReferenceLinkHandlerImpl() }
                                                 Markdown(
                                                     content = reassembled.escapeForMarkdown(),
                                                     modifier = Modifier.fillMaxWidth(),
@@ -1388,6 +1399,9 @@ fun MessageItem(
                                                     padding = customMarkdownPadding,
                                                     components = customMarkdownComponents,
                                                     imageTransformer = latexImageTransformer,
+                                                    flavour = markdownFlavour,
+                                                    parser = markdownParser,
+                                                    referenceLinkHandler = referenceLinkHandler,
                                                     animations = markdownAnimations { this }
                                                 )
                                             }
@@ -1842,6 +1856,8 @@ fun MessageItem(
                                             content = debouncedThoughtContent,
                                             isStreaming = isStreaming
                                         ) { text ->
+                                            val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
+                                            val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
                                             Markdown(
                                                 content = text.escapeForMarkdown(),
                                                 modifier = Modifier.fillMaxWidth(),
@@ -1849,6 +1865,9 @@ fun MessageItem(
                                                 typography = thoughtTypography,
                                                 padding = thoughtMarkdownPadding,
                                                 components = customMarkdownComponents,
+                                                flavour = markdownFlavour,
+                                                parser = markdownParser,
+                                                referenceLinkHandler = referenceLinkHandler,
                                                 animations = markdownAnimations { this }
                                             )
                                         }
@@ -1858,6 +1877,8 @@ fun MessageItem(
                                         content = debouncedThoughtContent,
                                         isStreaming = isStreaming
                                     ) { text ->
+                                        val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
+                                        val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
                                         Markdown(
                                             content = text.escapeForMarkdown(),
                                             modifier = Modifier.fillMaxWidth(),
@@ -1865,6 +1886,9 @@ fun MessageItem(
                                             typography = thoughtTypography,
                                             padding = thoughtMarkdownPadding,
                                             components = customMarkdownComponents,
+                                            flavour = markdownFlavour,
+                                            parser = markdownParser,
+                                            referenceLinkHandler = referenceLinkHandler,
                                             animations = markdownAnimations { this }
                                         )
                                     }

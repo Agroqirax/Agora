@@ -3,20 +3,34 @@ package com.newoether.agora.ui.components
 import android.graphics.Bitmap
 import android.graphics.Canvas
 
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.isUnspecified
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import com.mikepenz.markdown.model.ImageData
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.ImageWidth
 import com.mikepenz.markdown.model.PlaceholderConfig
 import androidx.compose.ui.text.PlaceholderVerticalAlign
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import ru.noties.jlatexmath.JLatexMathDrawable
 import kotlin.io.encoding.Base64
 
@@ -475,40 +489,130 @@ private fun renderTextToBitmap(text: String, textSize: Float, color: Int): Bitma
     return bmp
 }
 
+private data class LatexRenderKey(
+    val latex: String,
+    val textSize: Float,
+    val color: Int,
+)
+
+private object LatexBitmapCache {
+    private const val MAX_ENTRIES = 128
+
+    private val lock = Any()
+    private val renderScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val inFlight = mutableMapOf<LatexRenderKey, Deferred<Bitmap>>()
+    private val bitmaps = object : LinkedHashMap<LatexRenderKey, Bitmap>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<LatexRenderKey, Bitmap>?): Boolean {
+            return size > MAX_ENTRIES
+        }
+    }
+
+    fun get(key: LatexRenderKey): Bitmap? = synchronized(lock) {
+        bitmaps[key]
+    }
+
+    fun renderAsync(key: LatexRenderKey): Deferred<Bitmap> = synchronized(lock) {
+        bitmaps[key]?.let { return CompletableDeferred(it) }
+        inFlight[key]?.let { return it }
+
+        val deferred = CompletableDeferred<Bitmap>()
+        inFlight[key] = deferred
+        renderScope.launch {
+            try {
+                val rendered = renderBitmap(key)
+                synchronized(lock) {
+                    bitmaps[key] = rendered
+                    if (inFlight[key] === deferred) {
+                        inFlight.remove(key)
+                    }
+                }
+                deferred.complete(rendered)
+            } catch (e: CancellationException) {
+                synchronized(lock) {
+                    if (inFlight[key] === deferred) {
+                        inFlight.remove(key)
+                    }
+                }
+                deferred.completeExceptionally(e)
+                throw e
+            } catch (t: Throwable) {
+                synchronized(lock) {
+                    if (inFlight[key] === deferred) {
+                        inFlight.remove(key)
+                    }
+                }
+                deferred.completeExceptionally(t)
+            }
+        }
+        deferred
+    }
+
+    suspend fun awaitRendered(key: LatexRenderKey): Bitmap {
+        get(key)?.let { return it }
+        return renderAsync(key).await()
+    }
+
+    private fun renderBitmap(key: LatexRenderKey): Bitmap {
+        val fw = (key.textSize * 10).toInt()
+        val fh = (key.textSize * 2).toInt()
+        return renderLatexToBitmap(
+            key.latex,
+            key.textSize,
+            key.color,
+            fallbackW = fw,
+            fallbackH = fh,
+            minW = 0,
+        ) ?: renderTextToBitmap("$${key.latex}$", key.textSize, key.color)
+    }
+}
+
+private fun estimateLatexPlaceholderSize(latex: String, textSize: Float, display: Boolean): Size {
+    val charCount = latex.length.coerceAtLeast(1)
+    val minWidth = textSize * if (display) 4f else 1.4f
+    val maxWidth = textSize * if (display) 18f else 8f
+    val width = (charCount * textSize * if (display) 0.46f else 0.38f)
+        .coerceIn(minWidth, maxWidth)
+    val height = textSize * if (display) 1.45f else 1.05f
+    return Size(width, height)
+}
+
 // ── Image transformer ──────────────────────────────────────────────────
 
 class LatexImageTransformer(
     private val textSize: Float = 40f,
     private val color: Int = 0xFF000000.toInt(),
 ) : ImageTransformer {
-    private val cache = object : LinkedHashMap<String, Bitmap>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > 64
-    }
-
-    private fun getOrRenderBitmap(latex: String): Bitmap {
-        return synchronized(cache) {
-            cache.getOrPut("$latex|$textSize|$color") {
-                val fw = (textSize * 10).toInt()
-                val fh = (textSize * 2).toInt()
-                val rendered = renderLatexToBitmap(latex, textSize, color, fallbackW = fw, fallbackH = fh, minW = 0)
-                if (rendered != null) {
-                    rendered
-                } else {
-                    // Show original LaTeX source instead of a generic placeholder.
-                    renderTextToBitmap("$${latex}$", textSize, color)
-                }
-            }
-        }
-    }
-
     @Composable
     override fun transform(link: String): ImageData? {
         val request = decodeLatexLink(link) ?: return null
-        val bmp: Bitmap = getOrRenderBitmap(request.latex)
+        val key = LatexRenderKey(request.latex, textSize, color)
+        val bitmapState = remember(key) { mutableStateOf(LatexBitmapCache.get(key)) }
+        LaunchedEffect(key) {
+            bitmapState.value = LatexBitmapCache.get(key)
+            if (bitmapState.value == null) {
+                bitmapState.value = try {
+                    LatexBitmapCache.awaitRendered(key)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Throwable) {
+                    null
+                }
+            }
+        }
+        val bmp: Bitmap? = bitmapState.value
+        val density = LocalDensity.current
+        val placeholderModifier = if (bmp == null) {
+            val estimated = estimateLatexPlaceholderSize(request.latex, textSize, request.display)
+            with(density) {
+                Modifier.size(estimated.width.toDp(), estimated.height.toDp())
+            }
+        } else {
+            Modifier
+        }
         return ImageData(
-            painter = BitmapPainter(bmp.asImageBitmap()),
+            painter = bmp?.let { BitmapPainter(it.asImageBitmap()) } ?: ColorPainter(Color.Transparent),
             contentDescription = request.latex,
-            modifier = Modifier,
+            modifier = placeholderModifier,
             alignment = Alignment.CenterStart,
             contentScale = ContentScale.Fit,
         )
@@ -525,9 +629,11 @@ class LatexImageTransformer(
         val request = decodeLatexLink(link) ?: return super.placeholderConfig(
             link, density, containerSize, imageWidth, imageSize, imageSizeChanged
         )
+        val key = LatexRenderKey(request.latex, textSize, color)
         val resolvedSize = if (imageSize.isUnspecified) {
-            val bmp = getOrRenderBitmap(request.latex)
-            Size(bmp.width.toFloat(), bmp.height.toFloat())
+            LatexBitmapCache.get(key)?.let { bmp ->
+                Size(bmp.width.toFloat(), bmp.height.toFloat())
+            } ?: estimateLatexPlaceholderSize(request.latex, textSize, request.display)
         } else {
             imageSize
         }
