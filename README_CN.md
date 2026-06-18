@@ -17,9 +17,12 @@
 
 [![F-Droid](https://img.shields.io/badge/F--Droid-安装-blue?logo=fdroid)](https://f-droid.org/packages/com.newoether.agora/)
 &nbsp;&nbsp;
+[![Google Play](https://img.shields.io/badge/Google_Play-安装-blue?logo=google-play)](https://play.google.com/store/apps/details?id=com.newoether.agora)
+&nbsp;&nbsp;
 [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-blue?logo=github)](https://github.com/newo-ether/Agora/releases)
 
 - **F-Droid（推荐）** — 通过 [F-Droid](https://f-droid.org/) 安装，搜索 **Agora**。
+- **Google Play** — 从 [Google Play 商店](https://play.google.com/store/apps/details?id=com.newoether.agora) 安装。
 - **GitHub Releases** — 从 [Releases 页面](https://github.com/newo-ether/Agora/releases) 下载最新 `.apk`。
 - **从源码构建** — 用 Android Studio 克隆并构建（详见[快速开始](#快速开始)）。
 
