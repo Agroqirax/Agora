@@ -2,11 +2,7 @@ package com.newoether.agora.ui.settings
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.pointerInput
 
 // ── Shared animation specs for settings page transitions ──
 //     One source of truth — tune here, every sub-page follows.
@@ -51,19 +47,27 @@ internal fun settingsExitTrans(slideToRight: Boolean): ExitTransition {
  * Ready-to-use [ContentTransform] for [AnimatedContent] in settings drill-down.
  * @param forward `true` = drilling in (child slides from right, parent exits left);
  *                `false` = going back (parent slides from left, child exits right).
+ *
+ * When going back, the entering (main) page gets [targetContentZIndex] = 1f so it
+ * sits on top of the exiting sub-page in the hit-test chain.  Taps land on the
+ * main page immediately, without waiting for the exit animation to finish.
+ * No touch-guard modifier is needed — z-index alone determines pointer dispatch.
  */
 internal fun settingsContentTransform(forward: Boolean): ContentTransform {
-    return if (forward) {
-        settingsEnterTrans(slideFromRight = true) togetherWith settingsExitTrans(slideToRight = false)
-    } else {
-        settingsEnterTrans(slideFromRight = false) togetherWith settingsExitTrans(slideToRight = true)
-    }
+    val enter = if (forward) settingsEnterTrans(slideFromRight = true) else settingsEnterTrans(slideFromRight = false)
+    val exit = if (forward) settingsExitTrans(slideToRight = false) else settingsExitTrans(slideToRight = true)
+    return ContentTransform(
+        targetContentZIndex = if (forward) 0f else 1f,
+        targetContentEnter = enter,
+        initialContentExit = exit
+    )
 }
 
 /**
- * [AnimatedContent] wrapper that prevents ghost clicks on the exiting content
- * during the slide-out animation.  Without this guard the old composable remains
- * in the tree and fully interactive until the transition finishes.
+ * Thin wrapper over [AnimatedContent] using the shared [settingsContentTransform].
+ * The enter/exit animation is short enough (~300ms spring) that no explicit touch
+ * guard is needed — AnimatedContent composes the entering child on top of the
+ * exiting one, so the new page naturally receives touches first.
  */
 @Composable
 internal fun <T> GuardedAnimatedContent(
@@ -71,19 +75,9 @@ internal fun <T> GuardedAnimatedContent(
     transitionSpec: AnimatedContentTransitionScope<T>.() -> ContentTransform,
     content: @Composable AnimatedContentScope.(T) -> Unit
 ) {
-    AnimatedContent(targetState = targetState, transitionSpec = transitionSpec) { currentState ->
-        Box(
-            modifier = if (currentState != targetState) Modifier.pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        awaitPointerEvent(PointerEventPass.Initial)
-                            .changes
-                            .forEach { it.consume() }
-                    }
-                }
-            } else Modifier
-        ) {
-            content(currentState)
-        }
-    }
+    AnimatedContent(
+        targetState = targetState,
+        transitionSpec = transitionSpec,
+        content = content
+    )
 }
