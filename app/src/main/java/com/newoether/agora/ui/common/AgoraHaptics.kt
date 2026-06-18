@@ -8,11 +8,13 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalView
+import com.newoether.agora.service.AppForegroundTracker
 
 @Stable
 interface AgoraHaptics {
@@ -49,9 +51,20 @@ val LocalAgoraHaptics = compositionLocalOf<AgoraHaptics> { NoOpAgoraHaptics }
 fun rememberAgoraHaptics(enabled: Boolean): AgoraHaptics {
     val view = LocalView.current
     val enabledState = rememberUpdatedState(enabled)
-    return remember(view) {
+    val haptics = remember(view) {
         PlatformAgoraHaptics(view) { enabledState.value }
     }
+    DisposableEffect(haptics) {
+        val listener: (Boolean) -> Unit = { inForeground ->
+            if (!inForeground) haptics.stopAnsweringTexture()
+        }
+        AppForegroundTracker.addListener(listener)
+        onDispose {
+            AppForegroundTracker.removeListener(listener)
+            haptics.stopAnsweringTexture()
+        }
+    }
+    return haptics
 }
 
 private class PlatformAgoraHaptics(
@@ -80,7 +93,7 @@ private class PlatformAgoraHaptics(
     override fun generationStopped() = perform(HapticFeedbackConstants.CONTEXT_CLICK)
 
     override fun startAnsweringTexture() {
-        if (!enabled() || answeringTextureActive) return
+        if (!isAllowed() || answeringTextureActive) return
         val vibrator = vibrator?.takeIf { it.hasVibrator() } ?: return
         answeringTextureActive = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -104,10 +117,12 @@ private class PlatformAgoraHaptics(
     }
 
     private fun perform(type: Int) {
-        if (enabled()) {
+        if (isAllowed()) {
             view.performHapticFeedback(type)
         }
     }
+
+    private fun isAllowed(): Boolean = enabled() && AppForegroundTracker.isInForeground
 
     private fun confirmFeedback(): Int =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

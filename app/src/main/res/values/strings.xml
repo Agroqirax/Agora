@@ -505,6 +505,7 @@
     <string name="settings_appearance">Appearance</string>
     <string name="settings_appearance_desc">Theme, color scheme, and dynamic color</string>
     <string name="appearance_title">Appearance</string>
+    <string name="appearance_interface">Interface</string>
     <string name="theme_mode">Theme Mode</string>
     <string name="theme_mode_light">Light</string>
     <string name="theme_mode_dark">Dark</string>

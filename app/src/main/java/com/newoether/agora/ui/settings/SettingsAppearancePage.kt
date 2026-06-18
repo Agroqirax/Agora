@@ -5,12 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
@@ -21,7 +18,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -55,10 +51,6 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
         "DARK" -> true
         else -> systemDark
     }
-    val previewScheme = remember(currentPreset, currentStyle, isDark) {
-        colorSchemeForPreset(currentPreset, currentStyle, isDark)
-    }
-
     CollapsingSettingsScaffold(
         title = stringResource(R.string.appearance_title),
         onBack = onBack,
@@ -95,11 +87,11 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 )
             )
 
-            // ── Dynamic Color ──
-            if (isDynamicAvailable) {
-                SettingsGroup(
-                    title = stringResource(R.string.dynamic_color),
-                    items = buildList {
+            // ── Interface ──
+            SettingsGroup(
+                title = stringResource(R.string.appearance_interface),
+                items = buildList {
+                    if (isDynamicAvailable) {
                         add {
                             SettingsItem(
                                 headlineContent = { Text(stringResource(R.string.dynamic_color)) },
@@ -114,105 +106,92 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             )
                         }
                     }
-                )
-            }
-
-            // ── Color Scheme ──
-            SettingsGroup(
-                title = stringResource(R.string.visual_effects),
-                items = listOf({
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.blur_effects)) },
-                        supportingContent = { Text(stringResource(R.string.blur_effects_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = blurEffectsEnabled,
-                                onCheckedChange = { viewModel.setBlurEffectsEnabled(it) }
-                            )
-                        },
-                        modifier = Modifier.clickable { viewModel.setBlurEffectsEnabled(!blurEffectsEnabled) }
-                    )
-                })
-            )
-
-            SettingsGroup(
-                title = stringResource(R.string.message_display),
-                items = listOf({
-                    var expanded by remember { mutableStateOf(false) }
-                    val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
-                    val selectedLabel = when (normalizedToolCallDisplayMode) {
-                        ToolCallDisplayModes.GROUPED_TIMELINE -> stringResource(R.string.tool_call_display_mode_grouped_timeline)
-                        ToolCallDisplayModes.COMPACT -> stringResource(R.string.tool_call_display_mode_compact)
-                        else -> stringResource(R.string.tool_call_display_mode_timeline)
-                    }
-                    val selectedDescription = when (normalizedToolCallDisplayMode) {
-                        ToolCallDisplayModes.GROUPED_TIMELINE -> stringResource(R.string.tool_call_display_mode_grouped_timeline_desc)
-                        ToolCallDisplayModes.COMPACT -> stringResource(R.string.tool_call_display_mode_compact_desc)
-                        else -> stringResource(R.string.tool_call_display_mode_timeline_desc)
-                    }
-                    val options = listOf(
-                        ToolCallDisplayModes.TIMELINE to stringResource(R.string.tool_call_display_mode_timeline),
-                        ToolCallDisplayModes.GROUPED_TIMELINE to stringResource(R.string.tool_call_display_mode_grouped_timeline),
-                        ToolCallDisplayModes.COMPACT to stringResource(R.string.tool_call_display_mode_compact)
-                    )
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.tool_call_display_mode)) },
-                        supportingContent = { Text(selectedDescription) },
-                        trailingContent = {
-                            Box {
-                                Text(
-                                    selectedLabel,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.width(96.dp),
-                                    textAlign = TextAlign.Center,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.blur_effects)) },
+                            supportingContent = { Text(stringResource(R.string.blur_effects_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = blurEffectsEnabled,
+                                    onCheckedChange = { viewModel.setBlurEffectsEnabled(it) }
                                 )
-                                DropdownMenu(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    tonalElevation = 16.dp,
-                                    expanded = expanded,
-                                    onDismissRequest = { expanded = false },
-                                    shape = RoundedCornerShape(12.dp)
-                                ) {
-                                    options.forEach { (mode, label) ->
-                                        DropdownMenuItem(
-                                            text = { Text(label) },
-                                            leadingIcon = {
-                                                if (normalizedToolCallDisplayMode == mode) {
-                                                    Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                            },
+                            modifier = Modifier.clickable { viewModel.setBlurEffectsEnabled(!blurEffectsEnabled) }
+                        )
+                    }
+                    add {
+                        var expanded by remember { mutableStateOf(false) }
+                        val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
+                        val selectedLabel = when (normalizedToolCallDisplayMode) {
+                            ToolCallDisplayModes.GROUPED_TIMELINE -> stringResource(R.string.tool_call_display_mode_grouped_timeline)
+                            ToolCallDisplayModes.COMPACT -> stringResource(R.string.tool_call_display_mode_compact)
+                            else -> stringResource(R.string.tool_call_display_mode_timeline)
+                        }
+                        val selectedDescription = when (normalizedToolCallDisplayMode) {
+                            ToolCallDisplayModes.GROUPED_TIMELINE -> stringResource(R.string.tool_call_display_mode_grouped_timeline_desc)
+                            ToolCallDisplayModes.COMPACT -> stringResource(R.string.tool_call_display_mode_compact_desc)
+                            else -> stringResource(R.string.tool_call_display_mode_timeline_desc)
+                        }
+                        val options = listOf(
+                            ToolCallDisplayModes.TIMELINE to stringResource(R.string.tool_call_display_mode_timeline),
+                            ToolCallDisplayModes.GROUPED_TIMELINE to stringResource(R.string.tool_call_display_mode_grouped_timeline),
+                            ToolCallDisplayModes.COMPACT to stringResource(R.string.tool_call_display_mode_compact)
+                        )
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.tool_call_display_mode)) },
+                            supportingContent = { Text(selectedDescription) },
+                            trailingContent = {
+                                Box {
+                                    Text(
+                                        selectedLabel,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.width(96.dp),
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    DropdownMenu(
+                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                        tonalElevation = 16.dp,
+                                        expanded = expanded,
+                                        onDismissRequest = { expanded = false },
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        options.forEach { (mode, label) ->
+                                            DropdownMenuItem(
+                                                text = { Text(label) },
+                                                leadingIcon = {
+                                                    if (normalizedToolCallDisplayMode == mode) {
+                                                        Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                },
+                                                onClick = {
+                                                    viewModel.setToolCallDisplayMode(mode)
+                                                    expanded = false
                                                 }
-                                            },
-                                            onClick = {
-                                                viewModel.setToolCallDisplayMode(mode)
-                                                expanded = false
-                                            }
-                                        )
+                                            )
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        modifier = Modifier.clickable { expanded = true }
-                    )
-                })
-            )
-
-            SettingsGroup(
-                title = stringResource(R.string.interaction_feedback),
-                items = listOf({
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.haptic_feedback)) },
-                        supportingContent = { Text(stringResource(R.string.haptic_feedback_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = hapticsEnabled,
-                                onCheckedChange = { viewModel.setHapticsEnabled(it) }
-                            )
-                        },
-                        modifier = Modifier.clickable { viewModel.setHapticsEnabled(!hapticsEnabled) }
-                    )
-                })
+                            },
+                            modifier = Modifier.clickable { expanded = true }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.haptic_feedback)) },
+                            supportingContent = { Text(stringResource(R.string.haptic_feedback_desc)) },
+                            trailingContent = {
+                                Switch(
+                                    checked = hapticsEnabled,
+                                    onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                                )
+                            },
+                            modifier = Modifier.clickable { viewModel.setHapticsEnabled(!hapticsEnabled) }
+                        )
+                    }
+                }
             )
 
             val schemeAlpha = if (dynamicColor && isDynamicAvailable) 0.38f else 1f

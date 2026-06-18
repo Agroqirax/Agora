@@ -327,6 +327,18 @@
     <string name="advanced_settings">Avanzado</string>
     <string name="advanced_generation_title">Ajustes avanzados</string>
     <string name="advanced_per_conversation">Anulaciones por conversación</string>
+    <string name="appearance_interface">Interfaz</string>
+    <string name="message_display">Visualización de mensajes</string>
+    <string name="tool_call_display_mode">Bloques de razonamiento y herramientas</string>
+    <string name="tool_call_display_mode_timeline">Cronología</string>
+    <string name="tool_call_display_mode_grouped_timeline">Agrupado</string>
+    <string name="tool_call_display_mode_compact">Compacto</string>
+    <string name="tool_call_display_mode_timeline_desc">Muestra respuesta, razonamiento y bloques de herramientas en orden cronológico</string>
+    <string name="tool_call_display_mode_grouped_timeline_desc">Mantiene el orden cronológico pero fusiona bloques consecutivos de razonamiento, herramientas e imágenes</string>
+    <string name="tool_call_display_mode_compact_desc">Agrupa los bloques de razonamiento y herramientas encima de la respuesta</string>
+    <string name="interaction_feedback">Respuesta de interacción</string>
+    <string name="haptic_feedback">Respuesta háptica</string>
+    <string name="haptic_feedback_desc">Usa vibraciones sutiles para el estado de generación y acciones importantes.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Búsqueda web</string>

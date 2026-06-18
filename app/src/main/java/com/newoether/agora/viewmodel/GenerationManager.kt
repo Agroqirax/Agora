@@ -862,12 +862,18 @@ class GenerationManager(
                 when (event) {
                     is StreamEvent.TextChunk -> {
                         val answerText = if (currentStatus == MessageStatus.THINKING) event.text.trimStart() else event.text
+                        if (currentStatus == MessageStatus.THINKING && answerText.isBlank()) {
+                            retryText = null
+                            return
+                        }
                         if (currentStatus == MessageStatus.THINKING) {
                             flushThoughtSegment()
                         }
                         totalText += answerText
                         currentAnswerBuf.append(answerText)
-                        currentStatus = MessageStatus.SENDING
+                        if (answerText.isNotBlank()) {
+                            currentStatus = MessageStatus.SENDING
+                        }
                         retryText = null
                     }
                     is StreamEvent.ThoughtChunk -> {

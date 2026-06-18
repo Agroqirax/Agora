@@ -183,6 +183,56 @@ private fun thoughtDurationMs(segs: List<MessageSegment>): Long? {
     }.takeIf { it > 0L }
 }
 
+private fun MessageSegment.isBlankAnswerSegment(): Boolean =
+    type == "answer" && content.isBlank()
+
+private fun MessageSegment.isVisibleAnswerSegment(): Boolean =
+    type == "answer" && content.isNotBlank()
+
+private fun MessageSegment.isInfoSegment(): Boolean =
+    type == "thought" || type == "tool" || type == "transcription"
+
+private fun ChatMessage.hasActiveAnswerSegment(): Boolean {
+    val lastVisibleSegment = segments?.lastOrNull { !it.isBlankAnswerSegment() }
+    return if (lastVisibleSegment != null) {
+        lastVisibleSegment.isVisibleAnswerSegment()
+    } else {
+        text.isNotBlank()
+    }
+}
+
+@Composable
+private fun AnimatedTimelineBlockAppearance(
+    animationKey: String,
+    isStreaming: Boolean,
+    appearanceInitialized: Boolean,
+    seenKeys: MutableSet<String>,
+    content: @Composable () -> Unit
+) {
+    val wasSeen = animationKey in seenKeys
+    val shouldAnimate = isStreaming && appearanceInitialized && !wasSeen
+    LaunchedEffect(animationKey) {
+        seenKeys.add(animationKey)
+    }
+    if (!shouldAnimate) {
+        content()
+        return
+    }
+    key(animationKey) {
+        var visible by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            visible = true
+        }
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(300)) + expandVertically(tween(300)),
+            exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
+        ) {
+            content()
+        }
+    }
+}
+
 // Label a transcription segment; numbers them ("Image Transcription 1/2/…") only
 // when more than one is present, so a single image keeps the clean unnumbered name.
 private fun transcriptionLabel(segs: List<MessageSegment>, index: Int): String {
@@ -1087,13 +1137,13 @@ fun MessageItem(
                         val thinkingNow = message.status == MessageStatus.THINKING
                         val isToolCalling = message.status == MessageStatus.TOOL_CALLING
                         val isTranscribing = message.status == MessageStatus.TRANSCRIBING
-                        val hasText = message.text.isNotEmpty()
-                        LaunchedEffect(thinkingNow, hasText, message.status) {
+                        val hasActiveAnswer = message.hasActiveAnswerSegment()
+                        LaunchedEffect(thinkingNow, hasActiveAnswer, message.status) {
                             heldLabel = when {
                                 thinkingNow -> "thinking"
                                 isToolCalling -> "calling"
                                 isTranscribing -> "transcribing"
-                                hasText -> "answering"
+                                hasActiveAnswer -> "answering"
                                 message.status == MessageStatus.SUCCESS || message.status == MessageStatus.ERROR || message.status == MessageStatus.STOPPED -> ""
                                 message.status == MessageStatus.SENDING -> ""
                                 else -> heldLabel
@@ -1106,7 +1156,7 @@ fun MessageItem(
                             isStreaming && isTranscribing -> transcribingStatus
                             isStreaming && isToolCalling -> toolCallingStatus
                             isStreaming && thinkingNow -> thinkingStatus
-                            isStreaming && hasText -> answeringStatus
+                            isStreaming && hasActiveAnswer -> answeringStatus
                             isStreaming -> when (heldLabel) {
                                 "thinking" -> thinkingStatus
                                 "calling" -> toolCallingStatus
@@ -1211,6 +1261,15 @@ fun MessageItem(
                         val useTimelineSegments = normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
                             mergedSegments.any { it.type == "answer" }
                         val groupAdjacentTimelineTools = normalizedToolCallDisplayMode == ToolCallDisplayModes.GROUPED_TIMELINE
+                        val timelineAppearanceSeenKeys = remember(message.id, normalizedToolCallDisplayMode) {
+                            mutableSetOf<String>()
+                        }
+                        var timelineAppearanceInitialized by remember(message.id, normalizedToolCallDisplayMode) {
+                            mutableStateOf(false)
+                        }
+                        LaunchedEffect(message.id, normalizedToolCallDisplayMode) {
+                            timelineAppearanceInitialized = true
+                        }
                         val detailSegments = remember(mergedSegments) {
                             mergedSegments.filter { it.type != "answer" }
                         }
@@ -1228,6 +1287,8 @@ fun MessageItem(
                                 groupAdjacentBlocks = groupAdjacentTimelineTools,
                                 expandedStates = thoughtExpandedStates,
                                 renderContext = markdownRenderContext,
+                                appearanceSeenKeys = timelineAppearanceSeenKeys,
+                                appearanceInitialized = timelineAppearanceInitialized,
                                 onSegmentClick = { indices ->
                                     selectedSegmentIndices = indices
                                     selectedSegmentIndex = indices.firstOrNull() ?: -1
@@ -2284,6 +2345,8 @@ private fun TimelineSegmentsContent(
     groupAdjacentBlocks: Boolean,
     expandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
+    appearanceSeenKeys: MutableSet<String>,
+    appearanceInitialized: Boolean,
     onSegmentClick: (List<Int>) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -2300,12 +2363,14 @@ private fun TimelineSegmentsContent(
                                 .fillMaxWidth()
                                 .padding(top = if (index == 0) 0.dp else 6.dp)
                         ) {
-                            RecomposeSafeMarkdown(
-                                content = seg.content,
-                                isStreaming = isStreaming && index == segments.lastIndex,
-                                modifier = Modifier.fillMaxWidth()
-                            ) { text ->
-                                MarkdownTextContent(text = text, renderContext = renderContext)
+                            SelectionContainer {
+                                RecomposeSafeMarkdown(
+                                    content = seg.content,
+                                    isStreaming = isStreaming && index == segments.lastIndex,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { text ->
+                                    MarkdownTextContent(text = text, renderContext = renderContext)
+                                }
                             }
                         }
                     }
@@ -2316,36 +2381,62 @@ private fun TimelineSegmentsContent(
                         val blockSegments = mutableListOf<MessageSegment>()
                         val blockDetailIndices = mutableListOf<Int>()
                         var blockEnd = index
-                        while (blockEnd < segments.size && segments[blockEnd].type != "answer") {
-                            blockSegments.add(segments[blockEnd])
-                            blockDetailIndices.add(detailIndex)
-                            detailIndex++
+                        while (blockEnd < segments.size && !segments[blockEnd].isVisibleAnswerSegment()) {
+                            val blockSeg = segments[blockEnd]
+                            if (blockSeg.isInfoSegment()) {
+                                blockSegments.add(blockSeg)
+                                blockDetailIndices.add(detailIndex)
+                                detailIndex++
+                            }
                             blockEnd++
                         }
-                        CompactSegmentBlock(
-                            segs = blockSegments,
-                            segmentIndices = blockDetailIndices,
-                            message = message,
+                        val expansionKey = "${message.id}:group:${blockDetailIndices.firstOrNull() ?: index}"
+                        val blockTopPaddingExtra = if (groupedBlockIndex > 0) 8.dp else 0.dp
+                        val blockContent: @Composable () -> Unit = {
+                            CompactSegmentBlock(
+                                segs = blockSegments,
+                                segmentIndices = blockDetailIndices,
+                                message = message,
+                                isStreaming = isStreaming,
+                                useLiveStatus = isStreaming && blockDetailIndices.lastOrNull() == detailSegments.lastIndex,
+                                expandedStates = expandedStates,
+                                expansionKey = expansionKey,
+                                topPaddingExtra = blockTopPaddingExtra,
+                                bottomPaddingExtra = 0.dp,
+                                onSegmentClick = { detailIndex -> onSegmentClick(listOf(detailIndex)) }
+                            )
+                        }
+                        AnimatedTimelineBlockAppearance(
+                            animationKey = expansionKey,
                             isStreaming = isStreaming,
-                            useLiveStatus = isStreaming && blockDetailIndices.lastOrNull() == detailSegments.lastIndex,
-                            expandedStates = expandedStates,
-                            expansionKey = "${message.id}:group:${blockDetailIndices.firstOrNull() ?: index}",
-                            topPaddingExtra = if (groupedBlockIndex > 0) 8.dp else 0.dp,
-                            bottomPaddingExtra = 0.dp,
-                            onSegmentClick = { detailIndex -> onSegmentClick(listOf(detailIndex)) }
-                        )
+                            appearanceInitialized = appearanceInitialized,
+                            seenKeys = appearanceSeenKeys
+                        ) {
+                            blockContent()
+                        }
                         groupedBlockIndex++
                         index = blockEnd
                     } else {
                         val currentDetailIndex = detailIndex
                         detailIndex++
-                        TimelineInfoSegmentCard(
-                            seg = seg,
-                            detailSegments = detailSegments,
-                            detailIndex = currentDetailIndex,
-                            isStreaming = isStreaming && index == segments.lastIndex,
-                            onClick = { onSegmentClick(listOf(currentDetailIndex)) }
-                        )
+                        val cardContent: @Composable () -> Unit = {
+                            TimelineInfoSegmentCard(
+                                seg = seg,
+                                detailSegments = detailSegments,
+                                detailIndex = currentDetailIndex,
+                                isStreaming = isStreaming && index == segments.lastIndex,
+                                onClick = { onSegmentClick(listOf(currentDetailIndex)) }
+                            )
+                        }
+                        val timelineKey = "${message.id}:timeline:$currentDetailIndex"
+                        AnimatedTimelineBlockAppearance(
+                            animationKey = timelineKey,
+                            isStreaming = isStreaming,
+                            appearanceInitialized = appearanceInitialized,
+                            seenKeys = appearanceSeenKeys
+                        ) {
+                            cardContent()
+                        }
                         index++
                     }
                 }

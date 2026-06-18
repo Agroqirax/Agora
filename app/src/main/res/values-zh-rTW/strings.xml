@@ -442,6 +442,7 @@
     <string name="scheme_style_neutral">中性</string>
     <string name="dynamic_color">動態顏色</string>
     <string name="dynamic_color_desc">根據桌布使用系統生成的顏色（Android 12+）</string>
+    <string name="appearance_interface">介面</string>
     <string name="visual_effects">視覺效果</string>
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">對聊天列表頂部工具列下方套用模糊。關閉可節省效能。</string>
@@ -453,6 +454,9 @@
     <string name="tool_call_display_mode_timeline_desc">依時間順序顯示回答、思考和工具區塊</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">保留時間順序，但合併連續的思考、工具和圖片區塊</string>
     <string name="tool_call_display_mode_compact_desc">將思考和工具區塊聚合顯示在回答上方</string>
+    <string name="interaction_feedback">互動回饋</string>
+    <string name="haptic_feedback">觸覺回饋</string>
+    <string name="haptic_feedback_desc">為生成狀態和關鍵操作使用輕微震動。</string>
 
     <!-- Language -->
     <string name="language_title">語言</string>

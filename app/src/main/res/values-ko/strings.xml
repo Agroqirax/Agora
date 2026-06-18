@@ -327,6 +327,18 @@
     <string name="advanced_settings">고급</string>
     <string name="advanced_generation_title">고급 설정</string>
     <string name="advanced_per_conversation">대화별 재정의</string>
+    <string name="appearance_interface">인터페이스</string>
+    <string name="message_display">메시지 표시</string>
+    <string name="tool_call_display_mode">사고 및 도구 블록</string>
+    <string name="tool_call_display_mode_timeline">타임라인</string>
+    <string name="tool_call_display_mode_grouped_timeline">그룹</string>
+    <string name="tool_call_display_mode_compact">간결</string>
+    <string name="tool_call_display_mode_timeline_desc">답변, 사고, 도구 블록을 시간순으로 표시합니다</string>
+    <string name="tool_call_display_mode_grouped_timeline_desc">시간순은 유지하되 연속된 사고, 도구, 이미지 블록을 병합합니다</string>
+    <string name="tool_call_display_mode_compact_desc">사고와 도구 블록을 답변 위에 모아 표시합니다</string>
+    <string name="interaction_feedback">상호작용 피드백</string>
+    <string name="haptic_feedback">햅틱 피드백</string>
+    <string name="haptic_feedback_desc">생성 상태와 주요 동작에 약한 진동을 사용합니다.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">웹 검색</string>

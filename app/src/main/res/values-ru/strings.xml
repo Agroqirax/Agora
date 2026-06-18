@@ -327,6 +327,18 @@
     <string name="advanced_settings">Дополнительно</string>
     <string name="advanced_generation_title">Дополнительные настройки</string>
     <string name="advanced_per_conversation">Переопределения для отдельной беседы</string>
+    <string name="appearance_interface">Интерфейс</string>
+    <string name="message_display">Отображение сообщений</string>
+    <string name="tool_call_display_mode">Блоки размышлений и инструментов</string>
+    <string name="tool_call_display_mode_timeline">Хронология</string>
+    <string name="tool_call_display_mode_grouped_timeline">Сгруппировано</string>
+    <string name="tool_call_display_mode_compact">Компактно</string>
+    <string name="tool_call_display_mode_timeline_desc">Показывать ответ, размышления и блоки инструментов в хронологическом порядке</string>
+    <string name="tool_call_display_mode_grouped_timeline_desc">Сохранять хронологию, но объединять соседние блоки размышлений, инструментов и изображений</string>
+    <string name="tool_call_display_mode_compact_desc">Группировать блоки размышлений и инструментов над ответом</string>
+    <string name="interaction_feedback">Обратная связь взаимодействия</string>
+    <string name="haptic_feedback">Тактильная отдача</string>
+    <string name="haptic_feedback_desc">Использовать легкую вибрацию для статуса генерации и важных действий.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Веб-поиск</string>

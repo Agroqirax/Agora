@@ -17,6 +17,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -81,6 +82,8 @@ import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.util.gradientBlurEdges
 import com.newoether.agora.util.verticalEdgeFade
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.ui.components.AnimatedBlobBackground
 import com.newoether.agora.ui.components.TypewriterText
@@ -97,6 +100,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
+
+private fun MessageSegment.isBlankAnswerSegment(): Boolean =
+    type == "answer" && content.isBlank()
+
+private fun MessageSegment.isVisibleAnswerSegment(): Boolean =
+    type == "answer" && content.isNotBlank()
+
+private fun ChatMessage.hasActiveAnswerSegment(): Boolean {
+    val lastVisibleSegment = segments?.lastOrNull { !it.isBlankAnswerSegment() }
+    return if (lastVisibleSegment != null) {
+        lastVisibleSegment.isVisibleAnswerSegment()
+    } else {
+        text.isNotBlank()
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -424,7 +442,6 @@ fun ChatApp(
         when {
             isLoading && !previousIsLoading -> {
                 observedGeneration = true
-                haptics.generationStart()
             }
             !isLoading && previousIsLoading && observedGeneration -> {
                 val terminalStatus = messages.lastOrNull { it.participant == Participant.MODEL }?.status
@@ -442,7 +459,7 @@ fun ChatApp(
     val answeringHapticActive = isLoading &&
         generatingInConversationId == currentConversationId &&
         messages.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
-            message.status == MessageStatus.SENDING && message.text.isNotEmpty()
+            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
         } == true
     DisposableEffect(answeringHapticActive, hapticsEnabled) {
         if (answeringHapticActive && hapticsEnabled) {
@@ -1002,13 +1019,15 @@ fun ChatApp(
                         }
                     }
 
-                    val animAlpha by animateFloatAsState(if (showButton) 1f else 0f, tween(400), label = "sA")
-                    val animSize by animateDpAsState(if (showButton) 40.dp else 24.dp, tween(400), label = "sS")
-                    val animIconSize by animateDpAsState(if (showButton) 24.dp else 14.dp, tween(400), label = "sIS")
-                    if (showButton) {
-                        Box(modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarHeight + 8.dp).size(48.dp), contentAlignment = Alignment.Center) {
-                            FloatingActionButton(onClick = { scope.launch { scrollToLastUserMessage(animate = true, easing = SCROLL_EASING) } }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(4.dp), modifier = Modifier.size(animSize).alpha(animAlpha)) {
-                                Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(animIconSize))
+                    AnimatedVisibility(
+                        visible = showButton,
+                        enter = fadeIn(tween(250)) + scaleIn(initialScale = 0.7f, animationSpec = tween(250)),
+                        exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.7f, animationSpec = tween(180)),
+                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarHeight + 8.dp)
+                    ) {
+                        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            FloatingActionButton(onClick = { scope.launch { scrollToLastUserMessage(animate = true, easing = SCROLL_EASING) } }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(4.dp), modifier = Modifier.size(40.dp)) {
+                                Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }
                         }
                     }

@@ -327,6 +327,18 @@
     <string name="advanced_settings">Erweitert</string>
     <string name="advanced_generation_title">Erweiterte Einstellungen</string>
     <string name="advanced_per_conversation">Überschreibungen pro Unterhaltung</string>
+    <string name="appearance_interface">Oberfläche</string>
+    <string name="message_display">Nachrichtenanzeige</string>
+    <string name="tool_call_display_mode">Nachdenk- und Werkzeugblöcke</string>
+    <string name="tool_call_display_mode_timeline">Zeitverlauf</string>
+    <string name="tool_call_display_mode_grouped_timeline">Gruppiert</string>
+    <string name="tool_call_display_mode_compact">Kompakt</string>
+    <string name="tool_call_display_mode_timeline_desc">Antworten, Nachdenken und Werkzeugblöcke in zeitlicher Reihenfolge anzeigen</string>
+    <string name="tool_call_display_mode_grouped_timeline_desc">Zeitliche Reihenfolge beibehalten, aber aufeinanderfolgende Nachdenk-, Werkzeug- und Bildblöcke zusammenfassen</string>
+    <string name="tool_call_display_mode_compact_desc">Nachdenk- und Werkzeugblöcke oberhalb der Antwort gruppieren</string>
+    <string name="interaction_feedback">Interaktionsfeedback</string>
+    <string name="haptic_feedback">Haptisches Feedback</string>
+    <string name="haptic_feedback_desc">Dezente Vibrationen für Generierungsstatus und wichtige Aktionen verwenden.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Websuche</string>

@@ -212,12 +212,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        AppForegroundTracker.isInForeground = true
+        AppForegroundTracker.setInForeground(true)
     }
 
     override fun onPause() {
         super.onPause()
-        AppForegroundTracker.isInForeground = false
+        AppForegroundTracker.setInForeground(false)
     }
 }
 
