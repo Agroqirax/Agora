@@ -61,7 +61,16 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val modelBlockHeights = remember { mutableStateMapOf<String, Float>() }
 
     val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val lastFingerprint by viewModel.lastFetchFingerprint.collectAsState()
     val providers = availableModels.entries.filter { it.value.isNotEmpty() }
+
+    // Auto-fetch models when entering the page if provider config has changed
+    LaunchedEffect(Unit) {
+        val current = viewModel.computeProviderFingerprint()
+        if (current != lastFingerprint) {
+            viewModel.fetchAvailableModels()
+        }
+    }
 
     CollapsingSettingsLazyScaffold(
         title = stringResource(R.string.models_title),

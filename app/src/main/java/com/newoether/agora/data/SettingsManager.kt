@@ -180,6 +180,7 @@ class SettingsManager(private val context: Context) {
         val AUTO_DELETE_ENABLED = booleanPreferencesKey("auto_delete_enabled")
         val AUTO_DELETE_PERIOD_HOURS = intPreferencesKey("auto_delete_period_hours")
         val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
+        val LAST_MODELS_FETCH_FINGERPRINT = stringPreferencesKey("last_models_fetch_fingerprint")
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
@@ -327,6 +328,7 @@ class SettingsManager(private val context: Context) {
     val autoDeleteEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTO_DELETE_ENABLED] ?: true }
     val autoDeletePeriodHours: Flow<Int> = context.dataStore.data.map { it[AUTO_DELETE_PERIOD_HOURS] ?: 168 }
     val lastBackupTimestamp: Flow<Long> = context.dataStore.data.map { it[LAST_BACKUP_TIMESTAMP] ?: 0L }
+    val lastModelsFetchFingerprint: Flow<String> = context.dataStore.data.map { it[LAST_MODELS_FETCH_FINGERPRINT] ?: "" }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
         context.dataStore.edit { prefs ->
@@ -722,5 +724,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveLastBackupTimestamp(timestamp: Long) {
         context.dataStore.edit { it[LAST_BACKUP_TIMESTAMP] = timestamp }
+    }
+
+    suspend fun saveLastModelsFetchFingerprint(fingerprint: String) {
+        context.dataStore.edit { it[LAST_MODELS_FETCH_FINGERPRINT] = fingerprint }
     }
 }

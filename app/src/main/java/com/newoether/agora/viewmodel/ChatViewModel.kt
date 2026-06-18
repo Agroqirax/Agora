@@ -497,6 +497,7 @@ class ChatViewModel(
     val autoBackupDirectory = settingsManager.autoBackupDirectory.stateIn(viewModelScope, SharingStarted.Eagerly, "Download/Agora/Backup")
     val autoDeleteEnabled = settingsManager.autoDeleteEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val autoDeletePeriodHours = settingsManager.autoDeletePeriodHours.stateIn(viewModelScope, SharingStarted.Eagerly, 168)
+    val lastFetchFingerprint = settingsManager.lastModelsFetchFingerprint.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
         val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
             .map { entities ->
@@ -2476,6 +2477,15 @@ class ChatViewModel(
         return prefixed
     }
 
+    fun computeProviderFingerprint(): String {
+        val parts = providers.map { (name, _) ->
+            val keyId = activeApiKeyIds.value[name] ?: ""
+            val url = providerBaseUrls.value[name] ?: ""
+            "$name|$keyId|$url"
+        }.sorted().joinToString(",")
+        return parts.hashCode().toString()
+    }
+
     fun fetchAvailableModels() {
         viewModelScope.launch {
             if (_isSyncingModels.value) return@launch
@@ -2530,6 +2540,9 @@ class ChatViewModel(
                 val allFetchedModels = settingsManager.availableModels.first().values.flatten().toSet()
                 val newEnabled = enabledModels.value.intersect(allFetchedModels)
                 setEnabledModels(newEnabled)
+
+                // Save fingerprint on any successful fetch so we don't re-fetch on next visit
+                settingsManager.saveLastModelsFetchFingerprint(computeProviderFingerprint())
 
                 when {
                     successProviders.isNotEmpty() && failedProviders.isEmpty() ->
