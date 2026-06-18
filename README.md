@@ -117,7 +117,7 @@
 
 ## Documentation
 
-📖 **[Browse the User Manual](https://newo-ether.github.io/Agora/)** — 15 pages covering installation, providers, tools, search, memory, shell, and more.
+📖 **[Browse the User Manual](https://newo-ether.github.io/Agora/)** — 24 pages covering installation, providers, tools, search, memory, shell, and more.
 
 🏗️ **[Architecture Guide](ARCHITECTURE.md)** — complete codebase walkthrough: data layer, API providers, JNI, UI, and data flows.
 

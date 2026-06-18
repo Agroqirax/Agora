@@ -33,7 +33,7 @@ theme:
 
 plugins:
   - i18n:
-      docs_structure: suffix
+      docs_structure: folder
       fallback_to_default: true
       languages:
         - locale: en
