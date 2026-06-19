@@ -195,7 +195,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             pendingToolCalls.getOrPut(idx) { PendingToolCall() }
                         }
                         if (tc.id != null) pending.id = tc.id
-                        tc.function?.name?.let { pending.name = it }
+                        tc.function?.name?.let { if (it.isNotEmpty()) pending.name = it }
                         tc.function?.arguments?.let {
                             pending.args.append(if (it is JsonPrimitive) it.content else it.toString())
                         }
