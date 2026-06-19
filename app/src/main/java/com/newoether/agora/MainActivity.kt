@@ -36,16 +36,22 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.AccessibilityManager
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.Font
@@ -69,6 +75,7 @@ import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
@@ -220,6 +227,146 @@ class MainActivity : ComponentActivity() {
         AppForegroundTracker.setInForeground(false)
     }
 }
+
+private const val SettingsOverlayScrimAlpha = 0.45f
+private const val SettingsOverlayEnterOffsetFraction = 0.25f
+private const val SettingsOverlayEnterScale = 0.92f
+private const val SettingsOverlayExitScale = 0.94f
+private const val SettingsOverlaySpringVisibilityThreshold = 0.001f
+
+@Composable
+private fun SettingsOverlayHost(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val scrimAlpha = remember { Animatable(0f) }
+    val pageOffsetFraction = remember { Animatable(0f) }
+    val pageAlpha = remember { Animatable(1f) }
+    val pageScale = remember { Animatable(1f) }
+    var renderOverlay by remember { mutableStateOf(visible) }
+
+    LaunchedEffect(visible) {
+        if (visible) {
+            renderOverlay = true
+            scrimAlpha.snapTo(0f)
+            pageOffsetFraction.snapTo(SettingsOverlayEnterOffsetFraction)
+            pageAlpha.snapTo(0f)
+            pageScale.snapTo(SettingsOverlayEnterScale)
+            listOf(
+                launch {
+                    scrimAlpha.animateTo(
+                        SettingsOverlayScrimAlpha,
+                        animationSpec = tween(300, delayMillis = 50)
+                    )
+                },
+                launch {
+                    pageOffsetFraction.animateTo(
+                        0f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessLow,
+                            visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+                        )
+                    )
+                },
+                launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
+                launch {
+                    pageScale.animateTo(
+                        1f,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessLow,
+                            visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+                        )
+                    )
+                }
+            ).joinAll()
+        } else if (renderOverlay) {
+            listOf(
+                launch {
+                    scrimAlpha.animateTo(
+                        0f,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    )
+                },
+                launch {
+                    pageOffsetFraction.animateTo(
+                        1f,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    )
+                },
+                launch {
+                    pageAlpha.animateTo(
+                        0f,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    )
+                },
+                launch {
+                    pageScale.animateTo(
+                        SettingsOverlayExitScale,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing)
+                    )
+                }
+            ).joinAll()
+            renderOverlay = false
+        }
+    }
+
+    if (!renderOverlay) return
+
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
+        val pageOffsetX = (widthPx * pageOffsetFraction.value).roundToInt()
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(0f)
+                .background(Color.Black.copy(alpha = scrimAlpha.value.coerceIn(0f, SettingsOverlayScrimAlpha)))
+                .pointerInput(onDismiss) {
+                    detectTapGestures { onDismiss() }
+                }
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(1f)
+                .offset { IntOffset(pageOffsetX, 0) }
+                .alpha(pageAlpha.value.coerceIn(0f, 1f))
+                .graphicsLayer {
+                    scaleX = pageScale.value
+                    scaleY = pageScale.value
+                }
+        ) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background
+            ) {
+                content()
+            }
+
+            if (!visible) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .consumePointerInput()
+                )
+            }
+        }
+    }
+}
+
+private fun Modifier.consumePointerInput(): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                event.changes.forEach { it.consume() }
+            }
+        }
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -624,55 +771,16 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                 onSnackbarOffsetChanged = { chatSnackbarOffset = it }
             )
 
-            // Scrim that fades in behind the settings page
-            AnimatedVisibility(
+            SettingsOverlayHost(
                 visible = showSettings,
-                enter = fadeIn(animationSpec = tween(300, delayMillis = 50)),
-                exit = fadeOut(animationSpec = tween(400, easing = FastOutSlowInEasing))
+                onDismiss = { showSettings = false }
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .pointerInput(Unit) {
-                            detectTapGestures { showSettings = false }
-                        }
+                SettingsScreen(
+                    viewModel = viewModel,
+                    onBack = {
+                        showSettings = false
+                    }
                 )
-            }
-
-            AnimatedVisibility(
-                visible = showSettings,
-                enter = slideInHorizontally(
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                ) { fullWidth -> (fullWidth * 0.25f).toInt() } + fadeIn(animationSpec = tween(300)) + scaleIn(
-                    initialScale = 0.92f,
-                    animationSpec = spring(
-                        dampingRatio = Spring.DampingRatioLowBouncy,
-                        stiffness = Spring.StiffnessLow
-                    )
-                ),
-                exit = slideOutHorizontally(
-                    animationSpec = tween(400, easing = FastOutSlowInEasing)
-                ) { it } + fadeOut(animationSpec = tween(400, easing = FastOutSlowInEasing)) + scaleOut(
-                    targetScale = 0.94f,
-                    animationSpec = tween(400, easing = FastOutSlowInEasing)
-                )
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    SettingsScreen(
-                        viewModel = viewModel,
-                        onBack = {
-                            showSettings = false
-                        }
-                    )
-
-                }
             }
 
             // Full screen image preview

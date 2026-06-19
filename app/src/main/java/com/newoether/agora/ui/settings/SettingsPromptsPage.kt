@@ -51,9 +51,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     GuardedAnimatedContent(
         targetState = editingEntry,
-        transitionSpec = {
-            settingsContentTransform(forward = targetState != null)
-        }
+        forward = editingEntry != null
     ) { currentEntry ->
         if (currentEntry != null) {
             SystemPromptEditorPage(

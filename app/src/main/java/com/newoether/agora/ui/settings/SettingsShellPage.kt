@@ -53,9 +53,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     GuardedAnimatedContent(
         targetState = showSandboxMgmt,
-        transitionSpec = {
-            settingsContentTransform(forward = targetState)
-        }
+        forward = showSandboxMgmt
     ) { isMgmt ->
         if (isMgmt && viewModel.sandboxManager != null) {
             key(sandboxEntryCount) {

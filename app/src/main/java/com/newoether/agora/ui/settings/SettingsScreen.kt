@@ -193,9 +193,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
         GuardedAnimatedContent(
             targetState = selectedCategory,
-            transitionSpec = {
-                settingsContentTransform(forward = targetState != null)
-            }
+            forward = selectedCategory != null
         ) { category ->
             when (category) {
                 "provider" -> SettingsProviderPage(viewModel, onBack = { selectedCategory = null })

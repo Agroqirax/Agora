@@ -69,6 +69,9 @@ private fun variableIcon(key: String): ImageVector = when (key) {
     else -> Icons.Default.Info
 }
 
+private val PromptTabCornerVisibilityThreshold = 0.01.dp
+private const val PromptTabWeightVisibilityThreshold = 0.001f
+
 @SuppressLint("UnusedContentLambdaTargetStateParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -176,7 +179,8 @@ fun SystemPromptEditorPage(
                     val targetBottomEnd = if (isSelected || index == tabLabels.lastIndex) outerCorner else innerCorner
                     val cornerSpec = spring<Dp>(
                         dampingRatio = Spring.DampingRatioHighBouncy,
-                        stiffness = Spring.StiffnessMediumLow
+                        stiffness = Spring.StiffnessMediumLow,
+                        visibilityThreshold = PromptTabCornerVisibilityThreshold
                     )
                     val topStart by animateDpAsState(targetTopStart, cornerSpec, label = "promptTabTopStart")
                     val topEnd by animateDpAsState(targetTopEnd, cornerSpec, label = "promptTabTopEnd")
@@ -200,7 +204,8 @@ fun SystemPromptEditorPage(
                         targetValue = if (isSelected) 1.13f else 1f,
                         animationSpec = spring(
                             dampingRatio = Spring.DampingRatioHighBouncy,
-                            stiffness = Spring.StiffnessMediumLow
+                            stiffness = Spring.StiffnessMediumLow,
+                            visibilityThreshold = PromptTabWeightVisibilityThreshold
                         ),
                         label = "promptTabWeight"
                     )
