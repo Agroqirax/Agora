@@ -32,7 +32,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.input.*
@@ -72,7 +71,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.platform.LocalContext
@@ -99,9 +97,6 @@ import kotlinx.serialization.json.jsonObject
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
@@ -111,20 +106,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-fun Modifier.verticalScrollbar(
-    scrollState: ScrollState,
-    color: Color,
-    width: androidx.compose.ui.unit.Dp = 3.dp
-): Modifier = drawWithContent {
-    drawContent()
-    if (scrollState.maxValue > 0) {
-        val viewPortHeight = size.height
-        val totalHeight = scrollState.maxValue + viewPortHeight
-        val thumbHeight = (viewPortHeight / totalHeight) * viewPortHeight
-        val thumbOffset = (scrollState.value / totalHeight.toFloat()) * viewPortHeight
-        drawRoundRect(color = color, topLeft = Offset(size.width - width.toPx() - 4.dp.toPx(), thumbOffset), size = Size(width.toPx(), thumbHeight), cornerRadius = CornerRadius(width.toPx() / 2))
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -1158,31 +1139,6 @@ fun ChatBottomBar(
                 // Process next video in queue
                 processNextVideo()
             }
-        )
-    }
-}
-
-@Composable
-private fun ProviderBadge(provider: String) {
-    val badgeColor = when (provider.lowercase()) {
-        "google", "gemini" -> MaterialTheme.colorScheme.onPrimaryContainer
-        "anthropic" -> Color(0xFFD97757)
-        "openai" -> Color(0xFF74AA9C)
-        else -> MaterialTheme.colorScheme.primary
-    }
-    val badgeBackground = when (provider.lowercase()) {
-        "google", "gemini" -> MaterialTheme.colorScheme.primaryContainer
-        else -> badgeColor.copy(alpha = 0.15f)
-    }
-    Surface(
-        shape = RoundedCornerShape(4.dp),
-        color = badgeBackground
-    ) {
-        Text(
-            provider,
-            style = ChatType.micro,
-            color = badgeColor,
-            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
         )
     }
 }
