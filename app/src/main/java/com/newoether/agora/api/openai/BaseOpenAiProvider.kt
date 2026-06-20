@@ -48,13 +48,27 @@ abstract class BaseOpenAiProvider : LlmProvider {
      * Parse the delta from one SSE event and emit TextChunk / ThoughtChunk events.
      * The base class handles tool_calls accumulation, finish_reason emission, and usage
      * emission automatically.
+     *
+     * The default implementation covers the common OpenAI-compatible shape: a separate
+     * `reasoning_content` field (gated on [ProviderConfig.thinkingEnabled]) plus `content`.
+     * Providers with a different reasoning representation (e.g. OpenRouter's
+     * `reasoning_details`) override this.
      */
-    protected abstract suspend fun parseDeltaContent(
+    protected open suspend fun parseDeltaContent(
         delta: OpenAiDelta,
         config: ProviderConfig,
         thinkParser: StreamingThinkTagParser,
         emit: suspend (StreamEvent) -> Unit
-    )
+    ) {
+        delta.reasoningContent?.let { reasoning ->
+            if (reasoning.isNotEmpty() && config.thinkingEnabled) {
+                emit(StreamEvent.ThoughtChunk(reasoning))
+            }
+        }
+        delta.content?.let { content ->
+            if (content.isNotEmpty()) emit(StreamEvent.TextChunk(content))
+        }
+    }
 
     protected open val retryableStatusCodes: Set<Int> = setOf(429, 502, 503, 504)
 

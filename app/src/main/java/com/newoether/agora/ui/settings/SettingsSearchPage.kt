@@ -39,6 +39,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.api.ProviderDefaults
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
@@ -79,11 +80,11 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     // Embedding provider presets
     data class EmbeddingProviderPreset(val name: String, val baseUrl: String, val models: List<String>)
     val embeddingProviders = listOf(
-        EmbeddingProviderPreset("OpenAI", "https://api.openai.com/v1", listOf("text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002")),
-        EmbeddingProviderPreset("Mistral", "https://api.mistral.ai/v1", listOf("mistral-embed")),
-        EmbeddingProviderPreset("Voyage AI", "https://api.voyageai.com/v1", listOf("voyage-3-large", "voyage-3-lite", "voyage-code-3")),
-        EmbeddingProviderPreset("SiliconFlow", "https://api.siliconflow.cn/v1", listOf("BAAI/bge-m3", "BAAI/bge-large-en-v1.5")),
-        EmbeddingProviderPreset("Ollama", "http://localhost:11434/v1", emptyList()),
+        EmbeddingProviderPreset("OpenAI", ProviderDefaults.embeddingBaseUrl("OpenAI"), listOf("text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002")),
+        EmbeddingProviderPreset("Mistral", ProviderDefaults.embeddingBaseUrl("Mistral"), listOf("mistral-embed")),
+        EmbeddingProviderPreset("Voyage AI", ProviderDefaults.embeddingBaseUrl("Voyage AI"), listOf("voyage-3-large", "voyage-3-lite", "voyage-code-3")),
+        EmbeddingProviderPreset("SiliconFlow", ProviderDefaults.embeddingBaseUrl("SiliconFlow"), listOf("BAAI/bge-m3", "BAAI/bge-large-en-v1.5")),
+        EmbeddingProviderPreset("Ollama", ProviderDefaults.embeddingBaseUrl("Ollama"), emptyList()),
         EmbeddingProviderPreset("Custom", "", emptyList())
     )
     var remoteName by remember { mutableStateOf("") }

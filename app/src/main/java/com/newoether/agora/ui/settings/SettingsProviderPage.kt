@@ -26,18 +26,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.viewmodel.ChatViewModel
-
-internal fun providerIcon(name: String): Int = when (name.lowercase()) {
-    "google" -> R.drawable.provider_google
-    "openai" -> R.drawable.provider_openai
-    "anthropic" -> R.drawable.provider_anthropic
-    "deepseek" -> R.drawable.provider_deepseek
-    "qwen" -> R.drawable.provider_qwen
-    "ollama" -> R.drawable.provider_ollama
-    "open router" -> R.drawable.provider_openrouter
-    else -> 0  // custom providers use Cloud icon below
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

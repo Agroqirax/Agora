@@ -105,6 +105,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.newoether.agora.R
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
@@ -495,17 +496,6 @@ private fun FirstVideoScrim(isDarkTheme: Boolean) {
 //  Config pages
 // ═════════════════════════════════════════════════════════════
 
-private fun providerIconRes(name: String): Int = when (name.lowercase()) {
-    "google" -> R.drawable.provider_google
-    "openai" -> R.drawable.provider_openai
-    "anthropic" -> R.drawable.provider_anthropic
-    "deepseek" -> R.drawable.provider_deepseek
-    "qwen" -> R.drawable.provider_qwen
-    "ollama" -> R.drawable.provider_ollama
-    "open router" -> R.drawable.provider_openrouter
-    else -> 0
-}
-
 @Composable
 private fun ProviderPage(providers: List<String>, selected: String?, onSelect: (String) -> Unit, modifier: Modifier, configuredProviders: Set<String> = emptySet()) {
     val scrollState = rememberScrollState()
@@ -533,7 +523,7 @@ private fun ProviderPage(providers: List<String>, selected: String?, onSelect: (
             Column(Modifier.verticalScroll(scrollState)) {
                 Spacer(Modifier.height(10.dp))
             providers.forEach { p ->
-                val iconRes = providerIconRes(p)
+                val iconRes = providerIcon(p)
                 Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp).clip(RoundedCornerShape(28.dp)).clickable { onSelect(p) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected = selected == p, onClick = { onSelect(p) })
                     Spacer(Modifier.width(8.dp))
@@ -584,7 +574,7 @@ private fun ApiKeyPage(
         } else if (provider == "Ollama") {
             val fm = LocalFocusManager.current
             Column(Modifier.padding(32.dp).fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
-                val iconRes = providerIconRes(provider)
+                val iconRes = providerIcon(provider)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (iconRes != 0) {
                         Icon(painterResource(iconRes), null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(36.dp))
@@ -631,7 +621,7 @@ private fun ApiKeyPage(
         } else {
             val fm = LocalFocusManager.current
             Column(Modifier.padding(32.dp).fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
-                val iconRes = providerIconRes(provider)
+                val iconRes = providerIcon(provider)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (iconRes != 0) {
                         Icon(painterResource(iconRes), null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(36.dp))

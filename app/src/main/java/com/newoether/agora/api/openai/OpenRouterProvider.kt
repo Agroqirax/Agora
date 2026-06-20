@@ -5,6 +5,14 @@ import com.newoether.agora.model.ThinkingLevels
 
 import com.newoether.agora.api.util.StreamingThinkTagParser
 
+private val BOLD_TITLE_REGEX = Regex("\\*\\*(.*?)\\*\\*")
+private val HEADING_TITLE_REGEX = Regex("(?m)^#+\\s*(.*)$")
+
+/** First bold (`**...**`) or markdown-heading line in a reasoning chunk, used as its title. */
+private fun extractThoughtTitle(text: String): String? =
+    BOLD_TITLE_REGEX.find(text)?.groupValues?.get(1)
+        ?: HEADING_TITLE_REGEX.find(text)?.groupValues?.get(1)
+
 class OpenRouterProvider : BaseOpenAiProvider() {
     override val name: String = "Open Router"
     override val defaultBaseUrl: String = "https://openrouter.ai/api/v1"
@@ -37,18 +45,14 @@ class OpenRouterProvider : BaseOpenAiProvider() {
             if (detail.type == "reasoning.text" || detail.type == "text") {
                 detail.text?.let {
                     if (it.isNotEmpty()) {
-                        val title = Regex("\\*\\*(.*?)\\*\\*").find(it)?.groupValues?.get(1)
-                            ?: Regex("(?m)^#+\\s*(.*)$").find(it)?.groupValues?.get(1)
-                        emit(StreamEvent.ThoughtChunk(it, title))
+                        emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it)))
                     }
                 }
             }
         }
         delta.reasoningContent?.let {
             if (it.isNotEmpty()) {
-                val title = Regex("\\*\\*(.*?)\\*\\*").find(it)?.groupValues?.get(1)
-                    ?: Regex("(?m)^#+\\s*(.*)$").find(it)?.groupValues?.get(1)
-                emit(StreamEvent.ThoughtChunk(it, title))
+                emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it)))
             }
         }
         delta.content?.let { content ->

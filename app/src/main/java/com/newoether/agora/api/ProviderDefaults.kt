@@ -19,6 +19,9 @@ object ProviderDefaults {
         "deepseek" -> "https://api.deepseek.com/v1"
         "qwen" -> "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
         "open router", "openrouter" -> "https://openrouter.ai/api/v1"
+        "voyage ai", "voyage" -> "https://api.voyageai.com/v1"
+        "siliconflow" -> "https://api.siliconflow.cn/v1"
+        "ollama" -> "http://localhost:11434/v1"
         else -> OPENAI_BASE_URL
     }
 }
