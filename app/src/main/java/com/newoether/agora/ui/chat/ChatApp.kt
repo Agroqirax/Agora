@@ -55,7 +55,6 @@ import com.newoether.agora.R
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.ui.components.AnimatedBlobBackground
 import com.newoether.agora.ui.components.TypewriterText
@@ -73,19 +72,8 @@ import kotlinx.coroutines.withTimeout
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 
-private fun MessageSegment.isBlankAnswerSegment(): Boolean =
-    type == "answer" && content.isBlank()
-
-// isVisibleAnswerSegment() is shared (internal) from MessageItem.kt.
-
-private fun ChatMessage.hasActiveAnswerSegment(): Boolean {
-    val lastVisibleSegment = segments?.lastOrNull { !it.isBlankAnswerSegment() }
-    return if (lastVisibleSegment != null) {
-        lastVisibleSegment.isVisibleAnswerSegment()
-    } else {
-        text.isNotBlank()
-    }
-}
+// isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
+// MessageItemSegments.kt.
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
