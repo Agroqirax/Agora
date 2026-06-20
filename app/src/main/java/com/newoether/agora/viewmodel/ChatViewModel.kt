@@ -1087,33 +1087,6 @@ class ChatViewModel(
         return generationManager.semanticSearch(query, limit, ctx)
     }
 
-    private suspend fun resolveEmbedding(text: String): FloatArray? = withContext(Dispatchers.IO) {
-        val model = activeEmbeddingModel.value
-        if (model == null) {
-            DebugLog.w("AgoraVM", "resolveEmbedding: no active model")
-            return@withContext null
-        }
-        if (model.type == EmbeddingModelType.LOCAL) {
-            if (!LlamaEngine.isModelReady(model.localFilePath)) {
-                DebugLog.w("AgoraVM", "resolveEmbedding: local model not ready at ${model.localFilePath}")
-                return@withContext null
-            }
-            DebugLog.d("AgoraVM", "resolveEmbedding: using local model ${model.name}")
-            LlamaEngine.computeEmbedding(text, model.localFilePath) {
-                localProvider.releaseEngineBlocking()
-            }
-        } else {
-            val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
-            if (apiKey.isBlank()) {
-                DebugLog.w("AgoraVM", "resolveEmbedding: no API key available")
-                return@withContext null
-            }
-            val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-            DebugLog.d("AgoraVM", "resolveEmbedding: calling ${model.remoteModelName} @ $baseUrl")
-            EmbeddingClient.computeEmbedding(text, apiKey, model.remoteModelName, baseUrl)
-        }
-    }
-
     private fun resolveEmbeddingApiKey(): String? {
         val keys = settings.apiKeys.value
         for (entry in keys) {
@@ -1135,26 +1108,6 @@ class ChatViewModel(
             return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
         }
         return null
-    }
-
-    /** With fallback — for runtime API calls. */
-    private fun resolveEmbeddingKeyForProvider(targetProvider: String): EmbeddingKeyInfo? {
-        val keys = settings.apiKeys.value
-        val match = keys.find { it.provider.equals(targetProvider, ignoreCase = true) }
-        if (match != null) {
-            val baseUrl = settings.providerBaseUrls.value[match.provider] ?: ProviderDefaults.embeddingBaseUrl(match.provider)
-            return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
-        }
-        val fallbackKeys = listOf("OpenAI", "DeepSeek", "Qwen", "Open Router", "Mistral", "OpenRouter")
-        for (fk in fallbackKeys) {
-            val entry = keys.find { it.provider.equals(fk, ignoreCase = true) }
-            if (entry != null) {
-                val baseUrl = settings.providerBaseUrls.value[entry.provider] ?: ProviderDefaults.embeddingBaseUrl(entry.provider)
-                return EmbeddingKeyInfo(entry.provider, entry.key, baseUrl)
-            }
-        }
-        val first = keys.firstOrNull() ?: return null
-        return EmbeddingKeyInfo(first.provider, first.key, ProviderDefaults.embeddingBaseUrl(first.provider))
     }
 
     private fun resolveEmbeddingBaseUrl(): String {
