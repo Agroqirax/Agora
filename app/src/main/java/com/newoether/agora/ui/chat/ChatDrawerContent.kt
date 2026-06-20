@@ -25,14 +25,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -47,9 +44,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -60,7 +55,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -71,18 +65,18 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
-import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.ui.chat.search.DrawerSearchBar
+import com.newoether.agora.ui.chat.search.SearchResultItem
+import com.newoether.agora.ui.chat.search.rememberDrawerSearchState
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.verticalEdgeFade
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -162,42 +156,12 @@ internal fun ChatDrawerContent(
             Text(stringResource(R.string.conversations), style = ChatType.conversationsTitle)
             Spacer(modifier = Modifier.height(12.dp))
 
-            var searchQuery by remember { mutableStateOf("") }
-            var searchResults by remember { mutableStateOf<List<Pair<MessageEntity, Float>>>(emptyList()) }
-            var isSearchActive by remember { mutableStateOf(false) }
+            val search = rememberDrawerSearchState(viewModel)
 
-            val manualSearchMethod by viewModel.settings.manualSearchMethod.collectAsState()
-
-            LaunchedEffect(searchQuery) {
-                if (searchQuery.isBlank()) {
-                    searchResults = emptyList()
-                    isSearchActive = false
-                } else {
-                    delay(200)
-                    if (searchQuery.isNotBlank()) {
-                        searchResults = if (manualSearchMethod == "rag")
-                            viewModel.semanticSearch(searchQuery)
-                        else
-                            viewModel.searchMessages(searchQuery).map { it to 0f }
-                        isSearchActive = true
-                    }
-                }
-            }
-
-            Surface(modifier = Modifier.fillMaxWidth().height(44.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp), tonalElevation = 8.dp) {
-                Row(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Box(Modifier.weight(1f)) {
-                        if (searchQuery.isEmpty()) Text(stringResource(R.string.search_hint), style = ChatType.drawerSearch, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        BasicTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), textStyle = ChatType.drawerSearch.copy(color = MaterialTheme.colorScheme.onSurface))
-                    }
-                    if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, stringResource(R.string.clear_search), modifier = Modifier.size(18.dp)) }
-                }
-            }
+            DrawerSearchBar(query = search.query, onQueryChange = { search.query = it })
             Spacer(modifier = Modifier.height(12.dp))
 
-            if (!isSearchActive) {
+            if (!search.isActive) {
                 val newChatDisabled = isSwitching
                 val newChatContainer by animateColorAsState(
                     if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
@@ -236,15 +200,15 @@ internal fun ChatDrawerContent(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            if (isSearchActive && searchResults.isEmpty()) {
+            if (search.isActive && search.results.isEmpty()) {
                 Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
                     Text(stringResource(R.string.search_no_results), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
             }
 
             LazyColumn(state = drawerListState, modifier = Modifier.weight(1f).verticalEdgeFade(edgeFadeDp = 40f, topWeight = stw, bottomWeight = sbw)) {
-                if (isSearchActive) {
-                    val grouped = searchResults.groupBy { it.first.conversationId }
+                if (search.isActive) {
+                    val grouped = search.results.groupBy { it.first.conversationId }
                     val titleMap = conversations.associate { it.id to it.title }
                     items(grouped.entries.toList()) { (convId, entries) ->
                         val bestScore = entries.maxOfOrNull { it.second } ?: 0f
@@ -252,7 +216,7 @@ internal fun ChatDrawerContent(
                             title = titleMap[convId] ?: stringResource(R.string.unknown),
                             messages = entries.map { it.first },
                             score = bestScore,
-                            query = searchQuery,
+                            query = search.query,
                             onClick = {
                                 haptics.selection()
                                 if (convId != currentConversationId || isNewChatMode) {

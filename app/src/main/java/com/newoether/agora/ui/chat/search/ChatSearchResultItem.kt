@@ -1,4 +1,4 @@
-package com.newoether.agora.ui.chat
+package com.newoether.agora.ui.chat.search
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
