@@ -2,38 +2,26 @@ package com.newoether.agora.ui.chat
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.defaultMinSize
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,24 +33,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -70,15 +50,10 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.gradientBlur
-import com.newoether.agora.util.gradientBlurEdges
-import com.newoether.agora.util.verticalEdgeFade
-import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
@@ -183,17 +158,10 @@ fun ChatApp(
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = convOverride?.contextWindow ?: maxContextWindow
-    val defaultTemperature by viewModel.settings.defaultTemperature.collectAsState()
-    val defaultMaxTokens by viewModel.settings.defaultMaxTokens.collectAsState()
-    val defaultTopP by viewModel.settings.defaultTopP.collectAsState()
-    val defaultFrequencyPenalty by viewModel.settings.defaultFrequencyPenalty.collectAsState()
-    val defaultPresencePenalty by viewModel.settings.defaultPresencePenalty.collectAsState()
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
 
-    val systemPrompts by viewModel.settings.systemPrompts.collectAsState()
-    val activeSystemPromptId by viewModel.settings.activeSystemPromptId.collectAsState()
 
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
     var conversationToRename by remember { mutableStateOf("") }
@@ -487,276 +455,19 @@ fun ChatApp(
         gesturesEnabled = true,
         scrimColor = DrawerDefaults.scrimColor,
         drawerContent = {
-            ModalDrawerSheet(
-                drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
-                drawerContainerColor = MaterialTheme.colorScheme.surface,
-                drawerTonalElevation = 1.dp,
-                modifier = Modifier
-                    .width(drawerWidth)
-                    .onGloballyPositioned { coords ->
-                        val x = coords.positionInWindow().x
-                        if (!x.isNaN() && drawerWidthPx > 0f) {
-                            drawerProgress = (1f + x / drawerWidthPx).coerceIn(0f, 1f)
-                        }
-                    }
-                    .graphicsLayer {
-                        clip = true
-                    }
-            ) {
-                val drawerListState = rememberLazyListState()
-                val atTop = drawerListState.firstVisibleItemIndex == 0 && drawerListState.firstVisibleItemScrollOffset == 0
-                val atBottom by remember {
-                    derivedStateOf {
-                        val layoutInfo = drawerListState.layoutInfo
-                        val totalItems = layoutInfo.totalItemsCount
-                        if (totalItems == 0) {
-                            true
-                        } else {
-                            val lastVisibleItem = layoutInfo.visibleItemsInfo.maxByOrNull { it.index }
-                            lastVisibleItem != null &&
-                                lastVisibleItem.index == totalItems - 1 &&
-                                lastVisibleItem.offset + lastVisibleItem.size <= layoutInfo.viewportEndOffset
-                        }
-                    }
-                }
-                val stw by animateFloatAsState(if (atTop) 0f else 1f, tween(200))
-                val sbw by animateFloatAsState(if (atBottom) 0f else 1f, tween(200))
-                Column(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .imePadding()
-                        .padding(horizontal = 16.dp, vertical = 20.dp)
-                        .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { focusManager.clearFocus() }
-                ) {
-                    Text(stringResource(R.string.conversations), style = ChatType.conversationsTitle)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    var searchQuery by remember { mutableStateOf("") }
-                    var searchResults by remember { mutableStateOf<List<Pair<MessageEntity, Float>>>(emptyList()) }
-                    var isSearchActive by remember { mutableStateOf(false) }
-
-                    val manualSearchMethod by viewModel.settings.manualSearchMethod.collectAsState()
-
-                    LaunchedEffect(searchQuery) {
-                        if (searchQuery.isBlank()) {
-                            searchResults = emptyList()
-                            isSearchActive = false
-                        } else {
-                            delay(200)
-                            if (searchQuery.isNotBlank()) {
-                                searchResults = if (manualSearchMethod == "rag")
-                                    viewModel.semanticSearch(searchQuery)
-                                else
-                                    viewModel.searchMessages(searchQuery).map { it to 0f }
-                                isSearchActive = true
-                            }
-                        }
-                    }
-
-                    Surface(modifier = Modifier.fillMaxWidth().height(44.dp), shape = CircleShape, color = MaterialTheme.colorScheme.surfaceColorAtElevation(8.dp), tonalElevation = 8.dp) {
-                        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
-                            Spacer(Modifier.width(10.dp))
-                            Box(Modifier.weight(1f)) {
-                                if (searchQuery.isEmpty()) Text(stringResource(R.string.search_hint), style = ChatType.drawerSearch, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                BasicTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), singleLine = true, cursorBrush = SolidColor(MaterialTheme.colorScheme.primary), textStyle = ChatType.drawerSearch.copy(color = MaterialTheme.colorScheme.onSurface))
-                            }
-                            if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(28.dp)) { Icon(Icons.Default.Close, stringResource(R.string.clear_search), modifier = Modifier.size(18.dp)) }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    if (!isSearchActive) {
-                        val newChatDisabled = isSwitching
-                        val newChatContainer by animateColorAsState(
-                            if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                            else MaterialTheme.colorScheme.primary,
-                            tween(300), label = "newChatContainer"
-                        )
-                        val newChatContent by animateColorAsState(
-                            if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                            else MaterialTheme.colorScheme.onPrimary,
-                            tween(300), label = "newChatContent"
-                        )
-                        Button(
-                            onClick = {
-                                if (!newChatDisabled) {
-                                    haptics.action()
-                                    viewModel.createNewChat()
-                                    scope.launch {
-                                        drawerState.close()
-                                        inputFocusRequester.requestFocus()
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(42.dp),
-                            enabled = true,
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = newChatContainer,
-                                contentColor = newChatContent
-                            )
-                        ) {
-                            Icon(Icons.Default.Add, null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.new_chat), style = ChatType.drawerButton)
-                        }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-
-                    if (isSearchActive && searchResults.isEmpty()) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), contentAlignment = Alignment.Center) {
-                            Text(stringResource(R.string.search_no_results), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-
-                    LazyColumn(state = drawerListState, modifier = Modifier.weight(1f).verticalEdgeFade(edgeFadeDp = 40f, topWeight = stw, bottomWeight = sbw)) {
-                        if (isSearchActive) {
-                            val grouped = searchResults.groupBy { it.first.conversationId }
-                            val titleMap = conversations.associate { it.id to it.title }
-                            items(grouped.entries.toList()) { (convId, entries) ->
-                                val bestScore = entries.maxOfOrNull { it.second } ?: 0f
-                                SearchResultItem(
-                                    title = titleMap[convId] ?: stringResource(R.string.unknown),
-                                    messages = entries.map { it.first },
-                                    score = bestScore,
-                                    query = searchQuery,
-                                    onClick = {
-                                        haptics.selection()
-                                        if (convId != currentConversationId || isNewChatMode) {
-                                            pendingDrawerConversationHaptic = convId
-                                        }
-                                        viewModel.selectConversation(convId)
-                                        scope.launch { drawerState.close() }
-                                    }
-                                )
-                            }
-                        } else {
-                            items(conversations) { conversation ->
-                                val isSelected = conversation.id == currentConversationId
-                                var showMenu by remember { mutableStateOf(false) }
-                                var pressOffset by remember { mutableStateOf(DpOffset.Zero) }
-                                var lastPosition by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
-                                val density = LocalDensity.current
-
-                                Box {
-                                    Surface(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(44.dp)
-                                            .padding(vertical = 2.dp)
-                                            .clip(CircleShape)
-                                            .pointerInput(showMenu) {
-                                                if (!showMenu) {
-                                                    awaitPointerEventScope {
-                                                        while (true) {
-                                                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                                                            lastPosition = event.changes.first().position
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            .combinedClickable(
-                                                enabled = !isSwitching,
-                                                onClick = {
-                                                    haptics.selection()
-                                                    if (conversation.id != currentConversationId || isNewChatMode) {
-                                                        pendingDrawerConversationHaptic = conversation.id
-                                                    }
-                                                    viewModel.selectConversation(conversation.id)
-                                                    scope.launch { drawerState.close() }
-                                                },
-                                                onLongClick = {
-                                                    haptics.longPress()
-                                                    pressOffset = with(density) {
-                                                        val x = lastPosition.x.toDp().coerceIn(16.dp, 200.dp)
-                                                        DpOffset(x, lastPosition.y.toDp() - 28.dp)
-                                                    }
-                                                    showMenu = true
-                                                }
-                                            ),
-                                        color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                        shape = CircleShape
-                                    ) {
-                                        Text(
-                                            text = conversation.title,
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                            maxLines = 1,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    DropdownMenu(
-                                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                        tonalElevation = 16.dp,
-                                        expanded = showMenu,
-                                        onDismissRequest = { showMenu = false },
-                                        offset = pressOffset,
-                                        shape = RoundedCornerShape(12.dp)
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.generate_title)) },
-                                            leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                            enabled = !isSwitching && !isLoading,
-                                            onClick = {
-                                                haptics.action()
-                                                showMenu = false
-                                                viewModel.generateTitle(conversation.id)
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.rename)) },
-                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                        enabled = !isSwitching && !isLoading,
-                                        onClick = {
-                                            haptics.action()
-                                            showMenu = false
-                                            showRenameDialog = conversation.id
-                                            conversationToRename = conversation.title
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.delete), color = if (!isSwitching && !isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = if (!isSwitching && !isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                        enabled = !isSwitching && !isLoading,
-                                        onClick = {
-                                            showMenu = false
-                                            showDeleteConfirmDialog = conversation.id
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    FilledTonalButton(
-                        onClick = {
-                            haptics.action()
-                            focusManager.clearFocus()
-                            onOpenSettings()
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(42.dp)
-                            .onGloballyPositioned { coords ->
-                                val screenHeightPx = configuration.screenHeightDp * density.density
-                                val buttonTopPx = coords.positionInWindow().y
-                                settingsButtonTopDp = (screenHeightPx - buttonTopPx) / density.density
-                            },
-                        shape = CircleShape
-                    ) {
-                        Icon(Icons.Default.Settings, null, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(stringResource(R.string.settings), style = ChatType.drawerButton)
-                    }
-                }
-            }
+            ChatDrawerContent(
+                viewModel = viewModel,
+                drawerWidth = drawerWidth,
+                drawerState = drawerState,
+                scope = scope,
+                inputFocusRequester = inputFocusRequester,
+                onDrawerProgress = { drawerProgress = it },
+                onSettingsButtonTop = { settingsButtonTopDp = it },
+                onOpenSettings = onOpenSettings,
+                onRequestRename = { id, title -> showRenameDialog = id; conversationToRename = title },
+                onRequestDelete = { id -> showDeleteConfirmDialog = id },
+                onPendingDrawerHaptic = { pendingDrawerConversationHaptic = it }
+            )
         }
     ) {
         Box(
@@ -1178,162 +889,34 @@ fun ChatApp(
     }
     }
 
-    if (showRenameDialog != null) {
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { showRenameDialog = null },
-            title = { Text(stringResource(R.string.rename_chat), fontWeight = FontWeight.Bold) },
-            text = {
-                val fm = LocalFocusManager.current
-                Box(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
-                    OutlinedTextField(
-                    value = conversationToRename,
-                    onValueChange = { conversationToRename = it },
-                    singleLine = true,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                }
+    showRenameDialog?.let { id ->
+        ChatRenameDialog(
+            initialName = conversationToRename,
+            onSave = { newName ->
+                viewModel.renameConversation(id, newName)
+                showRenameDialog = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.renameConversation(showRenameDialog!!, conversationToRename)
-                    showRenameDialog = null
-                }) {
-                    Text(stringResource(R.string.save))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRenameDialog = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
+            onDismiss = { showRenameDialog = null }
         )
     }
 
-    if (showDeleteConfirmDialog != null) {
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { showDeleteConfirmDialog = null },
-            title = { Text(stringResource(R.string.delete_chat), fontWeight = FontWeight.Bold) },
-            text = { Text(stringResource(R.string.delete_chat_confirm)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        haptics.reject()
-                        viewModel.deleteConversation(showDeleteConfirmDialog!!)
-                        showDeleteConfirmDialog = null
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text(stringResource(R.string.delete))
-                }
+    showDeleteConfirmDialog?.let { id ->
+        ChatDeleteConfirmDialog(
+            onConfirm = {
+                haptics.reject()
+                viewModel.deleteConversation(id)
+                showDeleteConfirmDialog = null
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirmDialog = null }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
+            onDismiss = { showDeleteConfirmDialog = null }
         )
     }
 
     if (showPromptDialog) {
-        val currentConversation = conversations.find { it.id == currentConversationId }
-        val pendingPrompt by viewModel.pendingSystemPromptId.collectAsState()
-        var selectedPromptId by remember(currentConversationId, pendingPrompt, currentConversation?.systemPromptId) {
-            mutableStateOf(if (isNewChatMode) pendingPrompt else currentConversation?.systemPromptId)
-        }
-
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { showPromptDialog = false },
-            title = { Text(stringResource(R.string.conversation_prompt), fontWeight = FontWeight.Bold) },
-            text = {
-                LazyColumn {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable { selectedPromptId = null }.padding(8.dp)
-                        ) {
-                            RadioButton(
-                                selected = selectedPromptId == null,
-                                onClick = { selectedPromptId = null }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            val globalDefaultTitle = systemPrompts.find { it.id == activeSystemPromptId }?.title ?: stringResource(R.string.no_system_prompt)
-                            Text(stringResource(R.string.global_default_format, globalDefaultTitle))
-                        }
-                    }
-                    items(systemPrompts) { prompt ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable { selectedPromptId = prompt.id }.padding(8.dp)
-                        ) {
-                            RadioButton(
-                                selected = selectedPromptId == prompt.id,
-                                onClick = { selectedPromptId = prompt.id }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(prompt.title)
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (isNewChatMode) {
-                        viewModel.setPendingSystemPrompt(selectedPromptId)
-                    } else {
-                        currentConversationId?.let { id ->
-                            viewModel.setConversationSystemPrompt(id, selectedPromptId)
-                        }
-                    }
-                    showPromptDialog = false
-                }) {
-                    Text(stringResource(R.string.save))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showPromptDialog = false }) {
-                    Text(stringResource(R.string.cancel))
-                }
-            }
-        )
+        ChatSystemPromptDialog(viewModel = viewModel, onDismiss = { showPromptDialog = false })
     }
 
-    // ── Advanced Settings Dialog ──
     if (showAdvancedDialog) {
-        val currentId = currentConversationId
-        val overrides = if (currentId != null) conversationSettings[currentId] ?: com.newoether.agora.data.ConversationSettings()
-            else com.newoether.agora.data.ConversationSettings()
-        val defaults = com.newoether.agora.data.ConversationSettings(
-            contextWindow = maxContextWindow,
-            temperature = defaultTemperature,
-            maxTokens = defaultMaxTokens,
-            topP = defaultTopP,
-            frequencyPenalty = defaultFrequencyPenalty,
-            presencePenalty = defaultPresencePenalty
-        )
-        AdvancedSettingsDialog(
-            overrides = overrides,
-            globalDefaults = defaults,
-            onSave = { settings ->
-                if (currentId != null) {
-                    viewModel.settings.setConversationSettings(currentId, settings)
-                } else {
-                    viewModel.setPendingConversationSettings(settings)
-                }
-                showAdvancedDialog = false
-            },
-            onResetToDefaults = {
-                if (currentId != null) {
-                    viewModel.settings.setConversationSettings(currentId, null)
-                } else {
-                    viewModel.setPendingConversationSettings(null)
-                }
-            },
-            onDismiss = { showAdvancedDialog = false }
-        )
+        ChatAdvancedSettingsDialog(viewModel = viewModel, onDismiss = { showAdvancedDialog = false })
     }
 }
 
