@@ -14,7 +14,6 @@ import com.newoether.agora.api.local.*
 import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
 import com.newoether.agora.data.ClaudeChatImporter
-import com.newoether.agora.data.GptChatImporter
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
@@ -67,9 +66,6 @@ import java.io.File
 import java.util.UUID
 import androidx.compose.foundation.lazy.LazyListState
 
-private inline fun <reified T : Enum<T>> safeValueOf(name: String): T? =
-    try { enumValueOf<T>(name) } catch (_: Exception) { null }
-
 class ChatViewModel(
     application: Application,
     private val settingsManager: SettingsManager,
@@ -115,6 +111,21 @@ class ChatViewModel(
         appContext = appContext,
         scope = viewModelScope,
     ) { _snackbarMessage.emit(it) }
+
+    /** Data export/import orchestration (native backup + Claude + GPT formats). */
+    val importExport = ImportExportManager(
+        app = getApplication(),
+        chatDao = chatDao,
+        conversations = convRepo,
+        settingsManager = settingsManager,
+        memoryManager = memoryManager,
+        scope = viewModelScope,
+        emitSnackbar = { _snackbarMessage.emit(it) },
+        onDataChanged = { refreshDataCounts() },
+    )
+
+    /** Local (on-device) chat-model configuration CRUD. */
+    val modelManager = ModelManager(settings, settingsManager, viewModelScope)
 
     private val builtInProviders = mapOf(
         "Google" to GeminiProvider(),
@@ -585,38 +596,17 @@ class ChatViewModel(
         _branchSwitchTrigger.value = null
     }
 
-    // Export/Import state
-    private val _exportProgress = MutableStateFlow<Float?>(null)
-    val exportProgress: StateFlow<Float?> = _exportProgress.asStateFlow()
-
-    private val _importProgress = MutableStateFlow<Float?>(null)
-    val importProgress: StateFlow<Float?> = _importProgress.asStateFlow()
-
-    private val _importManifest = MutableStateFlow<DataImporter.ImportManifest?>(null)
-    val importManifest: StateFlow<DataImporter.ImportManifest?> = _importManifest.asStateFlow()
-
-    private val _importPreview = MutableStateFlow<DataImporter.ImportPreview?>(null)
-    val importPreview: StateFlow<DataImporter.ImportPreview?> = _importPreview.asStateFlow()
-
-    // Claude import state
-    private val _claudeImportPreview = MutableStateFlow<ClaudeChatImporter.ImportPreview?>(null)
-    val claudeImportPreview: StateFlow<ClaudeChatImporter.ImportPreview?> = _claudeImportPreview.asStateFlow()
-
-    private val _claudeImportProgress = MutableStateFlow<Float?>(null)
-    val claudeImportProgress: StateFlow<Float?> = _claudeImportProgress.asStateFlow()
-
-    private val _claudeImportResult = MutableStateFlow<ClaudeChatImporter.ImportResult?>(null)
-    val claudeImportResult: StateFlow<ClaudeChatImporter.ImportResult?> = _claudeImportResult.asStateFlow()
-
-    // GPT import state
-    private val _gptImportPreview = MutableStateFlow<GptChatImporter.ImportPreview?>(null)
-    val gptImportPreview: StateFlow<GptChatImporter.ImportPreview?> = _gptImportPreview.asStateFlow()
-
-    private val _gptImportProgress = MutableStateFlow<Float?>(null)
-    val gptImportProgress: StateFlow<Float?> = _gptImportProgress.asStateFlow()
-
-    private val _gptImportResult = MutableStateFlow<GptChatImporter.ImportResult?>(null)
-    val gptImportResult: StateFlow<GptChatImporter.ImportResult?> = _gptImportResult.asStateFlow()
+    // Export/Import state lives in [importExport]; exposed here for the UI.
+    val exportProgress get() = importExport.exportProgress
+    val importProgress get() = importExport.importProgress
+    val importManifest get() = importExport.importManifest
+    val importPreview get() = importExport.importPreview
+    val claudeImportPreview get() = importExport.claudeImportPreview
+    val claudeImportProgress get() = importExport.claudeImportProgress
+    val claudeImportResult get() = importExport.claudeImportResult
+    val gptImportPreview get() = importExport.gptImportPreview
+    val gptImportProgress get() = importExport.gptImportProgress
+    val gptImportResult get() = importExport.gptImportResult
 
 
     private val _conversationCount = MutableStateFlow(0)
@@ -803,67 +793,14 @@ class ChatViewModel(
     fun cacheMessagesForModel(modelId: String, recache: Boolean = false, silent: Boolean = false) =
         ragManager.cacheMessagesForModel(modelId, recache, silent)
 
-    fun isLocalModelIdTaken(modelId: String, excludeId: String? = null): Boolean {
-        return settings.localChatModels.value.any { it.modelId == modelId && it.id != excludeId }
-    }
-
-    fun addLocalChatModel(config: LocalChatModelConfig) {
-        viewModelScope.launch {
-            if (isLocalModelIdTaken(config.modelId)) return@launch
-            val models = settings.localChatModels.value.toMutableList()
-            models.add(config)
-            settingsManager.saveLocalChatModels(models)
-            val modelPrefixedId = "Local:${config.modelId}"
-            settings.setEnabledModels(settings.enabledModels.value + modelPrefixedId)
-            settingsManager.saveModelAliases(settings.modelAliases.value + (modelPrefixedId to config.alias))
-        }
-    }
-    fun deleteLocalChatModel(uuid: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val model = settings.localChatModels.value.find { it.id == uuid }
-            if (model != null) {
-                if (model.localFilePath.isNotBlank()) java.io.File(model.localFilePath).delete()
-                if (model.mmprojPath.isNotBlank()) java.io.File(model.mmprojPath).delete()
-            }
-            val models = settings.localChatModels.value.filter { it.id != uuid }
-            settingsManager.saveLocalChatModels(models)
-            val modelPrefixedId = "Local:${model?.modelId ?: uuid}"
-            settings.setEnabledModels(settings.enabledModels.value - modelPrefixedId)
-            val updatedAvailable = settingsManager.availableModels.first().toMutableMap()
-            updatedAvailable["Local"] = models.map { "Local:${it.modelId}" }
-            settingsManager.saveAvailableModels("Local", updatedAvailable["Local"] ?: emptyList())
-            settingsManager.saveModelAliases(settings.modelAliases.value - modelPrefixedId)
-        }
-    }
+    fun isLocalModelIdTaken(modelId: String, excludeId: String? = null) =
+        modelManager.isLocalModelIdTaken(modelId, excludeId)
+    fun addLocalChatModel(config: LocalChatModelConfig) = modelManager.addLocalChatModel(config)
+    fun deleteLocalChatModel(uuid: String) = modelManager.deleteLocalChatModel(uuid)
     fun updateLocalChatModel(
         uuid: String, newModelId: String, newAlias: String, nCtx: Int, temperature: Float, topP: Float, maxTokens: Int,
         mmprojPath: String = ""
-    ) {
-        viewModelScope.launch {
-            if (isLocalModelIdTaken(newModelId, excludeId = uuid)) return@launch
-            val oldModel = settings.localChatModels.value.find { it.id == uuid } ?: return@launch
-            if (oldModel.mmprojPath.isNotBlank() && oldModel.mmprojPath != mmprojPath) {
-                java.io.File(oldModel.mmprojPath).delete()
-            }
-            val models = settings.localChatModels.value.map {
-                if (it.id == uuid) it.copy(modelId = newModelId, alias = newAlias, nCtx = nCtx, temperature = temperature, topP = topP, maxTokens = maxTokens, mmprojPath = mmprojPath)
-                else it
-            }
-            settingsManager.saveLocalChatModels(models)
-            // Update model references if modelId changed
-            if (oldModel.modelId != newModelId) {
-                val oldPrefixed = "Local:${oldModel.modelId}"
-                val newPrefixed = "Local:$newModelId"
-                settings.setEnabledModels(settings.enabledModels.value - oldPrefixed + newPrefixed)
-                val avail = settingsManager.availableModels.first().toMutableMap()
-                avail["Local"] = models.map { "Local:${it.modelId}" }
-                settingsManager.saveAvailableModels("Local", avail["Local"] ?: emptyList())
-                settingsManager.saveModelAliases(settings.modelAliases.value - oldPrefixed + (newPrefixed to newAlias))
-            } else {
-                settingsManager.saveModelAliases(settings.modelAliases.value + ("Local:$newModelId" to newAlias))
-            }
-        }
-    }
+    ) = modelManager.updateLocalChatModel(uuid, newModelId, newAlias, nCtx, temperature, topP, maxTokens, mmprojPath)
 
     suspend fun semanticSearch(query: String, limit: Int = 20): List<Pair<MessageEntity, Float>> {
         val ctx = com.newoether.agora.viewmodel.GenerationContext(
@@ -2192,332 +2129,21 @@ class ChatViewModel(
         }
     }
 
-    fun exportData(uri: Uri, categories: Set<DataExporter.ExportCategory>, includeApiKeys: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val exporter = DataExporter(getApplication(), chatDao, settingsManager, memoryManager)
-                exporter.export(uri, categories, includeApiKeys) { progress ->
-                    _exportProgress.value = progress
-                }
-                _exportProgress.value = null
-                _snackbarMessage.emit(SnackbarEvent(getApplication<android.app.Application>().getString(R.string.export_success)))
-            } catch (e: Exception) {
-                _exportProgress.value = null
-                _snackbarMessage.emit(SnackbarEvent(
-                    getApplication<android.app.Application>().getString(R.string.export_failed, e.localizedMessage ?: "")
-                ))
-            }
-        }
-    }
-
-    fun previewImport(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val importer = DataImporter(getApplication(), chatDao, settingsManager, memoryManager)
-                val manifest = importer.readManifest(uri)
-                if (manifest == null) {
-                    _snackbarMessage.emit(SnackbarEvent(
-                        getApplication<android.app.Application>().getString(R.string.import_invalid_file)
-                    ))
-                    return@launch
-                }
-                val preview = importer.preview(uri)
-                if (preview.conversationCount == 0 && preview.memoryCount == 0 &&
-                    preview.systemPromptCount == 0 && !preview.settingsPresent) {
-                    _snackbarMessage.emit(SnackbarEvent(
-                        getApplication<android.app.Application>().getString(R.string.import_no_data)
-                    ))
-                    return@launch
-                }
-                _importManifest.value = manifest
-                _importPreview.value = preview
-            } catch (e: Exception) {
-                _snackbarMessage.emit(SnackbarEvent(
-                    getApplication<android.app.Application>().getString(R.string.import_failed, e.localizedMessage ?: "")
-                ))
-            }
-        }
-    }
-
-    fun clearImportState() {
-        _importManifest.value = null
-        _importPreview.value = null
-    }
-
-    fun setClaudeImportPreview(preview: ClaudeChatImporter.ImportPreview) {
-        _claudeImportPreview.value = preview
-    }
-
-    /** Hard ceiling on import file size; beyond this we refuse rather than risk OOM. */
-    private val maxImportBytes = 256L * 1024 * 1024
-
-    /** Opens a readable stream for [uri], or throws with a localized message. */
-    private fun openImportStream(uri: Uri): java.io.InputStream =
-        getApplication<android.app.Application>().contentResolver.openInputStream(uri)
-            ?: throw java.io.IOException(appContext.getString(R.string.could_not_read_file))
-
-    /**
-     * Returns a localized error if [uri] exceeds [maxImportBytes], else null.
-     * The size is read from provider metadata without opening the file.
-     */
-    private fun importSizeError(uri: Uri): String? {
-        val size = getApplication<android.app.Application>().contentResolver
-            .query(uri, arrayOf(android.provider.OpenableColumns.SIZE), null, null, null)
-            ?.use { c -> if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else -1L } ?: -1L
-        return if (size > maxImportBytes) {
-            appContext.getString(R.string.import_file_too_large, size / (1024 * 1024))
-        } else null
-    }
-
-    fun previewClaudeChat(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                importSizeError(uri)?.let {
-                    emitSnackbar(it); _claudeImportPreview.value = null; return@launch
-                }
-                val importer = ClaudeChatImporter()
-                val parseResult = importer.extractAndParse { openImportStream(uri) }
-                if (parseResult.isSuccess) {
-                    _claudeImportPreview.value = importer.preview(parseResult.getOrThrow())
-                } else {
-                    emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
-                    _claudeImportPreview.value = null
-                }
-            } catch (e: OutOfMemoryError) {
-                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
-                _claudeImportPreview.value = null
-            } catch (e: Exception) {
-                emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
-                _claudeImportPreview.value = null
-            }
-        }
-    }
-
-    fun setClaudeImportError(error: String) {
-        emitSnackbar(error)
-        _claudeImportPreview.value = null
-    }
-
-    fun clearClaudeImportState() {
-        _claudeImportPreview.value = null
-        _claudeImportProgress.value = null
-        _claudeImportResult.value = null
-    }
-
-    fun importClaudeChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _claudeImportProgress.value = 0.2f
-                importSizeError(uri)?.let {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, it))
-                    return@launch
-                }
-
-                val importer = ClaudeChatImporter()
-                val parseResult = importer.extractAndParse { openImportStream(uri) }
-                if (parseResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
-                    return@launch
-                }
-
-                _claudeImportProgress.value = 0.4f
-                val conversations = parseResult.getOrThrow()
-                val preview = importer.preview(conversations)
-                val importData = importer.toImportFormat(conversations, selectedIds)
-
-                if (preview.totalMessageCount == 0) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_no_data))
-                    return@launch
-                }
-
-                _claudeImportProgress.value = 0.6f
-
-                // Convert to Room entities
-                val chatEntities = importData.conversations.map { ce ->
-                    ChatEntity(ce.id, ce.title, ce.lastUpdated, ce.selectedBranchesJson, ce.systemPromptId, ce.modelId)
-                }
-                val messageEntities = importData.messages.map { me ->
-                    MessageEntity(
-                        id = me.id, conversationId = me.conversationId, parentId = me.parentId,
-                        text = me.text, images = me.images, thoughts = me.thoughts,
-                        thoughtTitle = me.thoughtTitle, tokenCount = me.tokenCount,
-                        status = safeValueOf<MessageStatus>(me.status) ?: MessageStatus.SUCCESS,
-                        participant = safeValueOf<Participant>(me.participant) ?: Participant.MODEL,
-                        timestamp = me.timestamp, thoughtTimeMs = me.thoughtTimeMs,
-                        modelName = me.modelName, toolCallJson = me.toolCallJson,
-                        attachmentMeta = me.attachmentMeta
-                    )
-                }
-
-                if (strategy == com.newoether.agora.ui.settings.ImportStrategy.REPLACE) {
-                    chatDao.deleteAllConversations()
-                    chatEntities.forEach { convRepo.upsertConversation(it) }
-                    messageEntities.forEach { convRepo.upsertMessage(it) }
-                    _claudeImportProgress.value = 0.8f
-                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(chatEntities.size, messageEntities.size)
-                } else {
-                    val existingConvIds = convRepo.getAllConversationsList().map { it.id }.toSet()
-                    val existingMsgIds = chatDao.findExistingMessageIds(messageEntities.map { it.id }).toSet()
-                    val newCh = chatEntities.filterNot { it.id in existingConvIds }
-                    val newMsgs = messageEntities.filterNot { it.id in existingMsgIds }
-                    newCh.forEach { convRepo.upsertConversation(it) }
-                    newMsgs.forEach { convRepo.upsertMessage(it) }
-                    _claudeImportProgress.value = 0.8f
-                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(newCh.size, newMsgs.size)
-                }
-                _claudeImportProgress.value = null
-                refreshDataCounts()
-            } catch (e: OutOfMemoryError) {
-                _claudeImportProgress.value = null
-                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
-            } catch (e: Exception) {
-                _claudeImportProgress.value = null
-                emitSnackbar(getApplication<android.app.Application>().getString(R.string.claude_import_error_detail, e.localizedMessage ?: ""))
-            }
-        }
-    }
-
-    fun previewGptChat(uri: Uri) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                importSizeError(uri)?.let {
-                    emitSnackbar(it); _gptImportPreview.value = null; return@launch
-                }
-                val importer = GptChatImporter()
-                val parseResult = importer.extractAndParse { openImportStream(uri) }
-                if (parseResult.isSuccess) {
-                    _gptImportPreview.value = importer.preview(parseResult.getOrThrow())
-                } else {
-                    emitSnackbar(parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error))
-                    _gptImportPreview.value = null
-                }
-            } catch (e: OutOfMemoryError) {
-                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
-                _gptImportPreview.value = null
-            } catch (e: Exception) {
-                emitSnackbar(e.localizedMessage ?: appContext.getString(R.string.unknown_error))
-                _gptImportPreview.value = null
-            }
-        }
-    }
-
-    fun setGptImportError(error: String) {
-        emitSnackbar(error)
-        _gptImportPreview.value = null
-    }
-
-    fun clearGptImportState() {
-        _gptImportPreview.value = null
-        _gptImportProgress.value = null
-        _gptImportResult.value = null
-    }
-
-    fun importGptChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                _gptImportProgress.value = 0.2f
-                importSizeError(uri)?.let {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, it))
-                    return@launch
-                }
-
-                val importer = GptChatImporter()
-                val parseResult = importer.extractAndParse { openImportStream(uri) }
-                if (parseResult.isFailure) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, parseResult.exceptionOrNull()?.localizedMessage ?: appContext.getString(R.string.parse_error)))
-                    return@launch
-                }
-
-                _gptImportProgress.value = 0.4f
-                val conversations = parseResult.getOrThrow()
-                val preview = importer.preview(conversations)
-                val importData = importer.toImportFormat(conversations, selectedIds)
-
-                if (preview.totalMessageCount == 0) {
-                    emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_no_data))
-                    return@launch
-                }
-
-                _gptImportProgress.value = 0.6f
-
-                val chatEntities = importData.conversations.map { ce ->
-                    ChatEntity(ce.id, ce.title, ce.lastUpdated, ce.selectedBranchesJson, ce.systemPromptId, ce.modelId)
-                }
-                val messageEntities = importData.messages.map { me ->
-                    MessageEntity(
-                        id = me.id, conversationId = me.conversationId, parentId = me.parentId,
-                        text = me.text, images = me.images, thoughts = me.thoughts,
-                        thoughtTitle = me.thoughtTitle, tokenCount = me.tokenCount,
-                        status = safeValueOf<MessageStatus>(me.status) ?: MessageStatus.SUCCESS,
-                        participant = safeValueOf<Participant>(me.participant) ?: Participant.MODEL,
-                        timestamp = me.timestamp, thoughtTimeMs = me.thoughtTimeMs,
-                        modelName = me.modelName, toolCallJson = me.toolCallJson,
-                        attachmentMeta = me.attachmentMeta
-                    )
-                }
-
-                val thoughtsCount = importData.messages.count { it.thoughts != null && it.thoughts.isNotBlank() }
-                if (strategy == com.newoether.agora.ui.settings.ImportStrategy.REPLACE) {
-                    chatDao.deleteAllConversations()
-                    chatEntities.forEach { convRepo.upsertConversation(it) }
-                    messageEntities.forEach { convRepo.upsertMessage(it) }
-                    _gptImportProgress.value = 0.8f
-                    _gptImportResult.value = GptChatImporter.ImportResult(chatEntities.size, messageEntities.size, thoughtsCount)
-                } else {
-                    val existingConvIds = convRepo.getAllConversationsList().map { it.id }.toSet()
-                    val existingMsgIds = chatDao.findExistingMessageIds(messageEntities.map { it.id }).toSet()
-                    val newCh = chatEntities.filterNot { it.id in existingConvIds }
-                    val newMsgs = messageEntities.filterNot { it.id in existingMsgIds }
-                    val newThoughtsCount = newMsgs.count { it.thoughts != null && it.thoughts.isNotBlank() }
-                    newCh.forEach { convRepo.upsertConversation(it) }
-                    newMsgs.forEach { convRepo.upsertMessage(it) }
-                    _gptImportProgress.value = 0.8f
-                    _gptImportResult.value = GptChatImporter.ImportResult(newCh.size, newMsgs.size, newThoughtsCount)
-                }
-                _gptImportProgress.value = null
-                refreshDataCounts()
-            } catch (e: OutOfMemoryError) {
-                _gptImportProgress.value = null
-                emitSnackbar(appContext.getString(R.string.import_out_of_memory))
-            } catch (e: Exception) {
-                _gptImportProgress.value = null
-                emitSnackbar(getApplication<android.app.Application>().getString(R.string.gpt_import_error_detail, e.localizedMessage ?: ""))
-            }
-        }
-    }
-
-    fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val importer = DataImporter(getApplication(), chatDao, settingsManager, memoryManager)
-                val result = importer.import(uri, decisions) { progress ->
-                    _importProgress.value = progress
-                }
-                _importProgress.value = null
-                _importManifest.value = null
-                _importPreview.value = null
-                refreshDataCounts()
-
-                val parts = mutableListOf<String>()
-                if (result.conversationsImported > 0) parts.add("${result.conversationsImported} conversations")
-                if (result.memoriesImported > 0) parts.add("${result.memoriesImported} memories")
-                if (result.systemPromptsImported > 0) parts.add("${result.systemPromptsImported} prompts")
-                if (result.settingsImported) parts.add("settings")
-                if (result.apiKeysImported) parts.add("API keys")
-
-                val summary = if (result.errors.isEmpty()) {
-                    getApplication<android.app.Application>().getString(R.string.import_success, parts.joinToString(", "))
-                } else {
-                    getApplication<android.app.Application>().getString(R.string.import_failed,
-                        "${result.errors.size} error(s): ${result.errors.first()}")
-                }
-                _snackbarMessage.emit(SnackbarEvent(summary))
-            } catch (e: Exception) {
-                _importProgress.value = null
-                _snackbarMessage.emit(SnackbarEvent(
-                    getApplication<android.app.Application>().getString(R.string.import_failed, e.localizedMessage ?: "")
-                ))
-            }
-        }
-    }
+    fun exportData(uri: Uri, categories: Set<DataExporter.ExportCategory>, includeApiKeys: Boolean) =
+        importExport.exportData(uri, categories, includeApiKeys)
+    fun previewImport(uri: Uri) = importExport.previewImport(uri)
+    fun clearImportState() = importExport.clearImportState()
+    fun setClaudeImportPreview(preview: ClaudeChatImporter.ImportPreview) = importExport.setClaudeImportPreview(preview)
+    fun previewClaudeChat(uri: Uri) = importExport.previewClaudeChat(uri)
+    fun setClaudeImportError(error: String) = importExport.setClaudeImportError(error)
+    fun clearClaudeImportState() = importExport.clearClaudeImportState()
+    fun importClaudeChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) =
+        importExport.importClaudeChat(uri, strategy, selectedIds)
+    fun previewGptChat(uri: Uri) = importExport.previewGptChat(uri)
+    fun setGptImportError(error: String) = importExport.setGptImportError(error)
+    fun clearGptImportState() = importExport.clearGptImportState()
+    fun importGptChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) =
+        importExport.importGptChat(uri, strategy, selectedIds)
+    fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) =
+        importExport.importData(uri, decisions)
 }
