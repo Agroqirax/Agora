@@ -54,17 +54,17 @@ private val searchMethods = listOf(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val accessPastConversations by viewModel.accessPastConversations.collectAsState()
-    val autoCacheEnabled by viewModel.autoCacheEnabled.collectAsState()
-    val modelSearchMethod by viewModel.modelSearchMethod.collectAsState()
-    val manualSearchMethod by viewModel.manualSearchMethod.collectAsState()
-    val embeddingModels by viewModel.embeddingModels.collectAsState()
-    val activeEmbeddingModelId by viewModel.activeEmbeddingModelId.collectAsState()
+    val accessPastConversations by viewModel.settings.accessPastConversations.collectAsState()
+    val autoCacheEnabled by viewModel.settings.autoCacheEnabled.collectAsState()
+    val modelSearchMethod by viewModel.settings.modelSearchMethod.collectAsState()
+    val manualSearchMethod by viewModel.settings.manualSearchMethod.collectAsState()
+    val embeddingModels by viewModel.settings.embeddingModels.collectAsState()
+    val activeEmbeddingModelId by viewModel.settings.activeEmbeddingModelId.collectAsState()
     val cachingProgress by viewModel.cachingProgress.collectAsState()
     val cacheCounts by viewModel.cacheCounts.collectAsState()
-    val searchContextWindow by viewModel.searchContextWindow.collectAsState()
-    val searchMatchLimit by viewModel.searchMatchLimit.collectAsState()
-    val ragThreshold by viewModel.ragThreshold.collectAsState()
+    val searchContextWindow by viewModel.settings.searchContextWindow.collectAsState()
+    val searchMatchLimit by viewModel.settings.searchMatchLimit.collectAsState()
+    val ragThreshold by viewModel.settings.ragThreshold.collectAsState()
 
     LaunchedEffect(Unit) { viewModel.loadCacheCounts() }
     var showRemoteDialog by remember { mutableStateOf(false) }
@@ -105,7 +105,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     LaunchedEffect(embeddingModels.size) {
         showMenuForModel = null
     }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.search_title),
@@ -121,9 +121,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(stringResource(R.string.memory_access_past_desc)) },
                             leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = {
-                                Switch(checked = accessPastConversations, onCheckedChange = { viewModel.setAccessPastConversations(it) })
+                                Switch(checked = accessPastConversations, onCheckedChange = { viewModel.settings.setAccessPastConversations(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setAccessPastConversations(!accessPastConversations) }
+                            modifier = Modifier.clickable { viewModel.settings.setAccessPastConversations(!accessPastConversations) }
                         )
                     }
                 )
@@ -138,9 +138,9 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(stringResource(R.string.auto_cache_desc)) },
                             leadingContent = { Icon(Icons.Default.Cached, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = {
-                                Switch(checked = autoCacheEnabled, onCheckedChange = { viewModel.setAutoCacheEnabled(it) })
+                                Switch(checked = autoCacheEnabled, onCheckedChange = { viewModel.settings.setAutoCacheEnabled(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setAutoCacheEnabled(!autoCacheEnabled) }
+                            modifier = Modifier.clickable { viewModel.settings.setAutoCacheEnabled(!autoCacheEnabled) }
                         )
                     }
                 )
@@ -182,7 +182,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                 },
                                                 onClick = {
                                                     if (!ragDisabled) {
-                                                        viewModel.setModelSearchMethod(method.key)
+                                                        viewModel.settings.setModelSearchMethod(method.key)
                                                         expanded = false
                                                     }
                                                 }
@@ -227,7 +227,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                 },
                                                 onClick = {
                                                     if (!ragDisabled) {
-                                                        viewModel.setManualSearchMethod(method.key)
+                                                        viewModel.settings.setManualSearchMethod(method.key)
                                                         expanded = false
                                                     }
                                                 }
@@ -403,7 +403,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                     Slider(
                                         value = searchContextWindow.toFloat(),
-                                        onValueChange = { viewModel.setSearchContextWindow(it.toInt()) },
+                                        onValueChange = { viewModel.settings.setSearchContextWindow(it.toInt()) },
                                         valueRange = 4f..32f,
                                         steps = 6,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -443,7 +443,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                     Slider(
                                         value = searchMatchLimit.toFloat(),
-                                        onValueChange = { viewModel.setSearchMatchLimit(it.toInt()) },
+                                        onValueChange = { viewModel.settings.setSearchMatchLimit(it.toInt()) },
                                         valueRange = 5f..30f,
                                         steps = 4,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -484,7 +484,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     Slider(
                                         value = localThreshold,
                                         onValueChange = { localThreshold = it },
-                                        onValueChangeFinished = { viewModel.setRagThreshold(localThreshold) },
+                                        onValueChangeFinished = { viewModel.settings.setRagThreshold(localThreshold) },
                                         valueRange = 0f..1f,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                     )
@@ -860,7 +860,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         if (showRenameDialog != null) {
             val modelId = showRenameDialog!!
             var editBatchSize by remember(modelId) {
-                val model = viewModel.embeddingModels.value.find { it.id == modelId }
+                val model = viewModel.settings.embeddingModels.value.find { it.id == modelId }
                 mutableStateOf((model?.batchSize ?: 8).toString())
             }
             AlertDialog(

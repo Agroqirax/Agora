@@ -33,8 +33,8 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val accessSavedMemories by viewModel.accessSavedMemories.collectAsState()
-    val accessActiveMemory by viewModel.accessActiveMemory.collectAsState()
+    val accessSavedMemories by viewModel.settings.accessSavedMemories.collectAsState()
+    val accessActiveMemory by viewModel.settings.accessActiveMemory.collectAsState()
     var activeMemoryContent by remember { mutableStateOf("") }
     var memoryFiles by remember { mutableStateOf<List<com.newoether.agora.data.MemoryManager.MemoryFileInfo>>(emptyList()) }
     var showFileEditor by remember { mutableStateOf<String?>(null) }
@@ -50,7 +50,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         activeMemoryContent = viewModel.memoryManager.getActiveMemory()
         memoryFiles = viewModel.memoryManager.listFiles()
     }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.memory_title),
@@ -66,9 +66,9 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(stringResource(R.string.memory_access_saved_desc)) },
                             leadingContent = { Icon(Icons.Default.Description, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = {
-                                Switch(checked = accessSavedMemories, onCheckedChange = { viewModel.setAccessSavedMemories(it) })
+                                Switch(checked = accessSavedMemories, onCheckedChange = { viewModel.settings.setAccessSavedMemories(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setAccessSavedMemories(!accessSavedMemories) }
+                            modifier = Modifier.clickable { viewModel.settings.setAccessSavedMemories(!accessSavedMemories) }
                         )
                     },
                     {
@@ -77,9 +77,9 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(stringResource(R.string.memory_access_active_desc)) },
                             leadingContent = { Icon(Icons.Default.Memory, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = {
-                                Switch(checked = accessActiveMemory, onCheckedChange = { viewModel.setAccessActiveMemory(it) })
+                                Switch(checked = accessActiveMemory, onCheckedChange = { viewModel.settings.setAccessActiveMemory(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setAccessActiveMemory(!accessActiveMemory) }
+                            modifier = Modifier.clickable { viewModel.settings.setAccessActiveMemory(!accessActiveMemory) }
                         )
                     }
                 )

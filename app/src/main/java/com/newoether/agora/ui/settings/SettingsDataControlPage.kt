@@ -67,12 +67,12 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showGptSuccessDialog by remember { mutableStateOf(false) }
 
     // Auto Backup
-    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
-    val autoBackupPeriodHours by viewModel.autoBackupPeriodHours.collectAsState()
-    val autoBackupCategories by viewModel.autoBackupCategories.collectAsState()
-    val autoBackupDirectory by viewModel.autoBackupDirectory.collectAsState()
-    val autoDeleteEnabled by viewModel.autoDeleteEnabled.collectAsState()
-    val autoDeletePeriodHours by viewModel.autoDeletePeriodHours.collectAsState()
+    val autoBackupEnabled by viewModel.settings.autoBackupEnabled.collectAsState()
+    val autoBackupPeriodHours by viewModel.settings.autoBackupPeriodHours.collectAsState()
+    val autoBackupCategories by viewModel.settings.autoBackupCategories.collectAsState()
+    val autoBackupDirectory by viewModel.settings.autoBackupDirectory.collectAsState()
+    val autoDeleteEnabled by viewModel.settings.autoDeleteEnabled.collectAsState()
+    val autoDeletePeriodHours by viewModel.settings.autoDeletePeriodHours.collectAsState()
 
     val isExporting = exportProgress != null
     val isImporting = importProgress != null
@@ -144,7 +144,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val isGptImporting = gptImportProgress != null
     val isProgressVisible = isExporting || isImporting || isClaudeImporting || isGptImporting
 
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     Box(modifier = Modifier.fillMaxSize()) {
         CollapsingSettingsScaffold(
             title = stringResource(R.string.settings_data_control),
@@ -816,10 +816,10 @@ private fun resolveDisplayPath(uri: String): String {
 
 @Composable
 private fun AutoBackupSection(viewModel: ChatViewModel) {
-    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
-    val autoBackupPeriodHours by viewModel.autoBackupPeriodHours.collectAsState()
-    val autoDeleteEnabled by viewModel.autoDeleteEnabled.collectAsState()
-    val autoDeletePeriodHours by viewModel.autoDeletePeriodHours.collectAsState()
+    val autoBackupEnabled by viewModel.settings.autoBackupEnabled.collectAsState()
+    val autoBackupPeriodHours by viewModel.settings.autoBackupPeriodHours.collectAsState()
+    val autoDeleteEnabled by viewModel.settings.autoDeleteEnabled.collectAsState()
+    val autoDeletePeriodHours by viewModel.settings.autoDeletePeriodHours.collectAsState()
 
     SettingsGroup(title = stringResource(R.string.auto_backup_title), items = buildList {
         // Toggle
@@ -954,7 +954,7 @@ private fun AutoDeletePeriodDropdown(currentHours: Int, backupHours: Int, onSele
 @Composable
 private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
     val context = LocalContext.current
-    val directory by viewModel.autoBackupDirectory.collectAsState()
+    val directory by viewModel.settings.autoBackupDirectory.collectAsState()
 
     val dirPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree()
@@ -986,7 +986,7 @@ private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
 
 @Composable
 private fun AutoBackupCategoriesItem(viewModel: ChatViewModel) {
-    val categories by viewModel.autoBackupCategories.collectAsState()
+    val categories by viewModel.settings.autoBackupCategories.collectAsState()
     var showDialog by remember { mutableStateOf(false) }
 
     val selectedKeys = categories.split(",").map { it.trim() }.filter { it.isNotBlank() }.toSet()

@@ -70,7 +70,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 import androidx.compose.foundation.lazy.LazyListState
-import com.newoether.agora.viewmodel.delegate.SettingsDelegate
 
 private inline fun <reified T : Enum<T>> safeValueOf(name: String): T? =
     try { enumValueOf<T>(name) } catch (_: Exception) { null }
@@ -90,6 +89,16 @@ class ChatViewModel(
     private val memoryRepository: com.newoether.agora.data.repository.MemoryRepository? = null
 ) : AndroidViewModel(application) {
 
+    /**
+     * Shared settings state holder (eagerly-shared StateFlows + setters).
+     * Revived from the previously-unused [SettingsRepository]; both ChatViewModel's
+     * internal logic and the settings pages read settings from here, so each setting
+     * is owned in exactly one place. Fallback keeps direct construction (tests) working.
+     */
+    val settings: com.newoether.agora.data.repository.SettingsRepository =
+        settingsRepository
+            ?: com.newoether.agora.data.repository.SettingsRepository(settingsManager, viewModelScope)
+
     private val localProvider = LocalProvider(appContext, settingsManager)
 
     private val builtInProviders = mapOf(
@@ -107,9 +116,6 @@ class ChatViewModel(
     // Dispatchers.IO during generation — must be thread-safe (P3 concurrency fix).
     // Declared as MutableMap so `in`/`contains` keep Map (containsKey) semantics (KT-18053).
     private val providers: MutableMap<String, LlmProvider> = java.util.concurrent.ConcurrentHashMap(builtInProviders)
-
-    // Settings delegate — handles all settings CRUD (~700 lines extracted)
-    private val settingsDelegate = SettingsDelegate(settingsManager, chatDao, viewModelScope)
 
     /**
      * Startup jobs deferred until all StateFlow/property backing fields are
@@ -234,9 +240,9 @@ class ChatViewModel(
 
                 if (changed) {
                     val allAvailable = settingsManager.availableModels.first().values.flatten().toSet()
-                    val newEnabled = enabledModels.value.intersect(allAvailable)
-                    if (newEnabled != enabledModels.value) {
-                        setEnabledModels(newEnabled)
+                    val newEnabled = settings.enabledModels.value.intersect(allAvailable)
+                    if (newEnabled != settings.enabledModels.value) {
+                        settings.setEnabledModels(newEnabled)
                     }
                 }
             }
@@ -281,7 +287,7 @@ class ChatViewModel(
             sandboxFactory = sandboxFactory
         ).also { gm ->
             gm.onMessagePersisted = { messageId, text ->
-                if (autoCacheEnabled.value && (modelSearchMethod.value == "rag" || manualSearchMethod.value == "rag")) {
+                if (settings.autoCacheEnabled.value && (settings.modelSearchMethod.value == "rag" || settings.manualSearchMethod.value == "rag")) {
                     indexMessageForRag(messageId, text)
                 }
             }
@@ -320,7 +326,7 @@ class ChatViewModel(
     }
 
     private fun getEffectiveBaseUrl(providerName: String): String? {
-        return providerBaseUrls.value[providerName]
+        return settings.providerBaseUrls.value[providerName]
             ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
             else null
     }
@@ -335,7 +341,6 @@ class ChatViewModel(
         }
     }
 
-    val customProviders = settingsManager.customProviders.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
 
     private val _scrollToMessage = MutableSharedFlow<String?>(replay = 0)
@@ -347,9 +352,8 @@ class ChatViewModel(
         }
     }
 
-    val selectedModel = settingsManager.selectedModel.stateIn(viewModelScope, SharingStarted.Eagerly, "gemini-1.5-flash")
     private val _currentActiveModel = MutableStateFlow<String?>(null)
-    val currentActiveModel = kotlinx.coroutines.flow.combine(_currentActiveModel, selectedModel) { active, default ->
+    val currentActiveModel = kotlinx.coroutines.flow.combine(_currentActiveModel, settings.selectedModel) { active, default ->
         active ?: default
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "gemini-1.5-flash")
 
@@ -360,52 +364,18 @@ class ChatViewModel(
         }
         // Check available models for unprefixed IDs first —
         // user-registered providers take priority over heuristics
-        availableModels.value.forEach { (providerName, models) ->
+        settings.availableModels.value.forEach { (providerName, models) ->
             if (models.contains(modelId)) return providerName
         }
         // Heuristic fallback for legacy unprefixed IDs
         return com.newoether.agora.model.ModelId.parse(modelId).providerName
     }
     
-    val availableModels = settingsManager.availableModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-    val enabledModels = settingsManager.enabledModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-    val modelAliases = settingsManager.modelAliases.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
-    val apiKeys = settingsManager.apiKeys.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val activeApiKeyIds = settingsManager.activeApiKeyIds.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-    val systemPrompts = settingsManager.systemPrompts.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val activeSystemPromptId = settingsManager.activeSystemPromptId.stateIn(viewModelScope, SharingStarted.Eagerly, null)
         
-        val maxContextWindow = settingsManager.maxContextWindow.stateIn(viewModelScope, SharingStarted.Eagerly, 20)
-        val visualizeContextRollout = settingsManager.visualizeContextRollout.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-        val codeExecutionEnabled = settingsManager.codeExecutionEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-        val googleSearchEnabled = settingsManager.googleSearchEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-        val thinkingEnabled = settingsManager.thinkingEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-        val thinkingLevel = settingsManager.thinkingLevel.stateIn(viewModelScope, SharingStarted.Eagerly, "medium")
-        val thinkingBudgetEnabled = settingsManager.thinkingBudgetEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-        val thinkingBudgetTokens = settingsManager.thinkingBudgetTokens.stateIn(viewModelScope, SharingStarted.Eagerly, 4096)
-    val providerBaseUrls = settingsManager.providerBaseUrls.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-    val titleGenerationEnabled = settingsManager.titleGenerationEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val titleGenerationModel = settingsManager.titleGenerationModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val titleGenerationPrompt = settingsManager.titleGenerationPrompt.stateIn(viewModelScope, SharingStarted.Eagerly, BuiltInPrompts.TITLE_GENERATION_SYSTEM)
-    val imageTranscriptionEnabledModels = settingsManager.imageTranscriptionEnabledModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-    val imageTranscriptionModel = settingsManager.imageTranscriptionModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val imageTranscriptionBatchSize = settingsManager.imageTranscriptionBatchSize.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
-    val imageTranscriptionPrompt = settingsManager.imageTranscriptionPrompt.stateIn(viewModelScope, SharingStarted.Eagerly, BuiltInPrompts.IMAGE_TRANSCRIPTION_USER)
-    val accessPastConversations = settingsManager.accessPastConversations.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val accessSavedMemories = settingsManager.accessSavedMemories.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val accessActiveMemory = settingsManager.accessActiveMemory.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val ragSearchEnabled = settingsManager.ragSearchEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val autoCacheEnabled = settingsManager.autoCacheEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val autoUpdateCheck = settingsManager.autoUpdateCheck.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val modelSearchMethod = settingsManager.modelSearchMethod.stateIn(viewModelScope, SharingStarted.Eagerly, "keyword")
-    val manualSearchMethod = settingsManager.manualSearchMethod.stateIn(viewModelScope, SharingStarted.Eagerly, "keyword")
-    val embeddingModels = settingsManager.embeddingModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val activeEmbeddingModelId = settingsManager.activeEmbeddingModelId.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val activeEmbeddingModel = combine(embeddingModels, activeEmbeddingModelId) { models, id ->
+    val activeEmbeddingModel = combine(settings.embeddingModels, settings.activeEmbeddingModelId) { models, id ->
         models.find { it.id == id }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val localChatModels = settingsManager.localChatModels.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _cachingProgress = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cachingProgress: StateFlow<Map<String, Pair<Int, Int>>> = _cachingProgress.asStateFlow()
@@ -420,26 +390,12 @@ class ChatViewModel(
     }
     private suspend fun refreshCacheCounts() {
         val total = chatDao.getIndexableMessageCount()
-        val counts = embeddingModels.value.associate { model ->
+        val counts = settings.embeddingModels.value.associate { model ->
             val cached = chatDao.getEmbeddingCountByModel(model.id).coerceAtMost(total)
             model.id to (cached to total)
         }
         _cacheCounts.value = counts
     }
-    val appLanguage = settingsManager.appLanguage.stateIn(viewModelScope, SharingStarted.Eagerly, "system")
-    val webSearchEnabled = settingsManager.webSearchEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val webSearchProvider = settingsManager.webSearchProvider.stateIn(viewModelScope, SharingStarted.Eagerly, "duckduckgo")
-    val webSearchApiKeys = settingsManager.webSearchApiKeys.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-    val webSearchNumResults = settingsManager.webSearchNumResults.stateIn(viewModelScope, SharingStarted.Eagerly, 5)
-    val webSearchBaseUrl = settingsManager.webSearchBaseUrl.stateIn(viewModelScope, SharingStarted.Eagerly, "")
-    val imageGenEnabled = settingsManager.imageGenEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val imageGenModel = settingsManager.imageGenModel.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val imageGenSize = settingsManager.imageGenSize.stateIn(viewModelScope, SharingStarted.Eagerly, "1024x1024")
-    val showDocumentationFab = settingsManager.showDocumentationFab.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val shellEnabled = settingsManager.shellEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val shellConfirmEnabled = settingsManager.shellConfirmEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val shellDevices = settingsManager.shellDevices.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val sandboxEnabled = settingsManager.sandboxEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     // ── Remote shell command confirmation gate ───────────────────────────
     data class PendingShellCommand(
@@ -453,7 +409,7 @@ class ChatViewModel(
     private val sessionAllowedShellServers = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     private suspend fun confirmShellCommand(server: String, summary: String): Boolean {
-        if (!shellConfirmEnabled.value) return true
+        if (!settings.shellConfirmEnabled.value) return true
         if (sessionAllowedShellServers.contains(server)) return true
         val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
         _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
@@ -473,31 +429,8 @@ class ChatViewModel(
     fun setShellConfirmEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) { settingsManager.saveShellConfirmEnabled(enabled) }
     }
-    val defaultTemperature = settingsManager.defaultTemperature.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val defaultMaxTokens = settingsManager.defaultMaxTokens.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val defaultTopP = settingsManager.defaultTopP.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val defaultFrequencyPenalty = settingsManager.defaultFrequencyPenalty.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val defaultPresencePenalty = settingsManager.defaultPresencePenalty.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    val conversationSettings = settingsManager.conversationSettings.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
-    val themeMode = settingsManager.themeMode.stateIn(viewModelScope, SharingStarted.Eagerly, "FOLLOW_DEVICE")
-    val colorScheme = settingsManager.colorScheme.stateIn(viewModelScope, SharingStarted.Eagerly, "DEFAULT")
-    val dynamicColor = settingsManager.dynamicColor.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val blurEffectsEnabled = settingsManager.blurEffectsEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val hapticsEnabled = settingsManager.hapticsEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val toolCallDisplayMode = settingsManager.toolCallDisplayMode.stateIn(viewModelScope, SharingStarted.Eagerly, com.newoether.agora.model.ToolCallDisplayModes.DEFAULT)
-    val schemeStyle = settingsManager.schemeStyle.stateIn(viewModelScope, SharingStarted.Eagerly, "TONAL_SPOT")
-    val searchContextWindow = settingsManager.searchContextWindow.stateIn(viewModelScope, SharingStarted.Eagerly, 8)
-    val searchMatchLimit = settingsManager.searchMatchLimit.stateIn(viewModelScope, SharingStarted.Eagerly, 10)
-    val ragThreshold = settingsManager.ragThreshold.stateIn(viewModelScope, SharingStarted.Eagerly, 0.5f)
 
     // ── Auto Backup ───────────────────────────────────────────
-    val autoBackupEnabled = settingsManager.autoBackupEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val autoBackupPeriodHours = settingsManager.autoBackupPeriodHours.stateIn(viewModelScope, SharingStarted.Eagerly, 24)
-    val autoBackupCategories = settingsManager.autoBackupCategories.stateIn(viewModelScope, SharingStarted.Eagerly, "conversations,memories,system_prompts,settings")
-    val autoBackupDirectory = settingsManager.autoBackupDirectory.stateIn(viewModelScope, SharingStarted.Eagerly, "Download/Agora/Backup")
-    val autoDeleteEnabled = settingsManager.autoDeleteEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
-    val autoDeletePeriodHours = settingsManager.autoDeletePeriodHours.stateIn(viewModelScope, SharingStarted.Eagerly, 168)
-    val lastFetchFingerprint = settingsManager.lastModelsFetchFingerprint.stateIn(viewModelScope, SharingStarted.Eagerly, "")
 
         val conversations: StateFlow<List<ChatConversation>> = chatDao.getAllConversations()
             .map { entities ->
@@ -642,7 +575,7 @@ class ChatViewModel(
 
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
-            val current = conversationSettings.value[convId] ?: ConversationSettings()
+            val current = settings.conversationSettings.value[convId] ?: ConversationSettings()
             viewModelScope.launch { settingsManager.saveConversationSettings(convId, update(current)) }
         } else {
             val current = _pendingConversationSettings.value ?: ConversationSettings()
@@ -806,110 +739,65 @@ class ChatViewModel(
         }
     }
 
-    // Settings logic — delegated to SettingsDelegate
-        fun setSelectedModel(model: String) = settingsDelegate.setSelectedModel(model)
-
-    fun setEnabledModels(models: Set<String>) = settingsDelegate.setEnabledModels(models, selectedModel.value)
-
-    fun updateModelAlias(model: String, alias: String) = settingsDelegate.updateModelAlias(model, alias, modelAliases.value)
-
-    fun addApiKey(name: String, key: String, provider: String) = settingsDelegate.addApiKey(name, key, provider, apiKeys.value)
-    fun upsertApiKey(name: String, key: String, provider: String) = settingsDelegate.upsertApiKey(name, key, provider, apiKeys.value)
-    fun deleteApiKey(id: String) = settingsDelegate.deleteApiKey(id, apiKeys.value, activeApiKeyIds.value)
-    fun updateApiKey(id: String, name: String, key: String) = settingsDelegate.updateApiKey(id, name, key, apiKeys.value)
-    fun setActiveApiKey(provider: String, id: String) = settingsDelegate.setActiveApiKey(provider, id)
-
-    fun addSystemPrompt(
-        title: String,
-        systemItems: List<PromptTemplateItem>,
-        userPrependItems: List<PromptTemplateItem>,
-        userPostpendItems: List<PromptTemplateItem>
-    ) = settingsDelegate.addSystemPrompt(title, systemItems, userPrependItems, userPostpendItems, systemPrompts.value, activeSystemPromptId.value)
-    fun deleteSystemPrompt(id: String) = settingsDelegate.deleteSystemPrompt(id, systemPrompts.value, activeSystemPromptId.value)
-    fun updateSystemPrompt(
-        id: String,
-        title: String,
-        systemItems: List<PromptTemplateItem>,
-        userPrependItems: List<PromptTemplateItem>,
-        userPostpendItems: List<PromptTemplateItem>
-    ) = settingsDelegate.updateSystemPrompt(id, title, systemItems, userPrependItems, userPostpendItems, systemPrompts.value)
-    fun setActiveSystemPrompt(id: String) = settingsDelegate.setActiveSystemPrompt(id)
-    fun setMaxContextWindow(window: Int) = settingsDelegate.setMaxContextWindow(window)
-    fun setVisualizeContextRollout(enabled: Boolean) = settingsDelegate.setVisualizeContextRollout(enabled)
-    fun setProviderBaseUrl(provider: String, url: String) = settingsDelegate.setProviderBaseUrl(provider, url)
+    // ── Custom providers ──────────────────────────────────────
+    // Settings persistence lives in SettingsRepository; ChatViewModel only maintains
+    // the live in-memory provider instances (the `providers` map) via callbacks.
     fun addCustomProvider(name: String, baseUrl: String) {
         providers[name] = CustomOpenAiProvider(name, baseUrl)
-        settingsDelegate.addCustomProvider(name, baseUrl, customProviders.value) { n, p -> providers[n] = p }
+        settings.addCustomProvider(name, baseUrl) { n, p -> providers[n] = p }
     }
     fun renameCustomProvider(oldName: String, newName: String) {
-        val url = providerBaseUrls.value[oldName] ?: return
+        val url = settings.providerBaseUrls.value[oldName] ?: return
         providers.remove(oldName)
         providers[newName] = CustomOpenAiProvider(newName, url)
-        settingsDelegate.renameCustomProvider(oldName, newName, providerBaseUrls.value, customProviders.value,
-            availableModels.value, enabledModels.value, modelAliases.value, apiKeys.value, activeApiKeyIds.value,
-            { providers.remove(it) }, { n, p -> providers[n] = p })
+        settings.renameCustomProvider(oldName, newName, { providers.remove(it) }, { n, p -> providers[n] = p })
     }
     fun deleteCustomProvider(name: String) {
-        settingsDelegate.deleteCustomProvider(name, customProviders.value, enabledModels.value,
-            modelAliases.value, providerBaseUrls.value, apiKeys.value) { providers.remove(it) }
+        settings.deleteCustomProvider(name) { providers.remove(it) }
     }
-    fun setTitleGenerationEnabled(enabled: Boolean) = settingsDelegate.setTitleGenerationEnabled(enabled)
-    fun setTitleGenerationModel(model: String?) = settingsDelegate.setTitleGenerationModel(model)
-    fun setTitleGenerationPrompt(prompt: String) = settingsDelegate.setTitleGenerationPrompt(prompt)
-    fun setImageTranscriptionModel(model: String?) = settingsDelegate.setImageTranscriptionModel(model)
-    fun setImageTranscriptionBatchSize(size: Int) = settingsDelegate.setImageTranscriptionBatchSize(size)
-    fun setImageTranscriptionPrompt(prompt: String) = settingsDelegate.setImageTranscriptionPrompt(prompt)
-    fun addImageTranscriptionModels(models: Set<String>) = settingsDelegate.addImageTranscriptionModels(models, imageTranscriptionEnabledModels.value)
-    fun removeImageTranscriptionModel(model: String) = settingsDelegate.removeImageTranscriptionModel(model, imageTranscriptionEnabledModels.value)
 
     private fun resolveTranscriptionProviderName(): String =
-        imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
+        settings.imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
 
     private fun resolveTranscriptionModelId(): String =
-        imageTranscriptionModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName } ?: ""
+        settings.imageTranscriptionModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName } ?: ""
 
     private fun resolveTranscriptionApiKey(): String {
-        val model = imageTranscriptionModel.value ?: return ""
+        val model = settings.imageTranscriptionModel.value ?: return ""
         val providerName = getProviderForModel(model)
         if (providerName == "Local") return ""
-        val activeKeyId = activeApiKeyIds.value[providerName]
-        return apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        return settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
     }
 
     private fun resolveTranscriptionBaseUrl(): String? {
-        val model = imageTranscriptionModel.value ?: return null
+        val model = settings.imageTranscriptionModel.value ?: return null
         val providerName = getProviderForModel(model)
-        return providerBaseUrls.value[providerName]
+        return settings.providerBaseUrls.value[providerName]
             ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
             else null
     }
 
     // Image generation reuses the selected model's provider credentials (mirrors transcription).
     private fun resolveImageGenModelId(): String =
-        imageGenModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName.removePrefix("models/") } ?: ""
+        settings.imageGenModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName.removePrefix("models/") } ?: ""
 
     private fun resolveImageGenApiKey(): String {
-        val model = imageGenModel.value ?: return ""
+        val model = settings.imageGenModel.value ?: return ""
         val providerName = getProviderForModel(model)
         if (providerName == "Local") return ""
-        val activeKeyId = activeApiKeyIds.value[providerName]
-        return apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        return settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
     }
 
     private fun resolveImageGenBaseUrl(): String {
-        val model = imageGenModel.value ?: return ""
+        val model = settings.imageGenModel.value ?: return ""
         val providerName = getProviderForModel(model)
-        return providerBaseUrls.value[providerName]
+        return settings.providerBaseUrls.value[providerName]
             ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
             else ""
     }
 
-    fun setAccessPastConversations(enabled: Boolean) = settingsDelegate.setAccessPastConversations(enabled)
-    fun setAccessSavedMemories(enabled: Boolean) = settingsDelegate.setAccessSavedMemories(enabled)
-    fun setAccessActiveMemory(enabled: Boolean) = settingsDelegate.setAccessActiveMemory(enabled)
-    fun setRagSearchEnabled(enabled: Boolean) = settingsDelegate.setRagSearchEnabled(enabled)
-    fun setAutoCacheEnabled(enabled: Boolean) = settingsDelegate.setAutoCacheEnabled(enabled)
-    fun setAutoUpdateCheck(enabled: Boolean) = settingsDelegate.setAutoUpdateCheck(enabled)
     fun getCurrentVersion(): String {
         return try { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
     }
@@ -917,12 +805,10 @@ class ChatViewModel(
         val current = getCurrentVersion()
         return com.newoether.agora.util.UpdateChecker.check(current)
     }
-    fun setModelSearchMethod(method: String) = settingsDelegate.setModelSearchMethod(method)
-    fun setManualSearchMethod(method: String) = settingsDelegate.setManualSearchMethod(method)
     fun addEmbeddingModel(config: EmbeddingModelConfig) {
         viewModelScope.launch {
-            val wasEmpty = embeddingModels.value.isEmpty()
-            val models = embeddingModels.value.toMutableList()
+            val wasEmpty = settings.embeddingModels.value.isEmpty()
+            val models = settings.embeddingModels.value.toMutableList()
             models.add(config)
             settingsManager.saveEmbeddingModels(models)
             if (wasEmpty) {
@@ -956,14 +842,14 @@ class ChatViewModel(
 
             val mutex = cacheMutexes.computeIfAbsent(id) { Mutex() }
             mutex.withLock {
-                val model = embeddingModels.value.find { it.id == id }
+                val model = settings.embeddingModels.value.find { it.id == id }
                 if (model?.type == EmbeddingModelType.LOCAL && model.localFilePath.isNotBlank()) {
                     java.io.File(model.localFilePath).delete()
                 }
                 chatDao.deleteEmbeddingsByModel(id)
-                val models = embeddingModels.value.filter { it.id != id }
+                val models = settings.embeddingModels.value.filter { it.id != id }
                 settingsManager.saveEmbeddingModels(models)
-                if (activeEmbeddingModelId.value == id && models.isNotEmpty()) {
+                if (settings.activeEmbeddingModelId.value == id && models.isNotEmpty()) {
                     settingsManager.setActiveEmbeddingModelId(models.first().id)
                 }
                 _cachingProgress.update { it - id }
@@ -974,17 +860,17 @@ class ChatViewModel(
     }
     fun renameEmbeddingModel(id: String, newName: String, batchSize: Int? = null) {
         viewModelScope.launch {
-            val models = embeddingModels.value.map {
+            val models = settings.embeddingModels.value.map {
                 if (it.id == id) it.copy(name = newName, batchSize = batchSize ?: it.batchSize) else it
             }
             settingsManager.saveEmbeddingModels(models)
         }
     }
     fun setActiveEmbeddingModel(id: String) {
-        if (id == activeEmbeddingModelId.value) return
+        if (id == settings.activeEmbeddingModelId.value) return
         viewModelScope.launch(Dispatchers.IO) {
             settingsManager.setActiveEmbeddingModelId(id)
-            val model = embeddingModels.value.find { it.id == id } ?: return@launch
+            val model = settings.embeddingModels.value.find { it.id == id } ?: return@launch
             val total = chatDao.getAllMessagesForIndexing().count { it.text.isNotBlank() }
             val cached = chatDao.getEmbeddingCountByModel(id)
             val notCached = (total - cached).coerceAtLeast(0)
@@ -1018,7 +904,7 @@ class ChatViewModel(
         val job = viewModelScope.launch(Dispatchers.IO) {
             val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
             mutex.withLock {
-                val model = embeddingModels.value.find { it.id == modelId } ?: return@launch
+                val model = settings.embeddingModels.value.find { it.id == modelId } ?: return@launch
                 if (recache) {
                     chatDao.deleteEmbeddingsByModel(modelId)
                 }
@@ -1048,7 +934,7 @@ class ChatViewModel(
                             return@launch
                         }
                         toProcess.chunked(batchSize).forEach { batch ->
-                            if (embeddingModels.value.none { it.id == modelId }) return@launch
+                            if (settings.embeddingModels.value.none { it.id == modelId }) return@launch
                             val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
                             val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
                                 localProvider.releaseEngineBlocking()
@@ -1074,7 +960,7 @@ class ChatViewModel(
                         }
                         val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
                         toProcess.chunked(batchSize).forEach { batch ->
-                            if (embeddingModels.value.none { it.id == modelId }) return@launch
+                            if (settings.embeddingModels.value.none { it.id == modelId }) return@launch
                             val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
                             val embeddings = EmbeddingClient.computeEmbeddings(
                                 texts, apiKey, model.remoteModelName, baseUrl
@@ -1118,35 +1004,35 @@ class ChatViewModel(
     }
 
     fun isLocalModelIdTaken(modelId: String, excludeId: String? = null): Boolean {
-        return localChatModels.value.any { it.modelId == modelId && it.id != excludeId }
+        return settings.localChatModels.value.any { it.modelId == modelId && it.id != excludeId }
     }
 
     fun addLocalChatModel(config: LocalChatModelConfig) {
         viewModelScope.launch {
             if (isLocalModelIdTaken(config.modelId)) return@launch
-            val models = localChatModels.value.toMutableList()
+            val models = settings.localChatModels.value.toMutableList()
             models.add(config)
             settingsManager.saveLocalChatModels(models)
             val modelPrefixedId = "Local:${config.modelId}"
-            setEnabledModels(enabledModels.value + modelPrefixedId)
-            settingsManager.saveModelAliases(modelAliases.value + (modelPrefixedId to config.alias))
+            settings.setEnabledModels(settings.enabledModels.value + modelPrefixedId)
+            settingsManager.saveModelAliases(settings.modelAliases.value + (modelPrefixedId to config.alias))
         }
     }
     fun deleteLocalChatModel(uuid: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val model = localChatModels.value.find { it.id == uuid }
+            val model = settings.localChatModels.value.find { it.id == uuid }
             if (model != null) {
                 if (model.localFilePath.isNotBlank()) java.io.File(model.localFilePath).delete()
                 if (model.mmprojPath.isNotBlank()) java.io.File(model.mmprojPath).delete()
             }
-            val models = localChatModels.value.filter { it.id != uuid }
+            val models = settings.localChatModels.value.filter { it.id != uuid }
             settingsManager.saveLocalChatModels(models)
             val modelPrefixedId = "Local:${model?.modelId ?: uuid}"
-            setEnabledModels(enabledModels.value - modelPrefixedId)
+            settings.setEnabledModels(settings.enabledModels.value - modelPrefixedId)
             val updatedAvailable = settingsManager.availableModels.first().toMutableMap()
             updatedAvailable["Local"] = models.map { "Local:${it.modelId}" }
             settingsManager.saveAvailableModels("Local", updatedAvailable["Local"] ?: emptyList())
-            settingsManager.saveModelAliases(modelAliases.value - modelPrefixedId)
+            settingsManager.saveModelAliases(settings.modelAliases.value - modelPrefixedId)
         }
     }
     fun updateLocalChatModel(
@@ -1155,11 +1041,11 @@ class ChatViewModel(
     ) {
         viewModelScope.launch {
             if (isLocalModelIdTaken(newModelId, excludeId = uuid)) return@launch
-            val oldModel = localChatModels.value.find { it.id == uuid } ?: return@launch
+            val oldModel = settings.localChatModels.value.find { it.id == uuid } ?: return@launch
             if (oldModel.mmprojPath.isNotBlank() && oldModel.mmprojPath != mmprojPath) {
                 java.io.File(oldModel.mmprojPath).delete()
             }
-            val models = localChatModels.value.map {
+            val models = settings.localChatModels.value.map {
                 if (it.id == uuid) it.copy(modelId = newModelId, alias = newAlias, nCtx = nCtx, temperature = temperature, topP = topP, maxTokens = maxTokens, mmprojPath = mmprojPath)
                 else it
             }
@@ -1168,33 +1054,33 @@ class ChatViewModel(
             if (oldModel.modelId != newModelId) {
                 val oldPrefixed = "Local:${oldModel.modelId}"
                 val newPrefixed = "Local:$newModelId"
-                setEnabledModels(enabledModels.value - oldPrefixed + newPrefixed)
+                settings.setEnabledModels(settings.enabledModels.value - oldPrefixed + newPrefixed)
                 val avail = settingsManager.availableModels.first().toMutableMap()
                 avail["Local"] = models.map { "Local:${it.modelId}" }
                 settingsManager.saveAvailableModels("Local", avail["Local"] ?: emptyList())
-                settingsManager.saveModelAliases(modelAliases.value - oldPrefixed + (newPrefixed to newAlias))
+                settingsManager.saveModelAliases(settings.modelAliases.value - oldPrefixed + (newPrefixed to newAlias))
             } else {
-                settingsManager.saveModelAliases(modelAliases.value + ("Local:$newModelId" to newAlias))
+                settingsManager.saveModelAliases(settings.modelAliases.value + ("Local:$newModelId" to newAlias))
             }
         }
     }
 
     suspend fun semanticSearch(query: String, limit: Int = 20): List<Pair<MessageEntity, Float>> {
         val ctx = com.newoether.agora.viewmodel.GenerationContext(
-            accessSavedMemories = accessSavedMemories.value,
-            accessActiveMemory = accessActiveMemory.value,
-            accessPastConversations = accessPastConversations.value,
-            modelSearchMethod = modelSearchMethod.value,
+            accessSavedMemories = settings.accessSavedMemories.value,
+            accessActiveMemory = settings.accessActiveMemory.value,
+            accessPastConversations = settings.accessPastConversations.value,
+            modelSearchMethod = settings.modelSearchMethod.value,
             activeEmbeddingConfig = activeEmbeddingModel.value,
             embeddingApiKey = resolveEmbeddingApiKey() ?: "",
-            ragThreshold = ragThreshold.value,
-            searchMatchLimit = searchMatchLimit.value,
-            searchContextWindow = searchContextWindow.value,
-            webSearchEnabled = webSearchEnabled.value,
-            webSearchApiKeys = webSearchApiKeys.value,
-            webSearchProvider = webSearchProvider.value,
-            webSearchNumResults = webSearchNumResults.value,
-            webSearchBaseUrl = webSearchBaseUrl.value
+            ragThreshold = settings.ragThreshold.value,
+            searchMatchLimit = settings.searchMatchLimit.value,
+            searchContextWindow = settings.searchContextWindow.value,
+            webSearchEnabled = settings.webSearchEnabled.value,
+            webSearchApiKeys = settings.webSearchApiKeys.value,
+            webSearchProvider = settings.webSearchProvider.value,
+            webSearchNumResults = settings.webSearchNumResults.value,
+            webSearchBaseUrl = settings.webSearchBaseUrl.value
         )
         return generationManager.semanticSearch(query, limit, ctx)
     }
@@ -1227,7 +1113,7 @@ class ChatViewModel(
     }
 
     private fun resolveEmbeddingApiKey(): String? {
-        val keys = apiKeys.value
+        val keys = settings.apiKeys.value
         for (entry in keys) {
             if (entry.provider == "OpenAI" || entry.provider == "DeepSeek" || entry.provider == "Qwen" || entry.provider == "Open Router") {
                 return entry.key
@@ -1240,10 +1126,10 @@ class ChatViewModel(
 
     /** Exact match only — for UI display in the embedding dialog. No fallback. */
     fun resolveEmbeddingKeyForProviderExact(targetProvider: String): EmbeddingKeyInfo? {
-        val keys = apiKeys.value
+        val keys = settings.apiKeys.value
         val match = keys.find { it.provider.equals(targetProvider, ignoreCase = true) }
         if (match != null) {
-            val baseUrl = providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
+            val baseUrl = settings.providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
             return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
         }
         return null
@@ -1251,17 +1137,17 @@ class ChatViewModel(
 
     /** With fallback — for runtime API calls. */
     private fun resolveEmbeddingKeyForProvider(targetProvider: String): EmbeddingKeyInfo? {
-        val keys = apiKeys.value
+        val keys = settings.apiKeys.value
         val match = keys.find { it.provider.equals(targetProvider, ignoreCase = true) }
         if (match != null) {
-            val baseUrl = providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
+            val baseUrl = settings.providerBaseUrls.value[match.provider] ?: resolveDefaultBaseUrlForProvider(match.provider)
             return EmbeddingKeyInfo(match.provider, match.key, baseUrl)
         }
         val fallbackKeys = listOf("OpenAI", "DeepSeek", "Qwen", "Open Router", "Mistral", "OpenRouter")
         for (fk in fallbackKeys) {
             val entry = keys.find { it.provider.equals(fk, ignoreCase = true) }
             if (entry != null) {
-                val baseUrl = providerBaseUrls.value[entry.provider] ?: resolveDefaultBaseUrlForProvider(entry.provider)
+                val baseUrl = settings.providerBaseUrls.value[entry.provider] ?: resolveDefaultBaseUrlForProvider(entry.provider)
                 return EmbeddingKeyInfo(entry.provider, entry.key, baseUrl)
             }
         }
@@ -1281,7 +1167,7 @@ class ChatViewModel(
     }
 
     private fun resolveEmbeddingBaseUrl(): String {
-        return providerBaseUrls.value["OpenAI"] ?: "https://api.openai.com/v1"
+        return settings.providerBaseUrls.value["OpenAI"] ?: "https://api.openai.com/v1"
     }
 
     fun indexMessageForRag(messageId: String, text: String) {
@@ -1323,18 +1209,6 @@ class ChatViewModel(
         }
     }
     suspend fun searchMessages(query: String, limit: Int = 20) = chatDao.searchMessages(query, limit)
-    fun setAppLanguage(language: String) = settingsDelegate.setAppLanguage(language)
-    fun setWebSearchEnabled(enabled: Boolean) = settingsDelegate.setWebSearchEnabled(enabled)
-    fun setWebSearchProvider(provider: String) = settingsDelegate.setWebSearchProvider(provider)
-    fun setWebSearchApiKey(provider: String, apiKey: String) = settingsDelegate.setWebSearchApiKey(provider, apiKey)
-    fun setWebSearchNumResults(n: Int) = settingsDelegate.setWebSearchNumResults(n)
-    fun setWebSearchBaseUrl(url: String) = settingsDelegate.setWebSearchBaseUrl(url)
-    fun setImageGenEnabled(enabled: Boolean) = settingsDelegate.setImageGenEnabled(enabled)
-    fun setImageGenModel(model: String?) = settingsDelegate.setImageGenModel(model)
-    fun setImageGenSize(size: String) = settingsDelegate.setImageGenSize(size)
-    fun setShowDocumentationFab(enabled: Boolean) = settingsDelegate.setShowDocumentationFab(enabled)
-    fun setShellEnabled(enabled: Boolean) = settingsDelegate.setShellEnabled(enabled)
-    fun setSandboxEnabled(enabled: Boolean) = settingsDelegate.setSandboxEnabled(enabled)
     // ── Auto Backup ───────────────────────────────────────────
     fun setAutoBackupEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -1376,35 +1250,25 @@ class ChatViewModel(
             settingsManager.saveAutoDeletePeriodHours(maxOf(hours, minValid))
         }
     }
-    fun setThinkingEnabled(enabled: Boolean) = settingsDelegate.setThinkingEnabled(enabled)
-    fun setThinkingLevel(level: String) = settingsDelegate.setThinkingLevel(level)
-    fun setThinkingBudgetEnabled(enabled: Boolean) = settingsDelegate.setThinkingBudgetEnabled(enabled)
-    fun setThinkingBudgetTokens(tokens: Int) = settingsDelegate.setThinkingBudgetTokens(tokens)
-    fun setDefaultTemperature(v: Float?) = settingsDelegate.setDefaultTemperature(v)
-    fun setDefaultMaxTokens(v: Int?) = settingsDelegate.setDefaultMaxTokens(v)
-    fun setDefaultTopP(v: Float?) = settingsDelegate.setDefaultTopP(v)
-    fun setDefaultFrequencyPenalty(v: Float?) = settingsDelegate.setDefaultFrequencyPenalty(v)
-    fun setDefaultPresencePenalty(v: Float?) = settingsDelegate.setDefaultPresencePenalty(v)
-    fun setConversationSettings(convId: String, settings: ConversationSettings?) = settingsDelegate.setConversationSettings(convId, settings)
     fun buildEffectiveConversationSettings(conversationId: String): ConversationSettings {
-        val overrides = conversationSettings.value[conversationId]
+        val overrides = settings.conversationSettings.value[conversationId]
             ?: _pendingConversationSettings.value  // new chat: may not be saved to map yet
             ?: ConversationSettings()
         return ConversationSettings(
-            contextWindow = overrides.contextWindow ?: maxContextWindow.value,
-            temperature = overrides.temperature ?: defaultTemperature.value,
-            maxTokens = overrides.maxTokens ?: defaultMaxTokens.value,
-            topP = overrides.topP ?: defaultTopP.value,
-            frequencyPenalty = overrides.frequencyPenalty ?: defaultFrequencyPenalty.value,
-            presencePenalty = overrides.presencePenalty ?: defaultPresencePenalty.value,
-            codeExecutionEnabled = overrides.codeExecutionEnabled ?: codeExecutionEnabled.value,
-            googleSearchEnabled = overrides.googleSearchEnabled ?: googleSearchEnabled.value,
-            thinkingEnabled = overrides.thinkingEnabled ?: thinkingEnabled.value,
-            thinkingLevel = overrides.thinkingLevel ?: thinkingLevel.value,
-            thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: thinkingBudgetEnabled.value,
-            thinkingBudgetTokens = overrides.thinkingBudgetTokens ?: thinkingBudgetTokens.value,
-            webSearchEnabled = if (webSearchEnabled.value) (overrides.webSearchEnabled ?: true) else false,
-            shellEnabled = if (shellEnabled.value) (overrides.shellEnabled ?: true) else false
+            contextWindow = overrides.contextWindow ?: settings.maxContextWindow.value,
+            temperature = overrides.temperature ?: settings.defaultTemperature.value,
+            maxTokens = overrides.maxTokens ?: settings.defaultMaxTokens.value,
+            topP = overrides.topP ?: settings.defaultTopP.value,
+            frequencyPenalty = overrides.frequencyPenalty ?: settings.defaultFrequencyPenalty.value,
+            presencePenalty = overrides.presencePenalty ?: settings.defaultPresencePenalty.value,
+            codeExecutionEnabled = overrides.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
+            googleSearchEnabled = overrides.googleSearchEnabled ?: settings.googleSearchEnabled.value,
+            thinkingEnabled = overrides.thinkingEnabled ?: settings.thinkingEnabled.value,
+            thinkingLevel = overrides.thinkingLevel ?: settings.thinkingLevel.value,
+            thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
+            thinkingBudgetTokens = overrides.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
+            webSearchEnabled = if (settings.webSearchEnabled.value) (overrides.webSearchEnabled ?: true) else false,
+            shellEnabled = if (settings.shellEnabled.value) (overrides.shellEnabled ?: true) else false
         )
     }
 
@@ -1423,13 +1287,13 @@ class ChatViewModel(
             modelId = com.newoether.agora.model.ModelId.parse(modelId).modelName,
             apiKey = activeKey,
             effectiveSystemPrompt = resolvedSystemPrompt,
-            maxContextWindow = effectiveSettings.contextWindow ?: maxContextWindow.value,
-            codeExecutionEnabled = effectiveSettings.codeExecutionEnabled ?: codeExecutionEnabled.value,
-            googleSearchEnabled = effectiveSettings.googleSearchEnabled ?: googleSearchEnabled.value,
-            thinkingEnabled = effectiveSettings.thinkingEnabled ?: thinkingEnabled.value,
-            thinkingLevel = effectiveSettings.thinkingLevel ?: thinkingLevel.value,
-            thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: thinkingBudgetEnabled.value,
-            thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: thinkingBudgetTokens.value,
+            maxContextWindow = effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
+            codeExecutionEnabled = effectiveSettings.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
+            googleSearchEnabled = effectiveSettings.googleSearchEnabled ?: settings.googleSearchEnabled.value,
+            thinkingEnabled = effectiveSettings.thinkingEnabled ?: settings.thinkingEnabled.value,
+            thinkingLevel = effectiveSettings.thinkingLevel ?: settings.thinkingLevel.value,
+            thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
+            thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
             baseUrl = getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,
@@ -1441,32 +1305,32 @@ class ChatViewModel(
         )
         val genCtx = com.newoether.agora.viewmodel.GenerationContext(
             conversationId = currentId,
-            accessSavedMemories = accessSavedMemories.value,
-            accessActiveMemory = accessActiveMemory.value,
-            accessPastConversations = accessPastConversations.value,
-            modelSearchMethod = modelSearchMethod.value,
+            accessSavedMemories = settings.accessSavedMemories.value,
+            accessActiveMemory = settings.accessActiveMemory.value,
+            accessPastConversations = settings.accessPastConversations.value,
+            modelSearchMethod = settings.modelSearchMethod.value,
             activeEmbeddingConfig = activeEmbeddingModel.value,
             embeddingApiKey = resolveEmbeddingApiKey() ?: "",
-            ragThreshold = ragThreshold.value,
-            searchMatchLimit = searchMatchLimit.value,
-            searchContextWindow = searchContextWindow.value,
-            webSearchEnabled = effectiveSettings.webSearchEnabled ?: webSearchEnabled.value,
-            webSearchApiKeys = webSearchApiKeys.value,
-            webSearchProvider = webSearchProvider.value,
-            webSearchNumResults = webSearchNumResults.value,
-            webSearchBaseUrl = webSearchBaseUrl.value,
-            imageGenEnabled = imageGenEnabled.value && imageGenModel.value?.contains(":") == true,
+            ragThreshold = settings.ragThreshold.value,
+            searchMatchLimit = settings.searchMatchLimit.value,
+            searchContextWindow = settings.searchContextWindow.value,
+            webSearchEnabled = effectiveSettings.webSearchEnabled ?: settings.webSearchEnabled.value,
+            webSearchApiKeys = settings.webSearchApiKeys.value,
+            webSearchProvider = settings.webSearchProvider.value,
+            webSearchNumResults = settings.webSearchNumResults.value,
+            webSearchBaseUrl = settings.webSearchBaseUrl.value,
+            imageGenEnabled = settings.imageGenEnabled.value && settings.imageGenModel.value?.contains(":") == true,
             imageGenApiKey = resolveImageGenApiKey(),
             imageGenBaseUrl = resolveImageGenBaseUrl(),
             imageGenModel = resolveImageGenModelId(),
-            imageGenSize = imageGenSize.value,
-            shellEnabled = effectiveSettings.shellEnabled ?: shellEnabled.value,
-            shellDevices = shellDevices.value,
-            sandboxEnabled = sandboxEnabled.value,
-            imageTranscriptionEnabled = imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
-            imageTranscriptionModel = imageTranscriptionModel.value,
-            imageTranscriptionBatchSize = imageTranscriptionBatchSize.value,
-            imageTranscriptionPrompt = imageTranscriptionPrompt.value,
+            imageGenSize = settings.imageGenSize.value,
+            shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
+            shellDevices = settings.shellDevices.value,
+            sandboxEnabled = settings.sandboxEnabled.value,
+            imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
+            imageTranscriptionModel = settings.imageTranscriptionModel.value,
+            imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,
+            imageTranscriptionPrompt = settings.imageTranscriptionPrompt.value,
             transcriptionProviderName = resolveTranscriptionProviderName(),
             transcriptionModelId = resolveTranscriptionModelId(),
             transcriptionApiKey = resolveTranscriptionApiKey(),
@@ -1499,20 +1363,20 @@ class ChatViewModel(
                 _streamingMessage.value = null
             }
         }
-        val id = activeEmbeddingModelId.value
+        val id = settings.activeEmbeddingModelId.value
         if (id.isNotEmpty()) cacheMessagesForModel(id, silent = true)
     }
 
     fun addShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
         viewModelScope.launch {
-            val current = shellDevices.value.toMutableList()
+            val current = settings.shellDevices.value.toMutableList()
             current.add(device)
             settingsManager.saveShellDevices(current)
         }
     }
     fun updateShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
         viewModelScope.launch {
-            val current = shellDevices.value.toMutableList()
+            val current = settings.shellDevices.value.toMutableList()
             val idx = current.indexOfFirst { it.id == device.id }
             if (idx >= 0) { current[idx] = device; settingsManager.saveShellDevices(current) }
         }
@@ -1543,17 +1407,6 @@ class ChatViewModel(
         if (key.isNullOrBlank()) Result.failure(Exception("Could not reach host or no host key presented"))
         else Result.success(key to com.newoether.agora.util.SshClient.fingerprintSha256(key))
     }
-    fun setThemeMode(mode: String) = settingsDelegate.setThemeMode(mode)
-    fun setColorScheme(scheme: String) = settingsDelegate.setColorScheme(scheme)
-    fun setDynamicColor(enabled: Boolean) = settingsDelegate.setDynamicColor(enabled)
-    fun setBlurEffectsEnabled(enabled: Boolean) = settingsDelegate.setBlurEffectsEnabled(enabled)
-    fun setHapticsEnabled(enabled: Boolean) = settingsDelegate.setHapticsEnabled(enabled)
-    fun setToolCallDisplayMode(mode: String) = settingsDelegate.setToolCallDisplayMode(mode)
-    fun setSchemeStyle(style: String) = settingsDelegate.setSchemeStyle(style)
-    fun removeShellDevice(deviceId: String) = settingsDelegate.removeShellDevice(deviceId, shellDevices.value)
-    fun setSearchMatchLimit(n: Int) = settingsDelegate.setSearchMatchLimit(n)
-    fun setSearchContextWindow(n: Int) = settingsDelegate.setSearchContextWindow(n)
-    fun setRagThreshold(threshold: Float) = settingsDelegate.setRagThreshold(threshold)
     suspend fun testRemoteEmbedding(modelName: String, baseUrl: String, apiKey: String = ""): String? {
         val effectiveKey = apiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
         val url = baseUrl.ifBlank { resolveEmbeddingBaseUrl() }
@@ -1626,12 +1479,12 @@ class ChatViewModel(
                 .filter { it.participant == Participant.MODEL && it.text.isNotBlank() }
                 .firstOrNull()
 
-            val titleModelId = titleGenerationModel.value
-            val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: selectedModel.value)
+            val titleModelId = settings.titleGenerationModel.value
+            val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: settings.selectedModel.value)
             val providerName = getProviderForModel(modelIdWithPrefix)
             val modelId = com.newoether.agora.model.ModelId.parse(modelIdWithPrefix).modelName
-            val activeKeyId = activeApiKeyIds.value[providerName]
-            val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+            val activeKeyId = settings.activeApiKeyIds.value[providerName]
+            val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
             if (!isProviderConfigured(providerName, activeKey)) {
                 emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
                 return@launch
@@ -1655,7 +1508,7 @@ class ChatViewModel(
             val config = ProviderConfig(
                 apiKey = activeKey,
                 modelId = modelId,
-                systemPrompt = titleGenerationPrompt.value.ifBlank { BuiltInPrompts.TITLE_GENERATION_SYSTEM },
+                systemPrompt = settings.titleGenerationPrompt.value.ifBlank { BuiltInPrompts.TITLE_GENERATION_SYSTEM },
                 maxContextWindow = 1,
                 thinkingEnabled = false,
                 baseUrl = getEffectiveBaseUrl(providerName)
@@ -1897,8 +1750,8 @@ class ChatViewModel(
                 if (!conversationExists) return@launch
                 for (message in messages) {
                     chatDao.upsertMessage(message.toStoppedEntity(conversationId))
-                    if (message.text.isNotBlank() && autoCacheEnabled.value &&
-                        (modelSearchMethod.value == "rag" || manualSearchMethod.value == "rag")
+                    if (message.text.isNotBlank() && settings.autoCacheEnabled.value &&
+                        (settings.modelSearchMethod.value == "rag" || settings.manualSearchMethod.value == "rag")
                     ) {
                         indexMessageForRag(message.id, message.text)
                     }
@@ -1947,8 +1800,8 @@ class ChatViewModel(
         val currentId = _currentConversationId.value ?: return
         val modelId = currentActiveModel.value
         val providerName = getProviderForModel(modelId)
-        val activeKeyId = activeApiKeyIds.value[providerName]
-        val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
         if (!isProviderConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return
@@ -2086,8 +1939,8 @@ class ChatViewModel(
         val currentId = _currentConversationId.value ?: return
         val modelId = currentActiveModel.value
         val providerName = getProviderForModel(modelId)
-        val activeKeyId = activeApiKeyIds.value[providerName]
-        val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
         if (!isProviderConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return
@@ -2170,10 +2023,10 @@ class ChatViewModel(
 
     private suspend fun buildEffectiveSystemPrompt(currentId: String): ResolvedPrompt {
         val conversation = chatDao.getConversation(currentId)
-        val targetPromptId = conversation?.systemPromptId ?: activeSystemPromptId.value
-        val entry = systemPrompts.value.find { it.id == targetPromptId }
+        val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
+        val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
         val activeMemory = memoryManager.getActiveMemory()
-        val includeActiveMemory = accessActiveMemory.value
+        val includeActiveMemory = settings.accessActiveMemory.value
         val modelId = com.newoether.agora.model.ModelId.parse(currentActiveModel.value).modelName
 
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
@@ -2228,15 +2081,15 @@ class ChatViewModel(
             return false
         }
         val providerName = getProviderForModel(modelId)
-        val activeKeyId = activeApiKeyIds.value[providerName]
-        val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
         if (!isProviderConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return false
         }
         if (providerName == "Local") {
             val localModelId = modelId.substringAfter("Local:")
-            val config = localChatModels.value.find { it.modelId == localModelId }
+            val config = settings.localChatModels.value.find { it.modelId == localModelId }
             if (config == null || !java.io.File(config.localFilePath).exists()) {
                 emitSnackbar(getApplication<Application>().getString(R.string.local_model_not_found))
                 return false
@@ -2510,7 +2363,7 @@ class ChatViewModel(
             }
 
             val lastMsg = _allMessages.value.find { it.id == modelMessageId }
-            if (wasNewChat && titleGenerationEnabled.value && generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
+            if (wasNewChat && settings.titleGenerationEnabled.value && generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
                 generateTitle(currentId)
             }
         } finally {
@@ -2544,18 +2397,18 @@ class ChatViewModel(
     suspend fun fetchModelsForProvider(name: String): List<String> {
         if (name == "Local") return emptyList()
         // Ensure custom providers are registered before lookup.
-        customProviders.value.forEach { config ->
+        settings.customProviders.value.forEach { config ->
             if (config.name !in providers) {
-                providers[config.name] = CustomOpenAiProvider(config.name, providerBaseUrls.value[config.name] ?: "")
+                providers[config.name] = CustomOpenAiProvider(config.name, settings.providerBaseUrls.value[config.name] ?: "")
             }
         }
         val provider = providers[name] ?: return emptyList()
-        val activeKey = apiKeys.value.find { it.id == activeApiKeyIds.value[name] }?.key ?: ""
+        val activeKey = settings.apiKeys.value.find { it.id == settings.activeApiKeyIds.value[name] }?.key ?: ""
         if (!isProviderConfigured(name, activeKey)) return emptyList()
         val baseUrl = if (name !in builtInProviders) {
-            providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: provider.defaultBaseUrl
+            settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: provider.defaultBaseUrl
         } else {
-            providerBaseUrls.value[name]
+            settings.providerBaseUrls.value[name]
         }
         val raw = withTimeout(10_000L) { provider.fetchModels(activeKey, baseUrl) }
         val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
@@ -2565,8 +2418,8 @@ class ChatViewModel(
 
     fun computeProviderFingerprint(): String {
         val parts = providers.map { (name, _) ->
-            val keyId = activeApiKeyIds.value[name] ?: ""
-            val url = providerBaseUrls.value[name] ?: ""
+            val keyId = settings.activeApiKeyIds.value[name] ?: ""
+            val url = settings.providerBaseUrls.value[name] ?: ""
             "$name|$keyId|$url"
         }.sorted().joinToString(",")
         return parts.hashCode().toString()
@@ -2581,9 +2434,9 @@ class ChatViewModel(
             var skippedCount = 0
 
             // Ensure custom providers are loaded into the providers map before iterating
-            customProviders.value.forEach { config ->
+            settings.customProviders.value.forEach { config ->
                 if (config.name !in providers) {
-                    val url = providerBaseUrls.value[config.name] ?: ""
+                    val url = settings.providerBaseUrls.value[config.name] ?: ""
                     providers[config.name] = CustomOpenAiProvider(config.name, url)
                 }
             }
@@ -2593,13 +2446,13 @@ class ChatViewModel(
                     if (name == "Local") return@forEach
 
                     try {
-                        val activeKeyId = activeApiKeyIds.value[name]
-                        val activeKey = apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+                        val activeKeyId = settings.activeApiKeyIds.value[name]
+                        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
                         val isCustomProvider = name !in builtInProviders
                         val currentBaseUrl = if (isCustomProvider) {
-                            providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: providerInstance.defaultBaseUrl
+                            settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: providerInstance.defaultBaseUrl
                         } else {
-                            providerBaseUrls.value[name]
+                            settings.providerBaseUrls.value[name]
                         }
 
                         if (!isProviderConfigured(name, activeKey)) {
@@ -2624,8 +2477,8 @@ class ChatViewModel(
                 }
 
                 val allFetchedModels = settingsManager.availableModels.first().values.flatten().toSet()
-                val newEnabled = enabledModels.value.intersect(allFetchedModels)
-                setEnabledModels(newEnabled)
+                val newEnabled = settings.enabledModels.value.intersect(allFetchedModels)
+                settings.setEnabledModels(newEnabled)
 
                 // Save fingerprint on any successful fetch so we don't re-fetch on next visit
                 settingsManager.saveLastModelsFetchFingerprint(computeProviderFingerprint())

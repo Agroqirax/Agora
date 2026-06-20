@@ -28,6 +28,11 @@ import com.newoether.agora.viewmodel.ChatViewModelFactory
 class AppContainer(private val appContext: Context) {
     private val application = appContext.applicationContext as Application
 
+    /** App-lifetime scope that backs the shared settings StateFlows. */
+    private val appScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
     // ── Data Layer ────────────────────────────────────────────
 
     val settingsManager: SettingsManager by lazy { SettingsManager(appContext) }
@@ -41,7 +46,7 @@ class AppContainer(private val appContext: Context) {
         ConversationRepository(chatDao)
     }
     val settingsRepository: SettingsRepository by lazy {
-        SettingsRepository(settingsManager)
+        SettingsRepository(settingsManager, appScope)
     }
     val memoryRepository: MemoryRepository by lazy {
         MemoryRepository(memoryManager)

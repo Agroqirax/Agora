@@ -42,14 +42,14 @@ internal fun providerIcon(name: String): Int = when (name.lowercase()) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val apiKeys by viewModel.apiKeys.collectAsState()
-    val providerBaseUrls by viewModel.providerBaseUrls.collectAsState()
-    val customProviders by viewModel.customProviders.collectAsState()
-    val localChatModels by viewModel.localChatModels.collectAsState()
+    val apiKeys by viewModel.settings.apiKeys.collectAsState()
+    val providerBaseUrls by viewModel.settings.providerBaseUrls.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
+    val localChatModels by viewModel.settings.localChatModels.collectAsState()
 
     var selectedProvider by rememberSaveable { mutableStateOf<String?>(null) }
     var showAddCustomDialog by remember { mutableStateOf(false) }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     val scrollState = rememberSaveable(saver = androidx.compose.foundation.ScrollState.Saver) { androidx.compose.foundation.ScrollState(0) }
 
     BackHandler {

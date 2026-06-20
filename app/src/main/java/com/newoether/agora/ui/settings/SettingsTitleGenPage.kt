@@ -23,14 +23,14 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val titleGenEnabled by viewModel.titleGenerationEnabled.collectAsState()
-    val titleGenModel by viewModel.titleGenerationModel.collectAsState()
-    val titleGenPrompt by viewModel.titleGenerationPrompt.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
-    val enabledModels by viewModel.enabledModels.collectAsState()
+    val titleGenEnabled by viewModel.settings.titleGenerationEnabled.collectAsState()
+    val titleGenModel by viewModel.settings.titleGenerationModel.collectAsState()
+    val titleGenPrompt by viewModel.settings.titleGenerationPrompt.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val enabledModels by viewModel.settings.enabledModels.collectAsState()
     var showTitleModelDialog by remember { mutableStateOf(false) }
     var showPromptDialog by remember { mutableStateOf(false) }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.settings_title_gen),
@@ -46,9 +46,9 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(stringResource(R.string.title_gen_auto_desc)) },
                             leadingContent = { Icon(Icons.Default.Edit, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = {
-                                Switch(checked = titleGenEnabled, onCheckedChange = { viewModel.setTitleGenerationEnabled(it) })
+                                Switch(checked = titleGenEnabled, onCheckedChange = { viewModel.settings.setTitleGenerationEnabled(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setTitleGenerationEnabled(!titleGenEnabled) }
+                            modifier = Modifier.clickable { viewModel.settings.setTitleGenerationEnabled(!titleGenEnabled) }
                         )
                     }
                     if (titleGenEnabled) {
@@ -96,12 +96,12 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             headlineContent = { Text(stringResource(R.string.title_gen_current_model), fontWeight = if (titleGenModel == null) FontWeight.Bold else FontWeight.Normal) },
                             leadingContent = {
                                 RadioButton(selected = titleGenModel == null, onClick = {
-                                    viewModel.setTitleGenerationModel(null)
+                                    viewModel.settings.setTitleGenerationModel(null)
                                     showTitleModelDialog = false
                                 })
                             },
                             modifier = Modifier.clickable {
-                                viewModel.setTitleGenerationModel(null)
+                                viewModel.settings.setTitleGenerationModel(null)
                                 showTitleModelDialog = false
                             }
                         )
@@ -115,12 +115,12 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(titleParsed.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },
                             leadingContent = {
                                 RadioButton(selected = titleGenModel == model, onClick = {
-                                    viewModel.setTitleGenerationModel(model)
+                                    viewModel.settings.setTitleGenerationModel(model)
                                     showTitleModelDialog = false
                                 })
                             },
                             modifier = Modifier.clickable {
-                                viewModel.setTitleGenerationModel(model)
+                                viewModel.settings.setTitleGenerationModel(model)
                                 showTitleModelDialog = false
                             }
                         )
@@ -136,7 +136,7 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = stringResource(R.string.title_gen_prompt),
             initialPrompt = titleGenPrompt,
             onDismiss = { showPromptDialog = false },
-            onSave = { viewModel.setTitleGenerationPrompt(it) }
+            onSave = { viewModel.settings.setTitleGenerationPrompt(it) }
         )
     }
 }

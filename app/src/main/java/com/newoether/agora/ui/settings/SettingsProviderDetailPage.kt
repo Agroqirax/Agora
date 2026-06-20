@@ -49,11 +49,11 @@ fun SettingsProviderDetailPage(
     viewModel: ChatViewModel,
     onBack: () -> Unit
 ) {
-    val apiKeys by viewModel.apiKeys.collectAsState()
-    val activeApiKeyIds by viewModel.activeApiKeyIds.collectAsState()
-    val providerBaseUrls by viewModel.providerBaseUrls.collectAsState()
-    val customProviders by viewModel.customProviders.collectAsState()
-    val localChatModels by viewModel.localChatModels.collectAsState()
+    val apiKeys by viewModel.settings.apiKeys.collectAsState()
+    val activeApiKeyIds by viewModel.settings.activeApiKeyIds.collectAsState()
+    val providerBaseUrls by viewModel.settings.providerBaseUrls.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
+    val localChatModels by viewModel.settings.localChatModels.collectAsState()
 
     val isLocal = providerName == "Local"
     val isCustom = customProviders.any { it.name == providerName }
@@ -140,7 +140,7 @@ fun SettingsProviderDetailPage(
                 // Save user input with 500ms debounce.
                 LaunchedEffect(baseUrlState.text) {
                     delay(500)
-                    viewModel.setProviderBaseUrl(providerName, baseUrlState.text.toString())
+                    viewModel.settings.setProviderBaseUrl(providerName, baseUrlState.text.toString())
                 }
                 SettingsGroup(
                     title = stringResource(R.string.provider_base_url),
@@ -300,7 +300,7 @@ fun SettingsProviderDetailPage(
                                     SettingsItem(
                                         headlineContent = { Text(entry.name, fontWeight = FontWeight.Medium) },
                                         supportingContent = { Text(entry.key.take(4) + "••••••••" + entry.key.takeLast(4)) },
-                                        leadingContent = { Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) { RadioButton(selected = isCurrentActive, onClick = { viewModel.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp)) } },
+                                        leadingContent = { Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) { RadioButton(selected = isCurrentActive, onClick = { viewModel.settings.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp)) } },
                                         trailingContent = {
                                             Box {
                                                 IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(18.dp)) }
@@ -311,7 +311,7 @@ fun SettingsProviderDetailPage(
                                             }
                                         },
                                         modifier = Modifier
-                                            .clickable { viewModel.setActiveApiKey(providerName, entry.id) }
+                                            .clickable { viewModel.settings.setActiveApiKey(providerName, entry.id) }
                                     )
                                 }
                             }
@@ -473,12 +473,12 @@ fun SettingsProviderDetailPage(
                 Spacer(modifier = Modifier.height(8.dp))
                 Box(modifier = Modifier.noOpBringIntoView()) { OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("${providerName} API Key") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) }
             }
-        }, confirmButton = { TextButton(onClick = { if (name.isNotBlank() && key.isNotBlank()) { if (isEdit) viewModel.updateApiKey(entry.id, name, key) else viewModel.addApiKey(name, key, providerName); showKeyDialog = null } }) { Text(if (isEdit) stringResource(R.string.provider_save) else stringResource(R.string.provider_add)) } }, dismissButton = { TextButton(onClick = { showKeyDialog = null }) { Text(stringResource(R.string.cancel)) } })
+        }, confirmButton = { TextButton(onClick = { if (name.isNotBlank() && key.isNotBlank()) { if (isEdit) viewModel.settings.updateApiKey(entry.id, name, key) else viewModel.settings.addApiKey(name, key, providerName); showKeyDialog = null } }) { Text(if (isEdit) stringResource(R.string.provider_save) else stringResource(R.string.provider_add)) } }, dismissButton = { TextButton(onClick = { showKeyDialog = null }) { Text(stringResource(R.string.cancel)) } })
     }
 
     // Delete key confirm
     showDeleteKeyConfirm?.let { entry ->
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteKeyConfirm = null }, title = { Text(stringResource(R.string.provider_delete_key_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.provider_delete_key_text, entry.name)) }, confirmButton = { TextButton(onClick = { viewModel.deleteApiKey(entry.id); showDeleteKeyConfirm = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.provider_delete)) } }, dismissButton = { TextButton(onClick = { showDeleteKeyConfirm = null }) { Text(stringResource(R.string.cancel)) } })
+        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteKeyConfirm = null }, title = { Text(stringResource(R.string.provider_delete_key_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.provider_delete_key_text, entry.name)) }, confirmButton = { TextButton(onClick = { viewModel.settings.deleteApiKey(entry.id); showDeleteKeyConfirm = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.provider_delete)) } }, dismissButton = { TextButton(onClick = { showDeleteKeyConfirm = null }) { Text(stringResource(R.string.cancel)) } })
     }
 
     // Rename custom provider

@@ -104,8 +104,7 @@ private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 private fun MessageSegment.isBlankAnswerSegment(): Boolean =
     type == "answer" && content.isBlank()
 
-private fun MessageSegment.isVisibleAnswerSegment(): Boolean =
-    type == "answer" && content.isNotBlank()
+// isVisibleAnswerSegment() is shared (internal) from MessageItem.kt.
 
 private fun ChatMessage.hasActiveAnswerSegment(): Boolean {
     val lastVisibleSegment = segments?.lastOrNull { !it.isBlankAnswerSegment() }
@@ -152,27 +151,27 @@ fun ChatApp(
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val generatingInConversationId by viewModel.generatingInConversationId.collectAsState()
     val selectedModel by viewModel.currentActiveModel.collectAsState()
-    val enabledModels by viewModel.enabledModels.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
+    val enabledModels by viewModel.settings.enabledModels.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
     val thoughtExpandedStates = remember(currentConversationId) { mutableStateMapOf<String, Boolean>() }
     val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
-    val visualizeContextRollout by viewModel.visualizeContextRollout.collectAsState()
-    val maxContextWindow by viewModel.maxContextWindow.collectAsState()
-    val globalCodeExecution by viewModel.codeExecutionEnabled.collectAsState()
-    val globalGoogleSearch by viewModel.googleSearchEnabled.collectAsState()
-    val globalThinkingEnabled by viewModel.thinkingEnabled.collectAsState()
-    val globalThinkingLevel by viewModel.thinkingLevel.collectAsState()
-    val globalThinkingBudgetEnabled by viewModel.thinkingBudgetEnabled.collectAsState()
-    val globalThinkingBudgetTokens by viewModel.thinkingBudgetTokens.collectAsState()
-    val globalWebSearch by viewModel.webSearchEnabled.collectAsState()
-    val webSearchApiKeys by viewModel.webSearchApiKeys.collectAsState()
-    val globalShell by viewModel.shellEnabled.collectAsState()
-    val shellDevices by viewModel.shellDevices.collectAsState()
-    val toolCallDisplayMode by viewModel.toolCallDisplayMode.collectAsState()
-    val conversationSettings by viewModel.conversationSettings.collectAsState()
+    val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
+    val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
+    val globalCodeExecution by viewModel.settings.codeExecutionEnabled.collectAsState()
+    val globalGoogleSearch by viewModel.settings.googleSearchEnabled.collectAsState()
+    val globalThinkingEnabled by viewModel.settings.thinkingEnabled.collectAsState()
+    val globalThinkingLevel by viewModel.settings.thinkingLevel.collectAsState()
+    val globalThinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
+    val globalThinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
+    val globalWebSearch by viewModel.settings.webSearchEnabled.collectAsState()
+    val webSearchApiKeys by viewModel.settings.webSearchApiKeys.collectAsState()
+    val globalShell by viewModel.settings.shellEnabled.collectAsState()
+    val shellDevices by viewModel.settings.shellDevices.collectAsState()
+    val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
+    val conversationSettings by viewModel.settings.conversationSettings.collectAsState()
     val pendingSettings by viewModel.pendingConversationSettings.collectAsState()
     // Resolved per-conversation values: override → global default
     val convId = currentConversationId
@@ -187,17 +186,17 @@ fun ChatApp(
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = convOverride?.contextWindow ?: maxContextWindow
-    val defaultTemperature by viewModel.defaultTemperature.collectAsState()
-    val defaultMaxTokens by viewModel.defaultMaxTokens.collectAsState()
-    val defaultTopP by viewModel.defaultTopP.collectAsState()
-    val defaultFrequencyPenalty by viewModel.defaultFrequencyPenalty.collectAsState()
-    val defaultPresencePenalty by viewModel.defaultPresencePenalty.collectAsState()
-    val blurEffectsEnabled by viewModel.blurEffectsEnabled.collectAsState()
-    val hapticsEnabled by viewModel.hapticsEnabled.collectAsState()
+    val defaultTemperature by viewModel.settings.defaultTemperature.collectAsState()
+    val defaultMaxTokens by viewModel.settings.defaultMaxTokens.collectAsState()
+    val defaultTopP by viewModel.settings.defaultTopP.collectAsState()
+    val defaultFrequencyPenalty by viewModel.settings.defaultFrequencyPenalty.collectAsState()
+    val defaultPresencePenalty by viewModel.settings.defaultPresencePenalty.collectAsState()
+    val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
+    val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
 
-    val systemPrompts by viewModel.systemPrompts.collectAsState()
-    val activeSystemPromptId by viewModel.activeSystemPromptId.collectAsState()
+    val systemPrompts by viewModel.settings.systemPrompts.collectAsState()
+    val activeSystemPromptId by viewModel.settings.activeSystemPromptId.collectAsState()
 
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
     var conversationToRename by remember { mutableStateOf("") }
@@ -539,7 +538,7 @@ fun ChatApp(
                     var searchResults by remember { mutableStateOf<List<Pair<MessageEntity, Float>>>(emptyList()) }
                     var isSearchActive by remember { mutableStateOf(false) }
 
-                    val manualSearchMethod by viewModel.manualSearchMethod.collectAsState()
+                    val manualSearchMethod by viewModel.settings.manualSearchMethod.collectAsState()
 
                     LaunchedEffect(searchQuery) {
                         if (searchQuery.isBlank()) {
@@ -1323,7 +1322,7 @@ fun ChatApp(
             globalDefaults = defaults,
             onSave = { settings ->
                 if (currentId != null) {
-                    viewModel.setConversationSettings(currentId, settings)
+                    viewModel.settings.setConversationSettings(currentId, settings)
                 } else {
                     viewModel.setPendingConversationSettings(settings)
                 }
@@ -1331,7 +1330,7 @@ fun ChatApp(
             },
             onResetToDefaults = {
                 if (currentId != null) {
-                    viewModel.setConversationSettings(currentId, null)
+                    viewModel.settings.setConversationSettings(currentId, null)
                 } else {
                     viewModel.setPendingConversationSettings(null)
                 }

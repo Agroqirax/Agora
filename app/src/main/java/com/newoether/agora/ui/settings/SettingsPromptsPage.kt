@@ -37,9 +37,9 @@ import java.util.UUID
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val systemPrompts by viewModel.systemPrompts.collectAsState()
-    val activeSystemPromptId by viewModel.activeSystemPromptId.collectAsState()
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val systemPrompts by viewModel.settings.systemPrompts.collectAsState()
+    val activeSystemPromptId by viewModel.settings.activeSystemPromptId.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     var editingEntry by remember { mutableStateOf<SystemPromptEntry?>(null) }
     var showDeletePromptConfirm by remember { mutableStateOf<SystemPromptEntry?>(null) }
     var showTemplatePicker by remember { mutableStateOf(false) }
@@ -58,9 +58,9 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 entry = currentEntry,
                 onSave = { title, systemItems, userPrependItems, userPostpendItems ->
                     if (systemPrompts.any { it.id == currentEntry.id }) {
-                        viewModel.updateSystemPrompt(currentEntry.id, title, systemItems, userPrependItems, userPostpendItems)
+                        viewModel.settings.updateSystemPrompt(currentEntry.id, title, systemItems, userPrependItems, userPostpendItems)
                     } else {
-                        viewModel.addSystemPrompt(title, systemItems, userPrependItems, userPostpendItems)
+                        viewModel.settings.addSystemPrompt(title, systemItems, userPrependItems, userPostpendItems)
                     }
                     editingEntry = null
                 },
@@ -71,7 +71,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             PromptList(
                 systemPrompts = systemPrompts,
                 activeSystemPromptId = activeSystemPromptId,
-                onSelectPrompt = { viewModel.setActiveSystemPrompt(it) },
+                onSelectPrompt = { viewModel.settings.setActiveSystemPrompt(it) },
                 onEdit = { editingEntry = it },
                 onDuplicate = { entry ->
                     val copyTitle = context.getString(R.string.prompts_duplicate_title, entry.title)
@@ -132,7 +132,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.deleteSystemPrompt(entry.id)
+                        viewModel.settings.deleteSystemPrompt(entry.id)
                         showDeletePromptConfirm = null
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)

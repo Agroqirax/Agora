@@ -81,14 +81,14 @@ private fun isLikelyImageModel(modelId: String): Boolean {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val enabled by viewModel.imageGenEnabled.collectAsState()
-    val selectedModel by viewModel.imageGenModel.collectAsState()
-    val size by viewModel.imageGenSize.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
+    val enabled by viewModel.settings.imageGenEnabled.collectAsState()
+    val selectedModel by viewModel.settings.imageGenModel.collectAsState()
+    val size by viewModel.settings.imageGenSize.collectAsState()
+    val availableModels by viewModel.settings.availableModels.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
     var showModelDialog by remember { mutableStateOf(false) }
     var showAllModels by remember { mutableStateOf(false) }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     // Source from ALL synced models (image models needn't be enabled for chat). Default to the
     // image-likely subset so the list stays short; "show all" is the escape hatch for odd names.
@@ -107,9 +107,9 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     supportingContent = { Text(stringResource(R.string.image_gen_enable_desc)) },
                     leadingContent = { Icon(Icons.Default.AddPhotoAlternate, null, tint = MaterialTheme.colorScheme.primary) },
                     trailingContent = {
-                        Switch(checked = enabled, onCheckedChange = { viewModel.setImageGenEnabled(it) })
+                        Switch(checked = enabled, onCheckedChange = { viewModel.settings.setImageGenEnabled(it) })
                     },
-                    modifier = Modifier.clickable { viewModel.setImageGenEnabled(!enabled) }
+                    modifier = Modifier.clickable { viewModel.settings.setImageGenEnabled(!enabled) }
                 )
             }))
 
@@ -156,7 +156,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     delay(500)
                                     val w = wState.text.toString().trim()
                                     val h = hState.text.toString().trim()
-                                    if (w.isNotEmpty() && h.isNotEmpty()) viewModel.setImageGenSize("${w}x${h}")
+                                    if (w.isNotEmpty() && h.isNotEmpty()) viewModel.settings.setImageGenSize("${w}x${h}")
                                 }
                                 Row(
                                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp).noOpBringIntoView(),
@@ -217,11 +217,11 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 supportingContent = { Text(parsed.providerName, style = MaterialTheme.typography.bodySmall) },
                                 leadingContent = {
                                     RadioButton(selected = selectedModel == model, onClick = {
-                                        viewModel.setImageGenModel(model); showModelDialog = false
+                                        viewModel.settings.setImageGenModel(model); showModelDialog = false
                                     })
                                 },
                                 modifier = Modifier.clickable {
-                                    viewModel.setImageGenModel(model); showModelDialog = false
+                                    viewModel.settings.setImageGenModel(model); showModelDialog = false
                                 }
                             )
                         }

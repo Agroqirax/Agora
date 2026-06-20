@@ -37,7 +37,7 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val versionName = packageInfo?.versionName ?: "?"
     val versionCode = packageInfo?.longVersionCode ?: 0
 
-    val autoUpdateCheck by viewModel.autoUpdateCheck.collectAsState()
+    val autoUpdateCheck by viewModel.settings.autoUpdateCheck.collectAsState()
     var updateStatus by remember { mutableStateOf<String?>(null) }
     var isChecking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -104,24 +104,24 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         supportingContent = { Text(stringResource(R.string.about_auto_update_desc)) },
                         leadingContent = { Icon(Icons.Default.Sync, null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = {
-                            Switch(checked = autoUpdateCheck, onCheckedChange = { viewModel.setAutoUpdateCheck(it) })
+                            Switch(checked = autoUpdateCheck, onCheckedChange = { viewModel.settings.setAutoUpdateCheck(it) })
                         },
-                        modifier = Modifier.clickable { viewModel.setAutoUpdateCheck(!autoUpdateCheck) }
+                        modifier = Modifier.clickable { viewModel.settings.setAutoUpdateCheck(!autoUpdateCheck) }
                     )
                 }
             })
 
             // -- Documentation --
-            val showDocFab by viewModel.showDocumentationFab.collectAsState()
+            val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
             SettingsGroup(title = stringResource(R.string.documentation), items = listOf({
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.show_documentation_links)) },
                     supportingContent = { Text(stringResource(R.string.show_documentation_links_desc)) },
                     leadingContent = { Icon(Icons.Default.MenuBook, null, tint = MaterialTheme.colorScheme.primary) },
                     trailingContent = {
-                        Switch(checked = showDocFab, onCheckedChange = { viewModel.setShowDocumentationFab(it) })
+                        Switch(checked = showDocFab, onCheckedChange = { viewModel.settings.setShowDocumentationFab(it) })
                     },
-                    modifier = Modifier.clickable { viewModel.setShowDocumentationFab(!showDocFab) }
+                    modifier = Modifier.clickable { viewModel.settings.setShowDocumentationFab(!showDocFab) }
                 )
             }))
 

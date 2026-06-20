@@ -145,7 +145,7 @@ fun WelcomeScreen(
 
     // ── Onboarding state ──
     val builtInProviders = listOf("Google", "OpenAI", "Anthropic", "DeepSeek", "Qwen", "Ollama", "Open Router")
-    val customProviders by viewModel.customProviders.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
     val allProviders = (builtInProviders + customProviders.map { it.name } + "Custom" + "Local").distinct()
     var selectedProvider by remember { mutableStateOf<String?>(null) }
     // True for any user-defined OpenAI-compatible provider (the "Custom" slot or an
@@ -157,12 +157,12 @@ fun WelcomeScreen(
     var baseUrlText by remember { mutableStateOf("") }
     var apiKeyVisible by remember { mutableStateOf(false) }
     var selectedModelId by remember { mutableStateOf<String?>(null) }
-    val autoBackupEnabled by viewModel.autoBackupEnabled.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
-    val localChatModels by viewModel.localChatModels.collectAsState()
-    val existingApiKeys by viewModel.apiKeys.collectAsState()
-    val existingProviderUrls by viewModel.providerBaseUrls.collectAsState()
+    val autoBackupEnabled by viewModel.settings.autoBackupEnabled.collectAsState()
+    val availableModels by viewModel.settings.availableModels.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val localChatModels by viewModel.settings.localChatModels.collectAsState()
+    val existingApiKeys by viewModel.settings.apiKeys.collectAsState()
+    val existingProviderUrls by viewModel.settings.providerBaseUrls.collectAsState()
 
     // Pre-fill API key / URL when switching to a configured provider
     LaunchedEffect(selectedProvider) {
@@ -268,15 +268,15 @@ fun WelcomeScreen(
         val p = selectedProvider ?: return@save
         when {
             p == "Local" -> { /* handled by GGUF import */ }
-            p == "Ollama" -> if (apiKeyText.isNotBlank()) viewModel.setProviderBaseUrl("Ollama", apiKeyText)
+            p == "Ollama" -> if (apiKeyText.isNotBlank()) viewModel.settings.setProviderBaseUrl("Ollama", apiKeyText)
             isCustomProvider -> {
                 if (baseUrlText.isNotBlank()) {
                     if (customProviders.none { it.name == p }) viewModel.addCustomProvider(p, baseUrlText)
-                    else viewModel.setProviderBaseUrl(p, baseUrlText)
+                    else viewModel.settings.setProviderBaseUrl(p, baseUrlText)
                 }
-                if (apiKeyText.isNotBlank()) viewModel.upsertApiKey(p, apiKeyText, p)
+                if (apiKeyText.isNotBlank()) viewModel.settings.upsertApiKey(p, apiKeyText, p)
             }
-            else -> if (apiKeyText.isNotBlank()) viewModel.upsertApiKey(p, apiKeyText, p)
+            else -> if (apiKeyText.isNotBlank()) viewModel.settings.upsertApiKey(p, apiKeyText, p)
         }
     }
 
@@ -382,8 +382,8 @@ fun WelcomeScreen(
                                     val models = if (selectedProvider == "Local") lModels else pModels
                                     val applyModel: (String) -> Unit = { id ->
                                         selectedModelId = id
-                                        viewModel.setSelectedModel(id)
-                                        viewModel.setEnabledModels(setOf(id))
+                                        viewModel.settings.setSelectedModel(id)
+                                        viewModel.settings.setEnabledModels(setOf(id))
                                     }
                                     // Auto-apply the first model whenever the current selection
                                     // isn't in the list (initial load, or after a provider/key change).

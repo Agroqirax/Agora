@@ -30,17 +30,17 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val webSearchEnabled by viewModel.webSearchEnabled.collectAsState()
-    val webSearchProvider by viewModel.webSearchProvider.collectAsState()
-    val webSearchApiKeys by viewModel.webSearchApiKeys.collectAsState()
-    val webSearchNumResults by viewModel.webSearchNumResults.collectAsState()
-    val webSearchBaseUrl by viewModel.webSearchBaseUrl.collectAsState()
+    val webSearchEnabled by viewModel.settings.webSearchEnabled.collectAsState()
+    val webSearchProvider by viewModel.settings.webSearchProvider.collectAsState()
+    val webSearchApiKeys by viewModel.settings.webSearchApiKeys.collectAsState()
+    val webSearchNumResults by viewModel.settings.webSearchNumResults.collectAsState()
+    val webSearchBaseUrl by viewModel.settings.webSearchBaseUrl.collectAsState()
     var showProviderDialog by remember { mutableStateOf(false) }
     var apiKeyText by remember(webSearchProvider) { mutableStateOf(webSearchApiKeys[webSearchProvider] ?: "") }
     LaunchedEffect(webSearchProvider) { apiKeyText = webSearchApiKeys[webSearchProvider] ?: "" }
 
     // No-op bring-into-view to prevent auto-scrolling on text field focus
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.web_search_title),
@@ -54,9 +54,9 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         supportingContent = { Text(stringResource(R.string.web_search_enable_desc)) },
                         leadingContent = { Icon(Icons.Default.Language, null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = {
-                            Switch(checked = webSearchEnabled, onCheckedChange = { viewModel.setWebSearchEnabled(it) })
+                            Switch(checked = webSearchEnabled, onCheckedChange = { viewModel.settings.setWebSearchEnabled(it) })
                         },
-                        modifier = Modifier.clickable { viewModel.setWebSearchEnabled(!webSearchEnabled) }
+                        modifier = Modifier.clickable { viewModel.settings.setWebSearchEnabled(!webSearchEnabled) }
                     )
                 }
 
@@ -105,7 +105,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                             OutlinedTextField(
                                                 value = apiKeyText,
-                                                onValueChange = { apiKeyText = it; viewModel.setWebSearchApiKey(webSearchProvider, it) },
+                                                onValueChange = { apiKeyText = it; viewModel.settings.setWebSearchApiKey(webSearchProvider, it) },
                                                 placeholder = {
                                                     Text(
                                                         stringResource(
@@ -153,7 +153,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         // Save user input with 500ms debounce.
                                         LaunchedEffect(urlState.text) {
                                             delay(500)
-                                            viewModel.setWebSearchBaseUrl(urlState.text.toString())
+                                            viewModel.settings.setWebSearchBaseUrl(urlState.text.toString())
                                         }
                                         Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                             OutlinedTextField(
@@ -206,7 +206,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                     Slider(
                                         value = webSearchNumResults.toFloat(),
-                                        onValueChange = { viewModel.setWebSearchNumResults(it.toInt()) },
+                                        onValueChange = { viewModel.settings.setWebSearchNumResults(it.toInt()) },
                                         valueRange = 1f..10f,
                                         steps = 8,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -256,13 +256,13 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 RadioButton(
                                     selected = webSearchProvider == key,
                                     onClick = {
-                                        viewModel.setWebSearchProvider(key)
+                                        viewModel.settings.setWebSearchProvider(key)
                                         showProviderDialog = false
                                     }
                                 )
                             },
                             modifier = Modifier.clickable {
-                                viewModel.setWebSearchProvider(key)
+                                viewModel.settings.setWebSearchProvider(key)
                                 showProviderDialog = false
                             }
                         )

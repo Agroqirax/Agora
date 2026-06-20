@@ -1,180 +1,341 @@
 package com.newoether.agora.data.repository
 
+import com.newoether.agora.api.LlmProvider
+import com.newoether.agora.api.openai.CustomOpenAiProvider
 import com.newoether.agora.data.ApiKeyEntry
+import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.data.SystemPromptEntry
-import kotlinx.coroutines.flow.Flow
+import com.newoether.agora.model.ToolCallDisplayModes
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
  * Repository wrapping DataStore-backed SettingsManager.
  *
- * Provides the same Flow-based reads as SettingsManager, plus
- * atomic batch mutation methods for multi-setting updates.
- * Phase 2 creates the abstraction layer.  Validation and caching
- * enhancements are deferred to a later refinement phase.
+ * Exposes every setting as a hot, eagerly-shared [StateFlow] (so the UI can
+ * `collectAsState` and callers can read `.value` synchronously), plus the
+ * setters and atomic batch mutations. This is the single shared owner of the
+ * app settings surface; `ChatViewModel` and the settings pages both consume it
+ * instead of re-exposing each setting individually.
+ *
+ * StateFlow initial values match the previous `ChatViewModel.stateIn` defaults
+ * so observable behavior is unchanged.
  */
 class SettingsRepository(
-    private val settingsManager: SettingsManager
+    private val settingsManager: SettingsManager,
+    private val scope: CoroutineScope
 ) {
-    // ── Read Flows (direct delegation) ────────────────────────
+    private fun <T> hot(flow: kotlinx.coroutines.flow.Flow<T>, initial: T): StateFlow<T> =
+        flow.stateIn(scope, SharingStarted.Eagerly, initial)
 
-    val selectedModel: Flow<String> = settingsManager.selectedModel
-    val availableModels: Flow<Map<String, List<String>>> = settingsManager.availableModels
-    val enabledModels: Flow<Set<String>> = settingsManager.enabledModels
-    val modelAliases: Flow<Map<String, String>> = settingsManager.modelAliases
-    val apiKeys: Flow<List<ApiKeyEntry>> = settingsManager.apiKeys
-    val activeApiKeyIds: Flow<Map<String, String>> = settingsManager.activeApiKeyIds
-    val systemPrompts: Flow<List<SystemPromptEntry>> = settingsManager.systemPrompts
-    val activeSystemPromptId: Flow<String?> = settingsManager.activeSystemPromptId
-    val maxContextWindow: Flow<Int> = settingsManager.maxContextWindow
-    val visualizeContextRollout: Flow<Boolean> = settingsManager.visualizeContextRollout
-    val codeExecutionEnabled: Flow<Boolean> = settingsManager.codeExecutionEnabled
-    val googleSearchEnabled: Flow<Boolean> = settingsManager.googleSearchEnabled
-    val thinkingEnabled: Flow<Boolean> = settingsManager.thinkingEnabled
-    val thinkingLevel: Flow<String> = settingsManager.thinkingLevel
-    val thinkingBudgetEnabled: Flow<Boolean> = settingsManager.thinkingBudgetEnabled
-    val thinkingBudgetTokens: Flow<Int> = settingsManager.thinkingBudgetTokens
-    val providerBaseUrls: Flow<Map<String, String>> = settingsManager.providerBaseUrls
-    val titleGenerationEnabled: Flow<Boolean> = settingsManager.titleGenerationEnabled
-    val titleGenerationModel: Flow<String?> = settingsManager.titleGenerationModel
-    val titleGenerationPrompt: Flow<String> = settingsManager.titleGenerationPrompt
-    val imageTranscriptionEnabledModels: Flow<Set<String>> = settingsManager.imageTranscriptionEnabledModels
-    val imageTranscriptionModel: Flow<String?> = settingsManager.imageTranscriptionModel
-    val imageTranscriptionBatchSize: Flow<Int> = settingsManager.imageTranscriptionBatchSize
-    val imageTranscriptionPrompt: Flow<String> = settingsManager.imageTranscriptionPrompt
-    val accessPastConversations: Flow<Boolean> = settingsManager.accessPastConversations
-    val accessSavedMemories: Flow<Boolean> = settingsManager.accessSavedMemories
-    val accessActiveMemory: Flow<Boolean> = settingsManager.accessActiveMemory
-    val ragSearchEnabled: Flow<Boolean> = settingsManager.ragSearchEnabled
-    val autoCacheEnabled: Flow<Boolean> = settingsManager.autoCacheEnabled
-    val autoUpdateCheck: Flow<Boolean> = settingsManager.autoUpdateCheck
-    val lastUpdateCheckTime: Flow<Long> = settingsManager.lastUpdateCheckTime
-    val modelSearchMethod: Flow<String> = settingsManager.modelSearchMethod
-    val manualSearchMethod: Flow<String> = settingsManager.manualSearchMethod
-    val embeddingModels: Flow<List<EmbeddingModelConfig>> = settingsManager.embeddingModels
-    val activeEmbeddingModelId: Flow<String> = settingsManager.activeEmbeddingModelId
-    val appLanguage: Flow<String> = settingsManager.appLanguage
-    val webSearchEnabled: Flow<Boolean> = settingsManager.webSearchEnabled
-    val webSearchProvider: Flow<String> = settingsManager.webSearchProvider
-    val webSearchApiKeys: Flow<Map<String, String>> = settingsManager.webSearchApiKeys
-    val webSearchNumResults: Flow<Int> = settingsManager.webSearchNumResults
-    val webSearchBaseUrl: Flow<String> = settingsManager.webSearchBaseUrl
-    val showDocumentationFab: Flow<Boolean> = settingsManager.showDocumentationFab
-    val shellEnabled: Flow<Boolean> = settingsManager.shellEnabled
-    val shellDevices: Flow<List<ShellDeviceConfig>> = settingsManager.shellDevices
-    val sandboxEnabled: Flow<Boolean> = settingsManager.sandboxEnabled
-    val defaultTemperature: Flow<Float?> = settingsManager.defaultTemperature
-    val defaultMaxTokens: Flow<Int?> = settingsManager.defaultMaxTokens
-    val defaultTopP: Flow<Float?> = settingsManager.defaultTopP
-    val defaultFrequencyPenalty: Flow<Float?> = settingsManager.defaultFrequencyPenalty
-    val defaultPresencePenalty: Flow<Float?> = settingsManager.defaultPresencePenalty
-    val conversationSettings: Flow<Map<String, ConversationSettings>> = settingsManager.conversationSettings
-    val themeMode: Flow<String> = settingsManager.themeMode
-    val colorScheme: Flow<String> = settingsManager.colorScheme
-    val dynamicColor: Flow<Boolean> = settingsManager.dynamicColor
-    val blurEffectsEnabled: Flow<Boolean> = settingsManager.blurEffectsEnabled
-    val hapticsEnabled: Flow<Boolean> = settingsManager.hapticsEnabled
-    val toolCallDisplayMode: Flow<String> = settingsManager.toolCallDisplayMode
-    val schemeStyle: Flow<String> = settingsManager.schemeStyle
-    val searchContextWindow: Flow<Int> = settingsManager.searchContextWindow
-    val searchMatchLimit: Flow<Int> = settingsManager.searchMatchLimit
-    val ragThreshold: Flow<Float> = settingsManager.ragThreshold
-    val localChatModels: Flow<List<LocalChatModelConfig>> = settingsManager.localChatModels
-    val customProviders: Flow<List<CustomProviderConfig>> = settingsManager.customProviders
+    // ── Read StateFlows (eagerly shared) ──────────────────────
+
+    val selectedModel: StateFlow<String> = hot(settingsManager.selectedModel, "gemini-1.5-flash")
+    val availableModels: StateFlow<Map<String, List<String>>> = hot(settingsManager.availableModels, emptyMap())
+    val enabledModels: StateFlow<Set<String>> = hot(settingsManager.enabledModels, emptySet())
+    val modelAliases: StateFlow<Map<String, String>> = hot(settingsManager.modelAliases, emptyMap())
+    val apiKeys: StateFlow<List<ApiKeyEntry>> = hot(settingsManager.apiKeys, emptyList())
+    val activeApiKeyIds: StateFlow<Map<String, String>> = hot(settingsManager.activeApiKeyIds, emptyMap())
+    val systemPrompts: StateFlow<List<SystemPromptEntry>> = hot(settingsManager.systemPrompts, emptyList())
+    val activeSystemPromptId: StateFlow<String?> = hot(settingsManager.activeSystemPromptId, null)
+    val maxContextWindow: StateFlow<Int> = hot(settingsManager.maxContextWindow, 20)
+    val visualizeContextRollout: StateFlow<Boolean> = hot(settingsManager.visualizeContextRollout, false)
+    val codeExecutionEnabled: StateFlow<Boolean> = hot(settingsManager.codeExecutionEnabled, false)
+    val googleSearchEnabled: StateFlow<Boolean> = hot(settingsManager.googleSearchEnabled, false)
+    val thinkingEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingEnabled, true)
+    val thinkingLevel: StateFlow<String> = hot(settingsManager.thinkingLevel, "medium")
+    val thinkingBudgetEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingBudgetEnabled, false)
+    val thinkingBudgetTokens: StateFlow<Int> = hot(settingsManager.thinkingBudgetTokens, 4096)
+    val providerBaseUrls: StateFlow<Map<String, String>> = hot(settingsManager.providerBaseUrls, emptyMap())
+    val titleGenerationEnabled: StateFlow<Boolean> = hot(settingsManager.titleGenerationEnabled, true)
+    val titleGenerationModel: StateFlow<String?> = hot(settingsManager.titleGenerationModel, null)
+    val titleGenerationPrompt: StateFlow<String> = hot(settingsManager.titleGenerationPrompt, BuiltInPrompts.TITLE_GENERATION_SYSTEM)
+    val imageTranscriptionEnabledModels: StateFlow<Set<String>> = hot(settingsManager.imageTranscriptionEnabledModels, emptySet())
+    val imageTranscriptionModel: StateFlow<String?> = hot(settingsManager.imageTranscriptionModel, null)
+    val imageTranscriptionBatchSize: StateFlow<Int> = hot(settingsManager.imageTranscriptionBatchSize, 3)
+    val imageTranscriptionPrompt: StateFlow<String> = hot(settingsManager.imageTranscriptionPrompt, BuiltInPrompts.IMAGE_TRANSCRIPTION_USER)
+    val accessPastConversations: StateFlow<Boolean> = hot(settingsManager.accessPastConversations, true)
+    val accessSavedMemories: StateFlow<Boolean> = hot(settingsManager.accessSavedMemories, true)
+    val accessActiveMemory: StateFlow<Boolean> = hot(settingsManager.accessActiveMemory, true)
+    val ragSearchEnabled: StateFlow<Boolean> = hot(settingsManager.ragSearchEnabled, false)
+    val autoCacheEnabled: StateFlow<Boolean> = hot(settingsManager.autoCacheEnabled, true)
+    val autoUpdateCheck: StateFlow<Boolean> = hot(settingsManager.autoUpdateCheck, true)
+    val lastUpdateCheckTime: StateFlow<Long> = hot(settingsManager.lastUpdateCheckTime, 0L)
+    val modelSearchMethod: StateFlow<String> = hot(settingsManager.modelSearchMethod, "keyword")
+    val manualSearchMethod: StateFlow<String> = hot(settingsManager.manualSearchMethod, "keyword")
+    val embeddingModels: StateFlow<List<EmbeddingModelConfig>> = hot(settingsManager.embeddingModels, emptyList())
+    val activeEmbeddingModelId: StateFlow<String> = hot(settingsManager.activeEmbeddingModelId, "")
+    val appLanguage: StateFlow<String> = hot(settingsManager.appLanguage, "system")
+    val webSearchEnabled: StateFlow<Boolean> = hot(settingsManager.webSearchEnabled, false)
+    val webSearchProvider: StateFlow<String> = hot(settingsManager.webSearchProvider, "duckduckgo")
+    val webSearchApiKeys: StateFlow<Map<String, String>> = hot(settingsManager.webSearchApiKeys, emptyMap())
+    val webSearchNumResults: StateFlow<Int> = hot(settingsManager.webSearchNumResults, 5)
+    val webSearchBaseUrl: StateFlow<String> = hot(settingsManager.webSearchBaseUrl, "")
+    val imageGenEnabled: StateFlow<Boolean> = hot(settingsManager.imageGenEnabled, false)
+    val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
+    val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
+    val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
+    val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
+    val shellConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.shellConfirmEnabled, true)
+    val shellDevices: StateFlow<List<ShellDeviceConfig>> = hot(settingsManager.shellDevices, emptyList())
+    val sandboxEnabled: StateFlow<Boolean> = hot(settingsManager.sandboxEnabled, false)
+    val defaultTemperature: StateFlow<Float?> = hot(settingsManager.defaultTemperature, null)
+    val defaultMaxTokens: StateFlow<Int?> = hot(settingsManager.defaultMaxTokens, null)
+    val defaultTopP: StateFlow<Float?> = hot(settingsManager.defaultTopP, null)
+    val defaultFrequencyPenalty: StateFlow<Float?> = hot(settingsManager.defaultFrequencyPenalty, null)
+    val defaultPresencePenalty: StateFlow<Float?> = hot(settingsManager.defaultPresencePenalty, null)
+    val conversationSettings: StateFlow<Map<String, ConversationSettings>> = hot(settingsManager.conversationSettings, emptyMap())
+    val themeMode: StateFlow<String> = hot(settingsManager.themeMode, "FOLLOW_DEVICE")
+    val colorScheme: StateFlow<String> = hot(settingsManager.colorScheme, "DEFAULT")
+    val dynamicColor: StateFlow<Boolean> = hot(settingsManager.dynamicColor, true)
+    val blurEffectsEnabled: StateFlow<Boolean> = hot(settingsManager.blurEffectsEnabled, true)
+    val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
+    val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
+    val schemeStyle: StateFlow<String> = hot(settingsManager.schemeStyle, "TONAL_SPOT")
+    val searchContextWindow: StateFlow<Int> = hot(settingsManager.searchContextWindow, 8)
+    val searchMatchLimit: StateFlow<Int> = hot(settingsManager.searchMatchLimit, 10)
+    val ragThreshold: StateFlow<Float> = hot(settingsManager.ragThreshold, 0.5f)
+    val localChatModels: StateFlow<List<LocalChatModelConfig>> = hot(settingsManager.localChatModels, emptyList())
+    val customProviders: StateFlow<List<CustomProviderConfig>> = hot(settingsManager.customProviders, emptyList())
+    val lastModelsFetchFingerprint: StateFlow<String> = hot(settingsManager.lastModelsFetchFingerprint, "")
     // ── Auto Backup ───────────────────────────────────────────
-    val autoBackupEnabled: Flow<Boolean> = settingsManager.autoBackupEnabled
-    val autoBackupPeriodHours: Flow<Int> = settingsManager.autoBackupPeriodHours
-    val autoBackupCategories: Flow<String> = settingsManager.autoBackupCategories
-    val autoBackupDirectory: Flow<String> = settingsManager.autoBackupDirectory
-    val autoDeleteEnabled: Flow<Boolean> = settingsManager.autoDeleteEnabled
-    val autoDeletePeriodHours: Flow<Int> = settingsManager.autoDeletePeriodHours
-    val lastBackupTimestamp: Flow<Long> = settingsManager.lastBackupTimestamp
+    val autoBackupEnabled: StateFlow<Boolean> = hot(settingsManager.autoBackupEnabled, true)
+    val autoBackupPeriodHours: StateFlow<Int> = hot(settingsManager.autoBackupPeriodHours, 24)
+    val autoBackupCategories: StateFlow<String> = hot(settingsManager.autoBackupCategories, "conversations,memories,system_prompts,settings")
+    val autoBackupDirectory: StateFlow<String> = hot(settingsManager.autoBackupDirectory, "Download/Agora/Backup")
+    val autoDeleteEnabled: StateFlow<Boolean> = hot(settingsManager.autoDeleteEnabled, true)
+    val autoDeletePeriodHours: StateFlow<Int> = hot(settingsManager.autoDeletePeriodHours, 168)
+    val lastBackupTimestamp: StateFlow<Long> = hot(settingsManager.lastBackupTimestamp, 0L)
 
-    // ── Write (direct delegation) ─────────────────────────────
+    // ── Write (fire-and-forget; read current state from own StateFlows) ──
+    //
+    // These setters launch on [scope] and read "current" list/map state from this
+    // repository's own `.value`, so callers no longer pass it in. Absorbed from the
+    // former `SettingsDelegate`; logic is byte-for-byte equivalent.
 
-    suspend fun saveSelectedModel(model: String) = settingsManager.saveSelectedModel(model)
-    suspend fun saveEnabledModels(models: Set<String>) = settingsManager.saveEnabledModels(models)
-    suspend fun saveAvailableModels(provider: String, models: List<String>) = settingsManager.saveAvailableModels(provider, models)
-    suspend fun saveModelAliases(aliases: Map<String, String>) = settingsManager.saveModelAliases(aliases)
-    suspend fun saveApiKeys(keys: List<ApiKeyEntry>) = settingsManager.saveApiKeys(keys)
-    suspend fun setActiveApiKeyId(provider: String, id: String?) = settingsManager.setActiveApiKeyId(provider, id)
-    suspend fun saveSystemPrompts(prompts: List<SystemPromptEntry>) = settingsManager.saveSystemPrompts(prompts)
-    suspend fun setActiveSystemPromptId(id: String?) = settingsManager.setActiveSystemPromptId(id)
-    suspend fun saveMaxContextWindow(window: Int) = settingsManager.saveMaxContextWindow(window)
-    suspend fun saveVisualizeContextRollout(enabled: Boolean) = settingsManager.saveVisualizeContextRollout(enabled)
-    suspend fun saveProviderBaseUrl(provider: String, url: String) = settingsManager.saveProviderBaseUrl(provider, url)
-    suspend fun saveCustomProviders(providers: List<CustomProviderConfig>) = settingsManager.saveCustomProviders(providers)
-    suspend fun saveTitleGenerationEnabled(enabled: Boolean) = settingsManager.saveTitleGenerationEnabled(enabled)
-    suspend fun saveTitleGenerationModel(model: String?) = settingsManager.saveTitleGenerationModel(model)
-    suspend fun saveTitleGenerationPrompt(prompt: String) = settingsManager.saveTitleGenerationPrompt(prompt)
-    suspend fun saveImageTranscriptionModel(model: String?) = settingsManager.saveImageTranscriptionModel(model)
-    suspend fun saveImageTranscriptionBatchSize(size: Int) = settingsManager.saveImageTranscriptionBatchSize(size)
-    suspend fun saveImageTranscriptionPrompt(prompt: String) = settingsManager.saveImageTranscriptionPrompt(prompt)
-    suspend fun saveImageTranscriptionEnabledModels(models: Set<String>) = settingsManager.saveImageTranscriptionEnabledModels(models)
-    suspend fun saveAccessPastConversations(enabled: Boolean) = settingsManager.saveAccessPastConversations(enabled)
-    suspend fun saveAccessSavedMemories(enabled: Boolean) = settingsManager.saveAccessSavedMemories(enabled)
-    suspend fun saveAccessActiveMemory(enabled: Boolean) = settingsManager.saveAccessActiveMemory(enabled)
-    suspend fun saveRagSearchEnabled(enabled: Boolean) = settingsManager.saveRagSearchEnabled(enabled)
-    suspend fun saveAutoCacheEnabled(enabled: Boolean) = settingsManager.saveAutoCacheEnabled(enabled)
-    suspend fun saveAutoUpdateCheck(enabled: Boolean) = settingsManager.saveAutoUpdateCheck(enabled)
-    suspend fun saveLastUpdateCheckTime(time: Long) = settingsManager.saveLastUpdateCheckTime(time)
-    suspend fun saveModelSearchMethod(method: String) = settingsManager.saveModelSearchMethod(method)
-    suspend fun saveManualSearchMethod(method: String) = settingsManager.saveManualSearchMethod(method)
-    suspend fun saveEmbeddingModels(models: List<EmbeddingModelConfig>) = settingsManager.saveEmbeddingModels(models)
-    suspend fun setActiveEmbeddingModelId(id: String) = settingsManager.setActiveEmbeddingModelId(id)
-    suspend fun saveAppLanguage(language: String) = settingsManager.saveAppLanguage(language)
-    suspend fun saveWebSearchEnabled(enabled: Boolean) = settingsManager.saveWebSearchEnabled(enabled)
-    suspend fun saveWebSearchProvider(provider: String) = settingsManager.saveWebSearchProvider(provider)
-    suspend fun saveWebSearchApiKey(provider: String, apiKey: String) = settingsManager.saveWebSearchApiKey(provider, apiKey)
-    suspend fun saveWebSearchNumResults(n: Int) = settingsManager.saveWebSearchNumResults(n)
-    suspend fun saveWebSearchBaseUrl(url: String) = settingsManager.saveWebSearchBaseUrl(url)
-    suspend fun saveShowDocumentationFab(enabled: Boolean) = settingsManager.saveShowDocumentationFab(enabled)
-    suspend fun saveShellEnabled(enabled: Boolean) = settingsManager.saveShellEnabled(enabled)
-    suspend fun saveShellDevices(devices: List<ShellDeviceConfig>) = settingsManager.saveShellDevices(devices)
-    suspend fun saveSandboxEnabled(enabled: Boolean) = settingsManager.saveSandboxEnabled(enabled)
-    suspend fun saveThinkingEnabled(enabled: Boolean) = settingsManager.saveThinkingEnabled(enabled)
-    suspend fun saveThinkingLevel(level: String) = settingsManager.saveThinkingLevel(level)
-    suspend fun saveThinkingBudgetEnabled(enabled: Boolean) = settingsManager.saveThinkingBudgetEnabled(enabled)
-    suspend fun saveThinkingBudgetTokens(tokens: Int) = settingsManager.saveThinkingBudgetTokens(tokens)
-    suspend fun saveDefaultTemperature(v: Float?) = settingsManager.saveDefaultTemperature(v)
-    suspend fun saveDefaultMaxTokens(v: Int?) = settingsManager.saveDefaultMaxTokens(v)
-    suspend fun saveDefaultTopP(v: Float?) = settingsManager.saveDefaultTopP(v)
-    suspend fun saveDefaultFrequencyPenalty(v: Float?) = settingsManager.saveDefaultFrequencyPenalty(v)
-    suspend fun saveDefaultPresencePenalty(v: Float?) = settingsManager.saveDefaultPresencePenalty(v)
-    suspend fun saveConversationSettings(convId: String, settings: ConversationSettings?) = settingsManager.saveConversationSettings(convId, settings)
-    suspend fun saveThemeMode(mode: String) = settingsManager.saveThemeMode(mode)
-    suspend fun saveColorScheme(scheme: String) = settingsManager.saveColorScheme(scheme)
-    suspend fun saveDynamicColor(enabled: Boolean) = settingsManager.saveDynamicColor(enabled)
-    suspend fun saveBlurEffectsEnabled(enabled: Boolean) = settingsManager.saveBlurEffectsEnabled(enabled)
-    suspend fun saveHapticsEnabled(enabled: Boolean) = settingsManager.saveHapticsEnabled(enabled)
-    suspend fun saveSchemeStyle(style: String) = settingsManager.saveSchemeStyle(style)
-    suspend fun saveSearchMatchLimit(n: Int) = settingsManager.saveSearchMatchLimit(n)
-    suspend fun saveSearchContextWindow(n: Int) = settingsManager.saveSearchContextWindow(n)
-    suspend fun saveRagThreshold(threshold: Float) = settingsManager.saveRagThreshold(threshold)
-    suspend fun saveLocalChatModels(models: List<LocalChatModelConfig>) = settingsManager.saveLocalChatModels(models)
-    // ── Auto Backup ───────────────────────────────────────────
-    suspend fun saveAutoBackupEnabled(enabled: Boolean) = settingsManager.saveAutoBackupEnabled(enabled)
-    suspend fun saveAutoBackupPeriodHours(hours: Int) = settingsManager.saveAutoBackupPeriodHours(hours)
-    suspend fun saveAutoBackupCategories(categories: String) = settingsManager.saveAutoBackupCategories(categories)
-    suspend fun saveAutoBackupDirectory(path: String) = settingsManager.saveAutoBackupDirectory(path)
-    suspend fun saveAutoDeleteEnabled(enabled: Boolean) = settingsManager.saveAutoDeleteEnabled(enabled)
-    suspend fun saveAutoDeletePeriodHours(hours: Int) = settingsManager.saveAutoDeletePeriodHours(hours)
-    suspend fun saveLastBackupTimestamp(timestamp: Long) = settingsManager.saveLastBackupTimestamp(timestamp)
+    // Model selection
+    fun setSelectedModel(model: String) {
+        scope.launch { settingsManager.saveSelectedModel(model) }
+    }
 
-    // ── Batch Operations ──────────────────────────────────────
+    fun setEnabledModels(models: Set<String>) {
+        scope.launch {
+            settingsManager.saveEnabledModels(models)
+            if (!models.contains(selectedModel.value)) {
+                settingsManager.saveSelectedModel(models.firstOrNull() ?: "")
+            }
+        }
+    }
+
+    fun updateModelAlias(model: String, alias: String) {
+        scope.launch {
+            val updated = modelAliases.value.toMutableMap()
+            if (alias.isBlank()) updated.remove(model) else updated[model] = alias
+            settingsManager.saveModelAliases(updated)
+        }
+    }
+
+    // API keys
+    fun addApiKey(name: String, key: String, provider: String) {
+        scope.launch {
+            val entry = ApiKeyEntry(name = name, key = key, provider = provider)
+            settingsManager.saveApiKeys(apiKeys.value + entry)
+            settingsManager.setActiveApiKeyId(provider, entry.id)
+        }
+    }
 
     /**
-     * Atomically remove all data associated with a provider:
-     * API keys, available models, base URLs, aliases, and enabled model references.
+     * Store exactly one key for [provider]: update the existing entry in place if there
+     * is one, otherwise add it — and drop any extra entries for the same provider.
+     * Idempotent, so onboarding never accumulates duplicates.
      */
-    suspend fun removeProvider(name: String) {
-        saveAvailableModels(name, emptyList())
-        settingsManager.setActiveApiKeyId(name, null)
-        // Additional cleanup is handled by ChatViewModel caller for now
+    fun upsertApiKey(name: String, key: String, provider: String) {
+        scope.launch {
+            val current = apiKeys.value
+            val existing = current.firstOrNull { it.provider == provider }
+            val entry = existing?.copy(name = name, key = key) ?: ApiKeyEntry(name = name, key = key, provider = provider)
+            settingsManager.saveApiKeys(current.filter { it.provider != provider } + entry)
+            settingsManager.setActiveApiKeyId(provider, entry.id)
+        }
     }
+
+    fun deleteApiKey(id: String) {
+        scope.launch {
+            val current = apiKeys.value
+            val entry = current.find { it.id == id } ?: return@launch
+            val newList = current.filter { it.id != id }
+            if (activeApiKeyIds.value[entry.provider] == id) {
+                val other = newList.firstOrNull { it.provider == entry.provider }
+                settingsManager.setActiveApiKeyId(entry.provider, other?.id)
+            }
+            settingsManager.saveApiKeys(newList)
+        }
+    }
+
+    fun updateApiKey(id: String, name: String, key: String) {
+        scope.launch {
+            settingsManager.saveApiKeys(apiKeys.value.map { if (it.id == id) it.copy(name = name, key = key) else it })
+        }
+    }
+
+    fun setActiveApiKey(provider: String, id: String) {
+        scope.launch { settingsManager.setActiveApiKeyId(provider, id) }
+    }
+
+    // System prompts
+    fun addSystemPrompt(
+        title: String, systemItems: List<PromptTemplateItem>,
+        userPrependItems: List<PromptTemplateItem>, userPostpendItems: List<PromptTemplateItem>
+    ) {
+        scope.launch {
+            val newList = systemPrompts.value + SystemPromptEntry(title = title, systemItems = systemItems, userPrependItems = userPrependItems, userPostpendItems = userPostpendItems)
+            settingsManager.saveSystemPrompts(newList)
+            if (activeSystemPromptId.value == null) settingsManager.setActiveSystemPromptId(newList.last().id)
+        }
+    }
+
+    fun deleteSystemPrompt(id: String) {
+        scope.launch {
+            val newList = systemPrompts.value.filter { it.id != id }
+            settingsManager.saveSystemPrompts(newList)
+            if (activeSystemPromptId.value == id) settingsManager.setActiveSystemPromptId(newList.firstOrNull()?.id)
+        }
+    }
+
+    fun updateSystemPrompt(
+        id: String, title: String, systemItems: List<PromptTemplateItem>,
+        userPrependItems: List<PromptTemplateItem>, userPostpendItems: List<PromptTemplateItem>
+    ) {
+        scope.launch {
+            settingsManager.saveSystemPrompts(systemPrompts.value.map { if (it.id == id) it.copy(title = title, content = "", systemItems = systemItems, userPrependItems = userPrependItems, userPostpendItems = userPostpendItems) else it })
+        }
+    }
+
+    fun setActiveSystemPrompt(id: String) {
+        scope.launch { settingsManager.setActiveSystemPromptId(id) }
+    }
+
+    // Custom provider CRUD (callbacks touch ChatViewModel's live provider map)
+    fun addCustomProvider(name: String, baseUrl: String, onProviderAdd: (String, CustomOpenAiProvider) -> Unit) {
+        scope.launch {
+            settingsManager.saveProviderBaseUrl(name, baseUrl)
+            settingsManager.saveCustomProviders(customProviders.value + CustomProviderConfig(name))
+            onProviderAdd(name, CustomOpenAiProvider(name, baseUrl))
+        }
+    }
+
+    fun renameCustomProvider(
+        oldName: String, newName: String,
+        onProviderRemove: (String) -> Unit,
+        onProviderAdd: (String, CustomOpenAiProvider) -> Unit
+    ) {
+        val url = providerBaseUrls.value[oldName] ?: return
+        scope.launch {
+            onProviderRemove(oldName)
+            val updated = customProviders.value.toMutableList()
+            val idx = updated.indexOfFirst { it.name == oldName }
+            if (idx >= 0) {
+                updated[idx] = CustomProviderConfig(newName)
+                settingsManager.saveCustomProviders(updated)
+                settingsManager.saveProviderBaseUrl(oldName, "")
+                settingsManager.saveProviderBaseUrl(newName, url)
+                val models = availableModels.value.toMutableMap()
+                models[newName] = models.remove(oldName) ?: emptyList()
+                settingsManager.saveAvailableModels(newName, models[newName] ?: emptyList())
+                settingsManager.saveAvailableModels(oldName, emptyList())
+                val newEnabled = enabledModels.value.map { if (it.startsWith("$oldName:")) it.replace("$oldName:", "$newName:") else it }.toSet()
+                settingsManager.saveEnabledModels(newEnabled)
+                val newAliases = modelAliases.value.mapKeys { if (it.key.startsWith("$oldName:")) it.key.replace("$oldName:", "$newName:") else it.key }
+                settingsManager.saveModelAliases(newAliases)
+                settingsManager.setActiveApiKeyId(oldName, null)
+                val newKeys = apiKeys.value.map { if (it.provider == oldName) it.copy(provider = newName) else it }
+                settingsManager.saveApiKeys(newKeys)
+                activeApiKeyIds.value[oldName]?.let { settingsManager.setActiveApiKeyId(newName, it) }
+            }
+            onProviderAdd(newName, CustomOpenAiProvider(newName, url))
+        }
+    }
+
+    fun deleteCustomProvider(name: String, onProviderRemove: (String) -> Unit) {
+        scope.launch {
+            settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
+            onProviderRemove(name)
+            settingsManager.saveAvailableModels(name, emptyList())
+            settingsManager.saveEnabledModels(enabledModels.value.filter { !it.startsWith("$name:") }.toSet())
+            settingsManager.saveModelAliases(modelAliases.value.filterKeys { !it.startsWith("$name:") })
+            settingsManager.saveProviderBaseUrl(name, "")
+            settingsManager.saveApiKeys(apiKeys.value.filter { it.provider != name })
+            settingsManager.setActiveApiKeyId(name, null)
+        }
+    }
+
+    // Image transcription
+    fun addImageTranscriptionModels(models: Set<String>) = scope.launch { settingsManager.saveImageTranscriptionEnabledModels(imageTranscriptionEnabledModels.value + models) }
+    fun removeImageTranscriptionModel(model: String) = scope.launch { settingsManager.saveImageTranscriptionEnabledModels(imageTranscriptionEnabledModels.value - model) }
+
+    // Shell devices
+    fun removeShellDevice(deviceId: String) = scope.launch { settingsManager.saveShellDevices(shellDevices.value.filter { it.id != deviceId }) }
+
+    fun setConversationSettings(convId: String, settings: ConversationSettings?) = scope.launch { settingsManager.saveConversationSettings(convId, settings) }
+
+    // ── Simple setting toggles ────────────────────────────────
+    fun setMaxContextWindow(window: Int) = scope.launch { settingsManager.saveMaxContextWindow(window) }
+    fun setVisualizeContextRollout(enabled: Boolean) = scope.launch { settingsManager.saveVisualizeContextRollout(enabled) }
+    fun setProviderBaseUrl(provider: String, url: String) = scope.launch { settingsManager.saveProviderBaseUrl(provider, url) }
+    fun setTitleGenerationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTitleGenerationEnabled(enabled) }
+    fun setTitleGenerationModel(model: String?) = scope.launch { settingsManager.saveTitleGenerationModel(model) }
+    fun setTitleGenerationPrompt(prompt: String) = scope.launch { settingsManager.saveTitleGenerationPrompt(prompt) }
+    fun setImageTranscriptionModel(model: String?) = scope.launch { settingsManager.saveImageTranscriptionModel(model) }
+    fun setImageTranscriptionBatchSize(size: Int) = scope.launch { settingsManager.saveImageTranscriptionBatchSize(size) }
+    fun setImageTranscriptionPrompt(prompt: String) = scope.launch { settingsManager.saveImageTranscriptionPrompt(prompt) }
+    fun setAccessPastConversations(enabled: Boolean) = scope.launch { settingsManager.saveAccessPastConversations(enabled) }
+    fun setAccessSavedMemories(enabled: Boolean) = scope.launch { settingsManager.saveAccessSavedMemories(enabled) }
+    fun setAccessActiveMemory(enabled: Boolean) = scope.launch { settingsManager.saveAccessActiveMemory(enabled) }
+    fun setRagSearchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveRagSearchEnabled(enabled) }
+    fun setAutoCacheEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAutoCacheEnabled(enabled) }
+    fun setAutoUpdateCheck(enabled: Boolean) = scope.launch { settingsManager.saveAutoUpdateCheck(enabled) }
+    fun setLastUpdateCheckTime(time: Long) = scope.launch { settingsManager.saveLastUpdateCheckTime(time) }
+    fun setModelSearchMethod(method: String) = scope.launch { settingsManager.saveModelSearchMethod(method) }
+    fun setManualSearchMethod(method: String) = scope.launch { settingsManager.saveManualSearchMethod(method) }
+    fun setAppLanguage(language: String) = scope.launch { settingsManager.saveAppLanguage(language) }
+    fun setWebSearchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveWebSearchEnabled(enabled) }
+    fun setWebSearchProvider(provider: String) = scope.launch { settingsManager.saveWebSearchProvider(provider) }
+    fun setWebSearchApiKey(provider: String, apiKey: String) = scope.launch { settingsManager.saveWebSearchApiKey(provider, apiKey) }
+    fun setWebSearchNumResults(n: Int) = scope.launch { settingsManager.saveWebSearchNumResults(n) }
+    fun setWebSearchBaseUrl(url: String) = scope.launch { settingsManager.saveWebSearchBaseUrl(url) }
+    fun setImageGenEnabled(enabled: Boolean) = scope.launch { settingsManager.saveImageGenEnabled(enabled) }
+    fun setImageGenModel(model: String?) = scope.launch { settingsManager.saveImageGenModel(model) }
+    fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
+    fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
+    fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
+    fun setSandboxEnabled(enabled: Boolean) = scope.launch { settingsManager.saveSandboxEnabled(enabled) }
+    fun setThinkingEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingEnabled(enabled) }
+    fun setThinkingLevel(level: String) = scope.launch { settingsManager.saveThinkingLevel(level) }
+    fun setThinkingBudgetEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingBudgetEnabled(enabled) }
+    fun setThinkingBudgetTokens(tokens: Int) = scope.launch { settingsManager.saveThinkingBudgetTokens(tokens) }
+    fun setDefaultTemperature(v: Float?) = scope.launch { settingsManager.saveDefaultTemperature(v) }
+    fun setDefaultMaxTokens(v: Int?) = scope.launch { settingsManager.saveDefaultMaxTokens(v) }
+    fun setDefaultTopP(v: Float?) = scope.launch { settingsManager.saveDefaultTopP(v) }
+    fun setDefaultFrequencyPenalty(v: Float?) = scope.launch { settingsManager.saveDefaultFrequencyPenalty(v) }
+    fun setDefaultPresencePenalty(v: Float?) = scope.launch { settingsManager.saveDefaultPresencePenalty(v) }
+    fun setThemeMode(mode: String) = scope.launch { settingsManager.saveThemeMode(mode) }
+    fun setColorScheme(scheme: String) = scope.launch { settingsManager.saveColorScheme(scheme) }
+    fun setDynamicColor(enabled: Boolean) = scope.launch { settingsManager.saveDynamicColor(enabled) }
+    fun setBlurEffectsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveBlurEffectsEnabled(enabled) }
+    fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
+    fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
+    fun setSchemeStyle(style: String) = scope.launch { settingsManager.saveSchemeStyle(style) }
+    fun setSearchMatchLimit(n: Int) = scope.launch { settingsManager.saveSearchMatchLimit(n) }
+    fun setSearchContextWindow(n: Int) = scope.launch { settingsManager.saveSearchContextWindow(n) }
+    fun setRagThreshold(threshold: Float) = scope.launch { settingsManager.saveRagThreshold(threshold) }
 }

@@ -22,7 +22,7 @@ private data class LanguageOption(val code: String, val label: String)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val appLanguage by viewModel.appLanguage.collectAsState()
+    val appLanguage by viewModel.settings.appLanguage.collectAsState()
     val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
 
     val restartMessage = stringResource(R.string.language_restart_message)
@@ -49,7 +49,7 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     ) {
             val changeLanguage: (String) -> Unit = { code ->
                 if (code != appLanguage) {
-                    viewModel.setAppLanguage(code)
+                    viewModel.settings.setAppLanguage(code)
                     viewModel.emitSnackbar(message = restartMessage, actionLabel = restartAction) {
                         activity?.let {
                             it.finish()

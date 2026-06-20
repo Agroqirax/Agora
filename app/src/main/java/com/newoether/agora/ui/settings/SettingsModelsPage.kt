@@ -51,17 +51,17 @@ private val FiveBottom    = RoundedCornerShape(bottomStart = 5.dp, bottomEnd = 5
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val enabledModels by viewModel.enabledModels.collectAsState()
-    val availableModels by viewModel.availableModels.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
-    val selectedModel by viewModel.selectedModel.collectAsState()
+    val enabledModels by viewModel.settings.enabledModels.collectAsState()
+    val availableModels by viewModel.settings.availableModels.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val selectedModel by viewModel.settings.selectedModel.collectAsState()
     var showActiveModelDialog by remember { mutableStateOf(false) }
     var showModelAliasDialog by remember { mutableStateOf<String?>(null) }
     val expandedProviders = remember { mutableStateMapOf<String, MutableTransitionState<Boolean>>() }
     val modelBlockHeights = remember { mutableStateMapOf<String, Float>() }
 
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
-    val lastFingerprint by viewModel.lastFetchFingerprint.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
+    val lastFingerprint by viewModel.settings.lastModelsFetchFingerprint.collectAsState()
     val providers = availableModels.entries.filter { it.value.isNotEmpty() }
 
     // Auto-fetch models when entering the page if provider config has changed
@@ -231,7 +231,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     )
                                                 }
                                                 Checkbox(checked = isEnabled, onCheckedChange = {
-                                                    viewModel.setEnabledModels(if (it) enabledModels + model else enabledModels - model)
+                                                    viewModel.settings.setEnabledModels(if (it) enabledModels + model else enabledModels - model)
                                                 })
                                             }
                                         },
@@ -273,13 +273,13 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 RadioButton(
                                     selected = model == selectedModel,
                                     onClick = {
-                                        viewModel.setSelectedModel(model)
+                                        viewModel.settings.setSelectedModel(model)
                                         showActiveModelDialog = false
                                     }
                                 )
                             },
                             modifier = Modifier.clickable {
-                                viewModel.setSelectedModel(model)
+                                viewModel.settings.setSelectedModel(model)
                                 showActiveModelDialog = false
                             }
                         )
@@ -316,7 +316,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.updateModelAlias(model, aliasState.text.toString())
+                    viewModel.settings.updateModelAlias(model, aliasState.text.toString())
                     showModelAliasDialog = null
                 }) { Text(stringResource(R.string.provider_save)) }
             },

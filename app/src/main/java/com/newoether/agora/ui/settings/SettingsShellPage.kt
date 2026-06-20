@@ -37,14 +37,14 @@ import java.util.UUID
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val shellEnabled by viewModel.shellEnabled.collectAsState()
-    val shellConfirmEnabled by viewModel.shellConfirmEnabled.collectAsState()
-    val shellDevices by viewModel.shellDevices.collectAsState()
-    val sandboxEnabled by viewModel.sandboxEnabled.collectAsState()
+    val shellEnabled by viewModel.settings.shellEnabled.collectAsState()
+    val shellConfirmEnabled by viewModel.settings.shellConfirmEnabled.collectAsState()
+    val shellDevices by viewModel.settings.shellDevices.collectAsState()
+    val sandboxEnabled by viewModel.settings.sandboxEnabled.collectAsState()
     val density = androidx.compose.ui.platform.LocalDensity.current
     var newlyAddedDeviceId by remember { mutableStateOf<String?>(null) }
     var deleteConfirmDeviceId by remember { mutableStateOf<String?>(null) }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     // ── Sandbox navigation ──
     var showSandboxMgmt by remember { mutableStateOf(false) }
@@ -77,8 +77,8 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         headlineContent = { Text(stringResource(R.string.shell_enable)) },
                         supportingContent = { Text(stringResource(R.string.shell_enable_desc)) },
                         leadingContent = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingContent = { Switch(checked = shellEnabled, onCheckedChange = { viewModel.setShellEnabled(it) }) },
-                        modifier = Modifier.clickable { viewModel.setShellEnabled(!shellEnabled) }
+                        trailingContent = { Switch(checked = shellEnabled, onCheckedChange = { viewModel.settings.setShellEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.settings.setShellEnabled(!shellEnabled) }
                     )
                 }
                 if (shellEnabled) {
@@ -143,7 +143,7 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     title = { Text(stringResource(R.string.shell_delete_confirm_title), fontWeight = FontWeight.Bold) },
                     text = { Text(stringResource(R.string.shell_delete_confirm_message, device?.name?.ifBlank { stringResource(R.string.search_untitled) } ?: "")) },
                     confirmButton = {
-                        TextButton(onClick = { viewModel.removeShellDevice(deviceId); deleteConfirmDeviceId = null },
+                        TextButton(onClick = { viewModel.settings.removeShellDevice(deviceId); deleteConfirmDeviceId = null },
                             colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.delete)) }
                     },
                     dismissButton = { TextButton(onClick = { deleteConfirmDeviceId = null }) { Text(stringResource(R.string.cancel)) } }
@@ -168,8 +168,8 @@ private fun SandboxSection(viewModel: ChatViewModel, sandboxEnabled: Boolean, on
                 headlineContent = { Text(stringResource(R.string.sandbox_enable)) },
                 supportingContent = { Text(stringResource(R.string.sandbox_enable_desc)) },
                 leadingContent = { Icon(Icons.Default.Terminal, null, tint = MaterialTheme.colorScheme.primary) },
-                trailingContent = { Switch(checked = sandboxEnabled, onCheckedChange = { viewModel.setSandboxEnabled(it) }) },
-                modifier = Modifier.clickable { viewModel.setSandboxEnabled(!sandboxEnabled) }
+                trailingContent = { Switch(checked = sandboxEnabled, onCheckedChange = { viewModel.settings.setSandboxEnabled(it) }) },
+                modifier = Modifier.clickable { viewModel.settings.setSandboxEnabled(!sandboxEnabled) }
             )
         }
         if (sandboxEnabled) {

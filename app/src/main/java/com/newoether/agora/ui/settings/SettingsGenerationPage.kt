@@ -34,18 +34,18 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val maxContextWindow by viewModel.maxContextWindow.collectAsState()
-    val visualizeContextRollout by viewModel.visualizeContextRollout.collectAsState()
-    val defaultTemperature by viewModel.defaultTemperature.collectAsState()
-    val defaultMaxTokens by viewModel.defaultMaxTokens.collectAsState()
-    val defaultTopP by viewModel.defaultTopP.collectAsState()
-    val defaultFrequencyPenalty by viewModel.defaultFrequencyPenalty.collectAsState()
-    val defaultPresencePenalty by viewModel.defaultPresencePenalty.collectAsState()
-    val thinkingEnabled by viewModel.thinkingEnabled.collectAsState()
-    val thinkingLevel by viewModel.thinkingLevel.collectAsState()
-    val thinkingBudgetEnabled by viewModel.thinkingBudgetEnabled.collectAsState()
-    val thinkingBudgetTokens by viewModel.thinkingBudgetTokens.collectAsState()
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
+    val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
+    val defaultTemperature by viewModel.settings.defaultTemperature.collectAsState()
+    val defaultMaxTokens by viewModel.settings.defaultMaxTokens.collectAsState()
+    val defaultTopP by viewModel.settings.defaultTopP.collectAsState()
+    val defaultFrequencyPenalty by viewModel.settings.defaultFrequencyPenalty.collectAsState()
+    val defaultPresencePenalty by viewModel.settings.defaultPresencePenalty.collectAsState()
+    val thinkingEnabled by viewModel.settings.thinkingEnabled.collectAsState()
+    val thinkingLevel by viewModel.settings.thinkingLevel.collectAsState()
+    val thinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
+    val thinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.generation_title),
@@ -98,7 +98,7 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             val committed = contextWindowDraft.toInt().coerceIn(5, 100)
                                             contextWindowDraft = committed.toFloat()
                                             if (committed != maxContextWindow) {
-                                                viewModel.setMaxContextWindow(committed)
+                                                viewModel.settings.setMaxContextWindow(committed)
                                             }
                                         },
                                         valueRange = 5f..100f,
@@ -117,9 +117,9 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Icon(Icons.Default.Visibility, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             },
                             trailingContent = {
-                                Switch(checked = visualizeContextRollout, onCheckedChange = { viewModel.setVisualizeContextRollout(it) })
+                                Switch(checked = visualizeContextRollout, onCheckedChange = { viewModel.settings.setVisualizeContextRollout(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setVisualizeContextRollout(!visualizeContextRollout) }
+                            modifier = Modifier.clickable { viewModel.settings.setVisualizeContextRollout(!visualizeContextRollout) }
                         )
                     }
                 )
@@ -139,9 +139,9 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Icon(painterResource(id = R.drawable.neurology_24), contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                             },
                             trailingContent = {
-                                Switch(checked = thinkingEnabled, onCheckedChange = { viewModel.setThinkingEnabled(it) })
+                                Switch(checked = thinkingEnabled, onCheckedChange = { viewModel.settings.setThinkingEnabled(it) })
                             },
-                            modifier = Modifier.clickable { viewModel.setThinkingEnabled(!thinkingEnabled) }
+                            modifier = Modifier.clickable { viewModel.settings.setThinkingEnabled(!thinkingEnabled) }
                         )
                     },
                     {
@@ -150,10 +150,10 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             level = thinkingLevel,
                             budgetEnabled = thinkingBudgetEnabled,
                             budgetTokens = thinkingBudgetTokens,
-                            onEnabledChange = { viewModel.setThinkingEnabled(it) },
-                            onLevelChange = { viewModel.setThinkingLevel(it) },
-                            onBudgetEnabledChange = { viewModel.setThinkingBudgetEnabled(it) },
-                            onBudgetTokensChange = { viewModel.setThinkingBudgetTokens(it) },
+                            onEnabledChange = { viewModel.settings.setThinkingEnabled(it) },
+                            onLevelChange = { viewModel.settings.setThinkingLevel(it) },
+                            onBudgetEnabledChange = { viewModel.settings.setThinkingBudgetEnabled(it) },
+                            onBudgetTokensChange = { viewModel.settings.setThinkingBudgetTokens(it) },
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
                             showHeader = false,
                             providerName = null,
@@ -174,8 +174,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = defaultTemperature,
                             valueRange = 0f..2f,
                             format = { v -> String.format(Locale.US, "%.2f", v) },
-                            onValueChange = { viewModel.setDefaultTemperature(it) },
-                            onReset = { viewModel.setDefaultTemperature(null) }
+                            onValueChange = { viewModel.settings.setDefaultTemperature(it) },
+                            onReset = { viewModel.settings.setDefaultTemperature(null) }
                         )
                     },
                     {
@@ -186,8 +186,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = defaultMaxTokens,
                             presets = maxTokensPresets,
                             format = { it.toString() },
-                            onValueChange = { viewModel.setDefaultMaxTokens(it) },
-                            onReset = { viewModel.setDefaultMaxTokens(null) }
+                            onValueChange = { viewModel.settings.setDefaultMaxTokens(it) },
+                            onReset = { viewModel.settings.setDefaultMaxTokens(null) }
                         )
                     },
                     {
@@ -197,8 +197,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = defaultTopP,
                             valueRange = 0f..1f,
                             format = { v -> String.format(Locale.US, "%.2f", v) },
-                            onValueChange = { viewModel.setDefaultTopP(it) },
-                            onReset = { viewModel.setDefaultTopP(null) }
+                            onValueChange = { viewModel.settings.setDefaultTopP(it) },
+                            onReset = { viewModel.settings.setDefaultTopP(null) }
                         )
                     },
                     {
@@ -208,8 +208,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = defaultFrequencyPenalty,
                             valueRange = -2f..2f,
                             format = { v -> String.format(Locale.US, "%.2f", v) },
-                            onValueChange = { viewModel.setDefaultFrequencyPenalty(it) },
-                            onReset = { viewModel.setDefaultFrequencyPenalty(null) }
+                            onValueChange = { viewModel.settings.setDefaultFrequencyPenalty(it) },
+                            onReset = { viewModel.settings.setDefaultFrequencyPenalty(null) }
                         )
                     },
                     {
@@ -219,8 +219,8 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             value = defaultPresencePenalty,
                             valueRange = -2f..2f,
                             format = { v -> String.format(Locale.US, "%.2f", v) },
-                            onValueChange = { viewModel.setDefaultPresencePenalty(it) },
-                            onReset = { viewModel.setDefaultPresencePenalty(null) }
+                            onValueChange = { viewModel.settings.setDefaultPresencePenalty(it) },
+                            onReset = { viewModel.settings.setDefaultPresencePenalty(null) }
                         )
                     }
                 )

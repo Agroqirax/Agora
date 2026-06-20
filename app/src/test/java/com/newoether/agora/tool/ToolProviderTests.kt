@@ -1,6 +1,7 @@
 package com.newoether.agora.tool
 
 import com.newoether.agora.viewmodel.GenerationContext
+import io.mockk.mockk
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -31,7 +32,7 @@ class WebSearchToolProviderTest {
 }
 
 class RagToolProviderTest {
-    private val provider = RagToolProvider()
+    private val provider = RagToolProvider(mockk(relaxed = true))
     private val enabledCtx = GenerationContext(accessPastConversations = true)
     private val disabledCtx = GenerationContext(accessPastConversations = false)
 
@@ -50,11 +51,11 @@ class RagToolProviderTest {
     }
 
     @Test
-    fun handles_returnsFalseForAllTools() {
-        // RagToolProvider.handles is always false — execution is in GenerationManager's when block
-        assertFalse(provider.handles("search_conversations"))
-        assertFalse(provider.handles("list_conversations"))
-        assertFalse(provider.handles("read_conversation"))
+    fun handles_returnsTrueForConversationTools() {
+        // RagToolProvider now owns execution of the conversation tools.
+        assertTrue(provider.handles("search_conversations"))
+        assertTrue(provider.handles("list_conversations"))
+        assertTrue(provider.handles("read_conversation"))
         assertFalse(provider.handles("web_search"))
     }
 }

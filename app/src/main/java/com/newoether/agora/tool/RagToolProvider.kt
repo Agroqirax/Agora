@@ -1,17 +1,38 @@
 package com.newoether.agora.tool
 
+import com.newoether.agora.api.EmbeddingClient
+import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
 import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
+import com.newoether.agora.data.EmbeddingIndexer
+import com.newoether.agora.data.local.ChatDao
+import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.Participant
+import com.newoether.agora.util.Constants
+import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
- * Provides tool definitions for RAG/conversation search tools.
- * Execution is handled by GenerationManager because it depends on
- * chatDao and semanticSearch which are tightly coupled to the generation pipeline.
+ * Conversation-history tools: search / list / read past conversations.
+ *
+ * Owns both the tool definitions AND their execution (semantic + keyword search,
+ * branch reconstruction, pagination). Execution depends on [ChatDao] and embedding
+ * search, which is why this provider is constructed with a `chatDao` rather than
+ * reading everything from [GenerationContext].
  */
-class RagToolProvider : ToolProvider {
+class RagToolProvider(
+    private val chatDao: ChatDao
+) : ToolProvider {
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.accessPastConversations) return emptyList()
@@ -54,12 +75,361 @@ class RagToolProvider : ToolProvider {
         )
     }
 
-    override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
-        // Execution is handled directly by GenerationManager.executeTool()
-        // because it depends on chatDao and semanticSearch
-        return "Unknown tool: $name"
+    override fun handles(name: String): Boolean =
+        name == "search_conversations" || name == "list_conversations" || name == "read_conversation"
+
+    override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String = when (name) {
+        "search_conversations" -> executeSearchConversations(arguments, ctx)
+        "list_conversations" -> executeListConversations(arguments, ctx)
+        "read_conversation" -> executeReadConversation(arguments, ctx)
+        else -> "Unknown tool: $name"
     }
 
-    override fun handles(name: String): Boolean = false
-    // Execution is handled by GenerationManager.executeTool()'s when block
+    private data class SearchWindow(
+        val conversationId: String,
+        val conversationTitle: String,
+        val messages: List<MessageEntity>,
+        val topScore: Float,
+        val matchCount: Int
+    )
+
+    private suspend fun executeSearchConversations(arguments: String, ctx: GenerationContext): String {
+        val argsStr = arguments.ifBlank { "{}" }
+        val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
+        val query = (args["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+            ?: return buildJsonObject { put("type", "search_conversations"); put("error", "no_query") }.toString()
+        val limit = ((args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: ctx.searchMatchLimit).coerceIn(1, 30)
+        val n = ((args["context_window"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: ctx.searchContextWindow).coerceIn(4, 32)
+        val halfN = n / 2
+        val maxWindowSize = n * 3
+        val totalCap = 200
+
+        return try {
+            // Step 1: Search — normalize to List<Pair<MessageEntity, Float>>
+            val scoredResults: List<Pair<MessageEntity, Float>> = if (ctx.modelSearchMethod == "rag" && ctx.activeEmbeddingConfig != null) {
+                semanticSearch(query, limit, ctx)
+                    .filter { it.second >= ctx.ragThreshold }
+            } else {
+                chatDao.searchMessages(query, limit).map { it to 1.0f }
+            }
+            if (scoredResults.isEmpty())
+                return buildJsonObject { put("type", "search_conversations"); put("query", query); put("error", "no_results") }.toString()
+
+            // Exclude current conversation
+            val currentConvId = ctx.conversationId
+            val scoreByMessageId = scoredResults.associate { it.first.id to it.second }
+            val matchesByConv = scoredResults.filter { it.first.conversationId != currentConvId }
+                .groupBy({ it.first.conversationId }, { it.first.id })
+            if (matchesByConv.isEmpty())
+                return buildJsonObject { put("type", "search_conversations"); put("query", query); put("error", "no_results") }.toString()
+
+            // Step 2-4: For each conversation, build branch, expand windows, merge
+            val allWindows = mutableListOf<SearchWindow>()
+
+            for ((convId, matchIds) in matchesByConv) {
+                val conversation = chatDao.getConversation(convId) ?: continue
+                val allMsgs = chatDao.getMessagesForConversation(convId).first()
+                    .filter { it.participant in listOf(Participant.USER, Participant.MODEL) && it.text.isNotEmpty() }
+
+                // Build selected branch as indexed list
+                val branch = buildSelectedBranch(allMsgs, conversation.selectedBranchesJson)
+                val indexMap = branch.withIndex().associate { (i, m) -> m.id to i }
+                val branchMatchIds = matchIds.filter { it in indexMap }.toSet()
+
+                // For each match, expand window N/2 before and N/2 after
+                val windows = mutableListOf<Pair<IntRange, Float>>() // (range, score)
+                for (matchId in matchIds) {
+                    val centerIdx = indexMap[matchId] ?: continue
+                    val score = scoreByMessageId[matchId] ?: 1.0f
+                    val before = halfN.coerceAtMost(centerIdx)
+                    val after = halfN.coerceAtMost(branch.size - 1 - centerIdx)
+                    // Asymmetric fill: compensate short sides with extra from the other side
+                    val extraBefore = (halfN - before).coerceAtMost(branch.size - 1 - centerIdx - after)
+                    val extraAfter = (halfN - after - extraBefore).coerceAtLeast(0).coerceAtMost(centerIdx - before)
+                    val start = (centerIdx - before - extraAfter).coerceAtLeast(0)
+                    val end = (centerIdx + after + extraBefore).coerceAtMost(branch.size - 1)
+                    windows.add((start..end) to score)
+                }
+
+                // Merge overlapping windows within this conversation
+                val sorted = windows.sortedByDescending { it.second }
+                val merged = mutableListOf<Pair<IntRange, Float>>()
+                for ((range, score) in sorted) {
+                    var mergedRange = range
+                    val overlapIdx = merged.indexOfFirst { (existing, _) ->
+                        mergedRange.first <= existing.last + 1 && existing.first <= mergedRange.last + 1
+                    }
+                    if (overlapIdx >= 0) {
+                        val (existing, existingScore) = merged[overlapIdx]
+                        mergedRange = (minOf(mergedRange.first, existing.first)..maxOf(mergedRange.last, existing.last))
+                        merged[overlapIdx] = mergedRange to maxOf(score, existingScore)
+                    } else {
+                        merged.add(mergedRange to score)
+                    }
+                }
+                // Convert to SearchWindow, apply cap
+                for ((range, score) in merged) {
+                    var cappedRange = range
+                    if (range.last - range.first + 1 > maxWindowSize) {
+                        val centerId = branchMatchIds.maxByOrNull { scoreByMessageId[it] ?: 0f }
+                        val centerIdx = if (centerId != null) indexMap[centerId]!! else (range.first + range.last) / 2
+                        cappedRange = ((centerIdx - halfN).coerceAtLeast(range.first)..(centerIdx + halfN).coerceAtMost(range.last))
+                    }
+                    val windowMsgIds = branch.subList(cappedRange.first, cappedRange.last + 1).map { it.id }.toSet()
+                    val matchedInWindow = branchMatchIds.count { it in windowMsgIds }
+                    allWindows.add(SearchWindow(
+                        conversationId = convId,
+                        conversationTitle = conversation.title,
+                        messages = cappedRange.map { branch[it] },
+                        topScore = score,
+                        matchCount = matchedInWindow
+                    ))
+                }
+            }
+
+            // Step 5: Sort by topScore desc, cap total messages
+            val finalWindows = mutableListOf<SearchWindow>()
+            var totalMessages = 0
+            for (window in allWindows.sortedByDescending { it.topScore }) {
+                if (totalMessages >= totalCap) break
+                val available = totalCap - totalMessages
+                if (window.messages.size > available) {
+                    finalWindows.add(window.copy(messages = window.messages.take(available)))
+                    totalMessages = totalCap
+                } else {
+                    finalWindows.add(window)
+                    totalMessages += window.messages.size
+                }
+            }
+
+            // Step 6: Format output
+            val resultArray = buildJsonArray {
+                for (window in finalWindows) {
+                    add(buildJsonObject {
+                        put("title", window.conversationTitle)
+                        put("conversation_id", window.conversationId)
+                        put("top_score", window.topScore)
+                        put("match_count", window.matchCount)
+                        putJsonArray("messages") {
+                            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                            for (msg in window.messages) {
+                                add(buildJsonObject {
+                                    put("participant", msg.participant.name)
+                                    put("text", msg.text)
+                                    put("timestamp", dateFormat.format(java.util.Date(msg.timestamp)))
+                                })
+                            }
+                        }
+                    })
+                }
+            }
+            buildJsonObject {
+                put("type", "search_conversations")
+                put("query", query)
+                put("results", resultArray)
+            }.toString()
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("type", "search_conversations")
+                put("query", query)
+                put("error", "search_error")
+                put("message", e.message ?: "")
+            }.toString()
+        }
+    }
+
+    private suspend fun executeListConversations(arguments: String, ctx: GenerationContext): String {
+        val argsStr = arguments.ifBlank { "{}" }
+        val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
+        val order = ((args["order"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "desc").lowercase()
+        val limit = ((args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 20).coerceIn(1, 50)
+        val offset = ((args["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
+
+        return try {
+            val allConversations = chatDao.getAllConversationsList()
+            val sorted = if (order == "desc") allConversations.reversed() else allConversations
+            val total = sorted.size
+            val page = if (offset < total) {
+                sorted.subList(offset, (offset + limit).coerceAtMost(total))
+            } else {
+                emptyList()
+            }
+            val hasMore = offset + limit < total
+
+            buildJsonObject {
+                put("type", "list_conversations")
+                put("total", total)
+                put("offset", offset)
+                put("limit", limit)
+                put("has_more", hasMore)
+                putJsonArray("conversations") {
+                    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                    for (conv in page) {
+                        add(buildJsonObject {
+                            put("id", conv.id)
+                            put("title", conv.title)
+                            put("timestamp", dateFormat.format(java.util.Date(conv.lastUpdated)))
+                        })
+                    }
+                }
+            }.toString()
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("type", "list_conversations")
+                put("error", "list_error")
+                put("message", e.message ?: "")
+            }.toString()
+        }
+    }
+
+    private suspend fun executeReadConversation(arguments: String, ctx: GenerationContext): String {
+        val argsStr = arguments.ifBlank { "{}" }
+        val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
+        val conversationId = ((args["conversation_id"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "").trim()
+        if (conversationId.isEmpty()) {
+            return buildJsonObject {
+                put("type", "read_conversation")
+                put("error", "missing_conversation_id")
+            }.toString()
+        }
+        val limit = ((args["limit"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 50).coerceIn(1, 100)
+        val offset = ((args["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
+
+        return try {
+            val conversation = chatDao.getConversation(conversationId)
+                ?: return buildJsonObject {
+                    put("type", "read_conversation")
+                    put("conversation_id", conversationId)
+                    put("error", "not_found")
+                }.toString()
+
+            val allMessages = chatDao.getMessagesForConversation(conversationId).first()
+                .filter { it.participant in listOf(Participant.USER, Participant.MODEL) }
+            // buildSelectedBranch needs all intermediate nodes to walk the tree without gaps;
+            // text emptiness check is deferred: tool-only MODEL msgs must stay as parent-chain links.
+            val branch = buildSelectedBranch(allMessages, conversation.selectedBranchesJson)
+                .filter { !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
+            val totalMessages = branch.size
+            val page = if (offset < totalMessages) {
+                branch.subList(offset, (offset + limit).coerceAtMost(totalMessages))
+            } else {
+                emptyList()
+            }
+            val hasMore = offset + limit < totalMessages
+
+            buildJsonObject {
+                put("type", "read_conversation")
+                put("conversation_id", conversationId)
+                put("title", conversation.title)
+                put("total_messages", totalMessages)
+                put("offset", offset)
+                put("limit", limit)
+                put("has_more", hasMore)
+                putJsonArray("messages") {
+                    val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                    for (msg in page) {
+                        add(buildJsonObject {
+                            put("participant", msg.participant.name)
+                            put("text", msg.text)
+                            put("timestamp", dateFormat.format(java.util.Date(msg.timestamp)))
+                        })
+                    }
+                }
+            }.toString()
+        } catch (e: Exception) {
+            buildJsonObject {
+                put("type", "read_conversation")
+                put("conversation_id", conversationId)
+                put("error", "read_error")
+                put("message", e.message ?: "")
+            }.toString()
+        }
+    }
+
+    /**
+     * Reconstruct the user-selected message branch for a conversation.
+     * Uses selectedBranchesJson (Map<parentId → childId>) to walk from root to leaf.
+     */
+    private fun buildSelectedBranch(
+        allMessages: List<MessageEntity>,
+        selectedBranchesJson: String?
+    ): List<MessageEntity> {
+        val selections: Map<String?, String> = try {
+            val raw = Json.decodeFromString<Map<String, String>>(selectedBranchesJson ?: "{}")
+            raw.mapKeys { if (it.key == "null") null else it.key }
+        } catch (_: Exception) { emptyMap() }
+
+        val byParent = allMessages.groupBy { it.parentId }
+        val path = mutableListOf<MessageEntity>()
+        var parentId: String? = null
+        while (true) {
+            val siblings = byParent[parentId] ?: break
+            if (siblings.isEmpty()) break
+            val selectedId = selections[parentId]
+            val visible = siblings.filter {
+                !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
+            }
+            val chosen = if (visible.isNotEmpty()) {
+                visible.find { it.id == selectedId } ?: visible.last()
+            } else {
+                siblings.find { it.id == selectedId } ?: siblings.last()
+            }
+            path.add(chosen)
+            parentId = chosen.id
+        }
+        return path
+    }
+
+    suspend fun semanticSearch(query: String, limit: Int, ctx: GenerationContext): List<Pair<MessageEntity, Float>> = withContext(Dispatchers.IO) {
+        val config = ctx.activeEmbeddingConfig
+        if (config == null) {
+            DebugLog.w("AgoraVM", "GM RAG: no active embedding config")
+            return@withContext emptyList()
+        }
+        val queryEmbedding = if (config.type == com.newoether.agora.data.EmbeddingModelType.LOCAL) {
+            if (!LlamaEngine.isModelReady(config.localFilePath)) {
+                DebugLog.w("AgoraVM", "GM RAG: local model not ready")
+                return@withContext emptyList()
+            }
+            LlamaEngine.computeEmbedding(query, config.localFilePath)
+        } else {
+            val apiKey = resolveEmbeddingApiKey(ctx)
+            if (apiKey == null) {
+                DebugLog.w("AgoraVM", "GM RAG: no API key")
+                return@withContext emptyList()
+            }
+            EmbeddingClient.computeEmbedding(
+                text = query,
+                apiKey = apiKey,
+                model = config.remoteModelName,
+                baseUrl = config.remoteBaseUrl.ifBlank { "https://api.openai.com/v1" }
+            )
+        }
+        if (queryEmbedding == null) {
+            DebugLog.w("AgoraVM", "GM RAG: failed to compute query embedding")
+            return@withContext emptyList()
+        }
+
+        val all = chatDao.getEmbeddingsByModel(config.id)
+        DebugLog.d("AgoraVM", "GM RAG: ${all.size} stored embeddings, query dim=${queryEmbedding.size}")
+        if (all.isEmpty()) return@withContext emptyList()
+
+        val scored = all.map {
+            val stored = EmbeddingIndexer.bytesToFloats(it.embedding)
+            it to EmbeddingIndexer.cosineSimilarity(queryEmbedding, stored)
+        }
+        val best = scored.maxOfOrNull { it.second } ?: 0f
+        DebugLog.d("AgoraVM", "GM RAG: best cosine = ${"%.4f".format(best)}")
+        val aboveThreshold = scored.filter { it.second > ctx.ragThreshold }
+        val messagesById = chatDao.getMessagesByIds(aboveThreshold.map { it.first.messageId }).associateBy { it.id }
+        val filtered = aboveThreshold
+            .filter { (messagesById[it.first.messageId]?.text?.length ?: 0) >= 10 }
+            .sortedByDescending { it.second }
+            .take(limit)
+        filtered.mapNotNull { (embedding, score) -> messagesById[embedding.messageId]?.let { it to score } }
+    }
+
+    private fun resolveEmbeddingApiKey(ctx: GenerationContext): String? {
+        return ctx.embeddingApiKey.ifBlank { null }
+    }
 }

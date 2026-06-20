@@ -30,17 +30,17 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val transcriptionEnabledModels by viewModel.imageTranscriptionEnabledModels.collectAsState()
-    val transcriptionModel by viewModel.imageTranscriptionModel.collectAsState()
-    val batchSize by viewModel.imageTranscriptionBatchSize.collectAsState()
-    val transcriptionPrompt by viewModel.imageTranscriptionPrompt.collectAsState()
-    val modelAliases by viewModel.modelAliases.collectAsState()
-    val enabledModels by viewModel.enabledModels.collectAsState()
+    val transcriptionEnabledModels by viewModel.settings.imageTranscriptionEnabledModels.collectAsState()
+    val transcriptionModel by viewModel.settings.imageTranscriptionModel.collectAsState()
+    val batchSize by viewModel.settings.imageTranscriptionBatchSize.collectAsState()
+    val transcriptionPrompt by viewModel.settings.imageTranscriptionPrompt.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val enabledModels by viewModel.settings.enabledModels.collectAsState()
     var showModelDialog by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showPromptDialog by remember { mutableStateOf(false) }
     var showMenuForModel by remember { mutableStateOf<String?>(null) }
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     val availableToAdd = remember(enabledModels, transcriptionEnabledModels) {
         enabledModels.filter { it !in transcriptionEnabledModels }.sortedBy { it }
@@ -134,7 +134,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
                                                     onClick = {
                                                         showMenuForModel = null
-                                                        viewModel.removeImageTranscriptionModel(model)
+                                                        viewModel.settings.removeImageTranscriptionModel(model)
                                                     }
                                                 )
                                             }
@@ -214,7 +214,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                     Slider(
                                         value = batchSize.toFloat(),
-                                        onValueChange = { viewModel.setImageTranscriptionBatchSize(it.toInt()) },
+                                        onValueChange = { viewModel.settings.setImageTranscriptionBatchSize(it.toInt()) },
                                         valueRange = 1f..10f,
                                         steps = 8,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -245,12 +245,12 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             supportingContent = { Text(dialogParsed.providerName, style = MaterialTheme.typography.bodySmall) },
                             leadingContent = {
                                 RadioButton(selected = transcriptionModel == model, onClick = {
-                                    viewModel.setImageTranscriptionModel(model)
+                                    viewModel.settings.setImageTranscriptionModel(model)
                                     showModelDialog = false
                                 })
                             },
                             modifier = Modifier.clickable {
-                                viewModel.setImageTranscriptionModel(model)
+                                viewModel.settings.setImageTranscriptionModel(model)
                                 showModelDialog = false
                             }
                         )
@@ -292,7 +292,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.addImageTranscriptionModels(selected)
+                    viewModel.settings.addImageTranscriptionModels(selected)
                     showAddDialog = false
                 }) { Text(stringResource(R.string.provider_add)) }
             },
@@ -307,7 +307,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = stringResource(R.string.transcription_prompt),
             initialPrompt = transcriptionPrompt,
             onDismiss = { showPromptDialog = false },
-            onSave = { viewModel.setImageTranscriptionPrompt(it) }
+            onSave = { viewModel.settings.setImageTranscriptionPrompt(it) }
         )
     }
 }

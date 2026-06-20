@@ -33,14 +33,14 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val themeMode by viewModel.themeMode.collectAsState()
-    val colorSchemeName by viewModel.colorScheme.collectAsState()
-    val schemeStyleName by viewModel.schemeStyle.collectAsState()
-    val dynamicColor by viewModel.dynamicColor.collectAsState()
-    val blurEffectsEnabled by viewModel.blurEffectsEnabled.collectAsState()
-    val hapticsEnabled by viewModel.hapticsEnabled.collectAsState()
-    val toolCallDisplayMode by viewModel.toolCallDisplayMode.collectAsState()
-    val showDocFab by viewModel.showDocumentationFab.collectAsState()
+    val themeMode by viewModel.settings.themeMode.collectAsState()
+    val colorSchemeName by viewModel.settings.colorScheme.collectAsState()
+    val schemeStyleName by viewModel.settings.schemeStyle.collectAsState()
+    val dynamicColor by viewModel.settings.dynamicColor.collectAsState()
+    val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
+    val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
+    val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     val isDynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     val currentPreset = try { ColorSchemePreset.valueOf(colorSchemeName) } catch (_: Exception) { ColorSchemePreset.MIDNIGHT }
@@ -65,7 +65,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = stringResource(R.string.theme_mode_light),
                             icon = Icons.Default.LightMode,
                             selected = themeMode == "LIGHT",
-                            onClick = { viewModel.setThemeMode("LIGHT") }
+                            onClick = { viewModel.settings.setThemeMode("LIGHT") }
                         )
                     },
                     {
@@ -73,7 +73,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = stringResource(R.string.theme_mode_dark),
                             icon = Icons.Default.DarkMode,
                             selected = themeMode == "DARK",
-                            onClick = { viewModel.setThemeMode("DARK") }
+                            onClick = { viewModel.settings.setThemeMode("DARK") }
                         )
                     },
                     {
@@ -81,7 +81,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = stringResource(R.string.theme_mode_follow_device),
                             icon = Icons.Default.SettingsBrightness,
                             selected = themeMode != "LIGHT" && themeMode != "DARK",
-                            onClick = { viewModel.setThemeMode("FOLLOW_DEVICE") }
+                            onClick = { viewModel.settings.setThemeMode("FOLLOW_DEVICE") }
                         )
                     }
                 )
@@ -99,10 +99,10 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 trailingContent = {
                                     Switch(
                                         checked = dynamicColor,
-                                        onCheckedChange = { viewModel.setDynamicColor(it) }
+                                        onCheckedChange = { viewModel.settings.setDynamicColor(it) }
                                     )
                                 },
-                                modifier = Modifier.clickable { viewModel.setDynamicColor(!dynamicColor) }
+                                modifier = Modifier.clickable { viewModel.settings.setDynamicColor(!dynamicColor) }
                             )
                         }
                     }
@@ -113,10 +113,10 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             trailingContent = {
                                 Switch(
                                     checked = blurEffectsEnabled,
-                                    onCheckedChange = { viewModel.setBlurEffectsEnabled(it) }
+                                    onCheckedChange = { viewModel.settings.setBlurEffectsEnabled(it) }
                                 )
                             },
-                            modifier = Modifier.clickable { viewModel.setBlurEffectsEnabled(!blurEffectsEnabled) }
+                            modifier = Modifier.clickable { viewModel.settings.setBlurEffectsEnabled(!blurEffectsEnabled) }
                         )
                     }
                     add {
@@ -167,7 +167,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     }
                                                 },
                                                 onClick = {
-                                                    viewModel.setToolCallDisplayMode(mode)
+                                                    viewModel.settings.setToolCallDisplayMode(mode)
                                                     expanded = false
                                                 }
                                             )
@@ -185,10 +185,10 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             trailingContent = {
                                 Switch(
                                     checked = hapticsEnabled,
-                                    onCheckedChange = { viewModel.setHapticsEnabled(it) }
+                                    onCheckedChange = { viewModel.settings.setHapticsEnabled(it) }
                                 )
                             },
-                            modifier = Modifier.clickable { viewModel.setHapticsEnabled(!hapticsEnabled) }
+                            modifier = Modifier.clickable { viewModel.settings.setHapticsEnabled(!hapticsEnabled) }
                         )
                     }
                 }
@@ -212,7 +212,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             leadingContent = {
                                 RadioButton(
                                     selected = preset == currentPreset,
-                                    onClick = { viewModel.setColorScheme(preset.name) },
+                                    onClick = { viewModel.settings.setColorScheme(preset.name) },
                                     enabled = !dynamicColor || !isDynamicAvailable
                                 )
                             },
@@ -226,7 +226,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             },
                             modifier = Modifier
                                 .alpha(schemeAlpha)
-                                .clickable(enabled = schemeAlpha > 0.5f) { viewModel.setColorScheme(preset.name) },
+                                .clickable(enabled = schemeAlpha > 0.5f) { viewModel.settings.setColorScheme(preset.name) },
                             leadingSpacing = 8.dp
                         )
                     }
@@ -248,13 +248,13 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             leadingContent = {
                                 RadioButton(
                                     selected = style == currentStyle,
-                                    onClick = { viewModel.setSchemeStyle(style.name) },
+                                    onClick = { viewModel.settings.setSchemeStyle(style.name) },
                                     enabled = !dynamicColor || !isDynamicAvailable
                                 )
                             },
                             modifier = Modifier
                                 .alpha(schemeAlpha)
-                                .clickable(enabled = schemeAlpha > 0.5f) { viewModel.setSchemeStyle(style.name) },
+                                .clickable(enabled = schemeAlpha > 0.5f) { viewModel.settings.setSchemeStyle(style.name) },
                             leadingSpacing = 8.dp
                         )
                     }
