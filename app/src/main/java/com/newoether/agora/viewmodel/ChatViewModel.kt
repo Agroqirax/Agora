@@ -395,6 +395,56 @@ class ChatViewModel(
         _pendingConversationSettings.value = settings
     }
 
+    private val payloadBuilder by lazy {
+        MessagePayloadBuilder(
+            generationManager = generationManager,
+            onSnackbar = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
+        )
+    }
+
+    private val requestBuilder = GenerationRequestBuilder(
+        settings = settings,
+        convRepo = convRepo,
+        memoryManager = memoryManager,
+        providerRegistry = providerRegistry,
+        ragManager = ragManager,
+        appContext = appContext,
+        currentActiveModel = currentActiveModel,
+        pendingConversationSettings = _pendingConversationSettings,
+        onSnackbar = { msg -> emitSnackbar(msg) },
+    )
+
+    private val generationController by lazy {
+        MessageGenerationController(
+            viewModelScope = viewModelScope,
+            application = getApplication(),
+            appContext = appContext,
+            convRepo = convRepo,
+            settings = settings,
+            session = session,
+            generationManagerProvider = { generationManager },
+            requestBuilder = requestBuilder,
+            payloadBuilder = payloadBuilder,
+            providerRegistry = providerRegistry,
+            localProvider = localProvider,
+            allMessages = _allMessages,
+            selectedChildren = _selectedChildren,
+            streamingMessage = _streamingMessage,
+            currentConversationId = _currentConversationId,
+            isLoading = _isLoading,
+            generatingInConversationId = _generatingInConversationId,
+            isNewChatMode = _isNewChatMode,
+            pendingConversationSettings = _pendingConversationSettings,
+            pendingSystemPromptId = _pendingSystemPromptId,
+            currentActiveModel = currentActiveModel,
+            messages = messages,
+            onScrollToMessage = { id -> triggerScrollToMessage(id) },
+            onSnackbar = { msg -> emitSnackbar(msg) },
+            onSnackbarSuspend = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
+            onPersistSelectedChildren = { convId, map -> persistSelectedChildren(convId, map) },
+        )
+    }
+
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
             val current = settings.conversationSettings.value[convId] ?: ConversationSettings()
@@ -535,54 +585,6 @@ class ChatViewModel(
     fun renameCustomProvider(oldName: String, newName: String) = providerRegistry.renameCustom(oldName, newName)
     fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
 
-    private data class ProviderKey(val providerName: String, val apiKey: String)
-
-    /** Resolves the active provider+key for [modelId] and verifies configuration.
-     *  Emits a snackbar and returns null when the provider is not configured. */
-    private fun resolveProviderKey(modelId: String): ProviderKey? {
-        val providerName = getProviderForModel(modelId)
-        val activeKey = settings.resolveActiveKey(providerName) ?: ""
-        if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
-            return null
-        }
-        return ProviderKey(providerName, activeKey)
-    }
-
-    private fun resolveTranscriptionProviderName(): String =
-        settings.imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
-
-    private fun resolveTranscriptionModelId(): String =
-        settings.imageTranscriptionModel.value?.let { ModelId.parse(it).modelName } ?: ""
-
-    private fun resolveTranscriptionApiKey(): String {
-        val model = settings.imageTranscriptionModel.value ?: return ""
-        val providerName = getProviderForModel(model)
-        if (providerName == Constants.PROVIDER_LOCAL) return ""
-        return settings.resolveActiveKey(providerName) ?: ""
-    }
-
-    private fun resolveTranscriptionBaseUrl(): String? {
-        val model = settings.imageTranscriptionModel.value ?: return null
-        return providerRegistry.getEffectiveBaseUrl(getProviderForModel(model))
-    }
-
-    // Image generation reuses the selected model's provider credentials (mirrors transcription).
-    private fun resolveImageGenModelId(): String =
-        settings.imageGenModel.value?.let { ModelId.parse(it).apiModelName } ?: ""
-
-    private fun resolveImageGenApiKey(): String {
-        val model = settings.imageGenModel.value ?: return ""
-        val providerName = getProviderForModel(model)
-        if (providerName == Constants.PROVIDER_LOCAL) return ""
-        return settings.resolveActiveKey(providerName) ?: ""
-    }
-
-    private fun resolveImageGenBaseUrl(): String {
-        val model = settings.imageGenModel.value ?: return ""
-        return providerRegistry.getEffectiveBaseUrl(getProviderForModel(model)) ?: ""
-    }
-
     fun getCurrentVersion(): String {
         return try { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
     }
@@ -673,95 +675,6 @@ class ChatViewModel(
             settings.saveAutoDeletePeriodHours(maxOf(hours, minValid))
         }
     }
-    fun buildEffectiveConversationSettings(conversationId: String): ConversationSettings {
-        val overrides = settings.conversationSettings.value[conversationId]
-            ?: _pendingConversationSettings.value  // new chat: may not be saved to map yet
-            ?: ConversationSettings()
-        return ConversationSettings(
-            contextWindow = overrides.contextWindow ?: settings.maxContextWindow.value,
-            temperature = overrides.temperature ?: settings.defaultTemperature.value,
-            maxTokens = overrides.maxTokens ?: settings.defaultMaxTokens.value,
-            topP = overrides.topP ?: settings.defaultTopP.value,
-            frequencyPenalty = overrides.frequencyPenalty ?: settings.defaultFrequencyPenalty.value,
-            presencePenalty = overrides.presencePenalty ?: settings.defaultPresencePenalty.value,
-            codeExecutionEnabled = overrides.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
-            googleSearchEnabled = overrides.googleSearchEnabled ?: settings.googleSearchEnabled.value,
-            thinkingEnabled = overrides.thinkingEnabled ?: settings.thinkingEnabled.value,
-            thinkingLevel = overrides.thinkingLevel ?: settings.thinkingLevel.value,
-            thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
-            thinkingBudgetTokens = overrides.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
-            webSearchEnabled = if (settings.webSearchEnabled.value) (overrides.webSearchEnabled ?: true) else false,
-            shellEnabled = if (settings.shellEnabled.value) (overrides.shellEnabled ?: true) else false
-        )
-    }
-
-    private fun buildGenerationPair(
-        providerName: String,
-        modelId: String,
-        activeKey: String,
-        resolvedSystemPrompt: String?,
-        resolvedUserPrepend: String?,
-        resolvedUserPostpend: String?,
-        effectiveSettings: ConversationSettings,
-        currentId: String
-    ): Pair<GenerationConfig, GenerationContext> {
-        val config = GenerationConfig(
-            providerName = providerName,
-            modelId = ModelId.parse(modelId).modelName,
-            apiKey = activeKey,
-            effectiveSystemPrompt = resolvedSystemPrompt,
-            maxContextWindow = effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
-            codeExecutionEnabled = effectiveSettings.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
-            googleSearchEnabled = effectiveSettings.googleSearchEnabled ?: settings.googleSearchEnabled.value,
-            thinkingEnabled = effectiveSettings.thinkingEnabled ?: settings.thinkingEnabled.value,
-            thinkingLevel = effectiveSettings.thinkingLevel ?: settings.thinkingLevel.value,
-            thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
-            thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
-            baseUrl = providerRegistry.getEffectiveBaseUrl(providerName),
-            userPrepend = resolvedUserPrepend,
-            userPostpend = resolvedUserPostpend,
-            temperature = effectiveSettings.temperature,
-            maxTokens = effectiveSettings.maxTokens,
-            topP = effectiveSettings.topP,
-            frequencyPenalty = effectiveSettings.frequencyPenalty,
-            presencePenalty = effectiveSettings.presencePenalty
-        )
-        val genCtx = GenerationContext(
-            conversationId = currentId,
-            accessSavedMemories = settings.accessSavedMemories.value,
-            accessActiveMemory = settings.accessActiveMemory.value,
-            accessPastConversations = settings.accessPastConversations.value,
-            modelSearchMethod = settings.modelSearchMethod.value,
-            activeEmbeddingConfig = activeEmbeddingModel.value,
-            embeddingApiKey = ragManager.resolveEmbeddingApiKey() ?: "",
-            ragThreshold = settings.ragThreshold.value,
-            searchMatchLimit = settings.searchMatchLimit.value,
-            searchContextWindow = settings.searchContextWindow.value,
-            webSearchEnabled = effectiveSettings.webSearchEnabled ?: settings.webSearchEnabled.value,
-            webSearchApiKeys = settings.webSearchApiKeys.value,
-            webSearchProvider = settings.webSearchProvider.value,
-            webSearchNumResults = settings.webSearchNumResults.value,
-            webSearchBaseUrl = settings.webSearchBaseUrl.value,
-            imageGenEnabled = settings.imageGenEnabled.value && settings.imageGenModel.value?.contains(":") == true,
-            imageGenApiKey = resolveImageGenApiKey(),
-            imageGenBaseUrl = resolveImageGenBaseUrl(),
-            imageGenModel = resolveImageGenModelId(),
-            imageGenSize = settings.imageGenSize.value,
-            shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
-            shellDevices = settings.shellDevices.value,
-            sandboxEnabled = settings.sandboxEnabled.value,
-            imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
-            imageTranscriptionModel = settings.imageTranscriptionModel.value,
-            imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,
-            imageTranscriptionPrompt = settings.imageTranscriptionPrompt.value,
-            transcriptionProviderName = resolveTranscriptionProviderName(),
-            transcriptionModelId = resolveTranscriptionModelId(),
-            transcriptionApiKey = resolveTranscriptionApiKey(),
-            transcriptionBaseUrl = resolveTranscriptionBaseUrl()
-        )
-        return Pair(config, genCtx)
-    }
-
     fun addShellDevice(device: ShellDeviceConfig) {
         settings.addShellDevice(device)
     }
@@ -854,78 +767,7 @@ class ChatViewModel(
         }
     }
 
-    fun generateTitle(conversationId: String) {
-        viewModelScope.launch {
-            _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.snackbar_generating_title)))
-            val conversation = convRepo.getConversation(conversationId) ?: return@launch
-            val path = messages.value
-            val firstUserMsg = path.firstOrNull { it.participant == Participant.USER } ?: return@launch
-            val firstModelMsg = path
-                .filter { it.participant == Participant.MODEL && it.text.isNotBlank() }
-                .firstOrNull()
-
-            val titleModelId = settings.titleGenerationModel.value
-            val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: settings.selectedModel.value)
-            val modelId = ModelId.parse(modelIdWithPrefix).modelName
-            val (providerName, activeKey) = resolveProviderKey(modelIdWithPrefix) ?: return@launch
-
-            val summaryText = if (firstModelMsg != null) {
-                "User: ${firstUserMsg.text}\nAssistant: ${firstModelMsg.text.take(500)}"
-            } else {
-                firstUserMsg.text
-            }
-
-            val titlePrompt = listOf(
-                ChatMessage(
-                    text = "Generate a short title (5 words maximum) for this conversation:\n\n$summaryText\n\nRespond with ONLY the title text, no quotes, no punctuation, no explanation.",
-                    participant = Participant.USER,
-                    status = MessageStatus.SUCCESS
-                )
-            )
-
-            val provider = getProviderInstance(providerName)
-            val config = ProviderConfig(
-                apiKey = activeKey,
-                modelId = modelId,
-                systemPrompt = settings.titleGenerationPrompt.value.ifBlank { BuiltInPrompts.TITLE_GENERATION_SYSTEM },
-                maxContextWindow = 1,
-                thinkingEnabled = false,
-                baseUrl = providerRegistry.getEffectiveBaseUrl(providerName)
-            )
-
-            var title = ""
-            try {
-                // Serialize with embedding to avoid dual model load OOM
-                if (providerName == Constants.PROVIDER_LOCAL) {
-                    LlamaEngine.modelMutex.withLock {
-                        withContext(Dispatchers.IO) {
-                            provider.generateResponse(titlePrompt, config).collect { event ->
-                                if (event is StreamEvent.TextChunk) title += event.text
-                                else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                            }
-                        }
-                        localProvider.releaseEngine()
-                    }
-                } else {
-                    provider.generateResponse(titlePrompt, config).collect { event ->
-                        if (event is StreamEvent.TextChunk) title += event.text
-                        else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Title generation failed for provider=$providerName model=$modelId", e)
-                return@launch
-            }
-
-            title = title.trim().replace("\n", " ").take(60)
-            if (title.isNotBlank()) {
-                renameConversation(conversationId, title)
-                _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.snackbar_title_generated)))
-            } else {
-                _snackbarMessage.emit(SnackbarEvent(appContext.getString(R.string.snackbar_title_error)))
-            }
-        }
-    }
+    fun generateTitle(conversationId: String) = generationController.generateTitle(conversationId)
 
     fun setConversationSystemPrompt(id: String, promptId: String?) {
         viewModelScope.launch {
@@ -964,240 +806,11 @@ class ChatViewModel(
      * Attachments, embeddings, and branch selections are cleaned up.
      * Returns the count of deleted messages (for the confirmation dialog).
      */
-    fun deleteMessage(messageId: String): Int {
-        val currentId = _currentConversationId.value ?: return 0
-
-        // Synchronous snapshot for dialog count return — must stay on the calling thread.
-        val snapshot = _allMessages.value
-        val targetMsg = snapshot.find { it.id == messageId } ?: return 0
-
-        val previewIds = linkedSetOf(messageId)
-        val queue = mutableListOf(messageId)
-        while (queue.isNotEmpty()) {
-            val pid = queue.removeAt(0)
-            snapshot.filter { it.parentId == pid }.forEach {
-                if (previewIds.add(it.id)) queue.add(it.id)
-            }
-        }
-
-        // P1: Only stop generation if deleting within the currently-generating conversation.
-        // P0: Use stopForReplacement() + join() to prevent the STOPPED-upsert race
-        //     that can resurrect deleted messages (the only write path that was missing it).
-        val stopFinalization = if (_generatingInConversationId.value == currentId) {
-            session.stopForReplacement()
-        } else {
-            null
-        }
-
-        viewModelScope.launch(Dispatchers.IO) {
-            // Wait for STOPPED DB finalization to complete before deleting.
-            // Without this join, a concurrent upsertMessage from stop finalization
-            // could resurrect the deleted row as a zombie/orphan after our DELETE.
-            stopFinalization?.join()
-
-            // Recompute staleIds from the latest _allMessages after join(),
-            // in case the message tree changed during finalization.
-            val allMsgs = _allMessages.value
-            if (allMsgs.none { it.id == messageId }) return@launch  // already deleted during wait
-            val staleIds = linkedSetOf(messageId)
-            val queue = mutableListOf(messageId)
-            while (queue.isNotEmpty()) {
-                val pid = queue.removeAt(0)
-                allMsgs.filter { it.parentId == pid }.forEach {
-                    if (staleIds.add(it.id)) queue.add(it.id)
-                }
-            }
-
-            val staleList = allMsgs.filter { it.id in staleIds }
-            convRepo.deleteMessageFiles(staleList)
-
-            // Delete embeddings for all cascaded messages
-            for (id in staleIds) {
-                convRepo.deleteEmbedding(id)
-            }
-
-            // DB delete
-            convRepo.deleteMessagesByIds(staleIds.toList())
-
-            // Update _allMessages
-            _allMessages.update { it.filter { m -> m.id !in staleIds } }
-
-            // Fix _selectedChildren — remove entries where key or value is deleted.
-            // If a deleted message was the selected branch, switch to the next available sibling.
-            val remainingMsgs = _allMessages.value
-            val newSelected = _selectedChildren.value.toMutableMap()
-            var changed = false
-            for ((parentId, childId) in _selectedChildren.value) {
-                // Remove entry if the parent itself was deleted
-                if (parentId != null && parentId in staleIds) {
-                    newSelected.remove(parentId)
-                    changed = true
-                    continue
-                }
-                if (childId in staleIds) {
-                    val siblings = remainingMsgs.filter {
-                        it.parentId == parentId &&
-                            !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                            !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                    }.sortedBy { it.timestamp }
-                    if (siblings.isNotEmpty()) {
-                        newSelected[parentId] = siblings.last().id
-                    } else {
-                        newSelected.remove(parentId)
-                    }
-                    changed = true
-                }
-            }
-            if (changed) _selectedChildren.value = newSelected
-        }
-
-        return previewIds.size
-    }
+    fun deleteMessage(messageId: String): Int = generationController.deleteMessage(messageId)
 
     fun stopGeneration() = session.stop()
 
-    fun regenerate(messageId: String) {
-        val currentId = _currentConversationId.value ?: return
-        val modelId = currentActiveModel.value
-        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return
-
-        val stopFinalization = session.stopForReplacement()
-        // Capture ownership on the UI thread, immediately after stopGeneration advanced
-        // the token, so no concurrent stop can slip in before we record it.
-        val myUiToken = session.captureUiToken()
-
-        // Compute IDs and set placeholder on the calling thread before launching IO work,
-        // so the combine function never sees _streamingMessage=null while the error is in _allMessages.
-        val messageToRegenerate = _allMessages.value.find { it.id == messageId } ?: return
-        val parentId = messageToRegenerate.parentId ?: return
-        val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
-        val isLatest = _allMessages.value.none { it.parentId == messageId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
-        // Error/stopped: purge and replace in-place. Normal: create new branch.
-        val modelMessageId = if (isErrorOrStopped && isLatest) messageId else UUID.randomUUID().toString()
-        val startTime = System.currentTimeMillis() + 1
-
-        // Insert placeholder into _allMessages and update _selectedChildren on the calling
-        // thread BEFORE setting _streamingMessage. This ensures the combine function sees a
-        // consistent state where the new ID is both present and selected, avoiding a frame
-        // where two model messages appear in the path.
-        val placeholder = ChatMessage(
-            id = modelMessageId, parentId = parentId, text = "", participant = Participant.MODEL,
-            status = MessageStatus.SENDING, timestamp = startTime
-        )
-        _allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
-        val newMap = _selectedChildren.value.toMutableMap()
-        newMap[parentId] = modelMessageId
-        val selectedAfterRegenerate = newMap.toMap()
-        _selectedChildren.value = selectedAfterRegenerate
-
-        _streamingMessage.value = placeholder
-        _isLoading.value = true
-
-        session.generationJob = session.scope.launch {
-            // Wait only for the short STOPPED DB finalization. The cancelled provider
-            // may still be unwinding, but it no longer owns the next generation path.
-            stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
-            try {
-                _allMessages.value.find { it.id == parentId } ?: return@launch
-
-                if (isErrorOrStopped && isLatest) {
-                    // Purge stale tool call children, thinking content, and embeddings
-                    val allMsgs = _allMessages.value
-                    val staleIds = mutableListOf<String>()
-                    val queue = mutableListOf(modelMessageId)
-                    while (queue.isNotEmpty()) {
-                        val pid = queue.removeAt(0)
-                        allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
-                            .forEach { staleIds.add(it.id); queue.add(it.id) }
-                    }
-                    if (staleIds.isNotEmpty()) {
-                        convRepo.deleteMessagesByIds(staleIds)
-                        _allMessages.update { it.filter { m -> m.id !in staleIds } }
-                    }
-                    convRepo.deleteEmbedding(modelMessageId)
-                    convRepo.upsertMessage(MessageEntity(
-                        id = modelMessageId, conversationId = currentId, parentId = parentId,
-                        text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                        modelName = currentActiveModel.value, toolCallJson = null
-                    ))
-                } else {
-                    // New branch — old message and its tool calls stay as a selectable branch
-                    convRepo.upsertMessage(MessageEntity(
-                        id = modelMessageId, conversationId = currentId, parentId = parentId,
-                        text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                        modelName = currentActiveModel.value
-                    ))
-                }
-                persistSelectedChildren(currentId, selectedAfterRegenerate)
-                convRepo.getConversation(currentId)?.let { conv ->
-                    convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-                }
-                launchGeneration(
-                    currentId, modelMessageId, startTime,
-                    isRegenerate = true, replaceMessageId = messageId,
-                    providerName, modelId, activeKey, myUiToken, myPersistId,
-                    callerTag = "regenerate"
-                )
-            } finally {
-                session.loadingChange(myUiToken, false)
-            }
-        }
-    }
-
-    /**
-     * Shared generation tail called by [sendMessage], [regenerate], and
-     * [editMessage]: resolves system prompt + conversation settings, builds
-     * [GenerationConfig]/[GenerationContext], and launches the provider stream.
-     *
-     * All three entry points converge here after their differing branch-setup
-     * heads, eliminating copy-pasted prompt-resolution / config-building /
-     * callback-wiring code.
-     */
-    private suspend fun launchGeneration(
-        currentId: String,
-        modelMessageId: String,
-        startTime: Long,
-        isRegenerate: Boolean,
-        replaceMessageId: String?,
-        providerName: String,
-        modelId: String,
-        activeKey: String,
-        uiToken: Long,
-        persistId: Long,
-        callerTag: String
-    ) {
-        val resolved = buildEffectiveSystemPrompt(currentId)
-        val effectiveSettings = buildEffectiveConversationSettings(currentId)
-        // Re-resolve the key against on-disk settings here (the suspend convergence
-        // point for all entry paths). The synchronous [activeKey] resolved by the
-        // callers can be blank if DataStore had not finished loading when Send was
-        // tapped, which would build the request with an empty key → 401.
-        val freshKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() } ?: activeKey
-        val (config, genCtx) = buildGenerationPair(
-            providerName, modelId, freshKey,
-            resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-            effectiveSettings, currentId
-        )
-        try {
-            generationManager.generate(
-                conversationId = currentId,
-                modelMessageId = modelMessageId,
-                startTime = startTime,
-                isRegenerate = isRegenerate,
-                replaceMessageId = replaceMessageId,
-                modelName = currentActiveModel.value,
-                config = config,
-                ctx = genCtx,
-                generationJob = session.generationJob,
-                callbacks = session.callbacksFor(uiToken, persistId)
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            DebugLog.e("AgoraVM", "Generation failed in $callerTag", e)
-        }
-    }
+    fun regenerate(messageId: String) = generationController.regenerate(messageId)
 
     fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
         if (_isLoading.value && _generatingInConversationId.value == _currentConversationId.value) return
@@ -1226,103 +839,7 @@ class ChatViewModel(
         }
     }
 
-    fun editMessage(messageId: String, newText: String) {
-        val currentId = _currentConversationId.value ?: return
-        val modelId = currentActiveModel.value
-        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return
-
-        val stopFinalization = session.stopForReplacement()
-        val myUiToken = session.captureUiToken()
-        session.generationJob = session.scope.launch {
-            stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
-            try {
-            val messageToEdit = _allMessages.value.find { it.id == messageId } ?: return@launch
-            val newUserMessageId = UUID.randomUUID().toString()
-            convRepo.upsertMessage(MessageEntity(
-                id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
-                text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
-            ))
-            val newMap = _selectedChildren.value.toMutableMap()
-            newMap[messageToEdit.parentId] = newUserMessageId
-            val selectedAfterUserEdit = newMap.toMap()
-            _selectedChildren.value = selectedAfterUserEdit
-            persistSelectedChildren(currentId, selectedAfterUserEdit)
-            val modelMessageId = UUID.randomUUID().toString()
-            val startTime = System.currentTimeMillis() + 1
-            convRepo.upsertMessage(MessageEntity(
-                id = modelMessageId, conversationId = currentId, parentId = newUserMessageId,
-                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                modelName = currentActiveModel.value
-            ))
-            convRepo.getConversation(currentId)?.let { conv ->
-                convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-            }
-            // Set _streamingMessage BEFORE _allMessages so the combine never
-            // evaluates with stale _allMessages data but no streaming overlay.
-            val placeholder = ChatMessage(
-                id = modelMessageId, parentId = newUserMessageId, text = "", participant = Participant.MODEL,
-                status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
-            )
-            session.streamUpdate(myUiToken, placeholder)
-            _allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
-            val editChildren = selectedAfterUserEdit.toMutableMap()
-            editChildren[newUserMessageId] = modelMessageId
-            val selectedAfterModelEdit = editChildren.toMap()
-            _selectedChildren.value = selectedAfterModelEdit
-            persistSelectedChildren(currentId, selectedAfterModelEdit)
-            launchGeneration(
-                currentId, modelMessageId, startTime,
-                isRegenerate = false, replaceMessageId = null,
-                providerName, modelId, activeKey, myUiToken, myPersistId,
-                callerTag = "editMessage"
-            )
-            } finally {
-                session.loadingChange(myUiToken, false)
-            }
-        }
-    }
-
-    private data class ResolvedPrompt(
-        val systemPrompt: String?,
-        val userPrepend: String?,
-        val userPostpend: String?
-    )
-
-    private suspend fun buildEffectiveSystemPrompt(currentId: String): ResolvedPrompt {
-        val conversation = convRepo.getConversation(currentId)
-        val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
-        val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
-        val activeMemory = memoryManager.getActiveMemory()
-        val includeActiveMemory = settings.accessActiveMemory.value
-        val modelId = ModelId.parse(currentActiveModel.value).modelName
-
-        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-        val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-        val now = java.util.Date()
-
-        val runtimeValues = mapOf(
-            PredefinedVariables.TIME to sdf.format(now),
-            PredefinedVariables.DATE to dateSdf.format(now),
-            PredefinedVariables.SENT_TIME to sdf.format(now),
-            PredefinedVariables.SENT_DATE to dateSdf.format(now),
-            PredefinedVariables.MODEL_ID to modelId,
-            PredefinedVariables.ACTIVE_MEMORY to if (includeActiveMemory && activeMemory.isNotBlank()) activeMemory else ""
-        )
-
-        if (entry != null) {
-            val systemItems = entry.resolvedSystemItems
-            // Prepend/postpend: {sent_time}/{sent_date} stay as placeholders resolved per-message in applyUserTemplate
-            val perMsgValues = runtimeValues.filterKeys { it !in PredefinedVariables.PER_MESSAGE_VARS }
-            return ResolvedPrompt(
-                systemPrompt = PredefinedVariables.compile(systemItems, runtimeValues).ifBlank { null },
-                userPrepend = PredefinedVariables.compile(entry.userPrependItems, perMsgValues, emptyMap()).ifBlank { null },
-                userPostpend = PredefinedVariables.compile(entry.userPostpendItems, perMsgValues, emptyMap()).ifBlank { null }
-            )
-        }
-
-        return ResolvedPrompt(null, null, null)
-    }
+    fun editMessage(messageId: String, newText: String) = generationController.editMessage(messageId, newText)
 
     private fun getFileName(context: android.content.Context, uri: android.net.Uri): String {
         return try {
@@ -1339,284 +856,8 @@ class ChatViewModel(
         }
     }
 
-    /** The persisted user-message media (final image paths) plus structured attachment metadata. */
-    private data class MessagePayload(
-        val allImages: List<String>,
-        val attachmentMeta: AttachmentMeta?
-    )
-
-    /**
-     * Resolves the outgoing message's attachments into concrete image paths and
-     * structured [AttachmentMeta]. Handles legacy images,
-     * images, videos (frame extraction / slicing), text files, and rendered PDF pages,
-     * then reconciles each metadata item's `imageIndex` against the actual processed
-     * image positions. Extracted from [sendMessage] so the send path reads as a sequence
-     * of steps rather than one ~320-line method.
-     */
-    private suspend fun buildMessagePayload(
-        app: Application,
-        images: List<String>,
-        attachments: List<SelectedAttachment>
-    ): MessagePayload {
-        // mediaUris: URIs that need processImages (images, video content:// URIs)
-        // directPaths: paths that skip processImages (pre-extracted frames, PDF copies, rendered pages)
-        val mediaUris = mutableListOf<String>()
-        val directPaths = mutableListOf<String>()
-        val sliceConfigs = mutableMapOf<String, VideoSliceConfig>()
-        val metaItems = mutableListOf<AttachmentItem>()
-        var nextImageIndex = 0
-
-        // Process legacy images list (backward compatibility)
-        for (uri in images) {
-            mediaUris.add(uri)
-        }
-
-        // Process new SelectedAttachment list
-        for (att in attachments) {
-            when (att.type) {
-                "image" -> {
-                    mediaUris.add(att.uri)
-                    metaItems.add(AttachmentItem(
-                        originalUri = att.uri, type = "image", mimeType = att.mimeType,
-                        imageIndex = nextImageIndex
-                    ))
-                    nextImageIndex++
-                }
-                "video" -> {
-                    // Copy video to local storage for export/playback survival
-                    val videoExt = when {
-                        att.mimeType?.contains("mp4") == true -> "mp4"
-                        att.mimeType?.contains("webm") == true -> "webm"
-                        att.mimeType?.contains("quicktime") == true -> "mov"
-                        else -> "mp4"
-                    }
-                    val videoFile = java.io.File(app.filesDir, "vid_original_${java.util.UUID.randomUUID()}.$videoExt")
-                    var localVideoUri: String? = null
-                    try {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
-                            videoFile.outputStream().use { input.copyTo(it) }
-                        }
-                        localVideoUri = "file://${videoFile.absolutePath}"
-                    } catch (_: Exception) {
-                        // Fallback: keep original content URI (may expire)
-                        localVideoUri = att.uri
-                    }
-
-                    if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
-                        metaItems.add(AttachmentItem(
-                            originalUri = localVideoUri, type = "video",
-                            fileName = att.fileName, mimeType = att.mimeType,
-                            imageIndex = nextImageIndex, pageCount = att.frameCount
-                        ))
-                        directPaths.addAll(att.processedFrames)
-                        nextImageIndex += att.processedFrames.size
-                    } else {
-                        val frameCount = att.frameCount ?: 1
-                        metaItems.add(AttachmentItem(
-                            originalUri = localVideoUri, type = "video",
-                            fileName = att.fileName, mimeType = att.mimeType,
-                            imageIndex = nextImageIndex, pageCount = att.frameCount
-                        ))
-                        mediaUris.add(att.uri)
-                        if (att.frameCount != null && att.frameCount > 1 && att.sliceIntervalMs != null) {
-                            sliceConfigs[att.uri] = VideoSliceConfig(
-                                intervalMicros = att.sliceIntervalMs * 1000L,
-                                frameCount = att.frameCount
-                            )
-                        }
-                        nextImageIndex += frameCount
-                    }
-                }
-                "file" -> {
-                    var textContent: String? = null
-                    try {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
-                            val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
-                            if (content.isNotBlank()) {
-                                textContent = content
-                            }
-                        }
-                    } catch (e: Exception) { DebugLog.e("ChatViewModel", "Failed to read attachment content: ${att.fileName}", e) }
-                    metaItems.add(AttachmentItem(
-                        originalUri = att.uri, type = "file",
-                        fileName = att.fileName, mimeType = att.mimeType,
-                        textContent = textContent
-                    ))
-                }
-                "pdf" -> {
-                    val pagePaths = if (att.preRenderedPaths != null && att.preRenderedPaths.isNotEmpty()) {
-                        val sel = att.selectedPages ?: att.preRenderedPaths.indices.toSet()
-                        att.preRenderedPaths.filterIndexed { i, _ -> i in sel }
-                    } else {
-                        PdfPageRenderer.renderAsImages(app, Uri.parse(att.uri), att.selectedPages)
-                    }
-                    if (pagePaths.isEmpty()) {
-                        _snackbarMessage.emit(SnackbarEvent(app.getString(R.string.pdf_render_failed)))
-                        continue
-                    }
-                    metaItems.add(AttachmentItem(
-                        originalUri = att.uri, type = "pdf",
-                        fileName = att.fileName, mimeType = "application/pdf",
-                        imageIndex = nextImageIndex, pageCount = pagePaths.size
-                    ))
-                    directPaths.addAll(pagePaths)
-                    nextImageIndex += pagePaths.size
-                }
-            }
-        }
-
-        val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris, sliceConfigs) else emptyList()
-        val allImages = processedImages + directPaths
-
-        // Recalculate imageIndex for all meta items based on final allImages positions.
-        // nextImageIndex tracked the expected order:
-        //   First N items correspond to mediaUris entries (→ processedImages)
-        //   Remaining items correspond to directPaths entries
-        // After processing, processedImages may differ in size from mediaUris.
-        // We build a position map: for each metaItem that has imageIndex < mediaUris.size,
-        // it was tracking an offset within mediaUris. We need the actual offset within processedImages.
-        val uriToResultMap = mutableListOf<IntRange>() // for each mediaUris entry, the range in processedImages
-        var pos = 0
-        for (uri in mediaUris) {
-            val start = pos
-            // Count consecutive results belonging to this URI by scanning forward until
-            // we find files that don't correspond. Since we can't distinguish, use a simple
-            // heuristic: each URI produces either 0 or 1+ results. The slice configs tell us
-            // how many frames per video.
-            val config = sliceConfigs[uri]
-            val expectedCount = config?.frameCount ?: 1
-            val end = minOf(pos + expectedCount, processedImages.size)
-            uriToResultMap.add(start until end)
-            pos = end
-        }
-        // Cap at processedImages size
-        val adjustedMetaItems = metaItems.map { item ->
-            val idx = item.imageIndex
-            if (idx == null) {
-                item
-            } else if (idx < mediaUris.size && idx < uriToResultMap.size) {
-                val range = uriToResultMap[idx]
-                item.copy(imageIndex = range.first)
-            } else if (idx in mediaUris.size until (mediaUris.size + directPaths.size)) {
-                // This item's imageIndex is relative to directPaths start
-                item.copy(imageIndex = processedImages.size + (idx - mediaUris.size))
-            } else {
-                // Fallback: keep original index (shouldn't happen for well-formed input)
-                item
-            }
-        }
-        val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
-            AttachmentMeta(items = adjustedMetaItems)
-        } else null
-        return MessagePayload(allImages, attachmentMeta)
-    }
-
-    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
-        if (!session.sendGate.compareAndSet(false, true)) return false
-        var committed = false
-        try {
-        val modelId = currentActiveModel.value
-        if (modelId.isBlank()) {
-            emitSnackbar(getApplication<Application>().getString(R.string.no_model_selected))
-            return false
-        }
-        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return false
-        if (providerName == Constants.PROVIDER_LOCAL) {
-            val localModelId = modelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
-            val config = settings.localChatModels.value.find { it.modelId == localModelId }
-            if (config == null || !java.io.File(config.localFilePath).exists()) {
-                emitSnackbar(getApplication<Application>().getString(R.string.local_model_not_found))
-                return false
-            }
-        }
-        val stopFinalization = session.stopForReplacement()
-        // Set loading immediately so UI shows sending state during attachment processing
-        _isLoading.value = true
-        // Capture ownership on the UI thread right after stopGeneration advanced the token.
-        val myUiToken = session.captureUiToken()
-
-        committed = true
-        session.generationJob = session.scope.launch {
-            try {
-            // Wait only for the short STOPPED DB finalization. The cancelled provider
-            // may still be unwinding, but it no longer owns the next generation path.
-            stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
-            val app = getApplication<Application>()
-            val (allImages, attachmentMeta) = buildMessagePayload(app, images, attachments)
-            var currentId = _currentConversationId.value
-            val wasNewChat = _isNewChatMode.value
-            if (wasNewChat || currentId == null) {
-                val newId = UUID.randomUUID().toString()
-                convRepo.upsertConversation(ChatEntity(id = newId, title = appContext.getString(R.string.new_chat), modelId = currentActiveModel.value, systemPromptId = _pendingSystemPromptId.value))
-                _currentConversationId.value = newId
-                _isNewChatMode.value = false
-                currentId = newId
-            }
-            // Apply pending per-conversation settings if any (from Advanced dialog in new chat)
-            val pendingSettings = _pendingConversationSettings.value
-            if (pendingSettings != null) {
-                settings.setConversationSettings(currentId, pendingSettings)
-                _pendingConversationSettings.value = null
-            }
-            val currentPath = messages.value
-            val lastMessageId = currentPath.lastOrNull()?.id
-            val userMessageId = UUID.randomUUID().toString()
-            convRepo.upsertMessage(MessageEntity(
-                id = userMessageId, conversationId = currentId, parentId = lastMessageId,
-                text = text, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
-                attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
-            ))
-            settings.incrementMessagesSent()
-            val modelMessageId = UUID.randomUUID().toString()
-            val startTime = System.currentTimeMillis() + 1
-            convRepo.upsertMessage(MessageEntity(
-                id = modelMessageId, conversationId = currentId, parentId = userMessageId,
-                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                modelName = currentActiveModel.value
-            ))
-            convRepo.getConversation(currentId)?.let { conv ->
-                convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-            }
-            // Set _streamingMessage BEFORE _allMessages, so when the combine
-            // re-evaluates on the _allMessages change, _streamingMessage is already
-            // visible — eliminating the single-frame gap.
-            val placeholder = ChatMessage(
-                id = modelMessageId, parentId = userMessageId, text = "", participant = Participant.MODEL,
-                status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
-            )
-            session.streamUpdate(myUiToken, placeholder)
-            _allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
-            val newChildren = _selectedChildren.value.toMutableMap()
-            newChildren[userMessageId] = modelMessageId
-            _selectedChildren.value = newChildren
-            triggerScrollToMessage(userMessageId)
-
-            launchGeneration(
-                currentId, modelMessageId, startTime,
-                isRegenerate = false, replaceMessageId = null,
-                providerName, modelId, activeKey, myUiToken, myPersistId,
-                callerTag = "sendMessage"
-            )
-
-            val lastMsg = _allMessages.value.find { it.id == modelMessageId }
-            if (wasNewChat && settings.titleGenerationEnabled.value && session.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
-                generateTitle(currentId)
-            }
-        } finally {
-            // Token-gated: only the still-current generation clears the button, so a
-            // cancelled/superseded coroutine can't revert the icon mid-generation.
-            session.loadingChange(myUiToken, false)
-            // sendGate must ALWAYS be freed, even when this coroutine was cancelled
-            // by a subsequent regenerate(). Otherwise the send button stays locked.
-            session.sendGate.set(false)
-        }
-        } // end launch
-    } finally {
-        if (!committed) session.sendGate.set(false)
-    }
-        return true
-    }
+    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean =
+        generationController.sendMessage(text, images, attachments)
 
     /**
      * Onboarding-focused model fetch for a single provider.
