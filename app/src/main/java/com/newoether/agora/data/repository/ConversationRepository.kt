@@ -3,11 +3,14 @@ package com.newoether.agora.data.repository
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.AttachmentMeta
+import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.MessageStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -33,6 +36,8 @@ class ConversationRepository(
     suspend fun upsertConversation(entity: ChatEntity) = chatDao.upsertConversation(entity)
 
     suspend fun deleteConversation(id: String) {
+        val messages = chatDao.getMessagesForConversation(id).first()
+        deleteAttachmentFilesFromEntities(messages)
         chatDao.deleteEmbeddingsByConversation(id)
         chatDao.deleteMessagesByConversation(id)
         chatDao.deleteConversation(id)
@@ -120,4 +125,46 @@ class ConversationRepository(
 
     suspend fun getAllMessagesForIndexing(): List<MessageEntity> =
         chatDao.getAllMessagesForIndexing()
+
+    /** Deletes all on-disk attachment files referenced by [messages]. Safe to call with
+     *  an empty list. Errors per-file are swallowed so one bad path never aborts a delete. */
+    suspend fun deleteMessageFiles(messages: List<MessageEntity>) = deleteAttachmentFilesFromEntities(messages)
+
+    /** Overload for the in-memory [ChatMessage] form used by the VM's cascade-delete path. */
+    fun deleteMessageFiles(messages: List<ChatMessage>) {
+        for (msg in messages) {
+            for (imagePath in msg.images) {
+                runCatching { java.io.File(imagePath).delete() }
+            }
+            msg.attachmentMeta?.items?.forEach { item ->
+                val uri = item.originalUri ?: return@forEach
+                if ((item.type == "video" || item.type == "image" || item.type == "file") &&
+                    uri.startsWith("file://")
+                ) {
+                    runCatching { java.io.File(uri.removePrefix("file://")).delete() }
+                }
+            }
+        }
+    }
+
+    private fun deleteAttachmentFilesFromEntities(messages: List<MessageEntity>) {
+        for (msg in messages) {
+            for (imagePath in msg.images) {
+                runCatching { java.io.File(imagePath).delete() }
+            }
+            if (msg.attachmentMeta != null) {
+                runCatching {
+                    val meta = Json.decodeFromString<AttachmentMeta>(msg.attachmentMeta)
+                    for (item in meta.items) {
+                        val uri = item.originalUri ?: continue
+                        if ((item.type == "video" || item.type == "image" || item.type == "file") &&
+                            uri.startsWith("file://")
+                        ) {
+                            runCatching { java.io.File(uri.removePrefix("file://")).delete() }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

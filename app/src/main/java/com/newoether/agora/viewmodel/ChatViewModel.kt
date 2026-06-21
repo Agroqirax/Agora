@@ -3,60 +3,70 @@ package com.newoether.agora.viewmodel
 import android.app.Application
 import android.content.Context
 import android.net.Uri
-import com.newoether.agora.util.DebugLog
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.newoether.agora.R
 import com.newoether.agora.api.*
+import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.api.anthropic.*
 import com.newoether.agora.api.gemini.*
 import com.newoether.agora.api.local.*
 import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
-import com.newoether.agora.data.ClaudeChatImporter
+import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.BuiltInPrompts
+import com.newoether.agora.data.ClaudeChatImporter
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.MemoryManager
-import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.PredefinedVariables
-import com.newoether.agora.api.LlamaEngine
+import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.repository.ConversationRepository
+import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatConversation
-import com.newoether.agora.util.Constants
-import com.newoether.agora.util.SearchResultFormatter
-import com.newoether.agora.util.SnackbarEvent
-import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.ToolCallData
+import com.newoether.agora.sandbox.SandboxManager
+import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.AgoraForegroundService
+import com.newoether.agora.service.AutoBackupWorker
+import com.newoether.agora.ui.settings.ImportStrategy
+import com.newoether.agora.util.Constants
+import com.newoether.agora.util.DebugLog
+import com.newoether.agora.util.PdfPageRenderer
+import com.newoether.agora.util.SearchResultFormatter
+import com.newoether.agora.util.SnackbarEvent
+import com.newoether.agora.util.SshClient
+import com.newoether.agora.util.UpdateChecker
+import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
-import androidx.compose.foundation.lazy.LazyListState
 
 class ChatViewModel(
     application: Application,
@@ -64,20 +74,14 @@ class ChatViewModel(
     private val chatDao: ChatDao,
     val memoryManager: MemoryManager,
     private val appContext: Context,
-    private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
+    private val sandboxFactory: SandboxManagerFactory? = null,
     // All injected via AppContainer/ChatViewModelFactory — the single construction site.
-    val autoBackupManager: com.newoether.agora.data.AutoBackupManager,
-    conversationRepository: com.newoether.agora.data.repository.ConversationRepository,
-    settingsRepository: com.newoether.agora.data.repository.SettingsRepository
+    val autoBackupManager: AutoBackupManager,
+    conversationRepository: ConversationRepository,
+    settingsRepository: SettingsRepository
 ) : AndroidViewModel(application) {
 
-    /**
-     * Shared settings state holder (eagerly-shared StateFlows + setters).
-     * Revived from the previously-unused [SettingsRepository]; both ChatViewModel's
-     * internal logic and the settings pages read settings from here, so each setting
-     * is owned in exactly one place.
-     */
-    val settings: com.newoether.agora.data.repository.SettingsRepository = settingsRepository
+    val settings: SettingsRepository = settingsRepository
 
     /**
      * Conversation/message persistence behind the repository layer. Revived from the
@@ -85,12 +89,12 @@ class ChatViewModel(
      * and stuck-message logic live there instead of being hand-rolled against [chatDao].
      * (Embedding writes / bulk import-export still go direct until later phases.)
      */
-    private val convRepo: com.newoether.agora.data.repository.ConversationRepository = conversationRepository
+    private val convRepo: ConversationRepository = conversationRepository
 
     private val localProvider = LocalProvider(appContext, settingsManager)
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
-    val ragManager = com.newoether.agora.viewmodel.RagManager(
+    val ragManager = RagManager(
         chatDao = chatDao,
         settings = settings,
         settingsManager = settingsManager,
@@ -130,7 +134,7 @@ class ChatViewModel(
                 val now = System.currentTimeMillis()
                 if (now - lastCheck > 24 * 60 * 60 * 1000L) {
                     settings.saveLastUpdateCheckTime(now)
-                    val info = com.newoether.agora.util.UpdateChecker.check(getCurrentVersion())
+                    val info = UpdateChecker.check(getCurrentVersion())
                     if (info != null) {
                         _updateDialogData.value = info
                     }
@@ -174,7 +178,7 @@ class ChatViewModel(
             } catch (_: Exception) {}
         }
         // ── Auto Backup ──────────────────────────────────────────
-        try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
+        try { AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
         viewModelScope.launch(Dispatchers.IO) {
             try { autoBackupManager.checkAndBackup() } catch (_: Exception) {}
         }
@@ -223,7 +227,7 @@ class ChatViewModel(
         }
     }
 
-    val sandboxManager: com.newoether.agora.sandbox.SandboxManager? by lazy {
+    val sandboxManager: SandboxManager? by lazy {
         sandboxFactory?.create()
     }
     val isSandboxFlavor: Boolean = sandboxFactory?.isAvailable() == true
@@ -235,10 +239,6 @@ class ChatViewModel(
         session.cancelScope()
         autoBackupManager.destroy()
     }
-
-    val listState = LazyListState()
-    val messageHeights = androidx.compose.runtime.mutableStateMapOf<String, Int>()
-
 
     fun getProviderInstance(name: String): LlmProvider = providerRegistry.getInstance(name)
 
@@ -299,10 +299,10 @@ class ChatViewModel(
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
     }
 
-    private val _updateDialogData = MutableStateFlow<com.newoether.agora.util.UpdateInfo?>(null)
-    val updateDialogData: StateFlow<com.newoether.agora.util.UpdateInfo?> = _updateDialogData.asStateFlow()
+    private val _updateDialogData = MutableStateFlow<UpdateInfo?>(null)
+    val updateDialogData: StateFlow<UpdateInfo?> = _updateDialogData.asStateFlow()
     fun dismissUpdateDialog() { _updateDialogData.value = null }
-    fun showUpdateDialog(info: com.newoether.agora.util.UpdateInfo) { _updateDialogData.value = info }
+    fun showUpdateDialog(info: UpdateInfo) { _updateDialogData.value = info }
 
     /** PDF / text-file preview state (see [MediaPreviewState]). */
     private val mediaPreview = MediaPreviewState()
@@ -397,10 +397,6 @@ class ChatViewModel(
         _isSwitching.value = switching
     }
 
-    fun clearMessageHeights() {
-        messageHeights.clear()
-    }
-
     private val _isNewChatMode = MutableStateFlow(true)
     val isNewChatMode: StateFlow<Boolean> = _isNewChatMode.asStateFlow()
 
@@ -460,9 +456,8 @@ class ChatViewModel(
     private val _systemPromptCount = MutableStateFlow(0)
     val systemPromptCount: StateFlow<Int> = _systemPromptCount.asStateFlow()
 
-    init { startInitJobs() }
-
     init {
+        startInitJobs()
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
@@ -537,12 +532,6 @@ class ChatViewModel(
                 } else {
                     _allMessages.value = emptyList()
                     _selectedChildren.value = emptyMap()
-                    messageHeights.clear()
-                }
-                // Prune stale height entries for messages no longer in the conversation
-                if (_allMessages.value.isNotEmpty()) {
-                    val currentIds = _allMessages.value.map { it.id }.toSet()
-                    messageHeights.keys.retainAll { it in currentIds }
                 }
             }
         }
@@ -568,11 +557,26 @@ class ChatViewModel(
     fun renameCustomProvider(oldName: String, newName: String) = providerRegistry.renameCustom(oldName, newName)
     fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
 
+    private data class ProviderKey(val providerName: String, val apiKey: String)
+
+    /** Resolves the active provider+key for [modelId] and verifies configuration.
+     *  Emits a snackbar and returns null when the provider is not configured. */
+    private fun resolveProviderKey(modelId: String): ProviderKey? {
+        val providerName = getProviderForModel(modelId)
+        val activeKeyId = settings.activeApiKeyIds.value[providerName]
+        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        if (!providerRegistry.isConfigured(providerName, activeKey)) {
+            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
+            return null
+        }
+        return ProviderKey(providerName, activeKey)
+    }
+
     private fun resolveTranscriptionProviderName(): String =
         settings.imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
 
     private fun resolveTranscriptionModelId(): String =
-        settings.imageTranscriptionModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName } ?: ""
+        settings.imageTranscriptionModel.value?.let { ModelId.parse(it).modelName } ?: ""
 
     private fun resolveTranscriptionApiKey(): String {
         val model = settings.imageTranscriptionModel.value ?: return ""
@@ -589,7 +593,7 @@ class ChatViewModel(
 
     // Image generation reuses the selected model's provider credentials (mirrors transcription).
     private fun resolveImageGenModelId(): String =
-        settings.imageGenModel.value?.let { com.newoether.agora.model.ModelId.parse(it).modelName.removePrefix("models/") } ?: ""
+        settings.imageGenModel.value?.let { ModelId.parse(it).modelName.removePrefix("models/") } ?: ""
 
     private fun resolveImageGenApiKey(): String {
         val model = settings.imageGenModel.value ?: return ""
@@ -607,9 +611,9 @@ class ChatViewModel(
     fun getCurrentVersion(): String {
         return try { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
     }
-    suspend fun checkForUpdates(): com.newoether.agora.util.UpdateInfo? {
+    suspend fun checkForUpdates(): UpdateInfo? {
         val current = getCurrentVersion()
-        return com.newoether.agora.util.UpdateChecker.check(current)
+        return UpdateChecker.check(current)
     }
     fun addEmbeddingModel(config: EmbeddingModelConfig) = ragManager.addEmbeddingModel(config)
     fun deleteEmbeddingModel(id: String) = ragManager.deleteEmbeddingModel(id)
@@ -629,7 +633,7 @@ class ChatViewModel(
     ) = modelManager.updateLocalChatModel(uuid, newModelId, newAlias, nCtx, temperature, topP, maxTokens, mmprojPath)
 
     suspend fun semanticSearch(query: String, limit: Int = 20): List<Pair<MessageEntity, Float>> {
-        val ctx = com.newoether.agora.viewmodel.GenerationContext(
+        val ctx = GenerationContext(
             accessSavedMemories = settings.accessSavedMemories.value,
             accessActiveMemory = settings.accessActiveMemory.value,
             accessPastConversations = settings.accessPastConversations.value,
@@ -658,9 +662,9 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             settings.saveAutoBackupEnabled(enabled)
             if (enabled) {
-                try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
+                try { AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
             } else {
-                try { com.newoether.agora.service.AutoBackupWorker.cancel(getApplication()) } catch (_: Exception) {}
+                try { AutoBackupWorker.cancel(getApplication()) } catch (_: Exception) {}
             }
         }
     }
@@ -728,7 +732,7 @@ class ChatViewModel(
     ): Pair<GenerationConfig, GenerationContext> {
         val config = GenerationConfig(
             providerName = providerName,
-            modelId = com.newoether.agora.model.ModelId.parse(modelId).modelName,
+            modelId = ModelId.parse(modelId).modelName,
             apiKey = activeKey,
             effectiveSystemPrompt = resolvedSystemPrompt,
             maxContextWindow = effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
@@ -747,7 +751,7 @@ class ChatViewModel(
             frequencyPenalty = effectiveSettings.frequencyPenalty,
             presencePenalty = effectiveSettings.presencePenalty
         )
-        val genCtx = com.newoether.agora.viewmodel.GenerationContext(
+        val genCtx = GenerationContext(
             conversationId = currentId,
             accessSavedMemories = settings.accessSavedMemories.value,
             accessActiveMemory = settings.accessActiveMemory.value,
@@ -783,10 +787,10 @@ class ChatViewModel(
         return Pair(config, genCtx)
     }
 
-    fun addShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
+    fun addShellDevice(device: ShellDeviceConfig) {
         settings.addShellDevice(device)
     }
-    fun updateShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
+    fun updateShellDevice(device: ShellDeviceConfig) {
         settings.updateShellDevice(device)
     }
 
@@ -800,7 +804,7 @@ class ChatViewModel(
         host: String, port: Int, user: String, password: String, timeoutSec: Int
     ): Result<Pair<String, String>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         if (host.isBlank()) return@withContext Result.failure(Exception("Host is empty"))
-        val client = com.newoether.agora.util.SshClient(
+        val client = SshClient(
             host, port, user.ifBlank { "root" }, password, timeoutSec * 1000,
             pinnedHostKey = "", allowUnknownHostKey = true
         )
@@ -813,7 +817,7 @@ class ChatViewModel(
         }
         val key = client.capturedHostKey
         if (key.isNullOrBlank()) Result.failure(Exception("Could not reach host or no host key presented"))
-        else Result.success(key to com.newoether.agora.util.SshClient.fingerprintSha256(key))
+        else Result.success(key to SshClient.fingerprintSha256(key))
     }
     suspend fun testRemoteEmbedding(modelName: String, baseUrl: String, apiKey: String = ""): String? {
         val effectiveKey = apiKey.ifBlank { ragManager.resolveEmbeddingApiKey() ?: "" }
@@ -838,7 +842,6 @@ class ChatViewModel(
         _isSwitching.value = true
         switchingJob = viewModelScope.launch {
             kotlinx.coroutines.delay(200) // Allow overlay to fade in
-            clearMessageHeights()
             _currentConversationId.value = null
             _currentActiveModel.value = null
             _pendingConversationSettings.value = null
@@ -859,7 +862,6 @@ class ChatViewModel(
         switchingJob = viewModelScope.launch {
             kotlinx.coroutines.delay(200) // Allow overlay to fade in
             _isNewChatMode.value = false
-            clearMessageHeights()
             _branchSwitchTrigger.value = null
             _currentConversationId.value = id
             val conversation = convRepo.getConversation(id)
@@ -890,7 +892,7 @@ class ChatViewModel(
             val titleModelId = settings.titleGenerationModel.value
             val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: settings.selectedModel.value)
             val providerName = getProviderForModel(modelIdWithPrefix)
-            val modelId = com.newoether.agora.model.ModelId.parse(modelIdWithPrefix).modelName
+            val modelId = ModelId.parse(modelIdWithPrefix).modelName
             val activeKeyId = settings.activeApiKeyIds.value[providerName]
             val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
             if (!providerRegistry.isConfigured(providerName, activeKey)) {
@@ -982,26 +984,6 @@ class ChatViewModel(
             stopGeneration()
         }
         viewModelScope.launch(Dispatchers.IO) {
-            // Delete attachment files for all messages in this conversation
-            val allMsgs = convRepo.getMessagesForConversation(id).first()
-            for (msg in allMsgs) {
-                for (imagePath in msg.images) {
-                    try { java.io.File(imagePath).delete() } catch (_: Exception) {}
-                }
-                // Delete video files referenced in attachmentMeta
-                if (msg.attachmentMeta != null) {
-                    try {
-                        val meta = kotlinx.serialization.json.Json.decodeFromString<com.newoether.agora.model.AttachmentMeta>(msg.attachmentMeta!!)
-                        for (item in meta.items) {
-                            if (item.type == "video" && item.originalUri?.startsWith("file://") == true) {
-                                try {
-                                    java.io.File(item.originalUri.removePrefix("file://")).delete()
-                                } catch (_: Exception) {}
-                            }
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
             convRepo.deleteConversation(id)
             if (_currentConversationId.value == id) createNewChat()
         }
@@ -1031,20 +1013,8 @@ class ChatViewModel(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
-            // Delete attachment files for all cascaded messages
             val staleList = allMsgs.filter { it.id in staleIds }
-            for (msg in staleList) {
-                for (imagePath in msg.images) {
-                    try { java.io.File(imagePath).delete() } catch (_: Exception) {}
-                }
-                if (msg.attachmentMeta != null) {
-                    for (item in msg.attachmentMeta.items) {
-                        if ((item.type == "video" || item.type == "image" || item.type == "file") && item.originalUri?.startsWith("file://") == true) {
-                            try { java.io.File(item.originalUri.removePrefix("file://")).delete() } catch (_: Exception) {}
-                        }
-                    }
-                }
-            }
+            convRepo.deleteMessageFiles(staleList)
 
             // Delete embeddings for all cascaded messages
             for (id in staleIds) {
@@ -1094,13 +1064,7 @@ class ChatViewModel(
     fun regenerate(messageId: String) {
         val currentId = _currentConversationId.value ?: return
         val modelId = currentActiveModel.value
-        val providerName = getProviderForModel(modelId)
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
-            return
-        }
+        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return
 
         val stopFinalization = session.stopForReplacement()
         // Capture ownership on the UI thread, immediately after stopGeneration advanced
@@ -1233,13 +1197,7 @@ class ChatViewModel(
     fun editMessage(messageId: String, newText: String) {
         val currentId = _currentConversationId.value ?: return
         val modelId = currentActiveModel.value
-        val providerName = getProviderForModel(modelId)
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
-            return
-        }
+        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return
 
         val stopFinalization = session.stopForReplacement()
         val myUiToken = session.captureUiToken()
@@ -1322,7 +1280,7 @@ class ChatViewModel(
         val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
         val activeMemory = memoryManager.getActiveMemory()
         val includeActiveMemory = settings.accessActiveMemory.value
-        val modelId = com.newoether.agora.model.ModelId.parse(currentActiveModel.value).modelName
+        val modelId = ModelId.parse(currentActiveModel.value).modelName
 
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
         val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
@@ -1369,12 +1327,12 @@ class ChatViewModel(
     /** The persisted user-message media (final image paths) plus structured attachment metadata. */
     private data class MessagePayload(
         val allImages: List<String>,
-        val attachmentMeta: com.newoether.agora.model.AttachmentMeta?
+        val attachmentMeta: AttachmentMeta?
     )
 
     /**
      * Resolves the outgoing message's attachments into concrete image paths and
-     * structured [com.newoether.agora.model.AttachmentMeta]. Handles legacy images,
+     * structured [AttachmentMeta]. Handles legacy images,
      * images, videos (frame extraction / slicing), text files, and rendered PDF pages,
      * then reconciles each metadata item's `imageIndex` against the actual processed
      * image positions. Extracted from [sendMessage] so the send path reads as a sequence
@@ -1390,29 +1348,12 @@ class ChatViewModel(
         val mediaUris = mutableListOf<String>()
         val directPaths = mutableListOf<String>()
         val sliceConfigs = mutableMapOf<String, VideoSliceConfig>()
-        val metaItems = mutableListOf<com.newoether.agora.model.AttachmentItem>()
+        val metaItems = mutableListOf<AttachmentItem>()
         var nextImageIndex = 0
 
         // Process legacy images list (backward compatibility)
         for (uri in images) {
-            val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
-            if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
-                mediaUris.add(uri)
-                try {
-                    val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
-                    if (isText) {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
-                            val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
-                            if (content.isNotBlank()) {
-                                val fileName = getFileName(app, android.net.Uri.parse(uri))
-                                // Legacy file content stored in text (pre-attachmentMeta)
-                            }
-                        }
-                    }
-                } catch (_: Exception) {}
-            } else {
-                mediaUris.add(uri)
-            }
+            mediaUris.add(uri)
         }
 
         // Process new SelectedAttachment list
@@ -1420,7 +1361,7 @@ class ChatViewModel(
             when (att.type) {
                 "image" -> {
                     mediaUris.add(att.uri)
-                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                    metaItems.add(AttachmentItem(
                         originalUri = att.uri, type = "image", mimeType = att.mimeType,
                         imageIndex = nextImageIndex
                     ))
@@ -1447,7 +1388,7 @@ class ChatViewModel(
                     }
 
                     if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
-                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                        metaItems.add(AttachmentItem(
                             originalUri = localVideoUri, type = "video",
                             fileName = att.fileName, mimeType = att.mimeType,
                             imageIndex = nextImageIndex, pageCount = att.frameCount
@@ -1456,7 +1397,7 @@ class ChatViewModel(
                         nextImageIndex += att.processedFrames.size
                     } else {
                         val frameCount = att.frameCount ?: 1
-                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                        metaItems.add(AttachmentItem(
                             originalUri = localVideoUri, type = "video",
                             fileName = att.fileName, mimeType = att.mimeType,
                             imageIndex = nextImageIndex, pageCount = att.frameCount
@@ -1482,7 +1423,7 @@ class ChatViewModel(
                             }
                         }
                     } catch (_: Exception) {}
-                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                    metaItems.add(AttachmentItem(
                         originalUri = att.uri, type = "file",
                         fileName = att.fileName, mimeType = att.mimeType,
                         textContent = textContent
@@ -1493,13 +1434,13 @@ class ChatViewModel(
                         val sel = att.selectedPages ?: att.preRenderedPaths.indices.toSet()
                         att.preRenderedPaths.filterIndexed { i, _ -> i in sel }
                     } else {
-                        com.newoether.agora.util.PdfPageRenderer.renderAsImages(app, android.net.Uri.parse(att.uri), att.selectedPages)
+                        PdfPageRenderer.renderAsImages(app, Uri.parse(att.uri), att.selectedPages)
                     }
                     if (pagePaths.isEmpty()) {
                         _snackbarMessage.emit(SnackbarEvent(app.getString(R.string.pdf_render_failed)))
                         continue
                     }
-                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                    metaItems.add(AttachmentItem(
                         originalUri = att.uri, type = "pdf",
                         fileName = att.fileName, mimeType = "application/pdf",
                         imageIndex = nextImageIndex, pageCount = pagePaths.size
@@ -1551,7 +1492,7 @@ class ChatViewModel(
             }
         }
         val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
-            com.newoether.agora.model.AttachmentMeta(items = adjustedMetaItems)
+            AttachmentMeta(items = adjustedMetaItems)
         } else null
         return MessagePayload(allImages, attachmentMeta)
     }
@@ -1565,13 +1506,7 @@ class ChatViewModel(
             emitSnackbar(getApplication<Application>().getString(R.string.no_model_selected))
             return false
         }
-        val providerName = getProviderForModel(modelId)
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
-            return false
-        }
+        val (providerName, activeKey) = resolveProviderKey(modelId) ?: return false
         if (providerName == "Local") {
             val localModelId = modelId.substringAfter("Local:")
             val config = settings.localChatModels.value.find { it.modelId == localModelId }
@@ -1594,7 +1529,6 @@ class ChatViewModel(
             stopFinalization?.join()
             val myPersistId = session.nextPersistId()
             val app = getApplication<Application>()
-            val finalText = text
             val (allImages, attachmentMeta) = buildMessagePayload(app, images, attachments)
             var currentId = _currentConversationId.value
             val wasNewChat = _isNewChatMode.value
@@ -1623,7 +1557,7 @@ class ChatViewModel(
             val userMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
                 id = userMessageId, conversationId = currentId, parentId = lastMessageId,
-                text = finalText, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
+                text = text, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
                 attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
             ))
             settings.incrementMessagesSent()
@@ -1807,12 +1741,12 @@ class ChatViewModel(
     fun previewClaudeChat(uri: Uri) = importExport.previewClaudeChat(uri)
     fun setClaudeImportError(error: String) = importExport.setClaudeImportError(error)
     fun clearClaudeImportState() = importExport.clearClaudeImportState()
-    fun importClaudeChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) =
+    fun importClaudeChat(uri: Uri, strategy: ImportStrategy, selectedIds: Set<String>) =
         importExport.importClaudeChat(uri, strategy, selectedIds)
     fun previewGptChat(uri: Uri) = importExport.previewGptChat(uri)
     fun setGptImportError(error: String) = importExport.setGptImportError(error)
     fun clearGptImportState() = importExport.clearGptImportState()
-    fun importGptChat(uri: Uri, strategy: com.newoether.agora.ui.settings.ImportStrategy, selectedIds: Set<String>) =
+    fun importGptChat(uri: Uri, strategy: ImportStrategy, selectedIds: Set<String>) =
         importExport.importGptChat(uri, strategy, selectedIds)
     fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) =
         importExport.importData(uri, decisions)

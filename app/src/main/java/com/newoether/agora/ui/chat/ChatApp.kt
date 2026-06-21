@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -212,11 +213,11 @@ fun ChatApp(
         (bottomBarHeight.value + (settingsButtonTopDp - bottomBarHeight.value) * t).dp
     }
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
-    val listState = viewModel.listState
+    val listState = rememberLazyListState()
     val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
     val inputFocusRequester = remember { FocusRequester() }
 
-    val messageHeights = viewModel.messageHeights
+    val messageHeights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
     var viewportHeightPx by remember { mutableIntStateOf(0) }
 
     var showLaunchContent by remember { mutableStateOf(false) }
