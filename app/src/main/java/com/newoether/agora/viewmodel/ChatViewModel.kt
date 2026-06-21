@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import com.newoether.agora.util.DebugLog
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.newoether.agora.api.*
 import com.newoether.agora.api.anthropic.*
@@ -14,20 +13,15 @@ import com.newoether.agora.api.local.*
 import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
 import com.newoether.agora.data.ClaudeChatImporter
-import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
-import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
 import com.newoether.agora.data.EmbeddingModelConfig
-import com.newoether.agora.data.EmbeddingModelType
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.PredefinedVariables
-import com.newoether.agora.data.PromptTemplateItem
-import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
@@ -47,7 +41,6 @@ import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.service.AgoraForegroundService
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,7 +52,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.NonCancellable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
