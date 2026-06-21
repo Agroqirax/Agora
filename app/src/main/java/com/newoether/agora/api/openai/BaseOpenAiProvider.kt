@@ -136,8 +136,8 @@ abstract class BaseOpenAiProvider : LlmProvider {
                         } else {
                             val errorRaw = handle.errorBody ?: "Unknown error"
                             val hasV1Fallback = endpointIndex + 1 < endpointUrls.size
-                            if (handle.code == 404 && hasV1Fallback) {
-                                DebugLog.w("AgoraAPI", "[$name] 404 at $endpointUrl, retrying with ${endpointUrls[endpointIndex + 1]}")
+                            if (hasV1Fallback) {
+                                DebugLog.w("AgoraAPI", "[$name] ${handle.code} at $endpointUrl, retrying with ${endpointUrls[endpointIndex + 1]}")
                                 endpointIndex++
                                 continue
                             }

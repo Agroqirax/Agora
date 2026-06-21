@@ -16,6 +16,7 @@ import com.newoether.agora.model.ToolCallDisplayModes
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -338,4 +339,40 @@ class SettingsRepository(
     fun setSearchMatchLimit(n: Int) = scope.launch { settingsManager.saveSearchMatchLimit(n) }
     fun setSearchContextWindow(n: Int) = scope.launch { settingsManager.saveSearchContextWindow(n) }
     fun setRagThreshold(threshold: Float) = scope.launch { settingsManager.saveRagThreshold(threshold) }
+
+    fun setShellConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellConfirmEnabled(enabled) }
+    fun addShellDevice(device: ShellDeviceConfig) = scope.launch { settingsManager.saveShellDevices(shellDevices.value + device) }
+    fun updateShellDevice(device: ShellDeviceConfig) = scope.launch {
+        settingsManager.saveShellDevices(shellDevices.value.map { if (it.id == device.id) device else it })
+    }
+
+    // ── Suspending DataStore access ───────────────────────────
+    //
+    // The StateFlows above are eagerly-shared with a default initial value, so at app
+    // startup `.value` may briefly be the default before DataStore loads. These suspend
+    // accessors read/write DataStore directly (awaiting the on-disk value, preserving
+    // write ordering) for callers that need the persisted value immediately or ordered,
+    // read-after-write semantics. They keep [SettingsManager] encapsulated as an internal
+    // detail of this repository — the single owner of the settings surface.
+
+    suspend fun getAutoUpdateCheck(): Boolean = settingsManager.autoUpdateCheck.first()
+    suspend fun getLastUpdateCheckTime(): Long = settingsManager.lastUpdateCheckTime.first()
+    suspend fun getEmbeddingModels(): List<EmbeddingModelConfig> = settingsManager.embeddingModels.first()
+    suspend fun getActiveEmbeddingModelId(): String = settingsManager.activeEmbeddingModelId.first()
+    suspend fun getModelAliases(): Map<String, String> = settingsManager.modelAliases.first()
+    suspend fun getProviderBaseUrls(): Map<String, String> = settingsManager.providerBaseUrls.first()
+    suspend fun getAvailableModels(): Map<String, List<String>> = settingsManager.availableModels.first()
+    suspend fun getSystemPrompts(): List<SystemPromptEntry> = settingsManager.systemPrompts.first()
+
+    suspend fun saveAvailableModels(provider: String, models: List<String>) = settingsManager.saveAvailableModels(provider, models)
+    suspend fun saveModelAliases(aliases: Map<String, String>) = settingsManager.saveModelAliases(aliases)
+    suspend fun saveLastUpdateCheckTime(time: Long) = settingsManager.saveLastUpdateCheckTime(time)
+    suspend fun saveLastModelsFetchFingerprint(fingerprint: String) = settingsManager.saveLastModelsFetchFingerprint(fingerprint)
+    suspend fun incrementMessagesSent() = settingsManager.incrementMessagesSent()
+    suspend fun saveAutoBackupEnabled(enabled: Boolean) = settingsManager.saveAutoBackupEnabled(enabled)
+    suspend fun saveAutoBackupPeriodHours(hours: Int) = settingsManager.saveAutoBackupPeriodHours(hours)
+    suspend fun saveAutoBackupCategories(categories: String) = settingsManager.saveAutoBackupCategories(categories)
+    suspend fun saveAutoBackupDirectory(path: String) = settingsManager.saveAutoBackupDirectory(path)
+    suspend fun saveAutoDeleteEnabled(enabled: Boolean) = settingsManager.saveAutoDeleteEnabled(enabled)
+    suspend fun saveAutoDeletePeriodHours(hours: Int) = settingsManager.saveAutoDeletePeriodHours(hours)
 }

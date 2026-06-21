@@ -73,22 +73,19 @@ class ChatViewModel(
     val memoryManager: MemoryManager,
     private val appContext: Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
-    // Injected via AppContainer/ChatViewModelFactory. Nullable + fallback keeps any
-    // direct construction (e.g. tests) working.
-    private val injectedAutoBackupManager: com.newoether.agora.data.AutoBackupManager? = null,
-    private val conversationRepository: com.newoether.agora.data.repository.ConversationRepository? = null,
-    private val settingsRepository: com.newoether.agora.data.repository.SettingsRepository? = null
+    // All injected via AppContainer/ChatViewModelFactory — the single construction site.
+    val autoBackupManager: com.newoether.agora.data.AutoBackupManager,
+    conversationRepository: com.newoether.agora.data.repository.ConversationRepository,
+    settingsRepository: com.newoether.agora.data.repository.SettingsRepository
 ) : AndroidViewModel(application) {
 
     /**
      * Shared settings state holder (eagerly-shared StateFlows + setters).
      * Revived from the previously-unused [SettingsRepository]; both ChatViewModel's
      * internal logic and the settings pages read settings from here, so each setting
-     * is owned in exactly one place. Fallback keeps direct construction (tests) working.
+     * is owned in exactly one place.
      */
-    val settings: com.newoether.agora.data.repository.SettingsRepository =
-        settingsRepository
-            ?: com.newoether.agora.data.repository.SettingsRepository(settingsManager, viewModelScope)
+    val settings: com.newoether.agora.data.repository.SettingsRepository = settingsRepository
 
     /**
      * Conversation/message persistence behind the repository layer. Revived from the
@@ -96,9 +93,7 @@ class ChatViewModel(
      * and stuck-message logic live there instead of being hand-rolled against [chatDao].
      * (Embedding writes / bulk import-export still go direct until later phases.)
      */
-    private val convRepo: com.newoether.agora.data.repository.ConversationRepository =
-        conversationRepository
-            ?: com.newoether.agora.data.repository.ConversationRepository(chatDao)
+    private val convRepo: com.newoether.agora.data.repository.ConversationRepository = conversationRepository
 
     private val localProvider = LocalProvider(appContext, settingsManager)
 
@@ -151,11 +146,11 @@ class ChatViewModel(
     private fun startInitJobs() {
         // Auto-check for updates on launch (at most once per day)
         viewModelScope.launch(Dispatchers.IO) {
-            if (settingsManager.autoUpdateCheck.first()) {
-                val lastCheck = settingsManager.lastUpdateCheckTime.first()
+            if (settings.getAutoUpdateCheck()) {
+                val lastCheck = settings.getLastUpdateCheckTime()
                 val now = System.currentTimeMillis()
                 if (now - lastCheck > 24 * 60 * 60 * 1000L) {
-                    settingsManager.saveLastUpdateCheckTime(now)
+                    settings.saveLastUpdateCheckTime(now)
                     val info = com.newoether.agora.util.UpdateChecker.check(getCurrentVersion())
                     if (info != null) {
                         _updateDialogData.value = info
@@ -164,8 +159,8 @@ class ChatViewModel(
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val models = settingsManager.embeddingModels.first()
-            val activeId = settingsManager.activeEmbeddingModelId.first()
+            val models = settings.getEmbeddingModels()
+            val activeId = settings.getActiveEmbeddingModelId()
             val active = models.find { it.id == activeId } ?: return@launch
             val total = convRepo.getAllMessagesForIndexing().count { it.text.isNotBlank() }
             val cached = convRepo.getEmbeddingCountByModel(active.id)
@@ -202,32 +197,32 @@ class ChatViewModel(
         // ── Auto Backup ──────────────────────────────────────────
         try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
         viewModelScope.launch(Dispatchers.IO) {
-            try { autoBackupManager?.checkAndBackup() } catch (_: Exception) {}
+            try { autoBackupManager.checkAndBackup() } catch (_: Exception) {}
         }
         // Sync local chat models into available models
         viewModelScope.launch {
             var lastLocalIds: List<String>? = null
             var lastAliases: Map<String, String>? = null
-            settingsManager.localChatModels.collect { models ->
+            settings.localChatModels.collect { models ->
                 val localIds = models.map { "Local:${it.modelId}" }
-                val currentAliases = settingsManager.modelAliases.first()
+                val currentAliases = settings.getModelAliases()
                 val aliases = currentAliases.toMutableMap()
                 models.forEach { aliases["Local:${it.modelId}"] = it.alias }
                 if (localIds != lastLocalIds) {
-                    settingsManager.saveAvailableModels("Local", localIds)
+                    settings.saveAvailableModels("Local", localIds)
                     lastLocalIds = localIds
                 }
                 if (aliases != lastAliases) {
-                    settingsManager.saveModelAliases(aliases)
+                    settings.saveModelAliases(aliases)
                     lastAliases = aliases
                 }
             }
         }
         // Sync custom providers into the providers map
         viewModelScope.launch {
-            settingsManager.customProviders.collect { custom ->
+            settings.customProviders.collect { custom ->
                 providers.keys.filter { it !in builtInProviders }.forEach { providers.remove(it) }
-                val baseUrls = settingsManager.providerBaseUrls.first()
+                val baseUrls = settings.getProviderBaseUrls()
                 custom.forEach { config ->
                     providers[config.name] = CustomOpenAiProvider(config.name, baseUrls[config.name] ?: "")
                 }
@@ -238,9 +233,9 @@ class ChatViewModel(
             var prevConfigured = emptyMap<String, Boolean>()
 
             combine(
-                settingsManager.apiKeys,
-                settingsManager.activeApiKeyIds,
-                settingsManager.providerBaseUrls
+                settings.apiKeys,
+                settings.activeApiKeyIds,
+                settings.providerBaseUrls
             ) { keys, activeIds, baseUrls ->
                 Triple(keys, activeIds, baseUrls)
             }.collect { (keys, activeIds, _) ->
@@ -255,9 +250,9 @@ class ChatViewModel(
                 var changed = false
                 current.forEach { (name, configured) ->
                     if (prevConfigured[name] == true && !configured) {
-                        val existing = settingsManager.availableModels.first()[name]
+                        val existing = settings.getAvailableModels()[name]
                         if (!existing.isNullOrEmpty()) {
-                            settingsManager.saveAvailableModels(name, emptyList())
+                            settings.saveAvailableModels(name, emptyList())
                             changed = true
                         }
                     }
@@ -265,7 +260,7 @@ class ChatViewModel(
                 prevConfigured = current
 
                 if (changed) {
-                    val allAvailable = settingsManager.availableModels.first().values.flatten().toSet()
+                    val allAvailable = settings.getAvailableModels().values.flatten().toSet()
                     val newEnabled = settings.enabledModels.value.intersect(allAvailable)
                     if (newEnabled != settings.enabledModels.value) {
                         settings.setEnabledModels(newEnabled)
@@ -326,21 +321,12 @@ class ChatViewModel(
     }
     val isSandboxFlavor: Boolean = sandboxFactory?.isAvailable() == true
 
-    // ── Auto Backup ───────────────────────────────────────────
-    // Prefer the single instance built in AppContainer; fall back to a local one
-    // only if this VM was constructed without DI (e.g. a test).
-    val autoBackupManager: com.newoether.agora.data.AutoBackupManager? by lazy {
-        injectedAutoBackupManager ?: try {
-            com.newoether.agora.data.AutoBackupManager(getApplication(), settingsManager, chatDao, memoryManager)
-        } catch (e: Exception) { null }
-    }
-
     override fun onCleared() {
         super.onCleared()
         sandboxManager?.close()
         localProvider.close()
         generationScope.coroutineContext[Job]?.cancel()
-        autoBackupManager?.destroy()
+        autoBackupManager.destroy()
     }
 
     val listState = LazyListState()
@@ -435,7 +421,7 @@ class ChatViewModel(
     }
 
     fun setShellConfirmEnabled(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveShellConfirmEnabled(enabled) }
+        settings.setShellConfirmEnabled(enabled)
     }
 
     // ── Auto Backup ───────────────────────────────────────────
@@ -582,7 +568,7 @@ class ChatViewModel(
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
             val current = settings.conversationSettings.value[convId] ?: ConversationSettings()
-            viewModelScope.launch { settingsManager.saveConversationSettings(convId, update(current)) }
+            settings.setConversationSettings(convId, update(current))
         } else {
             val current = _pendingConversationSettings.value ?: ConversationSettings()
             _pendingConversationSettings.value = update(current)
@@ -830,7 +816,7 @@ class ChatViewModel(
     // ── Auto Backup ───────────────────────────────────────────
     fun setAutoBackupEnabled(enabled: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
-            settingsManager.saveAutoBackupEnabled(enabled)
+            settings.saveAutoBackupEnabled(enabled)
             if (enabled) {
                 try { com.newoether.agora.service.AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
             } else {
@@ -840,32 +826,32 @@ class ChatViewModel(
     }
     fun setAutoBackupPeriodHours(hours: Int) {
         viewModelScope.launch(Dispatchers.IO) {
-            settingsManager.saveAutoBackupPeriodHours(hours)
+            settings.saveAutoBackupPeriodHours(hours)
             // Enforce: auto-delete period must be strictly greater than backup period
             val deleteTiers = listOf(168, 720, 8760)
-            val deleteHours = try { settingsManager.autoDeletePeriodHours.first() } catch (_: Exception) { 168 }
+            val deleteHours = settings.autoDeletePeriodHours.value
             if (deleteHours <= hours) {
                 val nextDelete = deleteTiers.firstOrNull { it > hours } ?: 8760
-                settingsManager.saveAutoDeletePeriodHours(nextDelete)
+                settings.saveAutoDeletePeriodHours(nextDelete)
             }
         }
     }
     fun setAutoBackupCategories(categories: String) {
-        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoBackupCategories(categories) }
+        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoBackupCategories(categories) }
     }
     fun setAutoBackupDirectory(path: String) {
-        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoBackupDirectory(path) }
+        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoBackupDirectory(path) }
     }
     fun setAutoDeleteEnabled(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) { settingsManager.saveAutoDeleteEnabled(enabled) }
+        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoDeleteEnabled(enabled) }
     }
     fun setAutoDeletePeriodHours(hours: Int) {
         viewModelScope.launch(Dispatchers.IO) {
-            val backupHours = try { settingsManager.autoBackupPeriodHours.first() } catch (_: Exception) { 24 }
+            val backupHours = settings.autoBackupPeriodHours.value
             val deleteTiers = listOf(168, 720, 8760)
             // Find the smallest valid delete tier that is > backupHours, and >= the requested hours
             val minValid = deleteTiers.firstOrNull { it > backupHours } ?: 8760
-            settingsManager.saveAutoDeletePeriodHours(maxOf(hours, minValid))
+            settings.saveAutoDeletePeriodHours(maxOf(hours, minValid))
         }
     }
     fun buildEffectiveConversationSettings(conversationId: String): ConversationSettings {
@@ -986,18 +972,10 @@ class ChatViewModel(
     }
 
     fun addShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
-        viewModelScope.launch {
-            val current = settings.shellDevices.value.toMutableList()
-            current.add(device)
-            settingsManager.saveShellDevices(current)
-        }
+        settings.addShellDevice(device)
     }
     fun updateShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
-        viewModelScope.launch {
-            val current = settings.shellDevices.value.toMutableList()
-            val idx = current.indexOfFirst { it.id == device.id }
-            if (idx >= 0) { current[idx] = device; settingsManager.saveShellDevices(current) }
-        }
+        settings.updateShellDevice(device)
     }
 
     /**
@@ -1912,8 +1890,8 @@ class ChatViewModel(
             }
             // Apply pending per-conversation settings if any (from Advanced dialog in new chat)
             val pendingSettings = _pendingConversationSettings.value
-            if (pendingSettings != null && currentId != null) {
-                viewModelScope.launch { settingsManager.saveConversationSettings(currentId, pendingSettings) }
+            if (pendingSettings != null) {
+                settings.setConversationSettings(currentId, pendingSettings)
                 _pendingConversationSettings.value = null
             }
             val currentPath = messages.value
@@ -1924,7 +1902,7 @@ class ChatViewModel(
                 text = finalText, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
                 attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
             ))
-            settingsManager.incrementMessagesSent()
+            settings.incrementMessagesSent()
             val modelMessageId = UUID.randomUUID().toString()
             val startTime = System.currentTimeMillis() + 1
             convRepo.upsertMessage(MessageEntity(
@@ -2028,7 +2006,7 @@ class ChatViewModel(
         }
         val raw = withTimeout(10_000L) { provider.fetchModels(activeKey, baseUrl) }
         val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
-        if (prefixed.isNotEmpty()) settingsManager.saveAvailableModels(name, prefixed)
+        if (prefixed.isNotEmpty()) settings.saveAvailableModels(name, prefixed)
         return prefixed
     }
 
@@ -2073,7 +2051,7 @@ class ChatViewModel(
 
                         if (!isProviderConfigured(name, activeKey)) {
                             skippedCount++
-                            settingsManager.saveAvailableModels(name, emptyList())
+                            settings.saveAvailableModels(name, emptyList())
                             return@forEach
                         }
 
@@ -2082,7 +2060,7 @@ class ChatViewModel(
                         }
                         if (rawModels.isNotEmpty()) {
                             val prefixedModels = rawModels.map { "$name:${it.removePrefix("models/")}" }
-                            settingsManager.saveAvailableModels(name, prefixedModels)
+                            settings.saveAvailableModels(name, prefixedModels)
                             successProviders.add(name)
                         } else {
                             failedProviders.add(name)
@@ -2092,12 +2070,12 @@ class ChatViewModel(
                     }
                 }
 
-                val allFetchedModels = settingsManager.availableModels.first().values.flatten().toSet()
+                val allFetchedModels = settings.getAvailableModels().values.flatten().toSet()
                 val newEnabled = settings.enabledModels.value.intersect(allFetchedModels)
                 settings.setEnabledModels(newEnabled)
 
                 // Save fingerprint on any successful fetch so we don't re-fetch on next visit
-                settingsManager.saveLastModelsFetchFingerprint(computeProviderFingerprint())
+                settings.saveLastModelsFetchFingerprint(computeProviderFingerprint())
 
                 when {
                     successProviders.isNotEmpty() && failedProviders.isEmpty() ->
@@ -2125,7 +2103,7 @@ class ChatViewModel(
             _conversationCount.value = convRepo.getAllConversationsList().size
             _memoryCount.value = memoryManager.listFiles().size +
                 (if (memoryManager.getActiveMemory().isNotEmpty()) 1 else 0)
-            _systemPromptCount.value = settingsManager.systemPrompts.first().size
+            _systemPromptCount.value = settings.getSystemPrompts().size
         }
     }
 

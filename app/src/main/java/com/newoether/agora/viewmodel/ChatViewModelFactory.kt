@@ -19,9 +19,9 @@ class ChatViewModelFactory(
     private val memoryManager: MemoryManager,
     private val context: Context,
     private val sandboxFactory: SandboxManagerFactory? = null,
-    private val autoBackupManager: AutoBackupManager? = null,
-    private val conversationRepository: ConversationRepository? = null,
-    private val settingsRepository: SettingsRepository? = null
+    private val autoBackupManager: AutoBackupManager,
+    private val conversationRepository: ConversationRepository,
+    private val settingsRepository: SettingsRepository
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
