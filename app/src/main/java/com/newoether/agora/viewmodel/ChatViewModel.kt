@@ -201,33 +201,9 @@ class ChatViewModel(
         providerRegistry.launchSyncJobs()
     }
 
-    private val generationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var generationJob: Job? = null
-    private val sendGate = java.util.concurrent.atomic.AtomicBoolean(false)
-    @Volatile private var stopFinalizationJob: Job? = null
-
-    private data class StopFinalizationState(
-        val conversationId: String?,
-        val messages: List<ChatMessage>
-    )
-
-    // ── Generation ownership ──────────────────────────────────────────────
-    // Two independent ownership signals make the generation lifecycle race-free:
-    //
-    //  • uiGenToken — owns the shared UI state (_isLoading, _streamingMessage,
-    //    _generatingInConversationId). Advanced on EVERY stop and EVERY new
-    //    generation. The four streaming callbacks mutate UI state only while their
-    //    captured token is still current, under genLock so the check-and-write is
-    //    atomic against stopGeneration() on the UI thread. A stopped or superseded
-    //    generation therefore cannot resurrect "Thinking…" or flip the button.
-    //
-    //  • persistId — owns the model message's DB row. Advanced ONLY when a new
-    //    generation starts (never on stop), so a stopped generation still persists
-    //    its own accumulated text, while a superseded one is blocked from clobbering
-    //    the newer generation's message.
-    private val genLock = Any()
-    private var uiGenToken = 0L
-    private val persistId = java.util.concurrent.atomic.AtomicLong(0L)
+    // Generation lifecycle (IO scope, current job, send gate, race-free stop/persist
+    // ownership tokens) lives in [GenerationSession]; declared below once the
+    // generation StateFlows it shares are initialized.
 
     private val generationManager by lazy {
         GenerationManager(
@@ -256,7 +232,7 @@ class ChatViewModel(
         super.onCleared()
         sandboxManager?.close()
         localProvider.close()
-        generationScope.coroutineContext[Job]?.cancel()
+        session.cancelScope()
         autoBackupManager.destroy()
     }
 
@@ -397,6 +373,20 @@ class ChatViewModel(
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     private val _generatingInConversationId = MutableStateFlow<String?>(null)
     val generatingInConversationId: StateFlow<String?> = _generatingInConversationId.asStateFlow()
+
+    /** Race-free generation lifecycle: IO scope, current job, send gate, stop/persist tokens. */
+    private val session = GenerationSession(
+        app = application,
+        convRepo = convRepo,
+        settings = settings,
+        isLoading = _isLoading,
+        streamingMessage = _streamingMessage,
+        generatingInConversationId = _generatingInConversationId,
+        allMessages = _allMessages,
+        currentConversationId = _currentConversationId,
+        onIndexMessageForRag = ::indexMessageForRag,
+        onCacheMessages = { cacheMessagesForModel(it, silent = true) },
+    )
 
     private val _isSwitching = MutableStateFlow(false)
     val isSwitching: StateFlow<Boolean> = _isSwitching.asStateFlow()
@@ -793,34 +783,6 @@ class ChatViewModel(
         return Pair(config, genCtx)
     }
 
-    // ── Token-guarded generation callbacks ────────────────────────────────
-    // Every generation captures its uiToken at launch and routes all UI-state
-    // mutations through these helpers. Each holds genLock so "is my token still
-    // current?" and the write happen atomically with respect to stopGeneration().
-    // Once superseded or stopped, the token no longer matches and every call is a
-    // silent no-op — a winding-down generation physically cannot touch the screen.
-    private fun streamUpdate(uiToken: Long, msg: ChatMessage) {
-        synchronized(genLock) { if (uiGenToken == uiToken) _streamingMessage.value = msg }
-    }
-    private fun loadingChange(uiToken: Long, value: Boolean) {
-        synchronized(genLock) { if (uiGenToken == uiToken) _isLoading.value = value }
-    }
-    private fun generatingIdChange(uiToken: Long, id: String?) {
-        synchronized(genLock) { if (uiGenToken == uiToken) _generatingInConversationId.value = id }
-    }
-    private fun streamClear(uiToken: Long) {
-        synchronized(genLock) {
-            if (uiGenToken != uiToken) return
-            val msg = _streamingMessage.value
-            if (msg?.status != MessageStatus.STOPPED) {
-                if (msg != null) { _allMessages.update { it.map { m -> if (m.id == msg.id) msg else m } } }
-                _streamingMessage.value = null
-            }
-        }
-        val id = settings.activeEmbeddingModelId.value
-        if (id.isNotEmpty()) cacheMessagesForModel(id, silent = true)
-    }
-
     fun addShellDevice(device: com.newoether.agora.data.ShellDeviceConfig) {
         settings.addShellDevice(device)
     }
@@ -1127,118 +1089,7 @@ class ChatViewModel(
         return staleIds.size
     }
 
-    fun stopGeneration() {
-        stopGenerationInternal(releaseSendGate = true)
-    }
-
-    private fun stopGenerationForReplacement(): Job? {
-        return stopGenerationInternal(releaseSendGate = false)
-    }
-
-    private fun stopGenerationInternal(releaseSendGate: Boolean): Job? {
-        val previousJob = generationJob
-        com.newoether.agora.api.HttpClient.activeStreamHandle?.cancel()
-        previousJob?.cancel()
-        // Advance the UI-ownership token and commit the terminal UI state as one
-        // atomic step under genLock. Any callback from the cancelled generation that
-        // is mid-flight on the IO thread is serialized by the same lock, so it either
-        // ran before this (and we overwrite it with STOPPED) or runs after (and is
-        // gated out by the advanced token). Either way "Thinking…" can never resurface.
-        var stoppedConversationId: String? = null
-        val stoppedMsg = synchronized(genLock) {
-            uiGenToken += 1
-            stoppedConversationId = _generatingInConversationId.value ?: _currentConversationId.value
-            _isLoading.value = false
-            val s = _streamingMessage.value?.copy(status = MessageStatus.STOPPED)
-            _streamingMessage.value = s
-            _generatingInConversationId.value = null
-            s
-        }
-        // Reflect STOPPED in memory immediately, then persist that terminal state via
-        // a short DB-only job. The cancelled provider may still unwind later, but it
-        // no longer blocks the user from sending the next message.
-        val fallbackStoppedMessages = mutableListOf<ChatMessage>()
-        if (stoppedMsg != null) {
-            _allMessages.update { it.map { m -> if (m.id == stoppedMsg.id) stoppedMsg else m } }
-        } else {
-            // _streamingMessage was null — mark any in-flight model message directly.
-            _allMessages.update { it.map { m ->
-                if (m.participant == Participant.MODEL &&
-                    (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING || m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
-                ) {
-                    val stopped = m.copy(status = MessageStatus.STOPPED)
-                    fallbackStoppedMessages.add(stopped)
-                    stopped
-                } else m
-            } }
-        }
-        val stoppedMessages = stoppedMsg?.let { listOf(it) } ?: fallbackStoppedMessages
-        val finalizationJob = launchStopFinalization(StopFinalizationState(stoppedConversationId, stoppedMessages))
-        if (releaseSendGate) sendGate.set(false)
-        AgoraForegroundService.stop(getApplication())
-        return finalizationJob ?: currentStopFinalizationJob()
-    }
-
-    private fun currentStopFinalizationJob(): Job? {
-        return synchronized(genLock) { stopFinalizationJob?.takeUnless { it.isCompleted } }
-    }
-
-    private fun launchStopFinalization(state: StopFinalizationState): Job? {
-        val conversationId = state.conversationId ?: return currentStopFinalizationJob()
-        val messages = state.messages.distinctBy { it.id }
-        if (messages.isEmpty()) return currentStopFinalizationJob()
-
-        val job = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val conversationExists = convRepo.getConversation(conversationId) != null
-                if (!conversationExists) return@launch
-                for (message in messages) {
-                    convRepo.upsertMessage(message.toStoppedEntity(conversationId))
-                    if (message.text.isNotBlank() && settings.autoCacheEnabled.value &&
-                        (settings.modelSearchMethod.value == "rag" || settings.manualSearchMethod.value == "rag")
-                    ) {
-                        indexMessageForRag(message.id, message.text)
-                    }
-                }
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Failed to persist stopped generation", e)
-            }
-        }
-        synchronized(genLock) { stopFinalizationJob = job }
-        return job
-    }
-
-    private fun ChatMessage.toStoppedEntity(conversationId: String): MessageEntity {
-        val toolJson = segments?.let { Json.encodeToString(it) } ?: toolCall?.let {
-            Json.encodeToString(listOf(
-                MessageSegment(
-                    type = "tool",
-                    toolName = it.toolName,
-                    toolArgs = it.arguments,
-                    toolResult = it.result,
-                    signature = it.signature,
-                    toolCallId = it.toolCallId
-                )
-            ))
-        }
-        return MessageEntity(
-            id = id,
-            conversationId = conversationId,
-            parentId = parentId,
-            text = text,
-            images = images,
-            thoughts = thoughts,
-            thoughtTitle = thoughtTitle,
-            tokenCount = tokenCount,
-            status = MessageStatus.STOPPED,
-            participant = participant,
-            timestamp = timestamp,
-            thoughtTimeMs = thoughtTimeMs,
-            modelName = modelName,
-            toolCallJson = toolJson,
-            attachmentMeta = attachmentMeta?.let { Json.encodeToString(it) }
-        )
-    }
+    fun stopGeneration() = session.stop()
 
     fun regenerate(messageId: String) {
         val currentId = _currentConversationId.value ?: return
@@ -1251,10 +1102,10 @@ class ChatViewModel(
             return
         }
 
-        val stopFinalization = stopGenerationForReplacement()
+        val stopFinalization = session.stopForReplacement()
         // Capture ownership on the UI thread, immediately after stopGeneration advanced
         // the token, so no concurrent stop can slip in before we record it.
-        val myUiToken = synchronized(genLock) { uiGenToken }
+        val myUiToken = session.captureUiToken()
 
         // Compute IDs and set placeholder on the calling thread before launching IO work,
         // so the combine function never sees _streamingMessage=null while the error is in _allMessages.
@@ -1283,11 +1134,11 @@ class ChatViewModel(
         _streamingMessage.value = placeholder
         _isLoading.value = true
 
-        generationJob = generationScope.launch {
+        session.generationJob = session.scope.launch {
             // Wait only for the short STOPPED DB finalization. The cancelled provider
             // may still be unwinding, but it no longer owns the next generation path.
             stopFinalization?.join()
-            val myPersistId = persistId.incrementAndGet()
+            val myPersistId = session.nextPersistId()
             try {
                 val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
 
@@ -1339,15 +1190,15 @@ class ChatViewModel(
                 modelName = currentActiveModel.value,
                 config = config,
                 ctx = genCtx,
-                generationJob = generationJob,
-                onStreamUpdate = { streamUpdate(myUiToken, it) },
-                onLoadingChange = { loadingChange(myUiToken, it) },
-                onGeneratingIdChange = { generatingIdChange(myUiToken, it) },
-                onStreamClear = { streamClear(myUiToken) },
-                isLatestPersist = { persistId.get() == myPersistId }
+                generationJob = session.generationJob,
+                onStreamUpdate = { session.streamUpdate(myUiToken, it) },
+                onLoadingChange = { session.loadingChange(myUiToken, it) },
+                onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
+                onStreamClear = { session.streamClear(myUiToken) },
+                isLatestPersist = { session.isLatestPersist(myPersistId) }
             )
             } finally {
-                loadingChange(myUiToken, false)
+                session.loadingChange(myUiToken, false)
             }
         }
     }
@@ -1390,11 +1241,11 @@ class ChatViewModel(
             return
         }
 
-        val stopFinalization = stopGenerationForReplacement()
-        val myUiToken = synchronized(genLock) { uiGenToken }
-        generationJob = generationScope.launch {
+        val stopFinalization = session.stopForReplacement()
+        val myUiToken = session.captureUiToken()
+        session.generationJob = session.scope.launch {
             stopFinalization?.join()
-            val myPersistId = persistId.incrementAndGet()
+            val myPersistId = session.nextPersistId()
             try {
             val messageToEdit = _allMessages.value.find { it.id == messageId } ?: return@launch
             val newUserMessageId = UUID.randomUUID().toString()
@@ -1423,7 +1274,7 @@ class ChatViewModel(
                 id = modelMessageId, parentId = newUserMessageId, text = "", participant = Participant.MODEL,
                 status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
             )
-            streamUpdate(myUiToken, placeholder)
+            session.streamUpdate(myUiToken, placeholder)
             _allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
             val editChildren = selectedAfterUserEdit.toMutableMap()
             editChildren[newUserMessageId] = modelMessageId
@@ -1446,15 +1297,15 @@ class ChatViewModel(
                 modelName = currentActiveModel.value,
                 config = config,
                 ctx = genCtx,
-                generationJob = generationJob,
-                onStreamUpdate = { streamUpdate(myUiToken, it) },
-                onLoadingChange = { loadingChange(myUiToken, it) },
-                onGeneratingIdChange = { generatingIdChange(myUiToken, it) },
-                onStreamClear = { streamClear(myUiToken) },
-                isLatestPersist = { persistId.get() == myPersistId }
+                generationJob = session.generationJob,
+                onStreamUpdate = { session.streamUpdate(myUiToken, it) },
+                onLoadingChange = { session.loadingChange(myUiToken, it) },
+                onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
+                onStreamClear = { session.streamClear(myUiToken) },
+                isLatestPersist = { session.isLatestPersist(myPersistId) }
             )
             } finally {
-                loadingChange(myUiToken, false)
+                session.loadingChange(myUiToken, false)
             }
         }
     }
@@ -1706,7 +1557,7 @@ class ChatViewModel(
     }
 
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
-        if (!sendGate.compareAndSet(false, true)) return false
+        if (!session.sendGate.compareAndSet(false, true)) return false
         var committed = false
         try {
         val modelId = currentActiveModel.value
@@ -1729,19 +1580,19 @@ class ChatViewModel(
                 return false
             }
         }
-        val stopFinalization = stopGenerationForReplacement()
+        val stopFinalization = session.stopForReplacement()
         // Set loading immediately so UI shows sending state during attachment processing
         _isLoading.value = true
         // Capture ownership on the UI thread right after stopGeneration advanced the token.
-        val myUiToken = synchronized(genLock) { uiGenToken }
+        val myUiToken = session.captureUiToken()
 
         committed = true
-        generationJob = generationScope.launch {
+        session.generationJob = session.scope.launch {
             try {
             // Wait only for the short STOPPED DB finalization. The cancelled provider
             // may still be unwinding, but it no longer owns the next generation path.
             stopFinalization?.join()
-            val myPersistId = persistId.incrementAndGet()
+            val myPersistId = session.nextPersistId()
             val app = getApplication<Application>()
             val finalText = text
             val (allImages, attachmentMeta) = buildMessagePayload(app, images, attachments)
@@ -1793,7 +1644,7 @@ class ChatViewModel(
                 id = modelMessageId, parentId = userMessageId, text = "", participant = Participant.MODEL,
                 status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
             )
-            streamUpdate(myUiToken, placeholder)
+            session.streamUpdate(myUiToken, placeholder)
             _allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
             val newChildren = _selectedChildren.value.toMutableMap()
             newChildren[userMessageId] = modelMessageId
@@ -1817,12 +1668,12 @@ class ChatViewModel(
                     modelName = currentActiveModel.value,
                     config = config,
                     ctx = genCtx,
-                    generationJob = generationJob,
-                    onStreamUpdate = { streamUpdate(myUiToken, it) },
-                    onLoadingChange = { loadingChange(myUiToken, it) },
-                    onGeneratingIdChange = { generatingIdChange(myUiToken, it) },
-                    onStreamClear = { streamClear(myUiToken) },
-                    isLatestPersist = { persistId.get() == myPersistId }
+                    generationJob = session.generationJob,
+                    onStreamUpdate = { session.streamUpdate(myUiToken, it) },
+                    onLoadingChange = { session.loadingChange(myUiToken, it) },
+                    onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
+                    onStreamClear = { session.streamClear(myUiToken) },
+                    isLatestPersist = { session.isLatestPersist(myPersistId) }
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -1830,20 +1681,20 @@ class ChatViewModel(
             }
 
             val lastMsg = _allMessages.value.find { it.id == modelMessageId }
-            if (wasNewChat && settings.titleGenerationEnabled.value && generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
+            if (wasNewChat && settings.titleGenerationEnabled.value && session.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
                 generateTitle(currentId)
             }
         } finally {
             // Token-gated: only the still-current generation clears the button, so a
             // cancelled/superseded coroutine can't revert the icon mid-generation.
-            loadingChange(myUiToken, false)
+            session.loadingChange(myUiToken, false)
             // sendGate must ALWAYS be freed, even when this coroutine was cancelled
             // by a subsequent regenerate(). Otherwise the send button stays locked.
-            sendGate.set(false)
+            session.sendGate.set(false)
         }
         } // end launch
     } finally {
-        if (!committed) sendGate.set(false)
+        if (!committed) session.sendGate.set(false)
     }
         return true
     }
