@@ -253,7 +253,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         val cleanPath = path.trimStart('/')
         val primary = "$normalizedBaseUrl/$cleanPath"
         if (!retryMissingV1BaseUrl || normalizedBaseUrl.isBlank() ||
-            normalizedBaseUrl.endsWith("/v1", ignoreCase = true)
+            BaseUrlResolver.hasVersionSegment(normalizedBaseUrl)
         ) {
             return listOf(primary)
         }

@@ -121,10 +121,28 @@ class ProviderRegistry(
         } else {
             settings.providerBaseUrls.value[name]
         }
-        val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) { provider.fetchModels(activeKey, baseUrl) }
-        val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
-        if (prefixed.isNotEmpty()) settings.saveAvailableModels(name, prefixed)
-        return prefixed
+
+        // Resolve the "/v1" ambiguity ONCE here (config time) and persist the canonical
+        // Base URL, so the request hot path uses a single deterministic endpoint instead
+        // of trying both forms (and eating a 404) on every call. Custom OpenAI-compatible
+        // providers without a version segment are probed /v1-first (the common case).
+        val candidates: List<String?> =
+            if (!isBuiltIn(name) && baseUrl != null && !com.newoether.agora.api.BaseUrlResolver.hasVersionSegment(baseUrl))
+                listOf(com.newoether.agora.api.BaseUrlResolver.withV1(baseUrl), baseUrl)
+            else
+                listOf(baseUrl)
+
+        for (candidate in candidates) {
+            val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) { provider.fetchModels(activeKey, candidate) }
+            if (raw.isEmpty()) continue
+            // Persist the working form when it differs from what was stored, so the
+            // ambiguity is never re-litigated at request time.
+            if (candidate != null && candidate != baseUrl) settings.setProviderBaseUrl(name, candidate)
+            val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
+            settings.saveAvailableModels(name, prefixed)
+            return prefixed
+        }
+        return emptyList()
     }
 
     /** Identity fingerprint of all providers' credentials/URLs — used to skip redundant syncs. */
