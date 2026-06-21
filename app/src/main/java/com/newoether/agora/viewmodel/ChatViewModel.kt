@@ -122,21 +122,8 @@ class ChatViewModel(
     /** Local (on-device) chat-model configuration CRUD. */
     val modelManager = ModelManager(settings, settingsManager, viewModelScope)
 
-    private val builtInProviders = mapOf(
-        "Google" to GeminiProvider(),
-        "OpenAI" to OpenAiProvider(),
-        "Anthropic" to AnthropicProvider(),
-        "DeepSeek" to DeepSeekProvider(),
-        "Qwen" to QwenProvider(),
-        "Ollama" to OllamaProvider(),
-        "Open Router" to OpenRouterProvider(),
-        "Local" to localProvider
-    )
-
-    // ConcurrentHashMap: mutated by init collectors (custom-provider sync) while read on
-    // Dispatchers.IO during generation — must be thread-safe (P3 concurrency fix).
-    // Declared as MutableMap so `in`/`contains` keep Map (containsKey) semantics (KT-18053).
-    private val providers: MutableMap<String, LlmProvider> = java.util.concurrent.ConcurrentHashMap(builtInProviders)
+    /** Built-in + custom provider instances, resolution, and model discovery (see [ProviderRegistry]). */
+    private val providerRegistry = ProviderRegistry(settings, localProvider, viewModelScope)
 
     /**
      * Startup jobs deferred until all StateFlow/property backing fields are
@@ -218,56 +205,8 @@ class ChatViewModel(
                 }
             }
         }
-        // Sync custom providers into the providers map
-        viewModelScope.launch {
-            settings.customProviders.collect { custom ->
-                providers.keys.filter { it !in builtInProviders }.forEach { providers.remove(it) }
-                val baseUrls = settings.getProviderBaseUrls()
-                custom.forEach { config ->
-                    providers[config.name] = CustomOpenAiProvider(config.name, baseUrls[config.name] ?: "")
-                }
-            }
-        }
-        // Auto-clear available models when a provider loses its credentials.
-        viewModelScope.launch {
-            var prevConfigured = emptyMap<String, Boolean>()
-
-            combine(
-                settings.apiKeys,
-                settings.activeApiKeyIds,
-                settings.providerBaseUrls
-            ) { keys, activeIds, baseUrls ->
-                Triple(keys, activeIds, baseUrls)
-            }.collect { (keys, activeIds, _) ->
-                if (keys.isEmpty() && activeIds.isEmpty()) return@collect
-
-                val current = mutableMapOf<String, Boolean>()
-                providers.toMap().forEach { (name, _) ->
-                    val activeKey = keys.find { it.id == activeIds[name] }?.key ?: ""
-                    current[name] = isProviderConfigured(name, activeKey)
-                }
-
-                var changed = false
-                current.forEach { (name, configured) ->
-                    if (prevConfigured[name] == true && !configured) {
-                        val existing = settings.getAvailableModels()[name]
-                        if (!existing.isNullOrEmpty()) {
-                            settings.saveAvailableModels(name, emptyList())
-                            changed = true
-                        }
-                    }
-                }
-                prevConfigured = current
-
-                if (changed) {
-                    val allAvailable = settings.getAvailableModels().values.flatten().toSet()
-                    val newEnabled = settings.enabledModels.value.intersect(allAvailable)
-                    if (newEnabled != settings.enabledModels.value) {
-                        settings.setEnabledModels(newEnabled)
-                    }
-                }
-            }
-        }
+        // Keep the provider map and cached model lists consistent with settings.
+        providerRegistry.launchSyncJobs()
     }
 
     private val generationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -303,7 +242,7 @@ class ChatViewModel(
             app = application,
             chatDao = chatDao,
             memoryManager = memoryManager,
-            providers = providers,
+            providers = providerRegistry.all,
             context = appContext,
             sandboxFactory = sandboxFactory
         ).also { gm ->
@@ -312,7 +251,7 @@ class ChatViewModel(
                     indexMessageForRag(messageId, text)
                 }
             }
-            gm.onConfirmShellCommand = { server, summary -> confirmShellCommand(server, summary) }
+            gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
         }
     }
 
@@ -333,25 +272,7 @@ class ChatViewModel(
     val messageHeights = androidx.compose.runtime.mutableStateMapOf<String, Int>()
 
 
-    fun getProviderInstance(name: String): LlmProvider {
-        return providers[name] ?: GeminiProvider()
-    }
-
-    private fun getEffectiveBaseUrl(providerName: String): String? {
-        return settings.providerBaseUrls.value[providerName]
-            ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
-            else null
-    }
-
-    private fun isProviderConfigured(providerName: String, activeKey: String): Boolean {
-        val isCustom = providerName !in builtInProviders
-        return when {
-            providerName == "Unknown" -> false
-            providerName == "Local" -> true
-            isCustom || providerName == "Ollama" -> !getEffectiveBaseUrl(providerName).isNullOrBlank()
-            else -> activeKey.isNotBlank()
-        }
-    }
+    fun getProviderInstance(name: String): LlmProvider = providerRegistry.getInstance(name)
 
 
 
@@ -369,19 +290,7 @@ class ChatViewModel(
         active ?: default
     }.stateIn(viewModelScope, SharingStarted.Eagerly, "gemini-1.5-flash")
 
-    fun getProviderForModel(modelId: String): String {
-        // Prefixed IDs (e.g. "OpenAI:gpt-4"): extract provider directly
-        if (modelId.contains(":")) {
-            return com.newoether.agora.model.ModelId.parse(modelId).providerName
-        }
-        // Check available models for unprefixed IDs first —
-        // user-registered providers take priority over heuristics
-        settings.availableModels.value.forEach { (providerName, models) ->
-            if (models.contains(modelId)) return providerName
-        }
-        // Heuristic fallback for legacy unprefixed IDs
-        return com.newoether.agora.model.ModelId.parse(modelId).providerName
-    }
+    fun getProviderForModel(modelId: String): String = providerRegistry.providerForModel(modelId)
     
 
         
@@ -392,37 +301,16 @@ class ChatViewModel(
     fun loadCacheCounts() = ragManager.loadCacheCounts()
 
     // ── Remote shell command confirmation gate ───────────────────────────
-    data class PendingShellCommand(
-        val server: String,
-        val summary: String,
-        val deferred: kotlinx.coroutines.CompletableDeferred<Boolean>
-    )
-    private val _pendingShellCommand = MutableStateFlow<PendingShellCommand?>(null)
-    val pendingShellCommand: StateFlow<PendingShellCommand?> = _pendingShellCommand.asStateFlow()
-    // Servers the user chose to trust for the rest of this app session.
-    private val sessionAllowedShellServers = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-
-    private suspend fun confirmShellCommand(server: String, summary: String): Boolean {
-        if (!settings.shellConfirmEnabled.value) return true
-        if (sessionAllowedShellServers.contains(server)) return true
-        val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
-        _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
-        return try { deferred.await() } finally {
-            if (_pendingShellCommand.value?.deferred === deferred) _pendingShellCommand.value = null
-        }
-    }
+    /** Shell-command confirmation policy + pending-prompt handshake (see [ShellConfirmationController]). */
+    private val shellConfirmation = ShellConfirmationController(settings)
+    val pendingShellCommand: StateFlow<ShellConfirmationController.PendingShellCommand?>
+        get() = shellConfirmation.pendingShellCommand
 
     /** Called by the UI to resolve a pending confirmation. */
-    fun resolveShellConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) {
-        val pending = _pendingShellCommand.value ?: return
-        if (allow && alwaysAllowServer) sessionAllowedShellServers.add(pending.server)
-        pending.deferred.complete(allow)
-        _pendingShellCommand.value = null
-    }
+    fun resolveShellConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) =
+        shellConfirmation.resolve(allow, alwaysAllowServer)
 
-    fun setShellConfirmEnabled(enabled: Boolean) {
-        settings.setShellConfirmEnabled(enabled)
-    }
+    fun setShellConfirmEnabled(enabled: Boolean) = shellConfirmation.setEnabled(enabled)
 
     // ── Auto Backup ───────────────────────────────────────────
 
@@ -448,30 +336,16 @@ class ChatViewModel(
     fun dismissUpdateDialog() { _updateDialogData.value = null }
     fun showUpdateDialog(info: com.newoether.agora.util.UpdateInfo) { _updateDialogData.value = info }
 
-    private val _previewPdfPages = MutableStateFlow<List<String>>(emptyList())
-    val previewPdfPages: StateFlow<List<String>> = _previewPdfPages.asStateFlow()
-    private val _previewPdfIndex = MutableStateFlow(0)
-    val previewPdfIndex: StateFlow<Int> = _previewPdfIndex.asStateFlow()
+    /** PDF / text-file preview state (see [MediaPreviewState]). */
+    private val mediaPreview = MediaPreviewState()
+    val previewPdfPages: StateFlow<List<String>> get() = mediaPreview.pdfPages
+    val previewPdfIndex: StateFlow<Int> get() = mediaPreview.pdfIndex
+    val previewFileContent: StateFlow<String?> get() = mediaPreview.fileContent
+    val previewFileName: StateFlow<String?> get() = mediaPreview.fileName
 
-    private val _previewFileContent = MutableStateFlow<String?>(null)
-    val previewFileContent: StateFlow<String?> = _previewFileContent.asStateFlow()
-    private val _previewFileName = MutableStateFlow<String?>(null)
-    val previewFileName: StateFlow<String?> = _previewFileName.asStateFlow()
-
-    fun showPdfPreview(pages: List<String>, startIndex: Int) {
-        _previewPdfPages.value = pages
-        _previewPdfIndex.value = startIndex
-    }
-
-    fun showFilePreview(fileName: String, content: String) {
-        _previewFileName.value = fileName
-        _previewFileContent.value = content
-    }
-
-    fun clearPreviews() {
-        _previewPdfPages.value = emptyList()
-        _previewFileContent.value = null
-    }
+    fun showPdfPreview(pages: List<String>, startIndex: Int) = mediaPreview.showPdf(pages, startIndex)
+    fun showFilePreview(fileName: String, content: String) = mediaPreview.showFile(fileName, content)
+    fun clearPreviews() = mediaPreview.clear()
 
     // Legacy state — to be replaced by _conversationUiState
     private val _streamingMessage = MutableStateFlow<ChatMessage?>(null)
@@ -708,19 +582,9 @@ class ChatViewModel(
     // ── Custom providers ──────────────────────────────────────
     // Settings persistence lives in SettingsRepository; ChatViewModel only maintains
     // the live in-memory provider instances (the `providers` map) via callbacks.
-    fun addCustomProvider(name: String, baseUrl: String) {
-        providers[name] = CustomOpenAiProvider(name, baseUrl)
-        settings.addCustomProvider(name, baseUrl) { n, p -> providers[n] = p }
-    }
-    fun renameCustomProvider(oldName: String, newName: String) {
-        val url = settings.providerBaseUrls.value[oldName] ?: return
-        providers.remove(oldName)
-        providers[newName] = CustomOpenAiProvider(newName, url)
-        settings.renameCustomProvider(oldName, newName, { providers.remove(it) }, { n, p -> providers[n] = p })
-    }
-    fun deleteCustomProvider(name: String) {
-        settings.deleteCustomProvider(name) { providers.remove(it) }
-    }
+    fun addCustomProvider(name: String, baseUrl: String) = providerRegistry.addCustom(name, baseUrl)
+    fun renameCustomProvider(oldName: String, newName: String) = providerRegistry.renameCustom(oldName, newName)
+    fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
 
     private fun resolveTranscriptionProviderName(): String =
         settings.imageTranscriptionModel.value?.let { getProviderForModel(it) } ?: ""
@@ -738,10 +602,7 @@ class ChatViewModel(
 
     private fun resolveTranscriptionBaseUrl(): String? {
         val model = settings.imageTranscriptionModel.value ?: return null
-        val providerName = getProviderForModel(model)
-        return settings.providerBaseUrls.value[providerName]
-            ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
-            else null
+        return providerRegistry.getEffectiveBaseUrl(getProviderForModel(model))
     }
 
     // Image generation reuses the selected model's provider credentials (mirrors transcription).
@@ -758,10 +619,7 @@ class ChatViewModel(
 
     private fun resolveImageGenBaseUrl(): String {
         val model = settings.imageGenModel.value ?: return ""
-        val providerName = getProviderForModel(model)
-        return settings.providerBaseUrls.value[providerName]
-            ?: if (providerName !in builtInProviders) getProviderInstance(providerName).defaultBaseUrl
-            else ""
+        return providerRegistry.getEffectiveBaseUrl(getProviderForModel(model)) ?: ""
     }
 
     fun getCurrentVersion(): String {
@@ -898,7 +756,7 @@ class ChatViewModel(
             thinkingLevel = effectiveSettings.thinkingLevel ?: settings.thinkingLevel.value,
             thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
             thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
-            baseUrl = getEffectiveBaseUrl(providerName),
+            baseUrl = providerRegistry.getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,
             temperature = effectiveSettings.temperature,
@@ -1081,7 +939,7 @@ class ChatViewModel(
             val modelId = com.newoether.agora.model.ModelId.parse(modelIdWithPrefix).modelName
             val activeKeyId = settings.activeApiKeyIds.value[providerName]
             val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-            if (!isProviderConfigured(providerName, activeKey)) {
+            if (!providerRegistry.isConfigured(providerName, activeKey)) {
                 emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
                 return@launch
             }
@@ -1107,7 +965,7 @@ class ChatViewModel(
                 systemPrompt = settings.titleGenerationPrompt.value.ifBlank { BuiltInPrompts.TITLE_GENERATION_SYSTEM },
                 maxContextWindow = 1,
                 thinkingEnabled = false,
-                baseUrl = getEffectiveBaseUrl(providerName)
+                baseUrl = providerRegistry.getEffectiveBaseUrl(providerName)
             )
 
             var title = ""
@@ -1396,7 +1254,7 @@ class ChatViewModel(
         val providerName = getProviderForModel(modelId)
         val activeKeyId = settings.activeApiKeyIds.value[providerName]
         val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!isProviderConfigured(providerName, activeKey)) {
+        if (!providerRegistry.isConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return
         }
@@ -1535,7 +1393,7 @@ class ChatViewModel(
         val providerName = getProviderForModel(modelId)
         val activeKeyId = settings.activeApiKeyIds.value[providerName]
         val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!isProviderConfigured(providerName, activeKey)) {
+        if (!providerRegistry.isConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return
         }
@@ -1665,6 +1523,196 @@ class ChatViewModel(
         }
     }
 
+    /** The persisted user-message media (final image paths) plus structured attachment metadata. */
+    private data class MessagePayload(
+        val allImages: List<String>,
+        val attachmentMeta: com.newoether.agora.model.AttachmentMeta?
+    )
+
+    /**
+     * Resolves the outgoing message's attachments into concrete image paths and
+     * structured [com.newoether.agora.model.AttachmentMeta]. Handles legacy images,
+     * images, videos (frame extraction / slicing), text files, and rendered PDF pages,
+     * then reconciles each metadata item's `imageIndex` against the actual processed
+     * image positions. Extracted from [sendMessage] so the send path reads as a sequence
+     * of steps rather than one ~320-line method.
+     */
+    private suspend fun buildMessagePayload(
+        app: Application,
+        images: List<String>,
+        attachments: List<SelectedAttachment>
+    ): MessagePayload {
+        // mediaUris: URIs that need processImages (images, video content:// URIs)
+        // directPaths: paths that skip processImages (pre-extracted frames, PDF copies, rendered pages)
+        val mediaUris = mutableListOf<String>()
+        val directPaths = mutableListOf<String>()
+        val sliceConfigs = mutableMapOf<String, VideoSliceConfig>()
+        val metaItems = mutableListOf<com.newoether.agora.model.AttachmentItem>()
+        var nextImageIndex = 0
+
+        // Process legacy images list (backward compatibility)
+        for (uri in images) {
+            val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
+            if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
+                mediaUris.add(uri)
+                try {
+                    val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
+                    if (isText) {
+                        app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
+                            val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
+                            if (content.isNotBlank()) {
+                                val fileName = getFileName(app, android.net.Uri.parse(uri))
+                                // Legacy file content stored in text (pre-attachmentMeta)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            } else {
+                mediaUris.add(uri)
+            }
+        }
+
+        // Process new SelectedAttachment list
+        for (att in attachments) {
+            when (att.type) {
+                "image" -> {
+                    mediaUris.add(att.uri)
+                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                        originalUri = att.uri, type = "image", mimeType = att.mimeType,
+                        imageIndex = nextImageIndex
+                    ))
+                    nextImageIndex++
+                }
+                "video" -> {
+                    // Copy video to local storage for export/playback survival
+                    val videoExt = when {
+                        att.mimeType?.contains("mp4") == true -> "mp4"
+                        att.mimeType?.contains("webm") == true -> "webm"
+                        att.mimeType?.contains("quicktime") == true -> "mov"
+                        else -> "mp4"
+                    }
+                    val videoFile = java.io.File(app.filesDir, "vid_original_${java.util.UUID.randomUUID()}.$videoExt")
+                    var localVideoUri: String? = null
+                    try {
+                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
+                            videoFile.outputStream().use { input.copyTo(it) }
+                        }
+                        localVideoUri = "file://${videoFile.absolutePath}"
+                    } catch (_: Exception) {
+                        // Fallback: keep original content URI (may expire)
+                        localVideoUri = att.uri
+                    }
+
+                    if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
+                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                            originalUri = localVideoUri, type = "video",
+                            fileName = att.fileName, mimeType = att.mimeType,
+                            imageIndex = nextImageIndex, pageCount = att.frameCount
+                        ))
+                        directPaths.addAll(att.processedFrames)
+                        nextImageIndex += att.processedFrames.size
+                    } else {
+                        val frameCount = att.frameCount ?: 1
+                        metaItems.add(com.newoether.agora.model.AttachmentItem(
+                            originalUri = localVideoUri, type = "video",
+                            fileName = att.fileName, mimeType = att.mimeType,
+                            imageIndex = nextImageIndex, pageCount = att.frameCount
+                        ))
+                        mediaUris.add(att.uri)
+                        if (att.frameCount != null && att.frameCount > 1 && att.sliceIntervalMs != null) {
+                            sliceConfigs[att.uri] = VideoSliceConfig(
+                                intervalMicros = att.sliceIntervalMs * 1000L,
+                                frameCount = att.frameCount
+                            )
+                        }
+                        nextImageIndex += frameCount
+                    }
+                }
+                "file" -> {
+                    var textContent: String? = null
+                    try {
+                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
+                            val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
+                            if (content.isNotBlank()) {
+                                val fileName = att.fileName ?: getFileName(app, android.net.Uri.parse(att.uri))
+                                textContent = content
+                            }
+                        }
+                    } catch (_: Exception) {}
+                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                        originalUri = att.uri, type = "file",
+                        fileName = att.fileName, mimeType = att.mimeType,
+                        textContent = textContent
+                    ))
+                }
+                "pdf" -> {
+                    val pagePaths = if (att.preRenderedPaths != null && att.preRenderedPaths.isNotEmpty()) {
+                        val sel = att.selectedPages ?: att.preRenderedPaths.indices.toSet()
+                        att.preRenderedPaths.filterIndexed { i, _ -> i in sel }
+                    } else {
+                        com.newoether.agora.util.PdfPageRenderer.renderAsImages(app, android.net.Uri.parse(att.uri), att.selectedPages)
+                    }
+                    if (pagePaths.isEmpty()) {
+                        _snackbarMessage.emit(SnackbarEvent(app.getString(R.string.pdf_render_failed)))
+                        continue
+                    }
+                    metaItems.add(com.newoether.agora.model.AttachmentItem(
+                        originalUri = att.uri, type = "pdf",
+                        fileName = att.fileName, mimeType = "application/pdf",
+                        imageIndex = nextImageIndex, pageCount = pagePaths.size
+                    ))
+                    directPaths.addAll(pagePaths)
+                    nextImageIndex += pagePaths.size
+                }
+            }
+        }
+
+        val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris, sliceConfigs) else emptyList()
+        val allImages = processedImages + directPaths
+
+        // Recalculate imageIndex for all meta items based on final allImages positions.
+        // nextImageIndex tracked the expected order:
+        //   First N items correspond to mediaUris entries (→ processedImages)
+        //   Remaining items correspond to directPaths entries
+        // After processing, processedImages may differ in size from mediaUris.
+        // We build a position map: for each metaItem that has imageIndex < mediaUris.size,
+        // it was tracking an offset within mediaUris. We need the actual offset within processedImages.
+        val uriToResultMap = mutableListOf<IntRange>() // for each mediaUris entry, the range in processedImages
+        var pos = 0
+        for (uri in mediaUris) {
+            val start = pos
+            // Count consecutive results belonging to this URI by scanning forward until
+            // we find files that don't correspond. Since we can't distinguish, use a simple
+            // heuristic: each URI produces either 0 or 1+ results. The slice configs tell us
+            // how many frames per video.
+            val config = sliceConfigs[uri]
+            val expectedCount = config?.frameCount ?: 1
+            val end = minOf(pos + expectedCount, processedImages.size)
+            uriToResultMap.add(start until end)
+            pos = end
+        }
+        // Cap at processedImages size
+        val adjustedMetaItems = metaItems.map { item ->
+            val idx = item.imageIndex
+            if (idx == null) {
+                item
+            } else if (idx < mediaUris.size && idx < uriToResultMap.size) {
+                val range = uriToResultMap[idx]
+                item.copy(imageIndex = range.first)
+            } else if (idx in mediaUris.size until (mediaUris.size + directPaths.size)) {
+                // This item's imageIndex is relative to directPaths start
+                item.copy(imageIndex = processedImages.size + (idx - mediaUris.size))
+            } else {
+                // Fallback: keep original index (shouldn't happen for well-formed input)
+                item
+            }
+        }
+        val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
+            com.newoether.agora.model.AttachmentMeta(items = adjustedMetaItems)
+        } else null
+        return MessagePayload(allImages, attachmentMeta)
+    }
+
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
         if (!sendGate.compareAndSet(false, true)) return false
         var committed = false
@@ -1677,7 +1725,7 @@ class ChatViewModel(
         val providerName = getProviderForModel(modelId)
         val activeKeyId = settings.activeApiKeyIds.value[providerName]
         val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-        if (!isProviderConfigured(providerName, activeKey)) {
+        if (!providerRegistry.isConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return false
         }
@@ -1703,175 +1751,8 @@ class ChatViewModel(
             stopFinalization?.join()
             val myPersistId = persistId.incrementAndGet()
             val app = getApplication<Application>()
-            // mediaUris: URIs that need processImages (images, video content:// URIs)
-            // directPaths: paths that skip processImages (pre-extracted frames, PDF copies, rendered pages)
-            val mediaUris = mutableListOf<String>()
-            val directPaths = mutableListOf<String>()
-            val sliceConfigs = mutableMapOf<String, VideoSliceConfig>()
-            val metaItems = mutableListOf<com.newoether.agora.model.AttachmentItem>()
-            var nextImageIndex = 0
-
-            // Process legacy images list (backward compatibility)
-            for (uri in images) {
-                val mimeType = try { app.contentResolver.getType(android.net.Uri.parse(uri)) } catch (_: Exception) { null }
-                if (mimeType != null && !mimeType.startsWith("image/") && !mimeType.startsWith("video/")) {
-                    mediaUris.add(uri)
-                    try {
-                        val isText = mimeType.startsWith("text/") || mimeType == "application/json" || mimeType == "application/xml"
-                        if (isText) {
-                            app.contentResolver.openInputStream(android.net.Uri.parse(uri))?.use { stream ->
-                                val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
-                                if (content.isNotBlank()) {
-                                    val fileName = getFileName(app, android.net.Uri.parse(uri))
-                                    // Legacy file content stored in text (pre-attachmentMeta)
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {}
-                } else {
-                    mediaUris.add(uri)
-                }
-            }
-
-            // Process new SelectedAttachment list
-            for (att in attachments) {
-                when (att.type) {
-                    "image" -> {
-                        mediaUris.add(att.uri)
-                        metaItems.add(com.newoether.agora.model.AttachmentItem(
-                            originalUri = att.uri, type = "image", mimeType = att.mimeType,
-                            imageIndex = nextImageIndex
-                        ))
-                        nextImageIndex++
-                    }
-                    "video" -> {
-                        // Copy video to local storage for export/playback survival
-                        val videoExt = when {
-                            att.mimeType?.contains("mp4") == true -> "mp4"
-                            att.mimeType?.contains("webm") == true -> "webm"
-                            att.mimeType?.contains("quicktime") == true -> "mov"
-                            else -> "mp4"
-                        }
-                        val videoFile = java.io.File(app.filesDir, "vid_original_${java.util.UUID.randomUUID()}.$videoExt")
-                        var localVideoUri: String? = null
-                        try {
-                            app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
-                                videoFile.outputStream().use { input.copyTo(it) }
-                            }
-                            localVideoUri = "file://${videoFile.absolutePath}"
-                        } catch (_: Exception) {
-                            // Fallback: keep original content URI (may expire)
-                            localVideoUri = att.uri
-                        }
-
-                        if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
-                            metaItems.add(com.newoether.agora.model.AttachmentItem(
-                                originalUri = localVideoUri, type = "video",
-                                fileName = att.fileName, mimeType = att.mimeType,
-                                imageIndex = nextImageIndex, pageCount = att.frameCount
-                            ))
-                            directPaths.addAll(att.processedFrames)
-                            nextImageIndex += att.processedFrames.size
-                        } else {
-                            val frameCount = att.frameCount ?: 1
-                            metaItems.add(com.newoether.agora.model.AttachmentItem(
-                                originalUri = localVideoUri, type = "video",
-                                fileName = att.fileName, mimeType = att.mimeType,
-                                imageIndex = nextImageIndex, pageCount = att.frameCount
-                            ))
-                            mediaUris.add(att.uri)
-                            if (att.frameCount != null && att.frameCount > 1 && att.sliceIntervalMs != null) {
-                                sliceConfigs[att.uri] = VideoSliceConfig(
-                                    intervalMicros = att.sliceIntervalMs * 1000L,
-                                    frameCount = att.frameCount
-                                )
-                            }
-                            nextImageIndex += frameCount
-                        }
-                    }
-                    "file" -> {
-                        var textContent: String? = null
-                        try {
-                            app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
-                                val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
-                                if (content.isNotBlank()) {
-                                    val fileName = att.fileName ?: getFileName(app, android.net.Uri.parse(att.uri))
-                                    textContent = content
-                                }
-                            }
-                        } catch (_: Exception) {}
-                        metaItems.add(com.newoether.agora.model.AttachmentItem(
-                            originalUri = att.uri, type = "file",
-                            fileName = att.fileName, mimeType = att.mimeType,
-                            textContent = textContent
-                        ))
-                    }
-                    "pdf" -> {
-                        val pagePaths = if (att.preRenderedPaths != null && att.preRenderedPaths.isNotEmpty()) {
-                            val sel = att.selectedPages ?: att.preRenderedPaths.indices.toSet()
-                            att.preRenderedPaths.filterIndexed { i, _ -> i in sel }
-                        } else {
-                            com.newoether.agora.util.PdfPageRenderer.renderAsImages(app, android.net.Uri.parse(att.uri), att.selectedPages)
-                        }
-                        if (pagePaths.isEmpty()) {
-                            _snackbarMessage.emit(SnackbarEvent(app.getString(R.string.pdf_render_failed)))
-                            continue
-                        }
-                        metaItems.add(com.newoether.agora.model.AttachmentItem(
-                            originalUri = att.uri, type = "pdf",
-                            fileName = att.fileName, mimeType = "application/pdf",
-                            imageIndex = nextImageIndex, pageCount = pagePaths.size
-                        ))
-                        directPaths.addAll(pagePaths)
-                        nextImageIndex += pagePaths.size
-                    }
-                }
-            }
-
             val finalText = text
-            val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris, sliceConfigs) else emptyList()
-            val allImages = processedImages + directPaths
-
-            // Recalculate imageIndex for all meta items based on final allImages positions.
-            // nextImageIndex tracked the expected order:
-            //   First N items correspond to mediaUris entries (→ processedImages)
-            //   Remaining items correspond to directPaths entries
-            // After processing, processedImages may differ in size from mediaUris.
-            // We build a position map: for each metaItem that has imageIndex < mediaUris.size,
-            // it was tracking an offset within mediaUris. We need the actual offset within processedImages.
-            val uriToResultMap = mutableListOf<IntRange>() // for each mediaUris entry, the range in processedImages
-            var pos = 0
-            for (uri in mediaUris) {
-                val start = pos
-                // Count consecutive results belonging to this URI by scanning forward until
-                // we find files that don't correspond. Since we can't distinguish, use a simple
-                // heuristic: each URI produces either 0 or 1+ results. The slice configs tell us
-                // how many frames per video.
-                val config = sliceConfigs[uri]
-                val expectedCount = config?.frameCount ?: 1
-                val end = minOf(pos + expectedCount, processedImages.size)
-                uriToResultMap.add(start until end)
-                pos = end
-            }
-            // Cap at processedImages size
-            val adjustedMetaItems = metaItems.map { item ->
-                val idx = item.imageIndex
-                if (idx == null) {
-                    item
-                } else if (idx < mediaUris.size && idx < uriToResultMap.size) {
-                    val range = uriToResultMap[idx]
-                    item.copy(imageIndex = range.first)
-                } else if (idx in mediaUris.size until (mediaUris.size + directPaths.size)) {
-                    // This item's imageIndex is relative to directPaths start
-                    item.copy(imageIndex = processedImages.size + (idx - mediaUris.size))
-                } else {
-                    // Fallback: keep original index (shouldn't happen for well-formed input)
-                    item
-                }
-            }
-            val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
-                com.newoether.agora.model.AttachmentMeta(items = adjustedMetaItems)
-            } else null
+            val (allImages, attachmentMeta) = buildMessagePayload(app, images, attachments)
             var currentId = _currentConversationId.value
             val wasNewChat = _isNewChatMode.value
             if (wasNewChat) {
@@ -1988,36 +1869,9 @@ class ChatViewModel(
      * flow updates the list. Returns the prefixed model ids, or empty on
      * failure / unconfigured provider.
      */
-    suspend fun fetchModelsForProvider(name: String): List<String> {
-        if (name == "Local") return emptyList()
-        // Ensure custom providers are registered before lookup.
-        settings.customProviders.value.forEach { config ->
-            if (config.name !in providers) {
-                providers[config.name] = CustomOpenAiProvider(config.name, settings.providerBaseUrls.value[config.name] ?: "")
-            }
-        }
-        val provider = providers[name] ?: return emptyList()
-        val activeKey = settings.apiKeys.value.find { it.id == settings.activeApiKeyIds.value[name] }?.key ?: ""
-        if (!isProviderConfigured(name, activeKey)) return emptyList()
-        val baseUrl = if (name !in builtInProviders) {
-            settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: provider.defaultBaseUrl
-        } else {
-            settings.providerBaseUrls.value[name]
-        }
-        val raw = withTimeout(10_000L) { provider.fetchModels(activeKey, baseUrl) }
-        val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
-        if (prefixed.isNotEmpty()) settings.saveAvailableModels(name, prefixed)
-        return prefixed
-    }
+    suspend fun fetchModelsForProvider(name: String): List<String> = providerRegistry.fetchModelsForProvider(name)
 
-    fun computeProviderFingerprint(): String {
-        val parts = providers.map { (name, _) ->
-            val keyId = settings.activeApiKeyIds.value[name] ?: ""
-            val url = settings.providerBaseUrls.value[name] ?: ""
-            "$name|$keyId|$url"
-        }.sorted().joinToString(",")
-        return parts.hashCode().toString()
-    }
+    fun computeProviderFingerprint(): String = providerRegistry.computeFingerprint()
 
     fun fetchAvailableModels() {
         viewModelScope.launch {
@@ -2028,28 +1882,23 @@ class ChatViewModel(
             var skippedCount = 0
 
             // Ensure custom providers are loaded into the providers map before iterating
-            settings.customProviders.value.forEach { config ->
-                if (config.name !in providers) {
-                    val url = settings.providerBaseUrls.value[config.name] ?: ""
-                    providers[config.name] = CustomOpenAiProvider(config.name, url)
-                }
-            }
+            providerRegistry.ensureCustomProvidersRegistered()
 
             val message = try {
-                providers.forEach { (name, providerInstance) ->
+                providerRegistry.all.forEach { (name, providerInstance) ->
                     if (name == "Local") return@forEach
 
                     try {
                         val activeKeyId = settings.activeApiKeyIds.value[name]
                         val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-                        val isCustomProvider = name !in builtInProviders
+                        val isCustomProvider = !providerRegistry.isBuiltIn(name)
                         val currentBaseUrl = if (isCustomProvider) {
                             settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: providerInstance.defaultBaseUrl
                         } else {
                             settings.providerBaseUrls.value[name]
                         }
 
-                        if (!isProviderConfigured(name, activeKey)) {
+                        if (!providerRegistry.isConfigured(name, activeKey)) {
                             skippedCount++
                             settings.saveAvailableModels(name, emptyList())
                             return@forEach
