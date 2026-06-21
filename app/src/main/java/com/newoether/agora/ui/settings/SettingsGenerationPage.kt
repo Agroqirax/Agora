@@ -252,8 +252,13 @@ private fun GenParamSlider(
     LaunchedEffect(persistedSliderPos) {
         sliderPos = persistedSliderPos
     }
+    // Reset is reflected synchronously; only the DataStore write is async. justReset
+    // flips the label to "not specified" immediately and is cleared once the async
+    // [value] catches up (becomes null on reset, or a new value if the user re-sets).
+    var justReset by remember { mutableStateOf(false) }
+    LaunchedEffect(value) { justReset = false }
     val draftChangedFromDefault = kotlin.math.abs(sliderPos - defaultSliderPos) > 0.0001f
-    val hasExplicitOrDraftValue = value != null || draftChangedFromDefault
+    val hasExplicitOrDraftValue = (value != null && !justReset) || draftChangedFromDefault
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -299,6 +304,7 @@ private fun GenParamSlider(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             modifier = Modifier.clickable {
                                 sliderPos = defaultSliderPos
+                                justReset = true
                                 onReset()
                             }
                         )
@@ -350,8 +356,11 @@ private fun GenParamSlider(
     LaunchedEffect(persistedIndex) {
         sliderPos = persistedIndex.toFloat()
     }
+    // Reset is reflected synchronously; only the DataStore write is async (see float variant).
+    var justReset by remember { mutableStateOf(false) }
+    LaunchedEffect(value) { justReset = false }
     val draftIndex = sliderPos.roundToInt().coerceIn(0, presets.lastIndex)
-    val hasExplicitOrDraftValue = value != null || draftIndex != defaultIndex
+    val hasExplicitOrDraftValue = (value != null && !justReset) || draftIndex != defaultIndex
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -397,6 +406,7 @@ private fun GenParamSlider(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             modifier = Modifier.clickable {
                                 sliderPos = defaultIndex.toFloat()
+                                justReset = true
                                 onReset()
                             }
                         )
