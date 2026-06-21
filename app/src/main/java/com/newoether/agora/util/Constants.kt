@@ -15,4 +15,8 @@ object Constants {
     const val MAX_WEB_FETCH_HTML_LENGTH = 80_000
     /** Max characters per tool result (prevents CursorWindow 2MB overflow) */
     const val MAX_TOOL_RESULT_LENGTH = 100_000
+    /** Placeholder model ID used as StateFlow/DataStore cold-start fallback and
+     *  template preview sample. NOT the real default model — it is overwritten
+     *  as soon as the user selects a model or DataStore loads the persisted value. */
+    const val EXAMPLE_MODEL_ID = "gemini-1.5-flash"
 }

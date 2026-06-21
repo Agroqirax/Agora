@@ -77,6 +77,18 @@ class GenerationSession(
     /** True while [persistId] still belongs to the generation that captured [id]. */
     fun isLatestPersist(id: Long): Boolean = persistId.get() == id
 
+    /**
+     * Bundles the five token-gated callbacks for one generation so each call site
+     * wires the ownership tokens once instead of re-threading them per lambda.
+     */
+    fun callbacksFor(uiToken: Long, persistId: Long) = GenerationCallbacks(
+        onStreamUpdate = { streamUpdate(uiToken, it) },
+        onLoadingChange = { loadingChange(uiToken, it) },
+        onGeneratingIdChange = { generatingIdChange(uiToken, it) },
+        onStreamClear = { streamClear(uiToken) },
+        isLatestPersist = { isLatestPersist(persistId) },
+    )
+
     // ── Token-gated UI mutators ───────────────────────────────────────────
     // Once superseded or stopped, the token no longer matches and every call is a
     // silent no-op — a winding-down generation physically cannot touch the screen.

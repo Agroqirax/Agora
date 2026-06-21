@@ -81,6 +81,13 @@ class ChatViewModel(
     settingsRepository: SettingsRepository
 ) : AndroidViewModel(application) {
 
+    companion object {
+        /** Overlay fade duration for conversation-switch transitions. */
+        private const val SWITCH_OVERLAY_FADE_MS = 200L
+        /** Auto-delete period tiers in hours: 7 days, 30 days, 365 days. */
+        private val AUTO_DELETE_TIERS_HOURS = listOf(168, 720, 8760)
+    }
+
     val settings: SettingsRepository = settingsRepository
 
     /**
@@ -256,7 +263,7 @@ class ChatViewModel(
     private val _currentActiveModel = MutableStateFlow<String?>(null)
     val currentActiveModel = kotlinx.coroutines.flow.combine(_currentActiveModel, settings.selectedModel) { active, default ->
         active ?: default
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, "gemini-1.5-flash")
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, Constants.EXAMPLE_MODEL_ID)
 
     fun getProviderForModel(modelId: String): String = providerRegistry.providerForModel(modelId)
     
@@ -315,7 +322,6 @@ class ChatViewModel(
     fun showFilePreview(fileName: String, content: String) = mediaPreview.showFile(fileName, content)
     fun clearPreviews() = mediaPreview.clear()
 
-    // Legacy state — to be replaced by _conversationUiState
     private val _streamingMessage = MutableStateFlow<ChatMessage?>(null)
     private val _selectedChildren = MutableStateFlow<Map<String?, String>>(emptyMap())
 
@@ -324,43 +330,9 @@ class ChatViewModel(
         _streamingMessage,
         _selectedChildren
     ) { allMsgs, streaming, selectedChildren ->
-        val path = mutableListOf<ChatMessage>()
-        var currentParentId: String? = null
-        
-        while (true) {
-            val siblings = allMsgs.filter { it.parentId == currentParentId }
-                .sortedBy { it.timestamp }
-            
-            if (siblings.isEmpty()) break
-            
-            val selectedId = selectedChildren[currentParentId]
-            val visibleSiblings = siblings.filter {
-                !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            }
-            var selectedMessage = if (visibleSiblings.isNotEmpty()) {
-                visibleSiblings.find { it.id == selectedId } ?: visibleSiblings.last()
-            } else {
-                siblings.find { it.id == selectedId } ?: siblings.last()
-            }
-
-            if (streaming != null && selectedMessage.id == streaming.id) {
-                selectedMessage = streaming
-            }
-
-            // Skip synthetic tool call/result messages (hidden from UI, API context only)
-            val isSynthetic = selectedMessage.id.startsWith(Constants.TOOL_MSG_PREFIX) || selectedMessage.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            if (!isSynthetic || (streaming != null && selectedMessage.id == streaming.id)) {
-                path.add(selectedMessage)
-            }
-            currentParentId = selectedMessage.id
-        }
-
-        if (streaming != null && path.none { it.id == streaming.id }) {
-            if (streaming.parentId == path.lastOrNull()?.id || (streaming.parentId == null && path.isEmpty())) {
-                path.add(streaming)
-            }
-        }
-        path
+        // Single source of truth for the visible-path walk: the tested
+        // ConversationUiState.resolvePath (covered by ConversationUiStateTest).
+        ConversationUiState.resolvePath(allMsgs, streaming, selectedChildren)
     }.distinctUntilChanged()
     .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -563,8 +535,7 @@ class ChatViewModel(
      *  Emits a snackbar and returns null when the provider is not configured. */
     private fun resolveProviderKey(modelId: String): ProviderKey? {
         val providerName = getProviderForModel(modelId)
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        val activeKey = settings.resolveActiveKey(providerName) ?: ""
         if (!providerRegistry.isConfigured(providerName, activeKey)) {
             emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
             return null
@@ -582,8 +553,7 @@ class ChatViewModel(
         val model = settings.imageTranscriptionModel.value ?: return ""
         val providerName = getProviderForModel(model)
         if (providerName == "Local") return ""
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        return settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        return settings.resolveActiveKey(providerName) ?: ""
     }
 
     private fun resolveTranscriptionBaseUrl(): String? {
@@ -599,8 +569,7 @@ class ChatViewModel(
         val model = settings.imageGenModel.value ?: return ""
         val providerName = getProviderForModel(model)
         if (providerName == "Local") return ""
-        val activeKeyId = settings.activeApiKeyIds.value[providerName]
-        return settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+        return settings.resolveActiveKey(providerName) ?: ""
     }
 
     private fun resolveImageGenBaseUrl(): String {
@@ -672,7 +641,7 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             settings.saveAutoBackupPeriodHours(hours)
             // Enforce: auto-delete period must be strictly greater than backup period
-            val deleteTiers = listOf(168, 720, 8760)
+            val deleteTiers = AUTO_DELETE_TIERS_HOURS
             val deleteHours = settings.autoDeletePeriodHours.value
             if (deleteHours <= hours) {
                 val nextDelete = deleteTiers.firstOrNull { it > hours } ?: 8760
@@ -692,7 +661,7 @@ class ChatViewModel(
     fun setAutoDeletePeriodHours(hours: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             val backupHours = settings.autoBackupPeriodHours.value
-            val deleteTiers = listOf(168, 720, 8760)
+            val deleteTiers = AUTO_DELETE_TIERS_HOURS
             // Find the smallest valid delete tier that is > backupHours, and >= the requested hours
             val minValid = deleteTiers.firstOrNull { it > backupHours } ?: 8760
             settings.saveAutoDeletePeriodHours(maxOf(hours, minValid))
@@ -841,7 +810,7 @@ class ChatViewModel(
         _isTransitioningToNewChat.value = true
         _isSwitching.value = true
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(200) // Allow overlay to fade in
+            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
             _currentConversationId.value = null
             _currentActiveModel.value = null
             _pendingConversationSettings.value = null
@@ -860,7 +829,7 @@ class ChatViewModel(
         _isTransitioningToNewChat.value = false
         _isSwitching.value = true
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(200) // Allow overlay to fade in
+            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
             _isNewChatMode.value = false
             _branchSwitchTrigger.value = null
             _currentConversationId.value = id
@@ -891,14 +860,8 @@ class ChatViewModel(
 
             val titleModelId = settings.titleGenerationModel.value
             val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: settings.selectedModel.value)
-            val providerName = getProviderForModel(modelIdWithPrefix)
             val modelId = ModelId.parse(modelIdWithPrefix).modelName
-            val activeKeyId = settings.activeApiKeyIds.value[providerName]
-            val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
-            if (!providerRegistry.isConfigured(providerName, activeKey)) {
-                emitSnackbar(getApplication<Application>().getString(R.string.no_api_key_for_provider, providerName))
-                return@launch
-            }
+            val (providerName, activeKey) = resolveProviderKey(modelIdWithPrefix) ?: return@launch
 
             val summaryText = if (firstModelMsg != null) {
                 "User: ${firstUserMsg.text}\nAssistant: ${firstModelMsg.text.take(500)}"
@@ -1104,28 +1067,28 @@ class ChatViewModel(
             stopFinalization?.join()
             val myPersistId = session.nextPersistId()
             try {
-                val userMessage = _allMessages.value.find { it.id == parentId } ?: return@launch
+                _allMessages.value.find { it.id == parentId } ?: return@launch
 
-            if (isErrorOrStopped && isLatest) {
-                // Purge stale tool call children, thinking content, and embeddings
-                val allMsgs = _allMessages.value
-                val staleIds = mutableListOf<String>()
-                val queue = mutableListOf(modelMessageId)
-                while (queue.isNotEmpty()) {
-                    val pid = queue.removeAt(0)
-                    allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
-                        .forEach { staleIds.add(it.id); queue.add(it.id) }
-                }
-                if (staleIds.isNotEmpty()) {
-                    convRepo.deleteMessagesByIds(staleIds)
-                    _allMessages.update { it.filter { m -> m.id !in staleIds } }
-                }
-                convRepo.deleteEmbedding(modelMessageId)
-                convRepo.upsertMessage(MessageEntity(
-                    id = modelMessageId, conversationId = currentId, parentId = parentId,
-                    text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                    modelName = currentActiveModel.value, toolCallJson = null
-                ))
+                if (isErrorOrStopped && isLatest) {
+                    // Purge stale tool call children, thinking content, and embeddings
+                    val allMsgs = _allMessages.value
+                    val staleIds = mutableListOf<String>()
+                    val queue = mutableListOf(modelMessageId)
+                    while (queue.isNotEmpty()) {
+                        val pid = queue.removeAt(0)
+                        allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
+                            .forEach { staleIds.add(it.id); queue.add(it.id) }
+                    }
+                    if (staleIds.isNotEmpty()) {
+                        convRepo.deleteMessagesByIds(staleIds)
+                        _allMessages.update { it.filter { m -> m.id !in staleIds } }
+                    }
+                    convRepo.deleteEmbedding(modelMessageId)
+                    convRepo.upsertMessage(MessageEntity(
+                        id = modelMessageId, conversationId = currentId, parentId = parentId,
+                        text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
+                        modelName = currentActiveModel.value, toolCallJson = null
+                    ))
                 } else {
                     // New branch — old message and its tool calls stay as a selectable branch
                     convRepo.upsertMessage(MessageEntity(
@@ -1138,32 +1101,64 @@ class ChatViewModel(
                 convRepo.getConversation(currentId)?.let { conv ->
                     convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
                 }
-            val resolved = buildEffectiveSystemPrompt(currentId)
-            val effectiveSettings = buildEffectiveConversationSettings(currentId)
-            val (config, genCtx) = buildGenerationPair(
-                providerName, modelId, activeKey,
-                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-                effectiveSettings, currentId
-            )
+                launchGeneration(
+                    currentId, modelMessageId, startTime,
+                    isRegenerate = true, replaceMessageId = messageId,
+                    providerName, modelId, activeKey, myUiToken, myPersistId,
+                    callerTag = "regenerate"
+                )
+            } finally {
+                session.loadingChange(myUiToken, false)
+            }
+        }
+    }
+
+    /**
+     * Shared generation tail called by [sendMessage], [regenerate], and
+     * [editMessage]: resolves system prompt + conversation settings, builds
+     * [GenerationConfig]/[GenerationContext], and launches the provider stream.
+     *
+     * All three entry points converge here after their differing branch-setup
+     * heads, eliminating copy-pasted prompt-resolution / config-building /
+     * callback-wiring code.
+     */
+    private suspend fun launchGeneration(
+        currentId: String,
+        modelMessageId: String,
+        startTime: Long,
+        isRegenerate: Boolean,
+        replaceMessageId: String?,
+        providerName: String,
+        modelId: String,
+        activeKey: String,
+        uiToken: Long,
+        persistId: Long,
+        callerTag: String
+    ) {
+        val resolved = buildEffectiveSystemPrompt(currentId)
+        val effectiveSettings = buildEffectiveConversationSettings(currentId)
+        val (config, genCtx) = buildGenerationPair(
+            providerName, modelId, activeKey,
+            resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
+            effectiveSettings, currentId
+        )
+        try {
             generationManager.generate(
                 conversationId = currentId,
                 modelMessageId = modelMessageId,
                 startTime = startTime,
-                isRegenerate = true,
-                replaceMessageId = messageId,
+                isRegenerate = isRegenerate,
+                replaceMessageId = replaceMessageId,
                 modelName = currentActiveModel.value,
                 config = config,
                 ctx = genCtx,
                 generationJob = session.generationJob,
-                onStreamUpdate = { session.streamUpdate(myUiToken, it) },
-                onLoadingChange = { session.loadingChange(myUiToken, it) },
-                onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
-                onStreamClear = { session.streamClear(myUiToken) },
-                isLatestPersist = { session.isLatestPersist(myPersistId) }
+                callbacks = session.callbacksFor(uiToken, persistId)
             )
-            } finally {
-                session.loadingChange(myUiToken, false)
-            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DebugLog.e("AgoraVM", "Generation failed in $callerTag", e)
         }
     }
 
@@ -1183,7 +1178,7 @@ class ChatViewModel(
         switchingJob?.cancel()
         _isSwitching.value = true
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(200) // Allow overlay to fade in
+            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
             val newMap = _selectedChildren.value.toMutableMap()
             val targetMessage = siblings[newIndex]
             newMap[parentId] = targetMessage.id
@@ -1239,28 +1234,11 @@ class ChatViewModel(
             val selectedAfterModelEdit = editChildren.toMap()
             _selectedChildren.value = selectedAfterModelEdit
             persistSelectedChildren(currentId, selectedAfterModelEdit)
-            val resolved = buildEffectiveSystemPrompt(currentId)
-            val effectiveSettings = buildEffectiveConversationSettings(currentId)
-            val (config, genCtx) = buildGenerationPair(
-                providerName, modelId, activeKey,
-                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-                effectiveSettings, currentId
-            )
-            generationManager.generate(
-                conversationId = currentId,
-                modelMessageId = modelMessageId,
-                startTime = startTime,
-                isRegenerate = false,
-                replaceMessageId = null,
-                modelName = currentActiveModel.value,
-                config = config,
-                ctx = genCtx,
-                generationJob = session.generationJob,
-                onStreamUpdate = { session.streamUpdate(myUiToken, it) },
-                onLoadingChange = { session.loadingChange(myUiToken, it) },
-                onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
-                onStreamClear = { session.streamClear(myUiToken) },
-                isLatestPersist = { session.isLatestPersist(myPersistId) }
+            launchGeneration(
+                currentId, modelMessageId, startTime,
+                isRegenerate = false, replaceMessageId = null,
+                providerName, modelId, activeKey, myUiToken, myPersistId,
+                callerTag = "editMessage"
             )
             } finally {
                 session.loadingChange(myUiToken, false)
@@ -1418,7 +1396,6 @@ class ChatViewModel(
                         app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
                             val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
                             if (content.isNotBlank()) {
-                                val fileName = att.fileName ?: getFileName(app, android.net.Uri.parse(att.uri))
                                 textContent = content
                             }
                         }
@@ -1532,14 +1509,7 @@ class ChatViewModel(
             val (allImages, attachmentMeta) = buildMessagePayload(app, images, attachments)
             var currentId = _currentConversationId.value
             val wasNewChat = _isNewChatMode.value
-            if (wasNewChat) {
-                val newId = UUID.randomUUID().toString()
-                convRepo.upsertConversation(ChatEntity(id = newId, title = appContext.getString(R.string.new_chat), modelId = currentActiveModel.value, systemPromptId = _pendingSystemPromptId.value))
-                _currentConversationId.value = newId
-                _isNewChatMode.value = false
-                currentId = newId
-            }
-            if (currentId == null) {
+            if (wasNewChat || currentId == null) {
                 val newId = UUID.randomUUID().toString()
                 convRepo.upsertConversation(ChatEntity(id = newId, title = appContext.getString(R.string.new_chat), modelId = currentActiveModel.value, systemPromptId = _pendingSystemPromptId.value))
                 _currentConversationId.value = newId
@@ -1585,34 +1555,12 @@ class ChatViewModel(
             _selectedChildren.value = newChildren
             triggerScrollToMessage(userMessageId)
 
-            val resolved = buildEffectiveSystemPrompt(currentId)
-            val effectiveSettings = buildEffectiveConversationSettings(currentId)
-            val (config, genCtx) = buildGenerationPair(
-                providerName, modelId, activeKey,
-                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-                effectiveSettings, currentId
+            launchGeneration(
+                currentId, modelMessageId, startTime,
+                isRegenerate = false, replaceMessageId = null,
+                providerName, modelId, activeKey, myUiToken, myPersistId,
+                callerTag = "sendMessage"
             )
-            try {
-                generationManager.generate(
-                    conversationId = currentId,
-                    modelMessageId = modelMessageId,
-                    startTime = startTime,
-                    isRegenerate = false,
-                    replaceMessageId = null,
-                    modelName = currentActiveModel.value,
-                    config = config,
-                    ctx = genCtx,
-                    generationJob = session.generationJob,
-                    onStreamUpdate = { session.streamUpdate(myUiToken, it) },
-                    onLoadingChange = { session.loadingChange(myUiToken, it) },
-                    onGeneratingIdChange = { session.generatingIdChange(myUiToken, it) },
-                    onStreamClear = { session.streamClear(myUiToken) },
-                    isLatestPersist = { session.isLatestPersist(myPersistId) }
-                )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-            }
 
             val lastMsg = _allMessages.value.find { it.id == modelMessageId }
             if (wasNewChat && settings.titleGenerationEnabled.value && session.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
@@ -1666,8 +1614,7 @@ class ChatViewModel(
                     if (name == "Local") return@forEach
 
                     try {
-                        val activeKeyId = settings.activeApiKeyIds.value[name]
-                        val activeKey = settings.apiKeys.value.find { it.id == activeKeyId }?.key ?: ""
+                        val activeKey = settings.resolveActiveKey(name) ?: ""
                         val isCustomProvider = !providerRegistry.isBuiltIn(name)
                         val currentBaseUrl = if (isCustomProvider) {
                             settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: providerInstance.defaultBaseUrl

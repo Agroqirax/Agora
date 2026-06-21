@@ -12,6 +12,7 @@ import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -40,7 +41,7 @@ class SettingsRepository(
 
     // ── Read StateFlows (eagerly shared) ──────────────────────
 
-    val selectedModel: StateFlow<String> = hot(settingsManager.selectedModel, "gemini-1.5-flash")
+    val selectedModel: StateFlow<String> = hot(settingsManager.selectedModel, Constants.EXAMPLE_MODEL_ID)
     val availableModels: StateFlow<Map<String, List<String>>> = hot(settingsManager.availableModels, emptyMap())
     val enabledModels: StateFlow<Set<String>> = hot(settingsManager.enabledModels, emptySet())
     val modelAliases: StateFlow<Map<String, String>> = hot(settingsManager.modelAliases, emptyMap())
@@ -344,6 +345,11 @@ class SettingsRepository(
     fun updateShellDevice(device: ShellDeviceConfig) = scope.launch {
         settingsManager.saveShellDevices(shellDevices.value.map { if (it.id == device.id) device else it })
     }
+
+    // ── Derived lookups ─────────────────────────────────────────
+    /** Resolves the currently-active cleartext API key for [provider], or `null`. */
+    fun resolveActiveKey(provider: String): String? =
+        apiKeys.value.find { it.id == activeApiKeyIds.value[provider] }?.key
 
     // ── Suspending DataStore access ───────────────────────────
     //

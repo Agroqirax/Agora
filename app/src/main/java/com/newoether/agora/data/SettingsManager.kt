@@ -3,6 +3,7 @@ package com.newoether.agora.data
 import android.content.Context
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -185,7 +186,7 @@ class SettingsManager(private val context: Context) {
         val LAST_MODELS_FETCH_FINGERPRINT = stringPreferencesKey("last_models_fetch_fingerprint")
     }
 
-    val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: "gemini-1.5-flash" }
+    val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: Constants.EXAMPLE_MODEL_ID }
     
     val providerBaseUrls: Flow<Map<String, String>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[PROVIDER_BASE_URLS] ?: "{}"

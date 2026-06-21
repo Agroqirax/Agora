@@ -115,6 +115,20 @@ internal fun applyUserTemplateToMessages(
     }
 }
 
+/**
+ * The token-gated UI callbacks a single generation drives. Built once per call by
+ * [GenerationSession.callbacksFor], so each generation entry point ([ChatViewModel]'s
+ * send / regenerate / edit) wires the session ownership tokens in exactly one place
+ * instead of re-threading five lambdas by hand.
+ */
+data class GenerationCallbacks(
+    val onStreamUpdate: (ChatMessage) -> Unit,
+    val onLoadingChange: (Boolean) -> Unit,
+    val onGeneratingIdChange: (String?) -> Unit,
+    val onStreamClear: () -> Unit,
+    val isLatestPersist: () -> Boolean,
+)
+
 class GenerationManager(
     private val app: Application,
     private val chatDao: ChatDao,
@@ -378,12 +392,10 @@ class GenerationManager(
         config: GenerationConfig,
         ctx: GenerationContext,
         generationJob: kotlinx.coroutines.Job?,
-        onStreamUpdate: (ChatMessage) -> Unit,
-        onLoadingChange: (Boolean) -> Unit,
-        onGeneratingIdChange: (String?) -> Unit,
-        onStreamClear: () -> Unit,
-        isLatestPersist: () -> Boolean
+        callbacks: GenerationCallbacks
     ) {
+        // Destructure into locals so the body below reads exactly as before.
+        val (onStreamUpdate, onLoadingChange, onGeneratingIdChange, onStreamClear, isLatestPersist) = callbacks
         val provider = getProviderInstance(config.providerName)
 
         onLoadingChange(true)

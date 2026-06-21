@@ -9,8 +9,9 @@ import com.newoether.agora.model.AttachmentMeta
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
-import kotlinx.serialization.encodeToString
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToStream
 import java.io.BufferedOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -141,6 +142,7 @@ class DataExporter(
         return null
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
     suspend fun export(
         uri: Uri,
         categories: Set<ExportCategory>,
@@ -169,7 +171,7 @@ class DataExporter(
 
             // Manifest
             zip.putNextEntry(ZipEntry("manifest.json"))
-            zip.write(Json.encodeToString(manifest).toByteArray())
+            Json.encodeToStream(manifest, zip)
             zip.closeEntry()
             step()
 
@@ -240,7 +242,7 @@ class DataExporter(
                         m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson, m.attachmentMeta)
                 }
                 zip.putNextEntry(ZipEntry("conversations.json"))
-                zip.write(Json.encodeToString(ExportConversations(conversations, messages)).toByteArray())
+                Json.encodeToStream(ExportConversations(conversations, messages), zip)
                 zip.closeEntry()
                 step()
             }
@@ -272,7 +274,7 @@ class DataExporter(
             if (ExportCategory.SYSTEM_PROMPTS in categories) {
                 val prompts = settingsManager.systemPrompts.first()
                 zip.putNextEntry(ZipEntry("system_prompts.json"))
-                zip.write(Json.encodeToString(prompts).toByteArray())
+                Json.encodeToStream(prompts, zip)
                 zip.closeEntry()
                 step()
             }
@@ -319,14 +321,14 @@ class DataExporter(
                     activeSystemPromptId = settingsManager.activeSystemPromptId.first()
                 )
                 zip.putNextEntry(ZipEntry("settings.json"))
-                zip.write(Json.encodeToString(settings).toByteArray())
+                Json.encodeToStream(settings, zip)
                 zip.closeEntry()
                 step()
 
                 // Extra settings (separate file to keep data class size manageable)
                 val extra = ExportExtraSettings.toJsonObject(settingsManager)
                 zip.putNextEntry(ZipEntry("extra_settings.json"))
-                zip.write(Json.encodeToString(extra).toByteArray())
+                Json.encodeToStream(extra, zip)
                 zip.closeEntry()
             }
 
@@ -341,7 +343,7 @@ class DataExporter(
                         .associate { it.name to it.apiKey }
                 )
                 zip.putNextEntry(ZipEntry("api_keys.json"))
-                zip.write(Json.encodeToString(keys).toByteArray())
+                Json.encodeToStream(keys, zip)
                 zip.closeEntry()
                 step()
             }

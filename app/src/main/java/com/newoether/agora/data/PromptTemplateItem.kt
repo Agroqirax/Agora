@@ -1,5 +1,6 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.util.Constants
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
@@ -32,7 +33,7 @@ object PredefinedVariables {
         SENT_TIME to "10:05:00",
         SENT_DATE to "2026-05-11",
         ACTIVE_MEMORY to "[Example memory content]",
-        MODEL_ID to "gemini-1.5-flash"
+        MODEL_ID to Constants.EXAMPLE_MODEL_ID
     )
 
     fun compile(
