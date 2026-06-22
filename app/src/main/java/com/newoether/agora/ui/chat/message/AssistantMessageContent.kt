@@ -3,9 +3,11 @@ package com.newoether.agora.ui.chat.message
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -279,8 +281,10 @@ internal fun AssistantMessageContent(
 
                 AnimatedVisibility(
                     visible = useTimelineSegments,
-                    enter = fadeIn(tween(500)) + expandVertically(tween(500)),
-                    exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
+                    // No container-level expand — each block animates its own alpha+scale
+                    // appearance, so the section must not also unfold vertically from the top.
+                    enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)),
+                    exit = fadeOut(tween(300))
                 ) {
                     TimelineSegmentsContent(
                         segments = mergedSegments,
@@ -302,7 +306,10 @@ internal fun AssistantMessageContent(
                 // message.text below as the complete answer.
                 AnimatedVisibility(
                     visible = !useTimelineSegments && detailSegments.isNotEmpty(),
-                    enter = fadeIn(tween(500)) + expandVertically(tween(500)),
+                    // alpha + scale, fast-in slow-out — matches the timeline block appearance.
+                    // Only plays when the block first appears live (visible false→true), not on history.
+                    enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)) +
+                        scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
                     exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
                 ) {
                     val segs = detailSegments
@@ -397,7 +404,21 @@ internal fun AssistantMessageContent(
                                     }
                             ) {
                                 Spacer(modifier = Modifier.height(2.dp))
+                                // Animate only items appended WHILE expanded during streaming.
+                                val seenSegIdx = remember(message.id) { mutableSetOf<Int>() }
+                                var seenSegInit by remember(message.id) { mutableStateOf(false) }
+                                val newSegIdx = if (isStreaming && seenSegInit)
+                                    segs.indices.filterNotTo(linkedSetOf()) { it in seenSegIdx } else emptySet()
+                                SideEffect {
+                                    segs.indices.forEach { seenSegIdx.add(it) }
+                                    if (!seenSegInit) seenSegInit = true
+                                }
                                 segs.forEachIndexed { idx, seg ->
+                                  AnimatedTimelineBlockAppearance(
+                                    animationKey = "${message.id}:compactseg:$idx",
+                                    animate = idx in newSegIdx
+                                  ) {
+                                   Column {
                                     if ((seg.type == "thought" && seg.content.isNotBlank()) || seg.type == "transcription") {
                                         Column(
                                             modifier = Modifier
@@ -463,6 +484,8 @@ internal fun AssistantMessageContent(
                                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
                                         )
                                     }
+                                   }
+                                  }
                                 }
                             }
                         }

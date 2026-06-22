@@ -352,7 +352,22 @@ private fun CompactSegmentBlock(
                         }
                 ) {
                     Spacer(modifier = Modifier.height(2.dp))
+                    // Animate only items appended WHILE expanded during streaming — not the
+                    // items already present when the block is first expanded, nor on history.
+                    val seenSegIdx = remember(expansionKey) { mutableSetOf<Int>() }
+                    var seenSegInit by remember(expansionKey) { mutableStateOf(false) }
+                    val newSegIdx = if (isStreaming && seenSegInit)
+                        segs.indices.filterNotTo(linkedSetOf()) { it in seenSegIdx } else emptySet()
+                    SideEffect {
+                        segs.indices.forEach { seenSegIdx.add(it) }
+                        if (!seenSegInit) seenSegInit = true
+                    }
                     segs.forEachIndexed { idx, seg ->
+                      AnimatedTimelineBlockAppearance(
+                        animationKey = "$expansionKey:seg:$idx",
+                        animate = idx in newSegIdx
+                      ) {
+                       Column {
                         if ((seg.type == "thought" && seg.content.isNotBlank()) || seg.type == "transcription") {
                             Column(
                                 modifier = Modifier
@@ -414,6 +429,8 @@ private fun CompactSegmentBlock(
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
                             )
                         }
+                       }
+                      }
                     }
                 }
             }

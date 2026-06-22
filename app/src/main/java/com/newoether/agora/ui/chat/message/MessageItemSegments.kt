@@ -114,24 +114,26 @@ internal fun AnimatedTimelineBlockAppearance(
     animate: Boolean,
     content: @Composable () -> Unit
 ) {
-    if (!animate) {
-        content()
-        return
-    }
     key(animationKey) {
-        var visible by remember { mutableStateOf(false) }
-        LaunchedEffect(Unit) {
-            visible = true
-        }
-        AnimatedVisibility(
-            visible = visible,
-            // Fast-in, slow-out (decelerate) alpha + scale appearance. Gated by `animate`
-            // so it only plays for blocks first appearing during live generation.
-            enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)) +
-                scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
-            exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
-        ) {
+        // Capture the decision on first composition. The caller flips `animate` to false on
+        // the very next recomposition (the block/item is marked "seen"), and during streaming
+        // that next frame can arrive before the enter animation finishes — so reading `animate`
+        // live would tear the AnimatedVisibility down and the content would just snap in.
+        val play = remember { animate }
+        if (!play) {
             content()
+        } else {
+            var visible by remember { mutableStateOf(false) }
+            LaunchedEffect(Unit) { visible = true }
+            AnimatedVisibility(
+                visible = visible,
+                // Fast-in, slow-out (decelerate) alpha + scale appearance.
+                enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)) +
+                    scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
+                exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
+            ) {
+                content()
+            }
         }
     }
 }
