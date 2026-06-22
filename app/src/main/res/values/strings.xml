@@ -938,4 +938,16 @@
     <string name="crash_dismiss">Don\'t send</string>
     <string name="crash_privacy_note">Only the crash log is sent to newoether.space. No other information is collected.</string>
     <string name="crash_submitted">Crash report sent. Thank you!</string>
+    <string name="settings_group_network">Network</string>
+    <string name="settings_proxy">Proxy</string>
+    <string name="settings_proxy_desc">Route network traffic through an HTTP or SOCKS proxy</string>
+    <string name="proxy_enable">Enable proxy</string>
+    <string name="proxy_enable_desc">Route all app network traffic through the proxy</string>
+    <string name="proxy_type">Type</string>
+    <string name="proxy_host">Host</string>
+    <string name="proxy_port">Port</string>
+    <string name="proxy_username">Username (optional)</string>
+    <string name="proxy_password">Password (optional)</string>
+    <string name="proxy_bypass">Bypass list</string>
+    <string name="proxy_bypass_desc">Hosts and CIDR ranges that connect directly, one per line</string>
 </resources>

@@ -327,7 +327,7 @@ class DataExporter(
                 step()
 
                 // Extra settings (separate file to keep data class size manageable)
-                val extra = ExportExtraSettings.toJsonObject(settingsManager)
+                val extra = ExportExtraSettings.toJsonObject(settingsManager, includeApiKeys)
                 zip.putNextEntry(ZipEntry("extra_settings.json"))
                 Json.encodeToStream(extra, zip)
                 zip.closeEntry()

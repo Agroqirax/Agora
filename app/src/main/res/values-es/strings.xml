@@ -935,4 +935,16 @@
     <string name="crash_dismiss">No enviar</string>
     <string name="crash_privacy_note">Solo se envía el registro del fallo a newoether.space. No se recopila ninguna otra información.</string>
     <string name="crash_submitted">Informe de fallos enviado. ¡Gracias!</string>
+    <string name="settings_group_network">Red</string>
+    <string name="settings_proxy">Proxy</string>
+    <string name="settings_proxy_desc">Enrutar el tráfico de red a través de un proxy HTTP o SOCKS</string>
+    <string name="proxy_enable">Activar proxy</string>
+    <string name="proxy_enable_desc">Enrutar todo el tráfico de red de la app a través del proxy</string>
+    <string name="proxy_type">Tipo</string>
+    <string name="proxy_host">Host</string>
+    <string name="proxy_port">Puerto</string>
+    <string name="proxy_username">Usuario (opcional)</string>
+    <string name="proxy_password">Contraseña (opcional)</string>
+    <string name="proxy_bypass">Lista de exclusión</string>
+    <string name="proxy_bypass_desc">Hosts y rangos CIDR que se conectan directamente, uno por línea</string>
 </resources>

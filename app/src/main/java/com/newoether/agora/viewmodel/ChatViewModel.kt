@@ -139,7 +139,34 @@ class ChatViewModel(
      * initialized — avoids the constructor this-escape where a Dispatchers.IO
      * coroutine accesses a field whose JVM backing field is still null.
      */
+    /** Build the proxy config from settings and push it into the shared HttpClient. */
+    private fun applyProxy() {
+        val host = settings.proxyHost.value.trim()
+        val cfg = if (settings.proxyEnabled.value && host.isNotEmpty()) {
+            com.newoether.agora.api.HttpClient.ProxyConfig(
+                type = if (settings.proxyType.value.equals("socks5", ignoreCase = true))
+                    com.newoether.agora.api.HttpClient.ProxyType.SOCKS
+                else com.newoether.agora.api.HttpClient.ProxyType.HTTP,
+                host = host,
+                port = settings.proxyPort.value.trim().toIntOrNull() ?: 0,
+                username = settings.proxyUsername.value,
+                password = settings.proxyPassword.value,
+                bypass = settings.proxyBypass.value.split('\n', ',').map { it.trim() }.filter { it.isNotEmpty() }
+            )
+        } else null
+        com.newoether.agora.api.HttpClient.setProxy(cfg)
+    }
+
     private fun startInitJobs() {
+        // Apply the network proxy at startup and whenever its settings change.
+        viewModelScope.launch {
+            val proxyFlows = listOf(
+                settings.proxyEnabled.map { it.toString() },
+                settings.proxyType, settings.proxyHost, settings.proxyPort,
+                settings.proxyUsername, settings.proxyPassword, settings.proxyBypass
+            )
+            kotlinx.coroutines.flow.combine(proxyFlows) { it }.collect { applyProxy() }
+        }
         // Auto-check for updates on launch (at most once per day)
         viewModelScope.launch(Dispatchers.IO) {
             if (settings.getAutoUpdateCheck()) {

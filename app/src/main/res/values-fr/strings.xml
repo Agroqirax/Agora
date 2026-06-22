@@ -935,4 +935,16 @@
     <string name="crash_dismiss">Ne pas envoyer</string>
     <string name="crash_privacy_note">Seul le journal de plantage est envoyé à newoether.space. Aucune autre information n\'est collectée.</string>
     <string name="crash_submitted">Rapport de plantage envoyé. Merci !</string>
+    <string name="settings_group_network">Réseau</string>
+    <string name="settings_proxy">Proxy</string>
+    <string name="settings_proxy_desc">Acheminer le trafic réseau via un proxy HTTP ou SOCKS</string>
+    <string name="proxy_enable">Activer le proxy</string>
+    <string name="proxy_enable_desc">Acheminer tout le trafic réseau via le proxy</string>
+    <string name="proxy_type">Type</string>
+    <string name="proxy_host">Hôte</string>
+    <string name="proxy_port">Port</string>
+    <string name="proxy_username">Identifiant (facultatif)</string>
+    <string name="proxy_password">Mot de passe (facultatif)</string>
+    <string name="proxy_bypass">Liste de contournement</string>
+    <string name="proxy_bypass_desc">Hôtes et plages CIDR connectés directement, un par ligne</string>
 </resources>

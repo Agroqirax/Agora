@@ -946,4 +946,16 @@
     <string name="crash_dismiss">不发送</string>
     <string name="crash_privacy_note">仅向 newoether.space 发送崩溃日志，不收集任何其他信息。</string>
     <string name="crash_submitted">崩溃报告已发送，谢谢！</string>
+    <string name="settings_group_network">网络</string>
+    <string name="settings_proxy">代理</string>
+    <string name="settings_proxy_desc">通过 HTTP 或 SOCKS 代理转发网络流量</string>
+    <string name="proxy_enable">启用代理</string>
+    <string name="proxy_enable_desc">将应用的所有网络流量通过代理转发</string>
+    <string name="proxy_type">类型</string>
+    <string name="proxy_host">主机</string>
+    <string name="proxy_port">端口</string>
+    <string name="proxy_username">用户名(可选)</string>
+    <string name="proxy_password">密码(可选)</string>
+    <string name="proxy_bypass">直连列表</string>
+    <string name="proxy_bypass_desc">直接连接、不经过代理的主机和 CIDR 网段,每行一个</string>
 </resources>

@@ -935,4 +935,16 @@
     <string name="crash_dismiss">送信しない</string>
     <string name="crash_privacy_note">クラッシュログのみが newoether.space に送信されます。それ以外の情報は収集されません。</string>
     <string name="crash_submitted">クラッシュレポートを送信しました。ありがとうございます!</string>
+    <string name="settings_group_network">ネットワーク</string>
+    <string name="settings_proxy">プロキシ</string>
+    <string name="settings_proxy_desc">HTTP または SOCKS プロキシ経由で通信します</string>
+    <string name="proxy_enable">プロキシを有効にする</string>
+    <string name="proxy_enable_desc">アプリのすべての通信をプロキシ経由にします</string>
+    <string name="proxy_type">種類</string>
+    <string name="proxy_host">ホスト</string>
+    <string name="proxy_port">ポート</string>
+    <string name="proxy_username">ユーザー名(任意)</string>
+    <string name="proxy_password">パスワード(任意)</string>
+    <string name="proxy_bypass">バイパスリスト</string>
+    <string name="proxy_bypass_desc">直接接続するホストと CIDR 範囲(1 行に 1 つ)</string>
 </resources>

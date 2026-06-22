@@ -153,6 +153,14 @@ class SettingsManager(private val context: Context) {
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
+        val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
+        val PROXY_TYPE = stringPreferencesKey("proxy_type")
+        val PROXY_HOST = stringPreferencesKey("proxy_host")
+        val PROXY_PORT = stringPreferencesKey("proxy_port")
+        val PROXY_USERNAME = stringPreferencesKey("proxy_username")
+        val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
+        val PROXY_BYPASS = stringPreferencesKey("proxy_bypass")
+        const val DEFAULT_PROXY_BYPASS = "localhost\n127.0.0.1\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n::1"
         val SHELL_CONFIRM_ENABLED = booleanPreferencesKey("shell_confirm_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
         val SANDBOX_ENABLED = booleanPreferencesKey("sandbox_enabled")
@@ -306,6 +314,13 @@ class SettingsManager(private val context: Context) {
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
+    val proxyEnabled: Flow<Boolean> = context.dataStore.data.map { it[PROXY_ENABLED] ?: false }
+    val proxyType: Flow<String> = context.dataStore.data.map { it[PROXY_TYPE] ?: "http" }
+    val proxyHost: Flow<String> = context.dataStore.data.map { it[PROXY_HOST] ?: "" }
+    val proxyPort: Flow<String> = context.dataStore.data.map { it[PROXY_PORT] ?: "" }
+    val proxyUsername: Flow<String> = context.dataStore.data.map { it[PROXY_USERNAME] ?: "" }
+    val proxyPassword: Flow<String> = context.dataStore.data.map { it[PROXY_PASSWORD] ?: "" }
+    val proxyBypass: Flow<String> = context.dataStore.data.map { it[PROXY_BYPASS] ?: DEFAULT_PROXY_BYPASS }
     // Confirm before the model runs state-changing commands on remote shell servers. Default on.
     val shellConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_CONFIRM_ENABLED] ?: true }
     val shellDevices: Flow<List<ShellDeviceConfig>> = context.dataStore.data.map { pref ->
@@ -658,6 +673,13 @@ class SettingsManager(private val context: Context) {
     suspend fun saveShellEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
     }
+    suspend fun saveProxyEnabled(enabled: Boolean) { context.dataStore.edit { it[PROXY_ENABLED] = enabled } }
+    suspend fun saveProxyType(type: String) { context.dataStore.edit { it[PROXY_TYPE] = type } }
+    suspend fun saveProxyHost(host: String) { context.dataStore.edit { it[PROXY_HOST] = host } }
+    suspend fun saveProxyPort(port: String) { context.dataStore.edit { it[PROXY_PORT] = port } }
+    suspend fun saveProxyUsername(user: String) { context.dataStore.edit { it[PROXY_USERNAME] = user } }
+    suspend fun saveProxyPassword(pass: String) { context.dataStore.edit { it[PROXY_PASSWORD] = pass } }
+    suspend fun saveProxyBypass(bypass: String) { context.dataStore.edit { it[PROXY_BYPASS] = bypass } }
 
     suspend fun saveShellConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_CONFIRM_ENABLED] = enabled }

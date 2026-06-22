@@ -935,4 +935,16 @@
     <string name="crash_dismiss">보내지 않기</string>
     <string name="crash_privacy_note">크래시 로그만 newoether.space로 전송됩니다. 다른 정보는 수집되지 않습니다.</string>
     <string name="crash_submitted">크래시 보고서를 보냈습니다. 감사합니다!</string>
+    <string name="settings_group_network">네트워크</string>
+    <string name="settings_proxy">프록시</string>
+    <string name="settings_proxy_desc">HTTP 또는 SOCKS 프록시를 통해 트래픽 전송</string>
+    <string name="proxy_enable">프록시 사용</string>
+    <string name="proxy_enable_desc">앱의 모든 네트워크 트래픽을 프록시로 전송</string>
+    <string name="proxy_type">유형</string>
+    <string name="proxy_host">호스트</string>
+    <string name="proxy_port">포트</string>
+    <string name="proxy_username">사용자 이름(선택)</string>
+    <string name="proxy_password">비밀번호(선택)</string>
+    <string name="proxy_bypass">우회 목록</string>
+    <string name="proxy_bypass_desc">직접 연결하는 호스트와 CIDR 범위, 한 줄에 하나씩</string>
 </resources>

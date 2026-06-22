@@ -179,6 +179,9 @@ private val settingsGroups = listOf(
         SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
     )),
+    SettingsGroupData(titleRes = R.string.settings_group_network, items = listOf(
+        SettingsCategory("proxy", R.string.settings_proxy, R.string.settings_proxy_desc, Icons.Default.Lan),
+    )),
     SettingsGroupData(titleRes = R.string.settings_group_memory_data, items = listOf(
         SettingsCategory("memory", R.string.settings_memory, R.string.settings_memory_desc, Icons.Default.Description),
         SettingsCategory("datacontrol", R.string.settings_data_control, R.string.settings_data_control_desc, Icons.Default.Storage),
@@ -227,6 +230,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "websearch" -> SettingsWebSearchPage(viewModel, onBack = { selectedCategory = null })
                 "imagegen" -> SettingsImageGenPage(viewModel, onBack = { selectedCategory = null })
                 "shell" -> SettingsShellPage(viewModel, onBack = { selectedCategory = null })
+                "proxy" -> SettingsProxyPage(viewModel, onBack = { selectedCategory = null })
                 "language" -> SettingsLanguagePage(viewModel, onBack = { selectedCategory = null })
                 "titlegen" -> SettingsTitleGenPage(viewModel, onBack = { selectedCategory = null })
                 "transcription" -> SettingsTranscriptionPage(viewModel, onBack = { selectedCategory = null })

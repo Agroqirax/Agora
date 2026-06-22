@@ -87,6 +87,13 @@ class SettingsRepository(
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
     val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
+    val proxyEnabled: StateFlow<Boolean> = hot(settingsManager.proxyEnabled, false)
+    val proxyType: StateFlow<String> = hot(settingsManager.proxyType, "http")
+    val proxyHost: StateFlow<String> = hot(settingsManager.proxyHost, "")
+    val proxyPort: StateFlow<String> = hot(settingsManager.proxyPort, "")
+    val proxyUsername: StateFlow<String> = hot(settingsManager.proxyUsername, "")
+    val proxyPassword: StateFlow<String> = hot(settingsManager.proxyPassword, "")
+    val proxyBypass: StateFlow<String> = hot(settingsManager.proxyBypass, com.newoether.agora.data.SettingsManager.DEFAULT_PROXY_BYPASS)
     val shellConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.shellConfirmEnabled, true)
     val shellDevices: StateFlow<List<ShellDeviceConfig>> = hot(settingsManager.shellDevices, emptyList())
     val sandboxEnabled: StateFlow<Boolean> = hot(settingsManager.sandboxEnabled, false)
@@ -322,6 +329,13 @@ class SettingsRepository(
     fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
+    fun setProxyEnabled(enabled: Boolean) = scope.launch { settingsManager.saveProxyEnabled(enabled) }
+    fun setProxyType(type: String) = scope.launch { settingsManager.saveProxyType(type) }
+    fun setProxyHost(host: String) = scope.launch { settingsManager.saveProxyHost(host) }
+    fun setProxyPort(port: String) = scope.launch { settingsManager.saveProxyPort(port) }
+    fun setProxyUsername(user: String) = scope.launch { settingsManager.saveProxyUsername(user) }
+    fun setProxyPassword(pass: String) = scope.launch { settingsManager.saveProxyPassword(pass) }
+    fun setProxyBypass(bypass: String) = scope.launch { settingsManager.saveProxyBypass(bypass) }
     fun setSandboxEnabled(enabled: Boolean) = scope.launch { settingsManager.saveSandboxEnabled(enabled) }
     fun setThinkingEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingEnabled(enabled) }
     fun setThinkingLevel(level: String) = scope.launch { settingsManager.saveThinkingLevel(level) }

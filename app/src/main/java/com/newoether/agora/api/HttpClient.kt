@@ -44,10 +44,104 @@ object HttpClient {
         }
     }
 
+    // ── Network proxy ─────────────────────────────────────────────────────
+    enum class ProxyType { HTTP, SOCKS }
+
+    /** Active proxy config, or null = direct connection. Read live by the proxy
+     *  selector, so changing it takes effect immediately without rebuilding the client. */
+    data class ProxyConfig(
+        val type: ProxyType,
+        val host: String,
+        val port: Int,
+        val username: String = "",
+        val password: String = "",
+        /** Hosts/CIDRs that bypass the proxy (e.g. localhost, 192.168.0.0/16). */
+        val bypass: List<String> = emptyList()
+    )
+
+    @Volatile private var proxyConfig: ProxyConfig? = null
+
+    /** Apply (or clear) the proxy. Also installs a default [java.net.Authenticator] for
+     *  SOCKS proxy auth, which OkHttp's proxyAuthenticator does not cover. */
+    fun setProxy(config: ProxyConfig?) {
+        proxyConfig = config?.takeIf { it.host.isNotBlank() && it.port in 1..65535 }
+        val cfg = proxyConfig
+        if (cfg != null && cfg.username.isNotBlank()) {
+            java.net.Authenticator.setDefault(object : java.net.Authenticator() {
+                override fun getPasswordAuthentication(): java.net.PasswordAuthentication? =
+                    if (requestorType == RequestorType.PROXY)
+                        java.net.PasswordAuthentication(cfg.username, cfg.password.toCharArray())
+                    else null
+            })
+        } else {
+            java.net.Authenticator.setDefault(null)
+        }
+    }
+
+    private fun resolveProxy(host: String): java.net.Proxy {
+        val cfg = proxyConfig ?: return java.net.Proxy.NO_PROXY
+        if (isProxyBypassed(host, cfg.bypass)) return java.net.Proxy.NO_PROXY
+        val type = if (cfg.type == ProxyType.SOCKS) java.net.Proxy.Type.SOCKS else java.net.Proxy.Type.HTTP
+        return java.net.Proxy(type, java.net.InetSocketAddress.createUnresolved(cfg.host, cfg.port))
+    }
+
+    /** True if [host] matches a bypass entry: exact host, `*.suffix` wildcard, or IPv4 CIDR. */
+    private fun isProxyBypassed(host: String, bypass: List<String>): Boolean {
+        if (host.isBlank()) return true
+        val h = host.lowercase().trim('[', ']')
+        for (raw in bypass) {
+            val entry = raw.trim().lowercase()
+            when {
+                entry.isEmpty() -> continue
+                entry.contains('/') -> if (ipv4InCidr(h, entry)) return true
+                entry.startsWith("*.") -> if (h == entry.drop(2) || h.endsWith(entry.drop(1))) return true
+                else -> if (h == entry) return true
+            }
+        }
+        return false
+    }
+
+    private fun ipv4ToLong(ip: String): Long? {
+        val o = ip.split('.')
+        if (o.size != 4) return null
+        var v = 0L
+        for (p in o) { val n = p.toIntOrNull() ?: return null; if (n !in 0..255) return null; v = (v shl 8) or n.toLong() }
+        return v
+    }
+
+    private fun ipv4InCidr(host: String, cidr: String): Boolean {
+        val parts = cidr.split('/')
+        if (parts.size != 2) return false
+        val bits = parts[1].toIntOrNull()?.takeIf { it in 0..32 } ?: return false
+        val ipL = ipv4ToLong(host) ?: return false
+        val netL = ipv4ToLong(parts[0]) ?: return false
+        val mask = if (bits == 0) 0L else (-1L shl (32 - bits)) and 0xFFFFFFFFL
+        return (ipL and mask) == (netL and mask)
+    }
+
+    private val proxySelector = object : java.net.ProxySelector() {
+        override fun select(uri: java.net.URI?): MutableList<java.net.Proxy> =
+            mutableListOf(resolveProxy(uri?.host ?: ""))
+        override fun connectFailed(uri: java.net.URI?, sa: java.net.SocketAddress?, e: IOException?) {}
+    }
+
+    private val proxyAuthenticator = object : okhttp3.Authenticator {
+        override fun authenticate(route: okhttp3.Route?, response: okhttp3.Response): Request? {
+            val cfg = proxyConfig
+            if (cfg == null || cfg.username.isBlank() || cfg.type != ProxyType.HTTP) return null
+            if (response.request.header("Proxy-Authorization") != null) return null // already tried
+            return response.request.newBuilder()
+                .header("Proxy-Authorization", okhttp3.Credentials.basic(cfg.username, cfg.password))
+                .build()
+        }
+    }
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.MINUTES)
         .writeTimeout(30, TimeUnit.SECONDS)
+        .proxySelector(proxySelector)
+        .proxyAuthenticator(proxyAuthenticator)
         .build()
 
     /** The currently active streaming handle, if any. Used to cancel

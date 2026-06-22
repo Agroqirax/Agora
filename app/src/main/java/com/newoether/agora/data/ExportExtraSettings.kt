@@ -22,7 +22,7 @@ import kotlinx.serialization.json.contentOrNull
 object ExportExtraSettings {
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun toJsonObject(sm: SettingsManager): JsonObject = buildJsonObject {
+    suspend fun toJsonObject(sm: SettingsManager, includeApiKeys: Boolean = true): JsonObject = buildJsonObject {
         // System prompts are exported standalone as system_prompts.json — NOT duplicated here.
 
         val imgTransEnabled = sm.imageTranscriptionEnabledModels.first()
@@ -76,6 +76,13 @@ object ExportExtraSettings {
         put("customFontPath", JsonPrimitive(sm.customFontPath.first()))
         put("customFontName", JsonPrimitive(sm.customFontName.first()))
         put("autoUpdateCheck", JsonPrimitive(sm.autoUpdateCheck.first()))
+        put("proxyEnabled", JsonPrimitive(sm.proxyEnabled.first()))
+        put("proxyType", JsonPrimitive(sm.proxyType.first()))
+        put("proxyHost", JsonPrimitive(sm.proxyHost.first()))
+        put("proxyPort", JsonPrimitive(sm.proxyPort.first()))
+        put("proxyUsername", JsonPrimitive(sm.proxyUsername.first()))
+        if (includeApiKeys) put("proxyPassword", JsonPrimitive(sm.proxyPassword.first()))
+        put("proxyBypass", JsonPrimitive(sm.proxyBypass.first()))
 
         val aliases = sm.modelAliases.first()
         if (aliases.isNotEmpty()) {
@@ -125,6 +132,13 @@ object ExportExtraSettings {
             if (!cs.isAllNull()) sm.saveConversationSettings(convId, cs)
         }
         obj["showDocumentationFab"]?.jsonPrimitive?.boolean?.let { sm.saveShowDocumentationFab(it) }
+        obj["proxyEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveProxyEnabled(it) }
+        obj["proxyType"]?.jsonPrimitive?.contentOrNull?.let { sm.saveProxyType(it) }
+        obj["proxyHost"]?.jsonPrimitive?.contentOrNull?.let { sm.saveProxyHost(it) }
+        obj["proxyPort"]?.jsonPrimitive?.contentOrNull?.let { sm.saveProxyPort(it) }
+        obj["proxyUsername"]?.jsonPrimitive?.contentOrNull?.let { sm.saveProxyUsername(it) }
+        obj["proxyPassword"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) sm.saveProxyPassword(it) }
+        obj["proxyBypass"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) sm.saveProxyBypass(it) }
         obj["themeMode"]?.jsonPrimitive?.contentOrNull?.let { sm.saveThemeMode(it) }
         obj["colorScheme"]?.jsonPrimitive?.contentOrNull?.let { sm.saveColorScheme(it) }
         obj["dynamicColor"]?.jsonPrimitive?.boolean?.let { sm.saveDynamicColor(it) }
