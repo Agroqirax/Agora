@@ -8,8 +8,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lan
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Numbers
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -61,8 +59,15 @@ fun SettingsProxyPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                     if (enabled) {
+                        // Type selector
                         add {
-                            ProxyCardSlot(icon = Icons.Default.Lan, label = stringResource(R.string.proxy_type)) {
+                            ProxyCard(icon = Icons.Default.Lan) {
+                                Text(
+                                    stringResource(R.string.proxy_type),
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(Modifier.height(10.dp))
                                 PillTabSwitcher(
                                     tabs = proxyTypes.map { it.second },
                                     selectedIndex = proxyTypes.indexOfFirst { it.first == type }.coerceAtLeast(0),
@@ -70,39 +75,47 @@ fun SettingsProxyPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 )
                             }
                         }
+                        // Server endpoint: host + port on one row
                         add {
-                            ProxyFieldCard(
-                                icon = Icons.Default.Dns,
-                                label = stringResource(R.string.proxy_host),
-                                value = host,
-                                onChange = { viewModel.settings.setProxyHost(it) }
-                            )
+                            ProxyCard(icon = Icons.Default.Dns) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    ProxyLabeledField(
+                                        label = stringResource(R.string.proxy_host),
+                                        value = host,
+                                        onChange = { viewModel.settings.setProxyHost(it) },
+                                        placeholder = "127.0.0.1",
+                                        modifier = Modifier.weight(2f)
+                                    )
+                                    ProxyLabeledField(
+                                        label = stringResource(R.string.proxy_port),
+                                        value = port,
+                                        onChange = { viewModel.settings.setProxyPort(it.filter { c -> c.isDigit() }) },
+                                        placeholder = "7890",
+                                        keyboard = KeyboardType.Number,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
                         }
+                        // Credentials: username + password stacked in one card
                         add {
-                            ProxyFieldCard(
-                                icon = Icons.Default.Numbers,
-                                label = stringResource(R.string.proxy_port),
-                                value = port,
-                                onChange = { viewModel.settings.setProxyPort(it.filter { c -> c.isDigit() }) },
-                                keyboard = KeyboardType.Number
-                            )
-                        }
-                        add {
-                            ProxyFieldCard(
-                                icon = Icons.Default.Person,
-                                label = stringResource(R.string.proxy_username),
-                                value = username,
-                                onChange = { viewModel.settings.setProxyUsername(it) }
-                            )
-                        }
-                        add {
-                            ProxyFieldCard(
-                                icon = Icons.Default.Lock,
-                                label = stringResource(R.string.proxy_password),
-                                value = password,
-                                onChange = { viewModel.settings.setProxyPassword(it) },
-                                password = true
-                            )
+                            ProxyCard(icon = Icons.Default.Person) {
+                                ProxyLabeledField(
+                                    label = stringResource(R.string.proxy_username),
+                                    value = username,
+                                    onChange = { viewModel.settings.setProxyUsername(it) }
+                                )
+                                Spacer(Modifier.height(16.dp))
+                                ProxyLabeledField(
+                                    label = stringResource(R.string.proxy_password),
+                                    value = password,
+                                    onChange = { viewModel.settings.setProxyPassword(it) },
+                                    password = true
+                                )
+                            }
                         }
                     }
                 }
@@ -111,14 +124,15 @@ fun SettingsProxyPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsGroup(
                     title = stringResource(R.string.proxy_bypass),
                     items = listOf({
-                        ProxyFieldCard(
-                            icon = Icons.AutoMirrored.Filled.AltRoute,
-                            label = stringResource(R.string.proxy_bypass),
-                            description = stringResource(R.string.proxy_bypass_desc),
-                            value = bypass,
-                            onChange = { viewModel.settings.setProxyBypass(it) },
-                            singleLine = false
-                        )
+                        ProxyCard(icon = Icons.AutoMirrored.Filled.AltRoute) {
+                            ProxyLabeledField(
+                                label = stringResource(R.string.proxy_bypass),
+                                description = stringResource(R.string.proxy_bypass_desc),
+                                value = bypass,
+                                onChange = { viewModel.settings.setProxyBypass(it) },
+                                singleLine = false
+                            )
+                        }
                     })
                 )
             }
@@ -127,77 +141,61 @@ fun SettingsProxyPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     }
 }
 
-/** A settings-card slot following the app's in-card layout: a primary-tinted leading icon, a
- *  [bodyLarge]/Medium label, and arbitrary [content] (e.g. a tab switcher) beneath it. */
+/** Card body wrapper following the app's in-card layout: a primary-tinted leading icon and a
+ *  content [Column]. Compose one or more [ProxyLabeledField]s (or other content) inside. */
 @Composable
-private fun ProxyCardSlot(
-    icon: ImageVector,
-    label: String,
-    content: @Composable () -> Unit
-) {
+private fun ProxyCard(icon: ImageVector, content: @Composable ColumnScope.() -> Unit) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
             Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(Modifier.height(10.dp))
-                content()
-            }
+            Column(modifier = Modifier.weight(1f), content = content)
         }
     }
 }
 
-/** Canonical proxy input row: matches the field treatment used on the Web Search / Image Gen
- *  settings pages (leading icon, label, then an outlined field with placeholder-free body text). */
+/** A labeled outlined field (no icon, no outer padding) for composing inside a [ProxyCard]:
+ *  a [bodyLarge]/Medium label, an optional description, then an outlined field with body text. */
 @Composable
-private fun ProxyFieldCard(
-    icon: ImageVector,
+private fun ProxyLabeledField(
     label: String,
     value: String,
     onChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
     description: String? = null,
+    placeholder: String? = null,
     keyboard: KeyboardType = KeyboardType.Text,
     password: Boolean = false,
     singleLine: Boolean = true
 ) {
     var draft by remember { mutableStateOf(value) }
     LaunchedEffect(value) { if (value != draft) draft = value }
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 2.dp))
-            Spacer(Modifier.width(16.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    label,
-                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                if (description != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        description,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
-                    OutlinedTextField(
-                        value = draft,
-                        onValueChange = { draft = it; onChange(it) },
-                        singleLine = singleLine,
-                        keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-                        visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
-                        shape = RoundedCornerShape(16.dp),
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
+    Column(modifier = modifier) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        if (description != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it; onChange(it) },
+                placeholder = placeholder?.let { ph -> { Text(ph, style = MaterialTheme.typography.bodyMedium) } },
+                singleLine = singleLine,
+                keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+                visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+                shape = RoundedCornerShape(16.dp),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
+                modifier = Modifier.fillMaxWidth()
+            )
         }
     }
 }
