@@ -189,7 +189,7 @@ fun SettingsProviderDetailPage(
                             var showMenu by remember { mutableStateOf(false) }
                             add {
                                 SettingsItem(
-                                    modifier = Modifier.clickable { showEditModelDialog = model },
+                                    modifier = Modifier.clickable { showMenu = true },
                                     headlineContent = { Text(model.alias, fontWeight = FontWeight.Medium) },
                                     leadingContent = {
                                         Icon(
