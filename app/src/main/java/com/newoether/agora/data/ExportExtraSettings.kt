@@ -72,6 +72,9 @@ object ExportExtraSettings {
         put("blurEffectsEnabled", JsonPrimitive(sm.blurEffectsEnabled.first()))
         put("hapticsEnabled", JsonPrimitive(sm.hapticsEnabled.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
+        put("fontPreference", JsonPrimitive(sm.fontPreference.first()))
+        put("customFontPath", JsonPrimitive(sm.customFontPath.first()))
+        put("customFontName", JsonPrimitive(sm.customFontName.first()))
         put("autoUpdateCheck", JsonPrimitive(sm.autoUpdateCheck.first()))
 
         val aliases = sm.modelAliases.first()
@@ -128,6 +131,9 @@ object ExportExtraSettings {
         obj["blurEffectsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveBlurEffectsEnabled(it) }
         obj["hapticsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveHapticsEnabled(it) }
         obj["schemeStyle"]?.jsonPrimitive?.contentOrNull?.let { sm.saveSchemeStyle(it) }
+        obj["fontPreference"]?.jsonPrimitive?.contentOrNull?.let { sm.saveFontPreference(it) }
+        obj["customFontPath"]?.jsonPrimitive?.contentOrNull?.let { sm.saveCustomFontPath(it) }
+        obj["customFontName"]?.jsonPrimitive?.contentOrNull?.let { sm.saveCustomFontName(it) }
         obj["autoUpdateCheck"]?.jsonPrimitive?.boolean?.let { sm.saveAutoUpdateCheck(it) }
 
         obj["modelAliases"]?.jsonObject?.let { aliasesObj ->

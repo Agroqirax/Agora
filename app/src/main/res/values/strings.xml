@@ -532,6 +532,13 @@
     <string name="scheme_style_expressive">Expressive</string>
     <string name="scheme_style_vibrant">Vibrant</string>
     <string name="scheme_style_neutral">Neutral</string>
+    <string name="font_title">Font</string>
+    <string name="font_app_default">App Default</string>
+    <string name="font_system_default">System Default</string>
+    <string name="font_custom">Custom Font</string>
+    <string name="font_custom_pick">Pick a font file</string>
+    <string name="font_no_file_selected">No font selected</string>
+    <string name="font_invalid_file">Invalid font file</string>
     <string name="dynamic_color">Dynamic Color</string>
     <string name="dynamic_color_desc">Use system-generated colors based on wallpaper (Android 12+)</string>
     <string name="visual_effects">Visual Effects</string>

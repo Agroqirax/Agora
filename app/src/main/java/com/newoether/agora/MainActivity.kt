@@ -140,6 +140,8 @@ class MainActivity : ComponentActivity() {
             val colorSchemeName by settingsManager.colorScheme.collectAsState(initial = "DEFAULT")
             val schemeStyleName by settingsManager.schemeStyle.collectAsState(initial = "TONAL_SPOT")
             val dynamicColor by settingsManager.dynamicColor.collectAsState(initial = true)
+            val fontPreference by settingsManager.fontPreference.collectAsState(initial = "app_default")
+            val customFontPath by settingsManager.customFontPath.collectAsState(initial = "")
 
             val themeModeEnum = try { com.newoether.agora.ui.theme.ThemeMode.valueOf(themeMode) } catch (_: Exception) { com.newoether.agora.ui.theme.ThemeMode.FOLLOW_DEVICE }
             val colorSchemePreset = try { com.newoether.agora.ui.theme.ColorSchemePreset.valueOf(colorSchemeName) } catch (_: Exception) { com.newoether.agora.ui.theme.ColorSchemePreset.MIDNIGHT }
@@ -163,7 +165,9 @@ class MainActivity : ComponentActivity() {
                 themeMode = themeModeEnum,
                 colorSchemePreset = colorSchemePreset,
                 schemeStyle = schemeStyle,
-                dynamicColor = dynamicColor
+                dynamicColor = dynamicColor,
+                fontPreference = fontPreference,
+                customFontPath = customFontPath
             ) {
                 val activity = LocalActivity.current
 

@@ -13,6 +13,7 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToStream
 import java.io.BufferedOutputStream
+import java.io.File
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -346,6 +347,17 @@ class DataExporter(
                 Json.encodeToStream(keys, zip)
                 zip.closeEntry()
                 step()
+            }
+
+            // ── Custom font file ──
+            val fontPath = settingsManager.customFontPath.first()
+            if (fontPath.isNotBlank()) {
+                val fontFile = File(fontPath)
+                if (fontFile.exists()) {
+                    zip.putNextEntry(ZipEntry("custom_font/${fontFile.name}"))
+                    fontFile.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
             }
 
             zip.finish()

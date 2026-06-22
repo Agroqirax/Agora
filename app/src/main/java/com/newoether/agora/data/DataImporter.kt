@@ -428,6 +428,22 @@ class DataImporter(
                             ExportExtraSettings.restoreFromJsonObject(obj, settingsManager)
                         } catch (_: Exception) { /* older exports may not have extra_settings.json */ }
                     }
+
+                    // Restore custom font file
+                    for (path in archive.names()) {
+                        if (!path.startsWith("custom_font/")) continue
+                        val bytes = archive.bytes(path) ?: continue
+                        val fileName = path.removePrefix("custom_font/")
+                        val fontFile = java.io.File(context.filesDir, "custom_font_$fileName")
+                        fontFile.writeBytes(bytes)
+                        // Update the font path to point to the restored file
+                        settingsManager.saveCustomFontPath(fontFile.absolutePath)
+                        // Re-read font name from the restored file
+                        try {
+                            val name = com.newoether.agora.util.readFontName(fontFile)
+                            settingsManager.saveCustomFontName(name)
+                        } catch (_: Exception) {}
+                    }
                 } catch (e: Exception) {
                     errors.add("Settings: ${e.localizedMessage ?: "Unknown error"}")
                 }

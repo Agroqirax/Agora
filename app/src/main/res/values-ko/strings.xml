@@ -535,6 +535,13 @@
     <string name="scheme_style_expressive">익스프레시브</string>
     <string name="scheme_style_vibrant">비비드</string>
     <string name="scheme_style_neutral">뉴트럴</string>
+    <string name="font_title">글꼴</string>
+    <string name="font_app_default">앱 기본</string>
+    <string name="font_system_default">시스템 기본</string>
+    <string name="font_custom">사용자 지정</string>
+    <string name="font_custom_pick">글꼴 파일 선택</string>
+    <string name="font_no_file_selected">선택 안 됨</string>
+    <string name="font_invalid_file">유효하지 않은 글꼴 파일</string>
     <string name="dynamic_color">동적 색상</string>
     <string name="dynamic_color_desc">배경화면을 기반으로 시스템이 생성한 색상 사용(Android 12 이상)</string>
     <string name="visual_effects">시각 효과</string>

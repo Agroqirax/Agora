@@ -163,6 +163,9 @@ class SettingsManager(private val context: Context) {
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
+        val FONT_PREFERENCE = stringPreferencesKey("font_preference")
+        val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
+        val CUSTOM_FONT_NAME = stringPreferencesKey("custom_font_name")
         val FIRST_LAUNCH_TIME = longPreferencesKey("first_launch_time")
         val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val RATING_PROMPT_SUBMITTED = booleanPreferencesKey("rating_prompt_submitted")
@@ -318,6 +321,9 @@ class SettingsManager(private val context: Context) {
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
     val schemeStyle: Flow<String> = context.dataStore.data.map { it[SCHEME_STYLE] ?: "TONAL_SPOT" }
+    val fontPreference: Flow<String> = context.dataStore.data.map { it[FONT_PREFERENCE] ?: "app_default" }
+    val customFontPath: Flow<String> = context.dataStore.data.map { it[CUSTOM_FONT_PATH] ?: "" }
+    val customFontName: Flow<String> = context.dataStore.data.map { it[CUSTOM_FONT_NAME] ?: "" }
     val firstLaunchTime: Flow<Long?> = context.dataStore.data.map { it[FIRST_LAUNCH_TIME] }
     val onboardingCompleted: Flow<Boolean> = context.dataStore.data.map { it[ONBOARDING_COMPLETED] ?: false }
     val ratingPromptSubmitted: Flow<Boolean> = context.dataStore.data.map { it[RATING_PROMPT_SUBMITTED] ?: false }
@@ -685,6 +691,16 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveToolCallDisplayMode(mode: String) {
         context.dataStore.edit { it[TOOL_CALL_DISPLAY_MODE] = ToolCallDisplayModes.normalize(mode) }
+    }
+
+    suspend fun saveFontPreference(value: String) {
+        context.dataStore.edit { it[FONT_PREFERENCE] = value }
+    }
+    suspend fun saveCustomFontPath(value: String) {
+        context.dataStore.edit { it[CUSTOM_FONT_PATH] = value }
+    }
+    suspend fun saveCustomFontName(value: String) {
+        context.dataStore.edit { it[CUSTOM_FONT_NAME] = value }
     }
 
     suspend fun saveSchemeStyle(style: String) {

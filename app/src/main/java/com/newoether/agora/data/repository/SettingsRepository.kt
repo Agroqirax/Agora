@@ -103,6 +103,9 @@ class SettingsRepository(
     val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
     val schemeStyle: StateFlow<String> = hot(settingsManager.schemeStyle, "TONAL_SPOT")
+    val fontPreference: StateFlow<String> = hot(settingsManager.fontPreference, "app_default")
+    val customFontPath: StateFlow<String> = hot(settingsManager.customFontPath, "")
+    val customFontName: StateFlow<String> = hot(settingsManager.customFontName, "")
     val searchContextWindow: StateFlow<Int> = hot(settingsManager.searchContextWindow, 8)
     val searchMatchLimit: StateFlow<Int> = hot(settingsManager.searchMatchLimit, 10)
     val ragThreshold: StateFlow<Float> = hot(settingsManager.ragThreshold, 0.5f)
@@ -336,6 +339,9 @@ class SettingsRepository(
     fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
     fun setSchemeStyle(style: String) = scope.launch { settingsManager.saveSchemeStyle(style) }
+    fun setFontPreference(value: String) = scope.launch { settingsManager.saveFontPreference(value) }
+    fun setCustomFontPath(value: String) = scope.launch { settingsManager.saveCustomFontPath(value) }
+    fun setCustomFontName(value: String) = scope.launch { settingsManager.saveCustomFontName(value) }
     fun setSearchMatchLimit(n: Int) = scope.launch { settingsManager.saveSearchMatchLimit(n) }
     fun setSearchContextWindow(n: Int) = scope.launch { settingsManager.saveSearchContextWindow(n) }
     fun setRagThreshold(threshold: Float) = scope.launch { settingsManager.saveRagThreshold(threshold) }

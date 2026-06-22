@@ -535,6 +535,13 @@
     <string name="scheme_style_expressive">معبّر</string>
     <string name="scheme_style_vibrant">نابض</string>
     <string name="scheme_style_neutral">محايد</string>
+    <string name="font_title">الخط</string>
+    <string name="font_app_default">افتراضي</string>
+    <string name="font_system_default">النظام</string>
+    <string name="font_custom">مخصص</string>
+    <string name="font_custom_pick">اختر ملف خط</string>
+    <string name="font_no_file_selected">لم يتم الاختيار</string>
+    <string name="font_invalid_file">ملف خط غير صالح</string>
     <string name="dynamic_color">اللون الديناميكي</string>
     <string name="dynamic_color_desc">استخدام ألوان يولّدها النظام بناءً على الخلفية (Android 12 وأحدث)</string>
     <string name="visual_effects">المؤثرات البصرية</string>

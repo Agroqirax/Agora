@@ -535,6 +535,13 @@
     <string name="scheme_style_expressive">Выразительный</string>
     <string name="scheme_style_vibrant">Яркий</string>
     <string name="scheme_style_neutral">Нейтральный</string>
+    <string name="font_title">Шрифт</string>
+    <string name="font_app_default">По умолчанию</string>
+    <string name="font_system_default">Системный</string>
+    <string name="font_custom">Свой шрифт</string>
+    <string name="font_custom_pick">Выбрать файл</string>
+    <string name="font_no_file_selected">Не выбрано</string>
+    <string name="font_invalid_file">Неверный файл шрифта</string>
     <string name="dynamic_color">Динамические цвета</string>
     <string name="dynamic_color_desc">Использовать цвета, создаваемые системой по обоям (Android 12+)</string>
     <string name="visual_effects">Визуальные эффекты</string>

@@ -448,6 +448,13 @@
     <string name="scheme_style_expressive">活潑</string>
     <string name="scheme_style_vibrant">鮮豔</string>
     <string name="scheme_style_neutral">中性</string>
+    <string name="font_title">字體</string>
+    <string name="font_app_default">應用預設</string>
+    <string name="font_system_default">系統預設</string>
+    <string name="font_custom">自訂字體</string>
+    <string name="font_custom_pick">選擇字體檔案</string>
+    <string name="font_no_file_selected">未選擇字體</string>
+    <string name="font_invalid_file">無效的字體檔案</string>
     <string name="dynamic_color">動態顏色</string>
     <string name="dynamic_color_desc">根據桌布使用系統生成的顏色（Android 12+）</string>
     <string name="appearance_interface">介面</string>

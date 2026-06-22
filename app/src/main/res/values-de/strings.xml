@@ -535,6 +535,13 @@
     <string name="scheme_style_expressive">Ausdrucksstark</string>
     <string name="scheme_style_vibrant">Lebhaft</string>
     <string name="scheme_style_neutral">Neutral</string>
+    <string name="font_title">Schriftart</string>
+    <string name="font_app_default">App-Standard</string>
+    <string name="font_system_default">System</string>
+    <string name="font_custom">Benutzerdefiniert</string>
+    <string name="font_custom_pick">Schriftdatei wählen</string>
+    <string name="font_no_file_selected">Keine ausgewählt</string>
+    <string name="font_invalid_file">Ungültige Schriftdatei</string>
     <string name="dynamic_color">Dynamische Farbe</string>
     <string name="dynamic_color_desc">Vom System anhand des Hintergrundbilds generierte Farben verwenden (Android 12+)</string>
     <string name="visual_effects">Visuelle Effekte</string>

@@ -535,6 +535,13 @@
     <string name="scheme_style_expressive">エクスプレッシブ</string>
     <string name="scheme_style_vibrant">ビビッド</string>
     <string name="scheme_style_neutral">ニュートラル</string>
+    <string name="font_title">フォント</string>
+    <string name="font_app_default">アプリ既定</string>
+    <string name="font_system_default">システム既定</string>
+    <string name="font_custom">カスタム</string>
+    <string name="font_custom_pick">フォントファイルを選択</string>
+    <string name="font_no_file_selected">未選択</string>
+    <string name="font_invalid_file">無効なフォントファイル</string>
     <string name="dynamic_color">ダイナミックカラー</string>
     <string name="dynamic_color_desc">壁紙に基づいてシステムが生成した色を使用（Android 12 以上）</string>
     <string name="visual_effects">視覚効果</string>
