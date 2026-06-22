@@ -34,6 +34,7 @@ import com.newoether.agora.data.DefaultSystemPrompt
 import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,6 +47,19 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showDeletePromptConfirm by remember { mutableStateOf<SystemPromptEntry?>(null) }
     var showTemplatePicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val templateSheetState = rememberModalBottomSheetState()
+
+    // Animate the sheet closed first, then flip to the editor page — avoids the sheet popping away
+    // at the same instant the page transition starts.
+    val pickTemplate: (SystemPromptEntry) -> Unit = { entry ->
+        scope.launch { templateSheetState.hide() }.invokeOnCompletion {
+            if (!templateSheetState.isVisible) {
+                showTemplatePicker = false
+                editingEntry = entry
+            }
+        }
+    }
 
     BackHandler(enabled = editingEntry != null) {
         editingEntry = null
@@ -89,6 +103,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     if (showTemplatePicker) {
         ModalBottomSheet(
             onDismissRequest = { showTemplatePicker = false },
+            sheetState = templateSheetState,
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
             containerColor = MaterialTheme.colorScheme.surfaceContainer
         ) {
@@ -107,8 +122,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
                 modifier = Modifier.fillMaxWidth().clickable {
-                    showTemplatePicker = false
-                    editingEntry = SystemPromptEntry(title = "")
+                    pickTemplate(SystemPromptEntry(title = ""))
                 }
             )
             SettingsItem(
@@ -118,8 +132,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     Icon(Icons.Default.Psychology, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 },
                 modifier = Modifier.fillMaxWidth().clickable {
-                    showTemplatePicker = false
-                    editingEntry = DefaultSystemPrompt.create(java.util.Locale.getDefault())
+                    pickTemplate(DefaultSystemPrompt.create(java.util.Locale.getDefault()))
                 }
             )
             Spacer(modifier = Modifier.height(24.dp))
