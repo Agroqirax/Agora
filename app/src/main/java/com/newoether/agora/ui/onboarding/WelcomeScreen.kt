@@ -13,7 +13,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.rememberScrollState
@@ -94,6 +93,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.newoether.agora.R
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
@@ -323,10 +323,8 @@ fun WelcomeScreen(
         confirmButton = { TextButton(onClick = { showGgufError = false }) { Text(stringResource(R.string.ok)) } }
     )
 
-    val defocusInteractionSource = remember { MutableInteractionSource() }
     AnimatedVisibility(visible = !exiting, exit = fadeOut(tween(300))) {
-        val fm = LocalFocusManager.current
-        Box(modifier = Modifier.fillMaxSize().clickable(indication = null, interactionSource = defocusInteractionSource) { fm.clearFocus() }) {
+        Box(modifier = Modifier.fillMaxSize().clearFocusOnTap()) {
             // No imePadding here: onboarding keeps a stable centered layout while
             // the keyboard is open; chat and settings surfaces handle IME insets.
             Column(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -567,8 +565,7 @@ private fun ApiKeyPage(
                 }
             }
         } else if (provider == Constants.PROVIDER_OLLAMA) {
-            val fm = LocalFocusManager.current
-            Column(Modifier.padding(32.dp).fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+            Column(Modifier.padding(32.dp).fillMaxWidth().clearFocusOnTap()) {
                 val iconRes = providerIcon(provider)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (iconRes != 0) {
@@ -587,8 +584,7 @@ private fun ApiKeyPage(
                 )
             }
         } else if (isCustom) {
-            val fm = LocalFocusManager.current
-            Column(Modifier.padding(32.dp).fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+            Column(Modifier.padding(32.dp).fillMaxWidth().clearFocusOnTap()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.Tune, null, tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(32.dp))
                     Spacer(Modifier.width(12.dp))
@@ -614,8 +610,7 @@ private fun ApiKeyPage(
                 )
             }
         } else {
-            val fm = LocalFocusManager.current
-            Column(Modifier.padding(32.dp).fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+            Column(Modifier.padding(32.dp).fillMaxWidth().clearFocusOnTap()) {
                 val iconRes = providerIcon(provider)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (iconRes != 0) {

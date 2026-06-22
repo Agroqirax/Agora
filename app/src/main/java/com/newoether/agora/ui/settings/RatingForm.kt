@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.api.HttpClient
 import kotlinx.coroutines.Dispatchers
@@ -60,7 +61,7 @@ fun RatingForm(
         append('"')
     }
 
-    Column {
+    Column(Modifier.clearFocusOnTap()) {
         Text(
             text = stringResource(R.string.rating_title),
             style = ChatType.ratingTitle,

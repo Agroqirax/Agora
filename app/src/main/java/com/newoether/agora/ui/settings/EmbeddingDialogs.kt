@@ -17,6 +17,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
@@ -76,6 +77,7 @@ internal fun AddRemoteEmbeddingDialog(
 ) {
     val provider = providers[state.selectedProviderIdx]
     AlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         onDismissRequest = { onDismiss(); state.testStatus = null },
         title = { Text(stringResource(R.string.add_remote_model), fontWeight = FontWeight.Bold) },

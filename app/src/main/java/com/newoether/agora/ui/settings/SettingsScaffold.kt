@@ -2,8 +2,6 @@ package com.newoether.agora.ui.settings
 
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -42,7 +40,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
@@ -55,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 import com.newoether.agora.ui.components.CircularBackButton
+import com.newoether.agora.ui.components.clearFocusOnTap
 
 // ── Shared geometry for the iOS-style collapsing large title, used by the
 //    Settings home page and every settings sub-page so the morph is identical. ──
@@ -184,7 +182,6 @@ fun CollapsingSettingsScaffold(
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val titleAreaHeight = SettingsTitleAreaHeight
     val titleTravel = settingsTitleTravel
-    val focusManager = LocalFocusManager.current
     val titleTravelPx = with(LocalDensity.current) { titleTravel.toPx() }
     val fraction by remember(titleTravelPx) {
         derivedStateOf { (scrollState.value / titleTravelPx).coerceIn(0f, 1f) }
@@ -200,10 +197,7 @@ fun CollapsingSettingsScaffold(
                 .navigationBarsPadding()
                 .imePadding()
                 .verticalScroll(scrollState)
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() }
-                ) { focusManager.clearFocus() }
+                .clearFocusOnTap()
                 .padding(horizontal = 16.dp)
         ) {
             Spacer(modifier = Modifier.height(statusBarTop + SettingsBarHeight + titleAreaHeight))

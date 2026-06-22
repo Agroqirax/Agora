@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.clearFocusOnTap
 
 @Composable
 fun PromptSettingItem(
@@ -64,6 +65,7 @@ fun PromptEditDialog(
 ) {
     var draft by remember(initialPrompt) { mutableStateOf(initialPrompt) }
     AlertDialog(
+        modifier = Modifier.clearFocusOnTap(),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         onDismissRequest = onDismiss,
         title = { Text(title, fontWeight = FontWeight.Bold) },

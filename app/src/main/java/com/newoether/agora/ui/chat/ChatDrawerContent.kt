@@ -5,9 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,6 +70,7 @@ import com.newoether.agora.R
 import com.newoether.agora.ui.chat.search.DrawerSearchBar
 import com.newoether.agora.ui.chat.search.SearchResultItem
 import com.newoether.agora.ui.chat.search.rememberDrawerSearchState
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.verticalEdgeFade
@@ -151,7 +150,7 @@ internal fun ChatDrawerContent(
                 .fillMaxHeight()
                 .imePadding()
                 .padding(horizontal = 16.dp, vertical = 20.dp)
-                .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { focusManager.clearFocus() }
+                .clearFocusOnTap()
         ) {
             Text(stringResource(R.string.conversations), style = ChatType.conversationsTitle)
             Spacer(modifier = Modifier.height(12.dp))

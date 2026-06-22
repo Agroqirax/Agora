@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -17,12 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -159,9 +158,8 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     var customName by remember { mutableStateOf("") }; var customBaseUrl by remember { mutableStateOf("") }
                     var nameError by remember { mutableStateOf(false) }; var urlError by remember { mutableStateOf(false) }
                     val allNames = builtInNames + customProviders.map { it.name }
-                    AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showAddCustomDialog = false }, title = { Text(stringResource(R.string.custom_provider_add_title), fontWeight = FontWeight.Bold) }, text = {
-                        val fm = LocalFocusManager.current
-                        Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+                    AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showAddCustomDialog = false }, title = { Text(stringResource(R.string.custom_provider_add_title), fontWeight = FontWeight.Bold) }, text = {
+                        Column(Modifier.fillMaxWidth()) {
                             OutlinedTextField(value = customName, onValueChange = { customName = it; nameError = false }, label = { Text(stringResource(R.string.custom_provider_name_label)) }, isError = nameError, supportingText = if (nameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedTextField(value = customBaseUrl, onValueChange = { customBaseUrl = it; urlError = false }, label = { Text(stringResource(R.string.provider_base_url)) }, isError = urlError, supportingText = if (urlError) {{ Text(stringResource(R.string.custom_provider_url_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)

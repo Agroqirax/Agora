@@ -1,7 +1,6 @@
 package com.newoether.agora.ui.settings
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,12 +21,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -219,6 +218,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         var editDesc by remember { mutableStateOf(fileEditorDesc) }
 
         AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 showFileEditor = null
@@ -227,8 +227,7 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             },
             title = { Text(if (isActiveMemory) stringResource(R.string.memory_edit_active) else stringResource(R.string.memory_edit), fontWeight = FontWeight.Bold) },
             text = {
-                val fm = LocalFocusManager.current
-                Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+                Column(Modifier.fillMaxWidth()) {
                     if (isActiveMemory) {
                         Text(
                             stringResource(R.string.memory_active_desc),
@@ -304,12 +303,12 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     // New File Dialog
     if (showNewFileDialog) {
         AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { showNewFileDialog = false },
             title = { Text(stringResource(R.string.memory_add_title), fontWeight = FontWeight.Bold) },
             text = {
-                val fm = LocalFocusManager.current
-                Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+                Column(Modifier.fillMaxWidth()) {
                     OutlinedTextField(
                         value = newFileName,
                         onValueChange = { newFileName = it },

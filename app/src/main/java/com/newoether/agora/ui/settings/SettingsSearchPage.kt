@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.api.ProviderDefaults
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
@@ -521,6 +522,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             }
             AlertDialog(
+                modifier = Modifier.clearFocusOnTap(),
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 onDismissRequest = {
                     if (localFilePath.isNotBlank()) File(localFilePath).delete()
@@ -636,6 +638,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 mutableStateOf((model?.batchSize ?: 8).toString())
             }
             AlertDialog(
+                modifier = Modifier.clearFocusOnTap(),
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 onDismissRequest = { showRenameDialog = null },
                 title = { Text(stringResource(R.string.edit), fontWeight = FontWeight.Bold) },

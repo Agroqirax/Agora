@@ -4,7 +4,6 @@ import com.newoether.agora.util.DebugLog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,7 +25,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -353,9 +352,10 @@ fun SettingsProviderDetailPage(
         var addMmprojPath by remember { mutableStateOf("") }
         var nCtx by remember { mutableStateOf("2048") }; var temperature by remember { mutableStateOf("0.7") }; var topP by remember { mutableStateOf("0.9") }; var maxTokens by remember { mutableStateOf("4096") }
         var idError by remember { mutableStateOf<String?>(null) }; var formError by remember { mutableStateOf<String?>(null) }
-        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }; val fm = LocalFocusManager.current
+        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
         LaunchedEffect(mmprojPickedUri) { if (mmprojPickedUri != null) { addMmprojPath = mmprojPickedUri!!; mmprojPickedUri = null } }
         AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 scope.launch(Dispatchers.IO) {
@@ -365,7 +365,7 @@ fun SettingsProviderDetailPage(
                 showAddModelDialog = false; copiedFilePath = null
             },
             title = { Text(stringResource(R.string.add_local_chat_model), fontWeight = FontWeight.Bold) },
-            text = { Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }.verticalScroll(rememberScrollState())) {
+            text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 OutlinedTextField(value = modelId, onValueChange = { modelId = it; idError = null }, label = { Text(stringResource(R.string.model_id_label)) }, supportingText = if (idError != null) {{ Text(idError!!, color = MaterialTheme.colorScheme.error) }} else null, isError = idError != null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = modelAlias, onValueChange = { modelAlias = it }, label = { Text(stringResource(R.string.model_alias_label)) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
@@ -417,12 +417,13 @@ fun SettingsProviderDetailPage(
         var editModelId by remember { mutableStateOf(model.modelId) }; var editAlias by remember { mutableStateOf(model.alias) }; var editMmprojPath by remember { mutableStateOf(model.mmprojPath) }
         var editNCtx by remember { mutableStateOf(model.nCtx.toString()) }; var editTemp by remember { mutableStateOf(model.temperature.toString()) }; var editTopP by remember { mutableStateOf(model.topP.toString()) }; var editMaxTokens by remember { mutableStateOf(model.maxTokens.toString()) }
         var editIdError by remember { mutableStateOf<String?>(null) }; var editFormError by remember { mutableStateOf<String?>(null) }
-        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }; val fm = LocalFocusManager.current
+        val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
         LaunchedEffect(mmprojPickedUri) { if (mmprojPickedUri != null) { editMmprojPath = mmprojPickedUri!!; mmprojPickedUri = null } }
         AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showEditModelDialog = null },
             title = { Text(stringResource(R.string.edit), fontWeight = FontWeight.Bold) },
-            text = { Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }.verticalScroll(rememberScrollState())) {
+            text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 OutlinedTextField(value = editModelId, onValueChange = { editModelId = it; editIdError = null }, label = { Text(stringResource(R.string.model_id_label)) }, supportingText = if (editIdError != null) {{ Text(editIdError!!, color = MaterialTheme.colorScheme.error) }} else null, isError = editIdError != null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 OutlinedTextField(value = editAlias, onValueChange = { editAlias = it }, label = { Text(stringResource(R.string.model_alias_label)) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
@@ -478,9 +479,8 @@ fun SettingsProviderDetailPage(
     showKeyDialog?.let { entry ->
         var name by remember { mutableStateOf(entry.name) }; var key by remember { mutableStateOf(entry.key) }
         val isEdit = apiKeys.any { it.id == entry.id }
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showKeyDialog = null }, title = { Text(if (isEdit) stringResource(R.string.provider_edit_key) else stringResource(R.string.provider_add_key_title), fontWeight = FontWeight.Bold) }, text = {
-            val fm = LocalFocusManager.current
-            Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+        AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showKeyDialog = null }, title = { Text(if (isEdit) stringResource(R.string.provider_edit_key) else stringResource(R.string.provider_add_key_title), fontWeight = FontWeight.Bold) }, text = {
+            Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.provider_key_name_hint)) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().noOpBringIntoView())
                 Spacer(modifier = Modifier.height(8.dp))
                 Box(modifier = Modifier.noOpBringIntoView()) { OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("${providerName} API Key") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) }
@@ -498,7 +498,7 @@ fun SettingsProviderDetailPage(
         var renameValue by remember { mutableStateOf(providerName) }
         var renameError by remember { mutableStateOf(false) }
         val allNames = listOf(Constants.PROVIDER_GOOGLE, Constants.PROVIDER_OPENAI, Constants.PROVIDER_ANTHROPIC, Constants.PROVIDER_DEEPSEEK, Constants.PROVIDER_QWEN, Constants.PROVIDER_OLLAMA, Constants.PROVIDER_OPEN_ROUTER) + customProviders.map { it.name }
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showRenameProvider = false }, title = { Text(stringResource(R.string.custom_provider_rename_title), fontWeight = FontWeight.Bold) }, text = {
+        AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showRenameProvider = false }, title = { Text(stringResource(R.string.custom_provider_rename_title), fontWeight = FontWeight.Bold) }, text = {
             OutlinedTextField(value = renameValue, onValueChange = { renameValue = it; renameError = false }, label = { Text(stringResource(R.string.custom_provider_name_label)) }, isError = renameError, supportingText = if (renameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
         }, confirmButton = { TextButton(onClick = {
             val trimmed = renameValue.trim()

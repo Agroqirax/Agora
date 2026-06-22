@@ -7,7 +7,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -26,13 +25,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.model.apiModelName
+import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.noOpBringIntoView
@@ -295,13 +294,13 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         val aliasState = rememberTextFieldState(modelAliases[model] ?: "")
 
         AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { showModelAliasDialog = null },
             title = { Text(stringResource(R.string.models_rename), fontWeight = FontWeight.Bold) },
             text = {
-                val fm = LocalFocusManager.current
                 val parsed = com.newoether.agora.model.ModelId.parse(model)
-                Column(Modifier.fillMaxWidth().clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { fm.clearFocus() }) {
+                Column(Modifier.fillMaxWidth()) {
                     Text(stringResource(R.string.models_rename_current, parsed.apiModelName), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     Box(modifier = Modifier.noOpBringIntoView()) {
