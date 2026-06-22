@@ -1,5 +1,6 @@
 package com.newoether.agora.tool
 
+import androidx.core.text.HtmlCompat
 import com.newoether.agora.api.DuckDuckGoScraper
 import com.newoether.agora.api.HttpClient
 import com.newoether.agora.api.ToolDefinition
@@ -39,7 +40,7 @@ class WebSearchToolProvider : ToolProvider {
                 parameters = ToolParameters(
                     properties = mapOf(
                         "url" to ToolProperty("string", "The URL of the page to fetch."),
-                        "maxChars" to ToolProperty("integer", "Maximum characters of text to return (default 4000, max 100000). Increase to get more content — the model can adjust this when the output appears truncated.")
+                        "maxChars" to ToolProperty("integer", "Maximum characters of text to return (default 8000, max 100000). If the result has \"truncated\": true, call again with a larger maxChars to get more.")
                     ),
                     required = listOf("url")
                 )
@@ -200,32 +201,21 @@ class WebSearchToolProvider : ToolProvider {
         val args = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
         val url = (args["url"] as? JsonPrimitive)?.content
             ?: return buildJsonObject { put("type", "web_fetch"); put("error", "no_url") }.toString()
-        val maxChars = try {
+        val maxChars = (try {
             (args["maxChars"] as? JsonPrimitive)?.content?.toIntOrNull()
-        } catch (_: Exception) { null } ?: 4000
+        } catch (_: Exception) { null } ?: 8000).coerceIn(1, 100_000)
 
         return try {
             val html = HttpClient.fetchModels(url)
                 ?: return buildJsonObject { put("type", "web_fetch"); put("url", url); put("error", "no_response") }.toString()
-            val text = html
-                .take(Constants.MAX_WEB_FETCH_HTML_LENGTH)
-                .replace(Regex("<script[^>]*>[\\s\\S]*?</script>", RegexOption.IGNORE_CASE), " ")
-                .replace(Regex("<style[^>]*>[\\s\\S]*?</style>", RegexOption.IGNORE_CASE), " ")
-                .replace(Regex("<[^>]+>"), " ")
-                .replace(Regex("&[a-z]+;|&#\\d+;")) { match ->
-                    when (match.value) {
-                        "&amp;" -> "&"; "&lt;" -> "<"; "&gt;" -> ">"; "&quot;" -> "\""
-                        "&apos;" -> "'"; "&nbsp;" -> " "; "&#39;" -> "'"
-                        else -> " "
-                    }
-                }
-                .replace(Regex("\\s+"), " ")
-                .trim()
-                .take(maxChars)
+            val fullText = htmlToReadableText(html)
+            val text = fullText.take(maxChars)
             buildJsonObject {
                 put("type", "web_fetch")
                 put("url", url)
                 put("text", text)
+                put("truncated", fullText.length > text.length)
+                put("totalChars", fullText.length)
             }.toString()
         } catch (e: Exception) {
             buildJsonObject {
@@ -235,5 +225,36 @@ class WebSearchToolProvider : ToolProvider {
                 put("message", e.message ?: "")
             }.toString()
         }
+    }
+
+    /**
+     * Extracts readable text from an HTML page.
+     *
+     * Strips non-content blocks (comments, script/style/noscript/svg/head), then lets
+     * [HtmlCompat] decode entities and flatten the remaining markup while keeping block
+     * elements as line breaks. Extraction runs over the whole (capped) HTML and the caller
+     * truncates the resulting *text* — so article content past the page's boilerplate is no
+     * longer cut off, and entities (—, ’, accents, numeric refs) are decoded correctly
+     * instead of being dropped to spaces.
+     */
+    private fun htmlToReadableText(rawHtml: String): String {
+        val stripped = rawHtml
+            .take(Constants.MAX_WEB_FETCH_HTML_LENGTH)
+            .replace(Regex("<!--[\\s\\S]*?-->"), " ")
+            .replace(
+                Regex("<(script|style|noscript|svg|head)\\b[^>]*>[\\s\\S]*?</\\1>", RegexOption.IGNORE_CASE),
+                " "
+            )
+            // Drop common page chrome so navigation/menus/footers don't eat the text budget.
+            .replace(
+                Regex("<(nav|header|footer|aside)\\b[^>]*>[\\s\\S]*?</\\1>", RegexOption.IGNORE_CASE),
+                " "
+            )
+        val text = HtmlCompat.fromHtml(stripped, HtmlCompat.FROM_HTML_MODE_COMPACT).toString()
+        return text
+            .replace(Regex("[ \\t\\x0B\\u000C\\r]+"), " ") // collapse intra-line whitespace
+            .replace(Regex(" *\\n *"), "\n")               // trim around line breaks
+            .replace(Regex("\\n{3,}"), "\n\n")             // collapse blank-line runs
+            .trim()
     }
 }

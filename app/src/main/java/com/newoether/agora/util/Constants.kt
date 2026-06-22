@@ -11,8 +11,11 @@ object Constants {
     const val MAX_CHUNK_TEXT_LENGTH = 500
     /** Max file content to read from user-attached text files */
     const val MAX_FILE_CONTENT_READ_LENGTH = 500_000
-    /** Max characters to fetch from a web page */
-    const val MAX_WEB_FETCH_HTML_LENGTH = 80_000
+    /** Upper bound on raw HTML processed by web_fetch — a safety cap against pathological
+     *  pages, not the content limit. Text is extracted from this whole window and then
+     *  truncated by the caller's maxChars, so real article content past the boilerplate
+     *  (head/scripts/nav, often tens of KB) is no longer cut off. */
+    const val MAX_WEB_FETCH_HTML_LENGTH = 600_000
     /** Max characters per tool result (prevents CursorWindow 2MB overflow) */
     const val MAX_TOOL_RESULT_LENGTH = 100_000
     /** Timeout for fetching available models from a single provider (ms) */
