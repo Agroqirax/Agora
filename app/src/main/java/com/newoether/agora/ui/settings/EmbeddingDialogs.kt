@@ -111,8 +111,10 @@ internal fun AddRemoteEmbeddingDialog(
                                         onClick = {
                                             state.selectedProviderIdx = idx
                                             state.baseUrl = p.baseUrl
-                                            if (idx == 0 && state.apiKeys[0].isBlank()) {
-                                                state.apiKeys[0] = viewModel.resolveEmbeddingKeyForProviderExact(Constants.PROVIDER_OPENAI)?.key ?: ""
+                                            // Auto-fill an already-configured key for this provider
+                                            // (OpenAI, OpenRouter, …) when the key field is empty.
+                                            if (state.apiKeys[0].isBlank()) {
+                                                viewModel.resolveEmbeddingKeyForProviderExact(p.name)?.key?.let { state.apiKeys[0] = it }
                                             }
                                             if (p.models.isNotEmpty()) {
                                                 state.modelName = p.models.first()
