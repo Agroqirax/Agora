@@ -206,7 +206,10 @@ class WebSearchToolProvider : ToolProvider {
         } catch (_: Exception) { null } ?: 8000).coerceIn(1, 100_000)
 
         return try {
-            val html = HttpClient.fetchModels(url)
+            val html = HttpClient.fetchModels(url, mapOf(
+                "User-Agent" to Constants.WEB_FETCH_USER_AGENT,
+                "Accept" to "text/html,application/xhtml+xml,*/*"
+            ))
                 ?: return buildJsonObject { put("type", "web_fetch"); put("url", url); put("error", "no_response") }.toString()
             val fullText = htmlToReadableText(html)
             val text = fullText.take(maxChars)

@@ -11,6 +11,11 @@ object Constants {
     const val MAX_CHUNK_TEXT_LENGTH = 500
     /** Max file content to read from user-attached text files */
     const val MAX_FILE_CONTENT_READ_LENGTH = 500_000
+    /** Browser-like User-Agent for web_fetch. Many sites (e.g. Wikimedia) reject the
+     *  default OkHttp UA with 403, which surfaced as a "no_response" error. */
+    const val WEB_FETCH_USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
     /** Upper bound on raw HTML processed by web_fetch — a safety cap against pathological
      *  pages, not the content limit. Text is extracted from this whole window and then
      *  truncated by the caller's maxChars, so real article content past the boilerplate
