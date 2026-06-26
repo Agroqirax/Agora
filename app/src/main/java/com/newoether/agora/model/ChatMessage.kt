@@ -78,3 +78,9 @@ data class ChatConversation(
     val origin: String = "user",
     val graduated: Boolean = false
 )
+
+@Immutable
+data class StableMessageList(val list: List<ChatMessage> = emptyList())
+
+@Immutable
+data class StableModelAliases(val map: Map<String, String> = emptyMap())
