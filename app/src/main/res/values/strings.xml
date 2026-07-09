@@ -1,3 +1,4 @@
+<?xml version='1.0' encoding='UTF-8'?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">Agora responded</string>
@@ -432,25 +433,10 @@
     <string name="location_enable_desc">Allow the model to view your location</string>
     <string name="location_confirm_setting">Confirm location</string>
     <string name="location_confirm_setting_desc">Ask before the assistant can get your location</string>
-    <string name="location_confirm_title">Share your location?</string>
-    <string name="location_confirm_message">The assistant wants to read your device\'s current location and share it with the model.</string>
-    <string name="location_confirm_allow">Allow</string>
-    <string name="location_confirm_deny">Deny</string>
-    <string name="location_confirm_always_allow">Always allow (don\'t ask again)</string>
     <string name="location_reverse_geocode_enable">Reverse geocode address</string>
     <string name="location_reverse_geocode_enable_desc">Also look up a street address for the coordinates via Nominatim</string>
     <string name="location_nominatim_base_url">Nominatim server URL</string>
     <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
-
-    <string name="calendar_confirm_title">Allow this calendar change?</string>
-    <string name="calendar_confirm_allow">Allow</string>
-    <string name="calendar_confirm_deny">Deny</string>
-    <string name="calendar_confirm_always_allow">Always allow (don\'t ask again)</string>
-
-    <string name="contacts_confirm_title">Allow this contacts change?</string>
-    <string name="contacts_confirm_allow">Allow</string>
-    <string name="contacts_confirm_deny">Deny</string>
-    <string name="contacts_confirm_always_allow">Always allow (don\'t ask again)</string>
 
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">Local Sandbox</string>
@@ -988,6 +974,22 @@
     <string name="shell_confirm_deny">Deny</string>
     <string name="shell_confirm_setting">Confirm remote shell actions</string>
     <string name="shell_confirm_setting_desc">Ask before the assistant runs commands or writes files on remote SSH/Conch servers</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">Share your location?</string>
+    <string name="location_confirm_message">The assistant wants to read your device\'s current location and share it with the model.</string>
+    <string name="location_confirm_allow">Allow</string>
+    <string name="location_confirm_deny">Deny</string>
+    <string name="location_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">Allow this calendar change?</string>
+    <string name="calendar_confirm_allow">Allow</string>
+    <string name="calendar_confirm_deny">Deny</string>
+    <string name="calendar_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">Allow this contacts change?</string>
+    <string name="contacts_confirm_allow">Allow</string>
+    <string name="contacts_confirm_deny">Deny</string>
+    <string name="contacts_confirm_always_allow">Always allow (don\'t ask again)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora quit unexpectedly</string>
