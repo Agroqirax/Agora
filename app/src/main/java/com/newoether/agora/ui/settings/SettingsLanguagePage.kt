@@ -35,6 +35,7 @@ fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
         LanguageOption("zh-Hant", "繁體中文"),
         LanguageOption("es", "Español"),
         LanguageOption("fr", "Français"),
+        LanguageOption("nl", "Nederlands"),
         LanguageOption("de", "Deutsch"),
         LanguageOption("ru", "Русский"),
         LanguageOption("pt-BR", "Português (Brasil)"),

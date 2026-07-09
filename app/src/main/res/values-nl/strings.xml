@@ -5,8 +5,8 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">Bijlage toevoegen</string>
-    <string name="photos">Foto's</string>
-    <string name="videos">Video's</string>
+    <string name="photos">Foto\'s</string>
+    <string name="videos">Video\'s</string>
     <string name="files">Bestanden</string>
     <string name="select_model">Model selecteren</string>
     <string name="no_model_selected">Geen model geselecteerd</string>
@@ -35,13 +35,13 @@
     <string name="tool_web_fetch_default">Webpagina ophalen</string>
     <string name="tool_web_fetch_failed">Ophalen mislukt</string>
     <string name="tool_search_conversations">Gesprekken doorzoeken</string>
-    <string name="tool_searching_web">Zoeken naar '%1$s' op het web</string>
-    <string name="tool_searching_conversations">Zoeken naar '%1$s' in gesprekken</string>
+    <string name="tool_searching_web">Zoeken naar \'%1$s\' op het web</string>
+    <string name="tool_searching_conversations">Zoeken naar \'%1$s\' in gesprekken</string>
     <string name="tool_search_failed">Zoeken mislukt</string>
-    <string name="tool_web_search_no_result">Geen resultaten gevonden voor '%1$s'</string>
-    <string name="tool_web_search_error">Fout bij zoeken naar '%1$s'</string>
-    <string name="tool_conversation_search_no_result">Geen overeenkomst gevonden voor '%1$s'</string>
-    <string name="tool_conversation_search_error">Fout bij het doorzoeken van gesprekken naar '%1$s'</string>
+    <string name="tool_web_search_no_result">Geen resultaten gevonden voor \'%1$s\'</string>
+    <string name="tool_web_search_error">Fout bij zoeken naar \'%1$s\'</string>
+    <string name="tool_conversation_search_no_result">Geen overeenkomst gevonden voor \'%1$s\'</string>
+    <string name="tool_conversation_search_error">Fout bij het doorzoeken van gesprekken naar \'%1$s\'</string>
     <string name="tool_web_search_done">%1$d resultaten gevonden voor "%2$s"</string>
     <string name="tool_web_search_done_default">Web doorzocht</string>
     <string name="tool_conversation_search_done_for">%1$d gesprekken gevonden voor "%2$s"</string>
@@ -101,7 +101,7 @@
     <string name="tool_looking_up_memories">Geheugen wordt doorzocht…</string>
     <string name="tool_updating_active">Actief geheugen wordt bijgewerkt…</string>
     <string name="tool_listing_shells">Shells worden weergegeven…</string>
-    <string name="tool_searching_for">Zoeken naar '%1$s'…</string>
+    <string name="tool_searching_for">Zoeken naar \'%1$s\'…</string>
     <!-- Tool done states (P0 + P1) -->
     <string name="tool_listed_conversations">%1$d gesprekken weergegeven</string>
     <string name="tool_listed_no_conversations">Geen gesprekken gevonden</string>
@@ -188,7 +188,7 @@
     <string name="provider_add_key_title">API-sleutel toevoegen</string>
     <string name="provider_key_name_hint">Naam (bijv. Werkruimte)</string>
     <string name="provider_delete_key_title">API-sleutel verwijderen?</string>
-    <string name="provider_delete_key_text">Weet je zeker dat je '%1$s' wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</string>
+    <string name="provider_delete_key_text">Weet je zeker dat je \'%1$s\' wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</string>
     <string name="provider_close">Sluiten</string>
     <string name="provider_save">Opslaan</string>
     <string name="provider_add">Toevoegen</string>
@@ -219,7 +219,7 @@
     <string name="tool_location_permission_denied">Locatietoestemming geweigerd</string>
     <string name="tool_location_denied">Gebruiker heeft het delen van de locatie geweigerd</string>
     <string name="tool_location_failed">Kon de locatie niet ophalen</string>
-    <string name="tool_list_calendars">Agenda's weergeven</string>
+    <string name="tool_list_calendars">Agenda\'s weergeven</string>
     <string name="tool_get_calendar_events">Agenda-items ophalen</string>
     <string name="tool_create_calendar_event">Agenda-item maken</string>
     <string name="tool_update_calendar_event">Agenda-item bijwerken</string>
@@ -250,7 +250,7 @@
     <!-- Settings - Prompts Page -->
     <string name="prompts_title">Systeemprompts</string>
     <string name="prompts_default">Standaard systeemprompt</string>
-    <string name="prompts_default_desc">Stel algemene persona's of regels in</string>
+    <string name="prompts_default_desc">Stel algemene persona\'s of regels in</string>
     <string name="prompts_add">Nieuwe prompt toevoegen</string>
     <string name="prompts_edit_title">Systeemprompt bewerken</string>
     <string name="prompts_add_title">Systeemprompt toevoegen</string>
@@ -266,7 +266,7 @@
     <string name="prompts_empty_title">Geen systeemprompts</string>
     <string name="prompts_empty_desc">Maak aangepaste persoonlijkheden en instructies</string>
     <string name="prompts_delete_title">Systeeminstructie verwijderen?</string>
-    <string name="prompts_delete_text">Weet je zeker dat je '%1$s' wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</string>
+    <string name="prompts_delete_text">Weet je zeker dat je \'%1$s\' wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.</string>
     <string name="template_title_required">Titel is verplicht</string>
     <string name="template_tab_system">Systeem</string>
     <string name="template_tab_prepend">Voorvoegsel</string>
@@ -291,7 +291,7 @@
     <string name="models_no_models">Geen modellen ingeschakeld</string>
     <string name="models_available">Beschikbare modellen</string>
     <string name="models_sync">Synchroniseren met alle providers</string>
-    <string name="models_sync_desc">Haal de nieuwste modellenlijst op voor alle geconfigureerde API's</string>
+    <string name="models_sync_desc">Haal de nieuwste modellenlijst op voor alle geconfigureerde API\'s</string>
     <string name="models_count">%1$d modellen beschikbaar</string>
     <string name="models_rename">Model hernoemen</string>
     <string name="models_rename_current">Huidige ID: %1$s</string>
@@ -543,7 +543,7 @@
     <string name="memory_content_hint">Inhoud</string>
     <string name="memory_active_desc">Deze inhoud wordt opgenomen in elke API-aanroep. Schrijf hier feiten, voorkeuren of context die het model altijd moet onthouden.</string>
     <string name="memory_delete_title">Geheugenitem verwijderen?</string>
-    <string name="memory_delete_text">Weet je zeker dat je '%1$s' wilt verwijderen? Dit kan niet ongedaan worden gemaakt.</string>
+    <string name="memory_delete_text">Weet je zeker dat je \'%1$s\' wilt verwijderen? Dit kan niet ongedaan worden gemaakt.</string>
     <string name="memory_add_title">Geheugenitem toevoegen</string>
     <string name="memory_create">Aanmaken</string>
 
@@ -658,10 +658,10 @@
     <string name="delete_model_confirm">Hiermee worden ook alle gecachte embeddings voor dit model verwijderd.</string>
 
     <!-- Errors -->
-    <string name="search_found_matches">%1$d overeenkomsten gevonden voor '%2$s'.</string>
-    <string name="search_found_results">%1$d resultaten gevonden voor '%2$s'.</string>
+    <string name="search_found_matches">%1$d overeenkomsten gevonden voor \'%2$s\'.</string>
+    <string name="search_found_results">%1$d resultaten gevonden voor \'%2$s\'.</string>
     <string name="search_found_results_no_query">%1$d resultaten gevonden.</string>
-    <string name="search_no_matches">Geen overeenkomsten gevonden voor '%1$s'.</string>
+    <string name="search_no_matches">Geen overeenkomsten gevonden voor \'%1$s\'.</string>
 
     <string name="unknown">Onbekend</string>
     <string name="search_hint">Gesprekken doorzoeken...</string>
@@ -732,7 +732,7 @@
     <string name="local_mmproj_path_hint">Pad naar het .gguf-bestand van mmproj voor vision</string>
     <string name="local_mmproj_path_label">Vision-projector (.mmproj)</string>
     <string name="local_chat_delete_title">Lokaal model verwijderen?</string>
-    <string name="local_chat_delete_text">Weet je zeker dat je '%1$s' wilt verwijderen? Het modelbestand wordt ook verwijderd.</string>
+    <string name="local_chat_delete_text">Weet je zeker dat je \'%1$s\' wilt verwijderen? Het modelbestand wordt ook verwijderd.</string>
     <string name="model_id_label">ID</string>
     <string name="model_alias_label">Alias</string>
 
@@ -888,7 +888,7 @@
     <!-- Documentation -->
     <string name="documentation">Documentatie</string>
     <string name="show_documentation_links">Documentatielinks weergeven</string>
-    <string name="show_documentation_links_desc">Toon een documentatieknop op instellingenpagina's</string>
+    <string name="show_documentation_links_desc">Toon een documentatieknop op instellingenpagina\'s</string>
 
     <!-- Onboarding -->
     <string name="onboarding_welcome_title">Welkom bij Agora</string>
@@ -950,10 +950,10 @@
     <string name="auto_delete_period_1mo">1 maand</string>
     <string name="auto_delete_period_1y">1 jaar</string>
     <!-- PDF page selection dialog -->
-    <string name="pdf_select_title">PDF-pagina's selecteren</string>
-    <string name="pdf_select_subtitle">%1$d pagina's — selecteer de pagina's die je wilt opnemen</string>
+    <string name="pdf_select_title">PDF-pagina\'s selecteren</string>
+    <string name="pdf_select_subtitle">%1$d pagina\'s — selecteer de pagina\'s die je wilt opnemen</string>
     <string name="pdf_rendering_progress">Pagina %1$d van %2$d renderen…</string>
-    <string name="pdf_send_pages">%1$d pagina's verzenden</string>
+    <string name="pdf_send_pages">%1$d pagina\'s verzenden</string>
     <string name="pdf_page_content_desc">Pagina %1$d</string>
     <string name="pdf_pages_selected">%1$d geselecteerd</string>
     <string name="video_between_frames">~%1$s tussen frames</string>
