@@ -153,6 +153,15 @@ class SettingsManager(private val context: Context) {
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
+        val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
+        val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
+        val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
+        val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
+        val CONTACTS_CONFIRM_ENABLED = booleanPreferencesKey("contacts_confirm_enabled")
+        val LOCATION_CONFIRM_ENABLED = booleanPreferencesKey("location_confirm_enabled")
+        val LOCATION_REVERSE_GEOCODE_ENABLED = booleanPreferencesKey("location_reverse_geocode_enabled")
+        val LOCATION_NOMINATIM_BASE_URL = stringPreferencesKey("location_nominatim_base_url")
+        const val DEFAULT_NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org"
         val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
         val PROXY_TYPE = stringPreferencesKey("proxy_type")
         val PROXY_HOST = stringPreferencesKey("proxy_host")
@@ -316,6 +325,14 @@ class SettingsManager(private val context: Context) {
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
+    val calendarEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_ENABLED] ?: false }
+    val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
+    val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
+    val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
+    val contactsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_CONFIRM_ENABLED] ?: true }
+    val locationConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_CONFIRM_ENABLED] ?: true }
+    val locationReverseGeocodeEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_REVERSE_GEOCODE_ENABLED] ?: true }
+    val locationNominatimBaseUrl: Flow<String> = context.dataStore.data.map { it[LOCATION_NOMINATIM_BASE_URL] ?: DEFAULT_NOMINATIM_BASE_URL }
     val proxyEnabled: Flow<Boolean> = context.dataStore.data.map { it[PROXY_ENABLED] ?: false }
     val proxyType: Flow<String> = context.dataStore.data.map { it[PROXY_TYPE] ?: "http" }
     val proxyHost: Flow<String> = context.dataStore.data.map { it[PROXY_HOST] ?: DEFAULT_PROXY_HOST }
@@ -675,6 +692,31 @@ class SettingsManager(private val context: Context) {
     suspend fun saveShellEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
     }
+    suspend fun saveCalendarEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CALENDAR_ENABLED] = enabled }
+    }
+    suspend fun saveCalendarConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CALENDAR_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveContactsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CONTACTS_ENABLED] = enabled }
+    }
+    suspend fun saveContactsConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CONTACTS_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveLocationEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[LOCATION_ENABLED] = enabled }
+    }
+    suspend fun saveLocationConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[LOCATION_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveLocationReverseGeocodeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[LOCATION_REVERSE_GEOCODE_ENABLED] = enabled }
+    }
+    suspend fun saveLocationNominatimBaseUrl(url: String) {
+        context.dataStore.edit { it[LOCATION_NOMINATIM_BASE_URL] = url }
+    }
+
     suspend fun saveProxyEnabled(enabled: Boolean) { context.dataStore.edit { it[PROXY_ENABLED] = enabled } }
     suspend fun saveProxyType(type: String) { context.dataStore.edit { it[PROXY_TYPE] = type } }
     suspend fun saveProxyHost(host: String) { context.dataStore.edit { it[PROXY_HOST] = host } }

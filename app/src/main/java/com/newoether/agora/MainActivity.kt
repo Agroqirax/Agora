@@ -30,6 +30,9 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -519,6 +522,187 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                     onClick = { viewModel.resolveShellConfirmation(allow = false) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.shell_confirm_deny)) }
+            }
+        )
+    }
+
+    // Location tool: system runtime-permission bridge. The tool call happens off the
+    // UI thread inside the generation pipeline, so it can't launch the permission
+    // dialog itself — it asks via a pending StateFlow and this composable answers.
+    val pendingLocationPermission by viewModel.pendingLocationPermissionRequest.collectAsState()
+    val locationPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[android.Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+            results[android.Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        viewModel.resolveLocationPermission(granted)
+    }
+    LaunchedEffect(pendingLocationPermission) {
+        if (pendingLocationPermission != null) {
+            locationPermLauncher.launch(arrayOf(
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
+        }
+    }
+
+    // Location tool: in-app "share your location?" confirmation gate
+    val pendingLocationRequest by viewModel.pendingLocationRequest.collectAsState()
+    pendingLocationRequest?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveLocationConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.location_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.location_confirm_message))
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.location_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (alwaysAllow) viewModel.settings.setLocationConfirmEnabled(false)
+                    viewModel.resolveLocationConfirmation(allow = true)
+                }) {
+                    Text(stringResource(R.string.location_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveLocationConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.location_confirm_deny)) }
+            }
+        )
+    }
+
+    // Calendar tool: system runtime-permission bridge (see location's, above, for why
+    // this handshake exists — the tool call happens off the UI thread).
+    val pendingCalendarPermission by viewModel.pendingCalendarPermissionRequest.collectAsState()
+    val calendarPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[android.Manifest.permission.READ_CALENDAR] == true
+        viewModel.resolveCalendarPermission(granted)
+    }
+    LaunchedEffect(pendingCalendarPermission) {
+        if (pendingCalendarPermission != null) {
+            calendarPermLauncher.launch(arrayOf(
+                android.Manifest.permission.READ_CALENDAR,
+                android.Manifest.permission.WRITE_CALENDAR
+            ))
+        }
+    }
+
+    // Calendar tool: in-app "create/update/delete this event?" confirmation gate
+    val pendingCalendarWrite by viewModel.pendingCalendarWriteConfirmation.collectAsState()
+    pendingCalendarWrite?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveCalendarWriteConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.CalendarMonth, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.calendar_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.calendar_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveCalendarWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
+                    Text(stringResource(R.string.calendar_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveCalendarWriteConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.calendar_confirm_deny)) }
+            }
+        )
+    }
+
+    // Contacts tool: system runtime-permission bridge
+    val pendingContactsPermission by viewModel.pendingContactsPermissionRequest.collectAsState()
+    val contactsPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[android.Manifest.permission.READ_CONTACTS] == true
+        viewModel.resolveContactsPermission(granted)
+    }
+    LaunchedEffect(pendingContactsPermission) {
+        if (pendingContactsPermission != null) {
+            contactsPermLauncher.launch(arrayOf(
+                android.Manifest.permission.READ_CONTACTS,
+                android.Manifest.permission.WRITE_CONTACTS
+            ))
+        }
+    }
+
+    // Contacts tool: in-app "create/update/delete this contact?" confirmation gate
+    val pendingContactsWrite by viewModel.pendingContactsWriteConfirmation.collectAsState()
+    pendingContactsWrite?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveContactsWriteConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Contacts, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.contacts_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.contacts_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveContactsWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
+                    Text(stringResource(R.string.contacts_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveContactsWriteConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.contacts_confirm_deny)) }
             }
         )
     }

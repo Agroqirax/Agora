@@ -31,6 +31,17 @@ internal fun toolDisplayName(toolName: String?): String {
         "file_glob" -> stringResource(R.string.tool_file_glob)
         "file_grep" -> stringResource(R.string.tool_file_grep)
         "generate_image" -> stringResource(R.string.tool_generate_image)
+        "get_location" -> stringResource(R.string.tool_get_location)
+        "list_calendars" -> stringResource(R.string.tool_list_calendars)
+        "get_calendar_events" -> stringResource(R.string.tool_get_calendar_events)
+        "create_calendar_event" -> stringResource(R.string.tool_create_calendar_event)
+        "update_calendar_event" -> stringResource(R.string.tool_update_calendar_event)
+        "delete_calendar_event" -> stringResource(R.string.tool_delete_calendar_event)
+        "search_contacts" -> stringResource(R.string.tool_search_contacts)
+        "get_contact" -> stringResource(R.string.tool_get_contact)
+        "create_contact" -> stringResource(R.string.tool_create_contact)
+        "update_contact" -> stringResource(R.string.tool_update_contact)
+        "delete_contact" -> stringResource(R.string.tool_delete_contact)
         else -> (toolName ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
     }
 }
@@ -217,9 +228,60 @@ internal fun toolSummary(seg: MessageSegment): String {
             content.isEmpty() -> stringResource(R.string.tool_generating_image)
             else -> stringResource(R.string.tool_generated_image)
         }
+        "get_location" -> {
+            val errorCode = try {
+                (Json.parseToJsonElement(content).jsonObject["error"] as? JsonPrimitive)?.content
+            } catch (_: Exception) { null }
+            when {
+                isError -> stringResource(R.string.tool_call_failed)
+                content.isBlank() -> stringResource(R.string.tool_getting_location)
+                errorCode == "permission_denied" -> stringResource(R.string.tool_location_permission_denied)
+                errorCode == "user_denied" -> stringResource(R.string.tool_location_denied)
+                errorCode != null -> stringResource(R.string.tool_location_failed)
+                else -> stringResource(R.string.tool_location_done)
+            }
+        }
+        "list_calendars", "get_calendar_events" -> genericReadSummary(content, isError)
+        "create_calendar_event", "update_calendar_event", "delete_calendar_event" -> genericWriteSummary(
+            content, isError, R.string.tool_calendar_permission_denied, R.string.tool_calendar_denied
+        )
+        "search_contacts", "get_contact" -> genericReadSummary(content, isError)
+        "create_contact", "update_contact", "delete_contact" -> genericWriteSummary(
+            content, isError, R.string.tool_contacts_permission_denied, R.string.tool_contacts_denied
+        )
         else -> {
             if (isError) stringResource(R.string.tool_call_failed)
             else stringResource(R.string.tool_done)
         }
+    }
+}
+
+/** Read-only calendar/contacts tools have no per-action wording worth localizing
+ *  individually — just report success/failure, same as the generic fallback. */
+@Composable
+private fun genericReadSummary(content: String, isError: Boolean): String {
+    if (isError) return stringResource(R.string.tool_call_failed)
+    if (content.isBlank()) return stringResource(R.string.tool_done)
+    val errorCode = try {
+        (Json.parseToJsonElement(content).jsonObject["error"] as? JsonPrimitive)?.content
+    } catch (_: Exception) { null }
+    return if (errorCode != null) stringResource(R.string.tool_call_failed) else stringResource(R.string.tool_done)
+}
+
+/** Shared summary logic for calendar/contacts create/update/delete tools: these all
+ *  emit the same {type, error, message} shape as [com.newoether.agora.tool.LocationToolProvider],
+ *  distinguishing permission_denied and user_denied from a generic failure. */
+@Composable
+private fun genericWriteSummary(content: String, isError: Boolean, permissionDeniedRes: Int, deniedRes: Int): String {
+    if (isError) return stringResource(R.string.tool_call_failed)
+    if (content.isBlank()) return stringResource(R.string.tool_done)
+    val errorCode = try {
+        (Json.parseToJsonElement(content).jsonObject["error"] as? JsonPrimitive)?.content
+    } catch (_: Exception) { null }
+    return when (errorCode) {
+        "permission_denied" -> stringResource(permissionDeniedRes)
+        "user_denied" -> stringResource(deniedRes)
+        null -> stringResource(R.string.tool_done)
+        else -> stringResource(R.string.tool_call_failed)
     }
 }

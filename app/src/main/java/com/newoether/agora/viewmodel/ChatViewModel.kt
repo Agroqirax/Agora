@@ -264,6 +264,12 @@ class ChatViewModel(
                 }
             }
             gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
+            gm.onConfirmLocationRequest = { locationConfirmation.confirm() }
+            gm.onRequestLocationPermission = { locationPermission.request() }
+            gm.onConfirmCalendarWrite = { summary -> calendarWriteConfirmation.confirm(summary) }
+            gm.onRequestCalendarPermission = { calendarPermission.request() }
+            gm.onConfirmContactsWrite = { summary -> contactsWriteConfirmation.confirm(summary) }
+            gm.onRequestContactsPermission = { contactsPermission.request() }
         }
     }
 
@@ -325,6 +331,83 @@ class ChatViewModel(
         shellConfirmation.resolve(allow, alwaysAllowServer)
 
     fun setShellConfirmEnabled(enabled: Boolean) = shellConfirmation.setEnabled(enabled)
+
+    // ── Location tool confirmation + runtime permission gates ────────────
+    /** In-app "share your location?" prompt (see [LocationConfirmationController]). */
+    private val locationConfirmation = LocationConfirmationController(settings)
+    val pendingLocationRequest: StateFlow<LocationConfirmationController.PendingLocationRequest?>
+        get() = locationConfirmation.pendingLocationRequest
+
+    /** System runtime-permission request bridge (see [RuntimePermissionController]). */
+    private val locationPermission = RuntimePermissionController(
+        arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+    )
+    val pendingLocationPermissionRequest: StateFlow<kotlinx.coroutines.CompletableDeferred<Boolean>?>
+        get() = locationPermission.pendingRequest
+
+    /** Called by the UI to resolve the pending "share your location?" confirmation. */
+    fun resolveLocationConfirmation(allow: Boolean) = locationConfirmation.resolve(allow)
+
+    /** Called by the UI once the system location-permission dialog has been answered. */
+    fun resolveLocationPermission(granted: Boolean) = locationPermission.resolve(granted)
+
+    /** Enables/disables the location tool. Turning it on immediately requests the
+     *  runtime permission (if not already granted) so the user isn't surprised the
+     *  first time the model calls the tool mid-conversation. */
+    fun setLocationEnabled(enabled: Boolean) {
+        settings.setLocationEnabled(enabled)
+        if (enabled) viewModelScope.launch { locationPermission.requestIfNeeded(appContext) }
+    }
+
+    // ── Calendar tool write-confirmation + runtime permission gates ──────
+    /** In-app "create/update/delete this event?" prompt (see [WriteConfirmationController]). */
+    private val calendarWriteConfirmation = WriteConfirmationController(
+        confirmEnabled = { settings.calendarConfirmEnabled.value },
+        setConfirmEnabled = { settings.setCalendarConfirmEnabled(it) }
+    )
+    val pendingCalendarWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
+        get() = calendarWriteConfirmation.pendingWrite
+
+    private val calendarPermission = RuntimePermissionController(
+        arrayOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR)
+    )
+    val pendingCalendarPermissionRequest: StateFlow<kotlinx.coroutines.CompletableDeferred<Boolean>?>
+        get() = calendarPermission.pendingRequest
+
+    fun resolveCalendarWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        calendarWriteConfirmation.resolve(allow, alwaysAllow)
+
+    fun resolveCalendarPermission(granted: Boolean) = calendarPermission.resolve(granted)
+
+    fun setCalendarEnabled(enabled: Boolean) {
+        settings.setCalendarEnabled(enabled)
+        if (enabled) viewModelScope.launch { calendarPermission.requestIfNeeded(appContext) }
+    }
+
+    // ── Contacts tool write-confirmation + runtime permission gates ──────
+    /** In-app "create/update/delete this contact?" prompt (see [WriteConfirmationController]). */
+    private val contactsWriteConfirmation = WriteConfirmationController(
+        confirmEnabled = { settings.contactsConfirmEnabled.value },
+        setConfirmEnabled = { settings.setContactsConfirmEnabled(it) }
+    )
+    val pendingContactsWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
+        get() = contactsWriteConfirmation.pendingWrite
+
+    private val contactsPermission = RuntimePermissionController(
+        arrayOf(android.Manifest.permission.READ_CONTACTS, android.Manifest.permission.WRITE_CONTACTS)
+    )
+    val pendingContactsPermissionRequest: StateFlow<kotlinx.coroutines.CompletableDeferred<Boolean>?>
+        get() = contactsPermission.pendingRequest
+
+    fun resolveContactsWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        contactsWriteConfirmation.resolve(allow, alwaysAllow)
+
+    fun resolveContactsPermission(granted: Boolean) = contactsPermission.resolve(granted)
+
+    fun setContactsEnabled(enabled: Boolean) {
+        settings.setContactsEnabled(enabled)
+        if (enabled) viewModelScope.launch { contactsPermission.requestIfNeeded(appContext) }
+    }
 
     // ── Auto Backup ───────────────────────────────────────────
 

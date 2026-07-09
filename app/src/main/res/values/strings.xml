@@ -212,6 +212,26 @@
     <string name="tool_generate_image">Generate Image</string>
     <string name="tool_generating_image">Generating image…</string>
     <string name="tool_generated_image">Generated image</string>
+    <string name="tool_get_location">Get Location</string>
+    <string name="tool_getting_location">Getting location…</string>
+    <string name="tool_location_done">Got current location</string>
+    <string name="tool_location_permission_denied">Location permission denied</string>
+    <string name="tool_location_denied">User declined to share location</string>
+    <string name="tool_location_failed">Couldn\'t get location</string>
+    <string name="tool_list_calendars">List Calendars</string>
+    <string name="tool_get_calendar_events">Get Calendar Events</string>
+    <string name="tool_create_calendar_event">Create Calendar Event</string>
+    <string name="tool_update_calendar_event">Update Calendar Event</string>
+    <string name="tool_delete_calendar_event">Delete Calendar Event</string>
+    <string name="tool_search_contacts">Search Contacts</string>
+    <string name="tool_get_contact">Get Contact</string>
+    <string name="tool_create_contact">Create Contact</string>
+    <string name="tool_update_contact">Update Contact</string>
+    <string name="tool_delete_contact">Delete Contact</string>
+    <string name="tool_calendar_denied">User declined this calendar change</string>
+    <string name="tool_calendar_permission_denied">Calendar permission denied</string>
+    <string name="tool_contacts_denied">User declined this contacts change</string>
+    <string name="tool_contacts_permission_denied">Contacts permission denied</string>
     <string name="img_action_save">Save to gallery</string>
     <string name="img_action_share">Share</string>
     <string name="img_saved">Saved to gallery</string>
@@ -393,6 +413,44 @@
     <string name="shell_result_exit_code">Exit code: %1$d</string>
     <string name="shell_result_server">Server: %1$s</string>
     <string name="shell_device_type">Type</string>
+
+    <!-- Settings - Android Page -->
+    <string name="android_title">Android</string>
+    <string name="android_desc">Android features</string>
+    <string name="calendar_title">Calendar</string>
+    <string name="calendar_enable">Enable Calendar Tool</string>
+    <string name="calendar_enable_desc">Allow the model to view your calendar</string>
+    <string name="calendar_confirm_setting">Confirm changes to calendar</string>
+    <string name="calendar_confirm_setting_desc">Ask before the assistant can change or delete calendar events</string>
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_enable">Enable Contacts Tool</string>
+    <string name="contacts_enable_desc">Allow the model to view your contacts</string>
+    <string name="contacts_confirm_setting">Confirm changes to contacts</string>
+    <string name="contacts_confirm_setting_desc">Ask before the assistant can change or delete contacts</string>
+    <string name="location_title">Location</string>
+    <string name="location_enable">Enable Location Tool</string>
+    <string name="location_enable_desc">Allow the model to view your location</string>
+    <string name="location_confirm_setting">Confirm location</string>
+    <string name="location_confirm_setting_desc">Ask before the assistant can get your location</string>
+    <string name="location_confirm_title">Share your location?</string>
+    <string name="location_confirm_message">The assistant wants to read your device\'s current location and share it with the model.</string>
+    <string name="location_confirm_allow">Allow</string>
+    <string name="location_confirm_deny">Deny</string>
+    <string name="location_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <string name="location_reverse_geocode_enable">Reverse geocode address</string>
+    <string name="location_reverse_geocode_enable_desc">Also look up a street address for the coordinates via Nominatim</string>
+    <string name="location_nominatim_base_url">Nominatim server URL</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
+    <string name="calendar_confirm_title">Allow this calendar change?</string>
+    <string name="calendar_confirm_allow">Allow</string>
+    <string name="calendar_confirm_deny">Deny</string>
+    <string name="calendar_confirm_always_allow">Always allow (don\'t ask again)</string>
+
+    <string name="contacts_confirm_title">Allow this contacts change?</string>
+    <string name="contacts_confirm_allow">Allow</string>
+    <string name="contacts_confirm_deny">Deny</string>
+    <string name="contacts_confirm_always_allow">Always allow (don\'t ask again)</string>
 
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">Local Sandbox</string>

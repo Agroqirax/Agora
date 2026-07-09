@@ -20,7 +20,10 @@ import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
+import com.newoether.agora.tool.CalendarToolProvider
+import com.newoether.agora.tool.ContactsToolProvider
 import com.newoether.agora.tool.ImageGenToolProvider
+import com.newoether.agora.tool.LocationToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
@@ -84,6 +87,11 @@ data class GenerationContext(
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val sandboxEnabled: Boolean = false,
+    val locationEnabled: Boolean = false,
+    val locationReverseGeocodeEnabled: Boolean = true,
+    val locationNominatimBaseUrl: String = com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL,
+    val calendarEnabled: Boolean = false,
+    val contactsEnabled: Boolean = false,
     val imageTranscriptionEnabled: Boolean = false,
     val imageTranscriptionModel: String? = null,
     val imageTranscriptionBatchSize: Int = 3,
@@ -143,6 +151,28 @@ class GenerationManager(
      *  Returns true to proceed, false to deny. */
     var onConfirmShellCommand: (suspend (server: String, summary: String) -> Boolean)? = null
 
+    /** User-confirmation gate for sharing location with the model. Set by the
+     *  ViewModel. Returns true to proceed, false to deny. */
+    var onConfirmLocationRequest: (suspend () -> Boolean)? = null
+
+    /** Runtime location-permission request gate. Set by the ViewModel; triggers the
+     *  system permission dialog and returns whether access was granted. */
+    var onRequestLocationPermission: (suspend () -> Boolean)? = null
+
+    /** User-confirmation gate for calendar create/update/delete. Set by the ViewModel.
+     *  Returns true to proceed, false to deny. */
+    var onConfirmCalendarWrite: (suspend (summary: String) -> Boolean)? = null
+
+    /** Runtime calendar-permission request gate. Set by the ViewModel. */
+    var onRequestCalendarPermission: (suspend () -> Boolean)? = null
+
+    /** User-confirmation gate for contacts create/update/delete. Set by the ViewModel.
+     *  Returns true to proceed, false to deny. */
+    var onConfirmContactsWrite: (suspend (summary: String) -> Boolean)? = null
+
+    /** Runtime contacts-permission request gate. Set by the ViewModel. */
+    var onRequestContactsPermission: (suspend () -> Boolean)? = null
+
     private val memoryToolProvider = MemoryToolProvider(memoryManager)
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider(conversations)
@@ -151,12 +181,34 @@ class GenerationManager(
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
     }
+    private val locationToolProvider = LocationToolProvider(app).also { lp ->
+        lp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
+        lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
+    }
+    private val calendarToolProvider = CalendarToolProvider(app).also { cp ->
+        cp.confirmWrite = { summary -> onConfirmCalendarWrite?.invoke(summary) ?: true }
+        cp.requestPermission = { onRequestCalendarPermission?.invoke() ?: false }
+    }
+    private val contactsToolProvider = ContactsToolProvider(app).also { cp ->
+        cp.confirmWrite = { summary -> onConfirmContactsWrite?.invoke(summary) ?: true }
+        cp.requestPermission = { onRequestContactsPermission?.invoke() ?: false }
+    }
     private val toolProviders: List<ToolProvider> = listOf(
-        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider
+        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
+        locationToolProvider, calendarToolProvider, contactsToolProvider
     )
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         imageGenToolProvider.definitions(ctx)
+
+    fun buildLocationTool(ctx: GenerationContext): List<ToolDefinition> =
+        locationToolProvider.definitions(ctx)
+
+    fun buildCalendarTool(ctx: GenerationContext): List<ToolDefinition> =
+        calendarToolProvider.definitions(ctx)
+
+    fun buildContactsTool(ctx: GenerationContext): List<ToolDefinition> =
+        contactsToolProvider.definitions(ctx)
 
     private val transcriptionManager = TranscriptionManager(providers, conversations, context)
 
@@ -357,7 +409,10 @@ class GenerationManager(
         val shellTool = buildShellTool(ctx)
         val fileTool = buildFileTool(ctx)
         val imageGenTool = buildImageGenTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool
+        val locationTool = buildLocationTool(ctx)
+        val calendarTool = buildCalendarTool(ctx)
+        val contactsTool = buildContactsTool(ctx)
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + calendarTool + contactsTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,
