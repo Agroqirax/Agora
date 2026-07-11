@@ -175,6 +175,17 @@
 </tr>
 </table>
 
+## Building from source
+
+```sh
+git clone https://github.com/newo-ether/Agora # Clone
+cd Agora                                      # Change directory
+git submodule update --init                   # Initialize submodules: bundled llama.cpp & proot
+chmod +x ./gradlew                            # Make gradle exectuable
+./gradlew assembleRelease                     # Build release
+adb install ./app/build/outputs/apk/fdroid/release/app-fdroid-release.apk # Install apk
+```
+
 ## Tech Stack
 
 - **Language:** [Kotlin](https://kotlinlang.org/)
