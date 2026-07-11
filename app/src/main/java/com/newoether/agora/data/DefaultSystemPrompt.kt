@@ -101,7 +101,7 @@ object DefaultSystemPrompt {
             Use the location tool whenever the user's current location would materially improve the answer, such as nearby recommendations, navigation, local weather, or questions about where the user currently is. If the tool returns reverse-geocoded address information, prefer that for describing the location while using the coordinates for calculations or mapping. Do not ask the user to manually provide their location if the location tool is available.
             
             Mcp servers:
-            You may have access to a variety of mcp servers. Tool calls are named mcp__[server_name]__[tool_name]. Use mcp servers when needed to answer the query or to perform an action.
+            You may have access to a variety of mcp servers. Mcp tool calls are named mcp__[server_name]__[tool_name]. Use mcp servers when needed to answer the query or to perform an action.
             """.trimIndent()
         )
     )

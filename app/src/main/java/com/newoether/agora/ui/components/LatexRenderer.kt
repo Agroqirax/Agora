@@ -589,10 +589,15 @@ private fun estimateLatexPlaceholderSize(latex: String, textSize: Float, display
 class LatexImageTransformer(
     private val textSize: Float = 40f,
     private val color: Int = 0xFF000000.toInt(),
+    // Regular (non-LaTeX) image links — e.g. `![alt](https://example.com/pic.png)` from
+    // an AI response — are handed off here instead of being silently dropped. Without a
+    // fallback, `transform()` returns null for them while the placeholder box below still
+    // reserves layout space, so the image link appears as a blank gap that never renders.
+    private val fallback: ImageTransformer = com.mikepenz.markdown.coil2.Coil2ImageTransformerImpl,
 ) : ImageTransformer {
     @Composable
     override fun transform(link: String): ImageData? {
-        val request = decodeLatexLink(link) ?: return null
+        val request = decodeLatexLink(link) ?: return fallback.transform(link)
         val key = LatexRenderKey(request.latex, textSize, color)
         var bitmap by remember(key) { mutableStateOf(LatexBitmapCache.get(key)) }
         val fade = remember(key) { Animatable(if (bitmap != null) 1f else 0f) }
@@ -639,6 +644,14 @@ class LatexImageTransformer(
         )
     }
 
+    @Composable
+    override fun intrinsicSize(painter: Painter): Size {
+        // LaTeX bitmaps use the default (painter.intrinsicSize); real network images need
+        // the fallback's implementation so it can observe the AsyncImagePainter's load state
+        // and report the actual decoded size once available.
+        return fallback.intrinsicSize(painter)
+    }
+
     override fun placeholderConfig(
         link: String,
         density: Density,
@@ -647,7 +660,7 @@ class LatexImageTransformer(
         imageSize: Size,
         imageSizeChanged: ((link: String, Size) -> Unit)?,
     ): PlaceholderConfig {
-        val request = decodeLatexLink(link) ?: return super.placeholderConfig(
+        val request = decodeLatexLink(link) ?: return fallback.placeholderConfig(
             link, density, containerSize, imageWidth, imageSize, imageSizeChanged
         )
         val key = LatexRenderKey(request.latex, textSize, color)
