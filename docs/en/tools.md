@@ -46,6 +46,20 @@ Execute commands on remote machines via the [Conch](https://github.com/newo-ethe
 - **Configuration**: Settings → Shell
 - **Guide**: [Remote Shell](shell.md)
 
+### MCP Servers
+
+Connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and let the model call the tools they expose — search, databases, home automation, or internal APIs.
+
+- **Transport**: Streamable HTTP (tools only — no resources/prompts yet)
+- **Configuration**: Settings → MCP Servers
+- **Guide**: [MCP Servers](mcp.md)
+
+### Android
+
+- **Location**: Retrieve the device's approximate or precise location
+- **Contacts**: Search and read contacts stored on the device
+- **Calendar**: Read upcoming events and create new calendar entries
+
 ### File Operations
 
 Read, write, edit, glob-search, and grep-search files on remote devices through the Conch protocol. The model can directly manipulate remote filesystems.
@@ -78,15 +92,15 @@ When a tool is called, you'll see it inline in the conversation:
 
 - **:material-progress-wrench: Tool Call Banner**
 
-    ---
+  ***
 
-    Shows the tool name and brief status (e.g., :material-magnify: "Searching 'latest AI news' on the web").
+  Shows the tool name and brief status (e.g., :material-magnify: "Searching 'latest AI news' on the web").
 
 - **:material-check-circle: Tool Result**
 
-    ---
+  ***
 
-    After execution, shows the formatted result or summary (e.g., "Found 5 results for 'latest AI news'").
+  After execution, shows the formatted result or summary (e.g., "Found 5 results for 'latest AI news'").
 
 </div>
 
@@ -108,16 +122,17 @@ If a tool call fails, the model is notified of the error and can retry or adjust
 
 You control which tools the model can access:
 
-| Setting | Location | Default |
-|---------|----------|---------|
-| Web Search | Settings → Web Search | Off |
-| Shell | Settings → Shell | Off |
-| Memory (Saved) | Settings → Memory → Access Saved Memories | Off |
-| Memory (Active) | Settings → Memory → Access Active Memory | Off |
-| Past Conversations | Settings → Memory → Access Past Conversations | Off |
-| Conversation Search | Settings → Conversation Search | On* |
+| Setting             | Location                                      | Default |
+| ------------------- | --------------------------------------------- | ------- |
+| Web Search          | Settings → Web Search                         | Off     |
+| Shell               | Settings → Shell                              | Off     |
+| MCP Servers         | Settings → MCP Servers                        | Off     |
+| Memory (Saved)      | Settings → Memory → Access Saved Memories     | Off     |
+| Memory (Active)     | Settings → Memory → Access Active Memory      | Off     |
+| Past Conversations  | Settings → Memory → Access Past Conversations | Off     |
+| Conversation Search | Settings → Conversation Search                | On\*    |
 
-*The model's ability to search conversations depends on having an embedding model configured. Without one, only keyword search is available.
+\*The model's ability to search conversations depends on having an embedding model configured. Without one, only keyword search is available.
 
 ---
 

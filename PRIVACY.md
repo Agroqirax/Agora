@@ -29,6 +29,14 @@ Please review the privacy policy of the provider you use.
 - **Notifications**: Used for foreground service to keep ongoing generations alive.
 - **Storage / File Access**: Only when you explicitly attach images, videos, or files to a message.
 
+### Optional permissions
+
+These permissions are available to enhance the AIs capability, but are not required.
+
+- **Location**: Give the AI access to your current coordinates. Optionally fetch and address using [nominatim](https://nominatim.openstreetmap.org).
+- **Calendar**: Give the AI access to read, create, edit or remove events from your calendar.
+- **Contacts**: Give the AI access to read, create, edit or remove contacts.
+
 ## Data Retention
 
 All chat history is stored locally in an on-device database. You can delete conversations at any time within the app. Clearing the app's data or uninstalling will remove all local data.

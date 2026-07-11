@@ -6,6 +6,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 sealed class StreamEvent {
     data class TextChunk(val text: String) : StreamEvent()
@@ -68,7 +69,39 @@ data class ToolParameters(
 data class ToolProperty(
     val type: String,
     val description: String,
-    val items: ToolProperty? = null
+    val items: ToolProperty? = null,
+    /** Allowed values for an enum-constrained string/number property. */
+    val enum: List<String>? = null,
+    /** Nested field schema, for `type == "object"` properties (e.g. MCP tool inputs). */
+    val properties: Map<String, ToolProperty>? = null,
+    /** Required nested field names, for `type == "object"` properties. */
+    val required: List<String>? = null
+)
+
+/** Recursively rebuilds a full JSON-Schema object from a [ToolProperty], including
+ *  nested object/array shapes. Shared by providers (Anthropic, Gemini) that can't
+ *  serialize [ToolProperty] directly and must reconstruct raw JSON instead. */
+fun ToolProperty.toJsonSchema(): JsonObject {
+    val map = mutableMapOf<String, JsonElement>(
+        "type" to JsonPrimitive(type),
+        "description" to JsonPrimitive(description)
+    )
+    items?.let { map["items"] = it.toJsonSchema() }
+    enum?.let { map["enum"] = kotlinx.serialization.json.JsonArray(it.map { v -> JsonPrimitive(v) }) }
+    properties?.let { props ->
+        map["properties"] = JsonObject(props.mapValues { (_, p) -> p.toJsonSchema() })
+    }
+    required?.let { map["required"] = kotlinx.serialization.json.JsonArray(it.map { v -> JsonPrimitive(v) }) }
+    return JsonObject(map)
+}
+
+/** Recursively rebuilds a full JSON-Schema object from [ToolParameters]. */
+fun ToolParameters.toJsonSchema(): JsonObject = JsonObject(
+    mapOf(
+        "type" to JsonPrimitive(type),
+        "properties" to JsonObject(properties.mapValues { (_, prop) -> prop.toJsonSchema() }),
+        "required" to kotlinx.serialization.json.JsonArray(required.map { JsonPrimitive(it) })
+    )
 )
 
 @Serializable

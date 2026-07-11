@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
             "en" -> java.util.Locale("en")
             "es" -> java.util.Locale("es")
             "fr" -> java.util.Locale("fr")
+            "nl" -> java.util.Locale("nl")
             "de" -> java.util.Locale("de")
             "ru" -> java.util.Locale("ru")
             "pt-BR" -> java.util.Locale("pt", "BR")
@@ -522,6 +524,50 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                     onClick = { viewModel.resolveShellConfirmation(allow = false) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.shell_confirm_deny)) }
+            }
+        )
+    }
+
+    // MCP destructive tool-call confirmation gate
+    val pendingMcpToolCall by viewModel.pendingMcpToolCall.collectAsState()
+    pendingMcpToolCall?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveMcpConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Api, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.mcp_confirm_title, pending.toolName, pending.server), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.mcp_confirm_always), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveMcpConfirmation(allow = true, alwaysAllowServer = alwaysAllow) }) {
+                    Text(stringResource(R.string.mcp_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveMcpConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.mcp_confirm_deny)) }
             }
         )
     }

@@ -212,6 +212,26 @@
     <string name="tool_generate_image">Bild erzeugen</string>
     <string name="tool_generating_image">Bild wird erzeugt…</string>
     <string name="tool_generated_image">Bild erzeugt</string>
+    <string name="tool_get_location">Standort abrufen</string>
+    <string name="tool_getting_location">Standort wird abgerufen…</string>
+    <string name="tool_location_done">Standort abgerufen</string>
+    <string name="tool_location_permission_denied">Standortberechtigung verweigert</string>
+    <string name="tool_location_denied">Benutzer hat das Teilen des Standorts abgelehnt</string>
+    <string name="tool_location_failed">Standort konnte nicht abgerufen werden</string>
+    <string name="tool_list_calendars">Kalender auflisten</string>
+    <string name="tool_get_calendar_events">Kalenderereignisse abrufen</string>
+    <string name="tool_create_calendar_event">Kalenderereignis erstellen</string>
+    <string name="tool_update_calendar_event">Kalenderereignis aktualisieren</string>
+    <string name="tool_delete_calendar_event">Kalenderereignis löschen</string>
+    <string name="tool_search_contacts">Kontakte durchsuchen</string>
+    <string name="tool_get_contact">Kontakt abrufen</string>
+    <string name="tool_create_contact">Kontakt erstellen</string>
+    <string name="tool_update_contact">Kontakt aktualisieren</string>
+    <string name="tool_delete_contact">Kontakt löschen</string>
+    <string name="tool_calendar_denied">Benutzer hat diese Kalenderänderung abgelehnt</string>
+    <string name="tool_calendar_permission_denied">Kalenderberechtigung verweigert</string>
+    <string name="tool_contacts_denied">Benutzer hat diese Kontaktänderung abgelehnt</string>
+    <string name="tool_contacts_permission_denied">Kontakteberechtigung verweigert</string>
     <string name="img_action_save">In Galerie speichern</string>
     <string name="img_action_share">Teilen</string>
     <string name="img_saved">In Galerie gespeichert</string>
@@ -397,6 +417,29 @@
     <string name="shell_result_exit_code">Exit-Code: %1$d</string>
     <string name="shell_result_server">Server: %1$s</string>
     <string name="shell_device_type">Typ</string>
+    
+    <!-- Settings - Android Page -->
+    <string name="android_title">Android</string>
+    <string name="android_desc">Android-Funktionen</string>
+    <string name="calendar_title">Kalender</string>
+    <string name="calendar_enable">Kalenderwerkzeug aktivieren</string>
+    <string name="calendar_enable_desc">Dem Modell Zugriff auf Ihren Kalender erlauben</string>
+    <string name="calendar_confirm_setting">Kalenderänderungen bestätigen</string>
+    <string name="calendar_confirm_setting_desc">Vor Änderungen oder dem Löschen von Kalenderereignissen nachfragen</string>
+    <string name="contacts_title">Kontakte</string>
+    <string name="contacts_enable">Kontakte-Werkzeug aktivieren</string>
+    <string name="contacts_enable_desc">Dem Modell Zugriff auf Ihre Kontakte erlauben</string>
+    <string name="contacts_confirm_setting">Kontaktänderungen bestätigen</string>
+    <string name="contacts_confirm_setting_desc">Vor Änderungen oder dem Löschen von Kontakten nachfragen</string>
+    <string name="location_title">Standort</string>
+    <string name="location_enable">Standortwerkzeug aktivieren</string>
+    <string name="location_enable_desc">Dem Modell Zugriff auf Ihren Standort erlauben</string>
+    <string name="location_confirm_setting">Standort bestätigen</string>
+    <string name="location_confirm_setting_desc">Nachfragen, bevor der Assistent Ihren Standort abruft</string>
+    <string name="location_reverse_geocode_enable">Adresse rückwärts auflösen</string>
+    <string name="location_reverse_geocode_enable_desc">Zusätzlich eine Straßenadresse über Nominatim für die Koordinaten ermitteln</string>
+    <string name="location_nominatim_base_url">Nominatim-Server-URL</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
 
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">Lokale Sandbox</string>
@@ -927,6 +970,58 @@
     <string name="shell_confirm_deny">Ablehnen</string>
     <string name="shell_confirm_setting">Remote-Shell-Aktionen bestätigen</string>
     <string name="shell_confirm_setting_desc">Nachfragen, bevor der Assistent Befehle ausführt oder Dateien auf Remote-SSH-/Conch-Servern schreibt</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">MCP-Server</string>
+    <string name="mcp_desc">Mit Model-Context-Protocol-Toolservern verbinden</string>
+    <string name="mcp_enable">MCP-Werkzeuge aktivieren</string>
+    <string name="mcp_enable_desc">Dem Modell erlauben, Werkzeuge Ihrer konfigurierten MCP-Server aufzurufen</string>
+    <string name="mcp_servers">Server</string>
+    <string name="mcp_add_server">Server hinzufügen</string>
+    <string name="mcp_remove_server">Entfernen</string>
+    <string name="mcp_no_servers">Keine MCP-Server konfiguriert</string>
+    <string name="mcp_server_enabled">Aktiviert</string>
+    <string name="mcp_server_name">Name</string>
+    <string name="mcp_server_name_hint">Mein MCP-Server</string>
+    <string name="mcp_server_desc">Beschreibung</string>
+    <string name="mcp_server_desc_hint">Wofür dieser Server gedacht ist</string>
+    <string name="mcp_server_url">Server-URL</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">Bearer-Token</string>
+    <string name="mcp_server_bearer_token_hint">Wird als Authorization: Bearer … gesendet</string>
+    <string name="mcp_server_headers">Zusätzliche Header</string>
+    <string name="mcp_server_headers_hint">X-Api-Key: secret</string>
+    <string name="mcp_server_headers_desc">Ein Header pro Zeile als \"Name: Wert\"</string>
+    <string name="mcp_server_timeout">Zeitüberschreitung (Sekunden)</string>
+    <string name="mcp_timeout_value">%d s</string>
+    <string name="mcp_delete_confirm_title">MCP-Server löschen</string>
+    <string name="mcp_delete_confirm_message">Möchten Sie „%1$s“ wirklich löschen?</string>
+    <string name="mcp_test_connection">Verbindung testen</string>
+    <string name="mcp_test_connection_testing">Verbindung wird hergestellt…</string>
+    <string name="mcp_test_connection_success">Verbunden — %1$d Werkzeug(e) gefunden</string>
+    <string name="mcp_test_connection_success_none">Verbunden — keine Werkzeuge gefunden</string>
+    <string name="mcp_test_connection_failure">Fehlgeschlagen: %1$s</string>
+    <string name="mcp_confirm_title">„%1$s“ auf „%2$s“ zulassen?</string>
+    <string name="mcp_confirm_allow">Einmal zulassen</string>
+    <string name="mcp_confirm_always">Diesen Server immer zulassen</string>
+    <string name="mcp_confirm_deny">Ablehnen</string>
+    <string name="mcp_confirm_setting">Destruktive MCP-Werkzeugaufrufe bestätigen</string>
+    <string name="mcp_confirm_setting_desc">Nachfragen, bevor der Assistent ein von einem MCP-Server als destruktiv markiertes Werkzeug ausführt. Schreibgeschützte Werkzeuge werden immer ohne Nachfrage ausgeführt.</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">Standort freigeben?</string>
+    <string name="location_confirm_message">Der Assistent möchte den aktuellen Standort Ihres Geräts abrufen und an das Modell weitergeben.</string>
+    <string name="location_confirm_allow">Zulassen</string>
+    <string name="location_confirm_deny">Ablehnen</string>
+    <string name="location_confirm_always_allow">Immer zulassen (nicht erneut fragen)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">Diese Kalenderänderung zulassen?</string>
+    <string name="calendar_confirm_allow">Zulassen</string>
+    <string name="calendar_confirm_deny">Ablehnen</string>
+    <string name="calendar_confirm_always_allow">Immer zulassen (nicht erneut fragen)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">Diese Kontaktänderung zulassen?</string>
+    <string name="contacts_confirm_allow">Zulassen</string>
+    <string name="contacts_confirm_deny">Ablehnen</string>
+    <string name="contacts_confirm_always_allow">Immer zulassen (nicht erneut fragen)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora wurde unerwartet beendet</string>

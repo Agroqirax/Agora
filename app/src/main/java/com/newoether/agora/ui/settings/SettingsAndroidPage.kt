@@ -41,10 +41,12 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val calendarConfirmEnabled by viewModel.settings.calendarConfirmEnabled.collectAsState()
     val contactsEnabled by viewModel.settings.contactsEnabled.collectAsState()
     val contactsConfirmEnabled by viewModel.settings.contactsConfirmEnabled.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.android_title),
-        onBack = onBack
+        onBack = onBack,
+        floatingActionButton = { if (showDocFab) DocumentationFab("android.md") }
     ) {
         SettingsGroupColumn {
             SettingsGroup(title = stringResource(R.string.location_title), items = buildList {

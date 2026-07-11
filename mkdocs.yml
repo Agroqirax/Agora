@@ -412,6 +412,8 @@ nav:
       - Remote Shell (Conch):
           - Shell Setup: shell.md
           - Sandbox: sandbox.md
+      - MCP Servers: mcp.md
+      - Android Tools: android.md
   - Knowledge Management:
       - Conversation Search: search.md
       - Embedding / RAG: embedding.md

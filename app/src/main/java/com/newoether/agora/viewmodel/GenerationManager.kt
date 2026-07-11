@@ -24,6 +24,7 @@ import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
 import com.newoether.agora.tool.ImageGenToolProvider
 import com.newoether.agora.tool.LocationToolProvider
+import com.newoether.agora.tool.McpToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
@@ -87,6 +88,8 @@ data class GenerationContext(
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val sandboxEnabled: Boolean = false,
+    val mcpEnabled: Boolean = false,
+    val mcpServers: List<com.newoether.agora.data.McpServerConfig> = emptyList(),
     val locationEnabled: Boolean = false,
     val locationReverseGeocodeEnabled: Boolean = true,
     val locationNominatimBaseUrl: String = com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL,
@@ -151,6 +154,10 @@ class GenerationManager(
      *  Returns true to proceed, false to deny. */
     var onConfirmShellCommand: (suspend (server: String, summary: String) -> Boolean)? = null
 
+    /** User-confirmation gate for destructive MCP tool calls. Set by the ViewModel.
+     *  Returns true to proceed, false to deny. Never invoked for non-destructive tools. */
+    var onConfirmMcpToolCall: (suspend (server: String, toolName: String, summary: String) -> Boolean)? = null
+
     /** User-confirmation gate for sharing location with the model. Set by the
      *  ViewModel. Returns true to proceed, false to deny. */
     var onConfirmLocationRequest: (suspend () -> Boolean)? = null
@@ -181,6 +188,11 @@ class GenerationManager(
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
     }
+    private val mcpToolProvider = McpToolProvider().also { mp ->
+        mp.confirm = { server, toolName, summary -> onConfirmMcpToolCall?.invoke(server, toolName, summary) ?: true }
+    }
+    val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
+        get() = mcpToolProvider.serverInfoFlow
     private val locationToolProvider = LocationToolProvider(app).also { lp ->
         lp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
@@ -195,7 +207,7 @@ class GenerationManager(
     }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
-        locationToolProvider, calendarToolProvider, contactsToolProvider
+        locationToolProvider, calendarToolProvider, contactsToolProvider, mcpToolProvider
     )
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
@@ -245,6 +257,19 @@ class GenerationManager(
         val all = shellToolProvider.definitions(ctx)
         return all.filter { it.function.name in FILE_TOOL_NAMES }
     }
+
+    /** Refreshes MCP server tool listings (network I/O — hence suspend) and returns
+     *  the resulting tool definitions. Safe to call every generation: cached per
+     *  server with a short TTL, so repeated calls in quick succession are free. */
+    suspend fun buildMcpTool(ctx: GenerationContext): List<ToolDefinition> {
+        mcpToolProvider.refresh(ctx)
+        return mcpToolProvider.definitions(ctx)
+    }
+
+    /** Ad-hoc "test connection" for the MCP settings page — connects to [server] and
+     *  lists its tools without touching the live tool cache. */
+    suspend fun testMcpConnection(server: com.newoether.agora.data.McpServerConfig): Result<List<String>> =
+        mcpToolProvider.testConnection(server)
 
 
     /** Semantic message search — delegates to [RagToolProvider], which owns the
@@ -412,7 +437,8 @@ class GenerationManager(
         val locationTool = buildLocationTool(ctx)
         val calendarTool = buildCalendarTool(ctx)
         val contactsTool = buildContactsTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + calendarTool + contactsTool
+        val mcpTool = buildMcpTool(ctx)
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + calendarTool + contactsTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

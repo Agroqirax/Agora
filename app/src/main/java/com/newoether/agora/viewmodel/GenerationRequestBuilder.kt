@@ -155,6 +155,8 @@ class GenerationRequestBuilder(
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
             shellDevices = settings.shellDevices.value,
             sandboxEnabled = settings.sandboxEnabled.value,
+            mcpEnabled = settings.mcpEnabled.value,
+            mcpServers = settings.mcpServers.value,
             locationEnabled = settings.locationEnabled.value,
             locationReverseGeocodeEnabled = settings.locationReverseGeocodeEnabled.value,
             locationNominatimBaseUrl = settings.locationNominatimBaseUrl.value.ifBlank { com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL },

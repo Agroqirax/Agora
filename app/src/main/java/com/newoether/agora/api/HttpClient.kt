@@ -150,6 +150,7 @@ object HttpClient {
 
     class StreamHandle(private val call: okhttp3.Call, private val response: okhttp3.Response) {
         val code: Int get() = response.code
+        val headers: okhttp3.Headers get() = response.headers
         val source: BufferedSource? get() = response.body?.source()
         val errorBody: String? by lazy {
             try { response.body?.string() } catch (_: Exception) { null }
@@ -165,14 +166,32 @@ object HttpClient {
         fun cancel() = call.cancel()
     }
 
-    fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle {
+    /**
+     * @param timeoutMs Optional per-call timeout override (connect+read+write combined,
+     *        via OkHttp's `callTimeout`). Falls back to the shared client's defaults when null.
+     * @param trackAsActive Whether this call becomes [activeStreamHandle] — the handle the
+     *        chat "stop generation" button cancels. Only the actual chat-generation stream
+     *        should set this; other callers that also happen to use streamPost (e.g. the MCP
+     *        tool provider) must pass `false`, or a concurrent call could hijack the stop
+     *        button into cancelling the wrong request.
+     */
+    fun streamPost(
+        url: String,
+        jsonBody: String,
+        headers: Map<String, String> = emptyMap(),
+        timeoutMs: Long? = null,
+        trackAsActive: Boolean = true
+    ): StreamHandle {
         guardCleartextCredentials(url, headers)
         val body = jsonBody.toRequestBody(JSON)
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val call = client.newCall(requestBuilder.build())
+        val callClient = if (timeoutMs != null) {
+            client.newBuilder().callTimeout(timeoutMs, TimeUnit.MILLISECONDS).build()
+        } else client
+        val call = callClient.newCall(requestBuilder.build())
         val handle = StreamHandle(call, call.execute())
-        activeStreamHandle = handle
+        if (trackAsActive) activeStreamHandle = handle
         return handle
     }
 

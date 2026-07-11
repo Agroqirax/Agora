@@ -58,6 +58,21 @@ data class ShellDeviceConfig(
 )
 
 @Serializable
+data class McpServerConfig(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String,
+    val description: String = "",
+    /** MCP Streamable HTTP endpoint, e.g. https://example.com/mcp */
+    val url: String = "",
+    val enabled: Boolean = true,
+    /** Convenience field — sent as `Authorization: Bearer <token>` when non-blank. */
+    val bearerToken: String = "",
+    /** Additional custom request headers (e.g. API keys some servers expect by name). */
+    val headers: Map<String, String> = emptyMap(),
+    val timeout: Int = 30
+)
+
+@Serializable
 data class SystemPromptEntry(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
@@ -175,6 +190,9 @@ class SettingsManager(private val context: Context) {
         val SHELL_CONFIRM_ENABLED = booleanPreferencesKey("shell_confirm_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
         val SANDBOX_ENABLED = booleanPreferencesKey("sandbox_enabled")
+        val MCP_ENABLED = booleanPreferencesKey("mcp_enabled")
+        val MCP_CONFIRM_ENABLED = booleanPreferencesKey("mcp_confirm_enabled")
+        val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val COLOR_SCHEME = stringPreferencesKey("color_scheme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
@@ -347,6 +365,14 @@ class SettingsManager(private val context: Context) {
         try { json.decodeFromString<List<ShellDeviceConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
     val sandboxEnabled: Flow<Boolean> = context.dataStore.data.map { it[SANDBOX_ENABLED] ?: false }
+
+    val mcpEnabled: Flow<Boolean> = context.dataStore.data.map { it[MCP_ENABLED] ?: false }
+    // Confirm before the model runs a destructive MCP tool call. Default on.
+    val mcpConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[MCP_CONFIRM_ENABLED] ?: true }
+    val mcpServers: Flow<List<McpServerConfig>> = context.dataStore.data.map { pref ->
+        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[MCP_SERVERS_JSON] ?: "[]")
+        try { json.decodeFromString<List<McpServerConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
+    }
 
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "FOLLOW_DEVICE" }
     val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
@@ -735,6 +761,18 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveSandboxEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SANDBOX_ENABLED] = enabled }
+    }
+
+    suspend fun saveMcpEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[MCP_ENABLED] = enabled }
+    }
+
+    suspend fun saveMcpConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[MCP_CONFIRM_ENABLED] = enabled }
+    }
+
+    suspend fun saveMcpServers(servers: List<McpServerConfig>) {
+        context.dataStore.edit { it[MCP_SERVERS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(servers)) }
     }
 
     suspend fun saveThemeMode(mode: String) {

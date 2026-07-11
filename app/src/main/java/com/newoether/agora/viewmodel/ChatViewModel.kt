@@ -264,6 +264,7 @@ class ChatViewModel(
                 }
             }
             gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
+            gm.onConfirmMcpToolCall = { server, toolName, summary -> mcpConfirmation.confirm(server, toolName, summary) }
             gm.onConfirmLocationRequest = { locationConfirmation.confirm() }
             gm.onRequestLocationPermission = { locationPermission.request() }
             gm.onConfirmCalendarWrite = { summary -> calendarWriteConfirmation.confirm(summary) }
@@ -326,11 +327,21 @@ class ChatViewModel(
     val pendingShellCommand: StateFlow<ShellConfirmationController.PendingShellCommand?>
         get() = shellConfirmation.pendingShellCommand
 
+    private val mcpConfirmation = McpConfirmationController(settings)
+    val pendingMcpToolCall: StateFlow<McpConfirmationController.PendingMcpToolCall?>
+        get() = mcpConfirmation.pendingMcpToolCall
+
     /** Called by the UI to resolve a pending confirmation. */
     fun resolveShellConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) =
         shellConfirmation.resolve(allow, alwaysAllowServer)
 
     fun setShellConfirmEnabled(enabled: Boolean) = shellConfirmation.setEnabled(enabled)
+
+    /** Called by the UI to resolve a pending MCP tool confirmation. */
+    fun resolveMcpConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) =
+        mcpConfirmation.resolve(allow, alwaysAllowServer)
+
+    fun setMcpConfirmEnabled(enabled: Boolean) = mcpConfirmation.setEnabled(enabled)
 
     // ── Location tool confirmation + runtime permission gates ────────────
     /** In-app "share your location?" prompt (see [LocationConfirmationController]). */
@@ -798,6 +809,19 @@ class ChatViewModel(
     fun updateShellDevice(device: ShellDeviceConfig) {
         settings.updateShellDevice(device)
     }
+    fun addMcpServer(server: com.newoether.agora.data.McpServerConfig) {
+        settings.addMcpServer(server)
+    }
+    fun updateMcpServer(server: com.newoether.agora.data.McpServerConfig) {
+        settings.updateMcpServer(server)
+    }
+    /** Connects to [server] and lists its tools, for the "Test connection" action
+     *  in the MCP settings page. Does not touch the live generation tool cache. */
+    val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
+        get() = generationManager.mcpServerInfo
+
+    suspend fun testMcpServer(server: com.newoether.agora.data.McpServerConfig): Result<List<String>> =
+        generationManager.testMcpConnection(server)
 
     /**
      * Connects to an SSH host in capture mode and returns the server host key

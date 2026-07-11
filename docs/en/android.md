@@ -18,8 +18,8 @@ Android Tools require standard Android runtime permissions.
 
 The first time the model attempts to use one of these tools, Agora will request the appropriate Android permission. Permissions are only requested when a tool is first needed.
 
-> [!NOTE]
-> You can revoke permissions at any time from your device's Android Settings.
+!!! note
+    You can revoke permissions at any time from your device's Android Settings.
 
 ## Setup
 

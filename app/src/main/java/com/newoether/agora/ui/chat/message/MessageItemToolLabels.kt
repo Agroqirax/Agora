@@ -42,9 +42,17 @@ internal fun toolDisplayName(toolName: String?): String {
         "create_contact" -> stringResource(R.string.tool_create_contact)
         "update_contact" -> stringResource(R.string.tool_update_contact)
         "delete_contact" -> stringResource(R.string.tool_delete_contact)
-        else -> (toolName ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+        else -> {
+            val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
+            (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+        }
     }
 }
+
+/** Qualified MCP tool names look like "mcp__<serverSlug>_<id6>__<originalToolName>".
+ *  Strips the server-namespacing prefix so the UI shows just the tool's own name. */
+private fun mcpDisplayToolName(qualified: String): String =
+    qualified.removePrefix("mcp__").substringAfter("__", qualified)
 
 @Composable
 internal fun toolSummary(seg: MessageSegment): String {

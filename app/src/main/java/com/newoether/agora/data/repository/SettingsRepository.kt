@@ -7,6 +7,7 @@ import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.data.McpServerConfig
 import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.ShellDeviceConfig
@@ -105,6 +106,9 @@ class SettingsRepository(
     val shellConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.shellConfirmEnabled, true)
     val shellDevices: StateFlow<List<ShellDeviceConfig>> = hot(settingsManager.shellDevices, emptyList())
     val sandboxEnabled: StateFlow<Boolean> = hot(settingsManager.sandboxEnabled, false)
+    val mcpEnabled: StateFlow<Boolean> = hot(settingsManager.mcpEnabled, false)
+    val mcpConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.mcpConfirmEnabled, true)
+    val mcpServers: StateFlow<List<McpServerConfig>> = hot(settingsManager.mcpServers, emptyList())
     val defaultTemperature: StateFlow<Float?> = hot(settingsManager.defaultTemperature, null)
     val defaultMaxTokens: StateFlow<Int?> = hot(settingsManager.defaultMaxTokens, null)
     val defaultTopP: StateFlow<Float?> = hot(settingsManager.defaultTopP, null)
@@ -305,6 +309,9 @@ class SettingsRepository(
     // Shell devices
     fun removeShellDevice(deviceId: String) = scope.launch { settingsManager.saveShellDevices(shellDevices.value.filter { it.id != deviceId }) }
 
+    // MCP servers
+    fun removeMcpServer(serverId: String) = scope.launch { settingsManager.saveMcpServers(mcpServers.value.filter { it.id != serverId }) }
+
     fun setConversationSettings(convId: String, settings: ConversationSettings?) = scope.launch { settingsManager.saveConversationSettings(convId, settings) }
 
     // ── Simple setting toggles ────────────────────────────────
@@ -380,6 +387,13 @@ class SettingsRepository(
     fun addShellDevice(device: ShellDeviceConfig) = scope.launch { settingsManager.saveShellDevices(shellDevices.value + device) }
     fun updateShellDevice(device: ShellDeviceConfig) = scope.launch {
         settingsManager.saveShellDevices(shellDevices.value.map { if (it.id == device.id) device else it })
+    }
+
+    fun setMcpEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMcpEnabled(enabled) }
+    fun setMcpConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMcpConfirmEnabled(enabled) }
+    fun addMcpServer(server: McpServerConfig) = scope.launch { settingsManager.saveMcpServers(mcpServers.value + server) }
+    fun updateMcpServer(server: McpServerConfig) = scope.launch {
+        settingsManager.saveMcpServers(mcpServers.value.map { if (it.id == server.id) server else it })
     }
 
     // ── Derived lookups ─────────────────────────────────────────

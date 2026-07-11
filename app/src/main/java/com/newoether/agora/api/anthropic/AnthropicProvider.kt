@@ -205,31 +205,7 @@ class AnthropicProvider : LlmProvider {
             AnthropicTool(
                 name = td.function.name,
                 description = td.function.description,
-                inputSchema = JsonObject(
-                    mapOf(
-                        "type" to JsonPrimitive(td.function.parameters.type),
-                        "properties" to JsonObject(
-                            td.function.parameters.properties.mapValues { (_, prop) ->
-                                val propMap = mutableMapOf<String, kotlinx.serialization.json.JsonElement>(
-                                    "type" to JsonPrimitive(prop.type),
-                                    "description" to JsonPrimitive(prop.description)
-                                )
-                                if (prop.items != null) {
-                                    propMap["items"] = JsonObject(
-                                        mapOf(
-                                            "type" to JsonPrimitive(prop.items.type),
-                                            "description" to JsonPrimitive(prop.items.description)
-                                        )
-                                    )
-                                }
-                                JsonObject(propMap)
-                            }
-                        ),
-                        "required" to kotlinx.serialization.json.JsonArray(
-                            td.function.parameters.required.map { JsonPrimitive(it) }
-                        )
-                    )
-                )
+                inputSchema = td.function.parameters.toJsonSchema()
             )
         }
 
