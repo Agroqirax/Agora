@@ -1,25 +1,29 @@
 <div align="center">
   <img src="app/src/main/assets/agora_transparent_large.png" alt="Agora Logo" width="120" />
 
-  # Agora
+# Agora
 
-  **BYOK LLM client with multi-provider access, agentic workflows, and remote device control.**
+**BYOK LLM client with multi-provider access, agentic workflows, and remote device control.**
 
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
-  [![Kotlin](https://img.shields.io/badge/Kotlin-Native-blue.svg)](https://kotlinlang.org/)
-  <br/>**English** | [中文](README_CN.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
+[![Kotlin](https://img.shields.io/badge/Kotlin-Native-blue.svg)](https://kotlinlang.org/)
+<br/>**English** | [中文](README_CN.md)
 
   <img src="assets/feature_graphic.png" alt="Agora — A BYOK AI App that takes back your data sovereignty." width="100%" />
 </div>
 
 ## Download
 
-[![F-Droid](https://img.shields.io/badge/F--Droid-Install-blue?logo=fdroid)](https://f-droid.org/packages/com.newoether.agora/)
-&nbsp;&nbsp;
-[![Google Play](https://img.shields.io/badge/Google_Play-Install-blue?logo=google-play)](https://play.google.com/store/apps/details?id=com.newoether.agora)
-&nbsp;&nbsp;
-[![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-blue?logo=github)](https://github.com/newo-ether/Agora/releases)
+[<img src="https://play.google.com/intl/en_us/badges/images/generic/en_badge_web_generic.png"
+    alt="Get it on Google Play"
+    height="80">](https://play.google.com/store/apps/details?id=com.newoether.agora)
+[<img src="https://fdroid.gitlab.io/artwork/badge/get-it-on.png"
+    alt="Get it on F-Droid"
+    height="80">](https://f-droid.org/packages/com.newoether.agora)
+[<img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/main/get-it-on-github.png"
+    alt="Get it on GitHub"
+    height="80">](https://github.com/newo-ether/Agora/releases/latest)
 
 - **F-Droid (Recommended)** — Install via [F-Droid](https://f-droid.org/), search for **Agora**.
 - **Google Play** — Install from [Google Play Store](https://play.google.com/store/apps/details?id=com.newoether.agora).
@@ -50,6 +54,7 @@
 ## Features
 
 ### Multi-Provider Access
+
 - **8 built-in providers:** OpenAI, Anthropic, Google Gemini, DeepSeek, Qwen (DashScope), OpenRouter, Ollama, Local (GGUF via llama.cpp)
 - **Unlimited custom providers** with arbitrary base URLs and API keys
 - **BYOK:** Bring your own API keys — no subscriptions, no middlemen
@@ -57,6 +62,7 @@
 - Per-provider base URL override for proxies and self-hosted endpoints
 
 ### Agentic Tools
+
 - **Web Search** — DuckDuckGo Lite (anonymous, no key), Brave, Serper, Tavily, and SearXNG integration
 - **Code Execution** — Gemini code execution for running and testing code inline; Alpine Linux sandbox via PRoot with SAF file access
 - **Image Generation** — BYOK text-to-image via OpenAI-compatible `/v1/images/generations`, rendered inline in chat
@@ -65,22 +71,26 @@
 - **Conversation Search** — RAG-powered semantic search over chat history
 
 ### Thinking & Reasoning
+
 - Deep reasoning: OpenAI o1/o3, Anthropic extended thinking, Gemini thinking, DeepSeek-R1, Qwen QwQ
 - Configurable thinking level (low/medium/high)
 - Streaming think-tag renderer with collapsible UI and duration tracking
 
 ### On-Device Intelligence
+
 - **Local LLM inference** via llama.cpp — run GGUF models entirely offline
 - **Local embeddings** for on-device semantic search (RAG)
 - **Ollama** provider for self-hosted models on your local network
 
 ### Remote Device Control (Conch Protocol)
+
 - ECDH key exchange + AES-256-GCM encryption + HMAC-SHA256 signing
 - Token bucket rate limiting and nonce-based anti-replay protection
 - **Multi-device support** — configure and switch between multiple remote servers
 - **MCP integration** — Conch as a Claude Desktop MCP server
 
 ### Knowledge Management
+
 - **RAG semantic search** across all past conversations using cosine similarity
 - Configurable similarity threshold and keyword/model search methods
 - Selectable embedding model (remote or local), independent of chat model
@@ -88,6 +98,7 @@
 - Visual context rollout indicator dims messages outside the active window
 
 ### Data Portability
+
 - **.agora Export/Import:** Conversations, memories, prompts, settings, and API keys in one portable file
 - **Merge, Replace, and Skip** import strategies
 - **Auto Backup** — periodic WorkManager-based backup with configurable period, categories, and retention
@@ -95,6 +106,7 @@
 - API key safety warnings for both export and import workflows
 
 ### Customization
+
 - **System prompt templates** with three-section editor (system prompt + user prepend + user append)
 - Variable substitution: `{sent_time}`, `{sent_date}`, and extensible variable system
 - Per-conversation model and system prompt switching
@@ -103,6 +115,7 @@
 - **Auto title generation** with configurable model
 
 ### UI & UX
+
 - Modern Material 3 design in Jetpack Compose with dynamic color (Material You)
 - Light / Dark / System theme modes with configurable color schemes
 - **Non-linear branching:** Edit any past message and branch into alternative conversation paths
@@ -124,6 +137,7 @@
 ## Getting Started
 
 ### Prerequisites
+
 - [Android Studio](https://developer.android.com/studio) (Ladybug or newer recommended)
 - Android SDK 34+
 - A valid API key from a supported provider

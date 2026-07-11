@@ -11,3 +11,4 @@ Features:
 * .agora export/import (conversations, memories, prompts, settings, keys) and import from Claude and ChatGPT exports
 * Markdown rendering with syntax highlighting, LaTeX math, image and file attachments
 * English and Chinese language support
+* MCP server support

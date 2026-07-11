@@ -38,6 +38,17 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!--
+                Lets the system "App info" page show a shortcut (usually a gear icon)
+                that opens straight to Agora's own in-app settings screen, instead of
+                only the launcher entry point.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <provider

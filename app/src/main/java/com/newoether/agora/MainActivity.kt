@@ -84,6 +84,17 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
+    // Bumped whenever the Activity is (re)started via the system App Info page's
+    // "additional settings in app" shortcut (ACTION_APPLICATION_PREFERENCES), so
+    // Compose can react even if this Activity instance was already running.
+    private var settingsIntentTrigger by mutableIntStateOf(0)
+
+    private fun Intent?.registerIfSettingsRequest() {
+        if (this?.action == Intent.ACTION_APPLICATION_PREFERENCES) {
+            settingsIntentTrigger++
+        }
+    }
+
     override fun attachBaseContext(newBase: Context) {
         val langCode = kotlinx.coroutines.runBlocking {
             SettingsManager(newBase).appLanguage.first()
@@ -116,6 +127,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        intent.registerIfSettingsRequest()
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -219,12 +232,18 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         false -> {
-                            MainNavigation(viewModel, settingsManager)
+                            MainNavigation(viewModel, settingsManager, openSettingsTrigger = settingsIntentTrigger)
                         }
                     }
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.registerIfSettingsRequest()
     }
 
     override fun onResume() {
@@ -380,8 +399,18 @@ private fun Modifier.consumePointerInput(): Modifier =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
-    var showSettings by rememberSaveable { mutableStateOf(false) }
+fun MainNavigation(
+    viewModel: ChatViewModel,
+    settingsManager: SettingsManager,
+    // > 0 means the Activity was opened (or re-delivered an intent) via the system
+    // App Info page's shortcut to this app's own settings. Each increment — including
+    // repeat taps while the app is already running — should (re)open the settings screen.
+    openSettingsTrigger: Int = 0
+) {
+    var showSettings by rememberSaveable { mutableStateOf(openSettingsTrigger > 0) }
+    LaunchedEffect(openSettingsTrigger) {
+        if (openSettingsTrigger > 0) showSettings = true
+    }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
     var fullScreenMediaIndex by remember { mutableIntStateOf(0) }
     var pdfViewerSelection by remember { mutableStateOf(setOf<Int>()) }
