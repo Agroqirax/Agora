@@ -554,9 +554,9 @@ fun ChatApp(
                                 bottomBarHeight = bottomBarHeight,
                                 viewportHeight = viewportHeightPx,
                                 messageHeights = messageHeights,
-                                onEditMessage = { id, text ->
+                                onEditMessage = { id, text, images, attachmentMeta ->
                                     val isFirstMessage = messages.isEmpty()
-                                    viewModel.editMessage(id, text)
+                                    viewModel.editMessage(id, text, images, attachmentMeta)
                                     scope.launch {
                                         if (!isFirstMessage) {
                                             delay(50)

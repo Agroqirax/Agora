@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallDisplayModes
@@ -30,7 +31,7 @@ private const val STREAMING_MARKDOWN_FLUSH_MS = 250L
 @Composable
 fun MessageItem(
     message: ChatMessage, 
-    onEdit: (String, String) -> Unit, 
+    onEdit: (String, String, List<String>, AttachmentMeta?) -> Unit,
     isStreaming: Boolean = false,
     isLoading: Boolean = false,
     isEditingAllowed: Boolean = true,

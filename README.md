@@ -25,10 +25,7 @@
     alt="Get it on GitHub"
     height="80">](https://github.com/newo-ether/Agora/releases/latest)
 
-- **F-Droid (Recommended)** — Install via [F-Droid](https://f-droid.org/), search for **Agora**.
-- **Google Play** — Install from [Google Play Store](https://play.google.com/store/apps/details?id=com.newoether.agora).
-- **GitHub Releases** — Download the latest `.apk` from the [Releases page](https://github.com/newo-ether/Agora/releases).
-- **Build from Source** — Clone and build with Android Studio (see [Getting Started](#getting-started)).
+Note: the google play version does not include the local shell. Download from GitHub or F-Droid instead if you want this feature.
 
 ---
 
@@ -69,6 +66,8 @@
 - **Remote Shell & File I/O** — Execute commands, read/write/edit/glob/grep files on remote servers via [Conch](https://github.com/newo-ether/conch)
 - **Memory** — Persistent active memory and saved memory files across conversations
 - **Conversation Search** — RAG-powered semantic search over chat history
+- **Android device** — Get the current location and r+w calendar & contacts
+- **MCP Servers** — Connect to mcp servers and use their tools
 
 ### Thinking & Reasoning
 

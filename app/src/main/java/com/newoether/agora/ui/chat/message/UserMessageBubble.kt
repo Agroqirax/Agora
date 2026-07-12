@@ -3,16 +3,19 @@ package com.newoether.agora.ui.chat.message
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -33,6 +36,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Shape
 import com.newoether.agora.R
 import com.newoether.agora.util.noOpBringIntoView
+import com.newoether.agora.model.AttachmentItem
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.ui.chat.AttachmentThumbnailItem
 import com.newoether.agora.ui.chat.ThumbnailClickHandlers
@@ -60,7 +65,7 @@ internal fun UserMessageBubble(
     isEditingAllowed: Boolean,
     branchIndex: Int,
     totalBranches: Int,
-    onEdit: (String, String) -> Unit,
+    onEdit: (String, String, List<String>, AttachmentMeta?) -> Unit,
     onCancelEdit: () -> Unit,
     onStartEdit: () -> Unit,
     onSwitchBranch: (Int) -> Unit,
@@ -74,6 +79,56 @@ internal fun UserMessageBubble(
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
     var showMenu by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+    val hasMetaItems = message.attachmentMeta?.items?.isNotEmpty() == true
+    val meta = remember(message.attachmentMeta) { message.attachmentMeta }
+    // Build display items: skip non-first video/PDF frames, add meta-only items.
+    // Shared by both the read-only bubble and the edit-mode attachment row below.
+    val displayItems = remember(message.images, meta) {
+        val skipIndices = mutableSetOf<Int>()
+        if (meta != null) {
+            for (item in meta.items) {
+                val count = item.pageCount ?: 1
+                if (item.imageIndex != null && count > 1 && (item.type == "video" || item.type == "pdf")) {
+                    for (i in item.imageIndex + 1 until item.imageIndex + count) {
+                        skipIndices.add(i)
+                    }
+                }
+            }
+        }
+        // Image-backed items
+        val imageItems = message.images.mapIndexedNotNull { index, path ->
+            if (index in skipIndices) null
+            else {
+                val item = findMetaForIndex(meta, index)
+                Triple(index, path, item)
+            }
+        }
+        // Meta-only items (file/PDF without image representation)
+        val metaOnlyItems = meta?.items
+            ?.filter { it.imageIndex == null && (it.type == "file" || it.type == "pdf" || it.type == "image") }
+            ?.map { Triple(-1, "", it) }
+            ?: emptyList()
+        imageItems + metaOnlyItems
+    }
+    // Collect all image/video URLs for the pager
+    val allMediaUrls = remember(displayItems) {
+        displayItems.mapNotNull { (_, imagePath, metaItem) ->
+            val t = resolveAttachmentType(imagePath, metaItem, ctx)
+            when (t) {
+                "image" -> if (imagePath.isNotEmpty()) imagePath else null
+                "video" -> metaItem?.originalUri
+                else -> null
+            }
+        }
+    }
+    // Which display items are still attached while editing (indices into displayItems).
+    // Reset to "all kept" whenever a fresh edit session starts, so a Cancel followed by
+    // re-entering edit (or editing a different message) doesn't carry over stale removals.
+    var keptDisplayIndices by remember(message.id) { mutableStateOf(displayItems.indices.toSet()) }
+    LaunchedEffect(isEditing, message.id) {
+        if (isEditing) keptDisplayIndices = displayItems.indices.toSet()
+    }
 
     Column(horizontalAlignment = Alignment.End) {
         Surface(
@@ -88,6 +143,74 @@ internal fun UserMessageBubble(
                 val editState = rememberTextFieldState(message.text)
                 val editScrollState = rememberScrollState()
                 Column(modifier = Modifier.padding(8.dp)) {
+                    if (displayItems.isNotEmpty()) {
+                        // Same thumbnail + top-right remove-X treatment as the composer's
+                        // pending-attachment row (AttachmentPreviewRow), applied to this
+                        // message's existing attachments instead of a fresh selection.
+                        LazyRow(
+                            modifier = Modifier.padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            itemsIndexed(displayItems) { itemIdx, (index, imagePath, metaItem) ->
+                                if (itemIdx !in keptDisplayIndices) return@itemsIndexed
+                                val type = remember(imagePath, metaItem?.type) {
+                                    resolveAttachmentType(imagePath, metaItem, ctx)
+                                }
+                                val fileName = metaItem?.fileName ?: imagePath.substringAfterLast("/")
+                                val pdfPages = if (type == "pdf") {
+                                    metaItem?.imageIndex?.let { start ->
+                                        val count = metaItem.pageCount ?: 1
+                                        val end = (start + count).coerceAtMost(message.images.size)
+                                        if (start in 0 until message.images.size) message.images.subList(start, end) else emptyList()
+                                    } ?: emptyList()
+                                } else emptyList()
+                                val mediaIndex = allMediaUrls.indexOf(
+                                    when (type) {
+                                        "video" -> metaItem?.originalUri
+                                        else -> imagePath
+                                    }
+                                ).coerceAtLeast(0)
+
+                                Box(modifier = Modifier.padding(top = 5.dp)) {
+                                    AttachmentThumbnailItem(
+                                        type = type,
+                                        imagePath = imagePath,
+                                        fileName = fileName,
+                                        originalUri = metaItem?.originalUri,
+                                        textContent = metaItem?.textContent,
+                                        pdfPages = pdfPages,
+                                        allMediaUrls = allMediaUrls,
+                                        mediaIndex = mediaIndex,
+                                        handlers = ThumbnailClickHandlers(
+                                            onMediaClick = onMediaClick,
+                                            onFileClick = onFileContentClick,
+                                            onPdfClick = onPdfPagesClick
+                                        )
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .offset(x = 5.dp, y = (-5).dp)
+                                            .size(18.dp)
+                                            .background(Color.Black.copy(alpha = 0.8f), CircleShape)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .clickable {
+                                                haptics.selection()
+                                                keptDisplayIndices = keptDisplayIndices - itemIdx
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = stringResource(R.string.remove),
+                                            tint = Color.White,
+                                            modifier = Modifier.size(10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Box(modifier = Modifier.noOpBringIntoView()) {
                         TextField(
                             state = editState,
@@ -104,7 +227,13 @@ internal fun UserMessageBubble(
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = { onCancelEdit() }) { Text(stringResource(R.string.cancel)) }
-                        TextButton(onClick = { onEdit(message.id, editState.text.toString()) }, enabled = !isLoading) { Text(stringResource(R.string.send)) }
+                        TextButton(
+                            onClick = {
+                                val (retainedImages, retainedMeta) = buildRetainedAttachments(message, displayItems, keptDisplayIndices)
+                                onEdit(message.id, editState.text.toString(), retainedImages, retainedMeta)
+                            },
+                            enabled = !isLoading
+                        ) { Text(stringResource(R.string.send)) }
                     }
                 }
             } else {
@@ -112,53 +241,7 @@ internal fun UserMessageBubble(
                     modifier = Modifier.padding(16.dp).noOpBringIntoView(),
                     horizontalAlignment = Alignment.Start
                 ) {
-                    val hasMetaItems = message.attachmentMeta?.items?.isNotEmpty() == true
                 if (message.images.isNotEmpty() || hasMetaItems) {
-                        val ctx = LocalContext.current
-                        val meta = remember(message.attachmentMeta) {
-                            message.attachmentMeta
-                        }
-                        // Build display items: skip non-first video/PDF frames, add meta-only items
-                        val displayItems = remember(message.images, meta) {
-                            val skipIndices = mutableSetOf<Int>()
-                            if (meta != null) {
-                                for (item in meta.items) {
-                                    val count = item.pageCount ?: 1
-                                    if (item.imageIndex != null && count > 1 && (item.type == "video" || item.type == "pdf")) {
-                                        for (i in item.imageIndex + 1 until item.imageIndex + count) {
-                                            skipIndices.add(i)
-                                        }
-                                    }
-                                }
-                            }
-                            // Image-backed items
-                            val imageItems = message.images.mapIndexedNotNull { index, path ->
-                                if (index in skipIndices) null
-                                else {
-                                    val item = findMetaForIndex(meta, index)
-                                    Triple(index, path, item)
-                                }
-                            }
-                            // Meta-only items (file/PDF without image representation)
-                            val metaOnlyItems = meta?.items
-                                ?.filter { it.imageIndex == null && (it.type == "file" || it.type == "pdf" || it.type == "image") }
-                                ?.map { Triple(-1, "", it) }
-                                ?: emptyList()
-                            imageItems + metaOnlyItems
-                        }
-
-                        // Collect all image/video URLs for the pager
-                        val allMediaUrls = remember(displayItems) {
-                            displayItems.mapNotNull { (_, imagePath, metaItem) ->
-                                val t = resolveAttachmentType(imagePath, metaItem, ctx)
-                                when (t) {
-                                    "image" -> if (imagePath.isNotEmpty()) imagePath else null
-                                    "video" -> metaItem?.originalUri
-                                    else -> null
-                                }
-                            }
-                        }
-
                         LazyRow(
                             modifier = Modifier.padding(bottom = if (message.text.isNotEmpty()) 8.dp else 0.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -279,4 +362,38 @@ internal fun UserMessageBubble(
             }
         }
     }
+}
+
+/**
+ * Rebuilds the images/attachmentMeta pair for an edited message from the subset of
+ * [displayItems] the user chose to keep (identified by their index within
+ * [displayItems], as tracked by [UserMessageBubble]'s edit-mode removal state).
+ * Multi-page video/PDF groups are removed or kept as a unit, and each retained meta
+ * item's `imageIndex` is remapped to that item's new position in the rebuilt image list.
+ */
+private fun buildRetainedAttachments(
+    message: ChatMessage,
+    displayItems: List<Triple<Int, String, AttachmentItem?>>,
+    keptDisplayIndices: Set<Int>
+): Pair<List<String>, AttachmentMeta?> {
+    val newImages = mutableListOf<String>()
+    val newMetaItems = mutableListOf<AttachmentItem>()
+    displayItems.forEachIndexed { displayIdx, (rawIndex, _, metaItem) ->
+        if (displayIdx !in keptDisplayIndices) return@forEachIndexed
+        val pageCount = metaItem?.pageCount ?: 1
+        val isGrouped = metaItem?.imageIndex != null && pageCount > 1 &&
+            (metaItem.type == "video" || metaItem.type == "pdf")
+        val rawIndices = when {
+            isGrouped -> (metaItem!!.imageIndex!! until (metaItem.imageIndex + pageCount)).toList()
+            rawIndex != -1 -> listOf(rawIndex)
+            else -> emptyList()
+        }
+        val startNewIndex = newImages.size
+        rawIndices.forEach { idx -> message.images.getOrNull(idx)?.let { newImages.add(it) } }
+        if (metaItem != null) {
+            newMetaItems.add(if (rawIndices.isNotEmpty()) metaItem.copy(imageIndex = startNewIndex) else metaItem)
+        }
+    }
+    val newMeta = if (newMetaItems.isNotEmpty()) AttachmentMeta(newMetaItems) else null
+    return newImages to newMeta
 }

@@ -13,6 +13,7 @@ import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
@@ -330,7 +331,7 @@ class MessageGenerationController(
     // editMessage
     // ════════════════════════════════════════════════════════════════════
 
-    fun editMessage(messageId: String, newText: String) {
+    fun editMessage(messageId: String, newText: String, images: List<String> = emptyList(), attachmentMeta: AttachmentMeta? = null) {
         val currentId = currentConversationId.value ?: return
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
@@ -349,7 +350,8 @@ class MessageGenerationController(
             val newUserMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
                 id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
-                text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
+                text = newText, images = images, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
+                attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
             ))
             val newMap = selectedChildren.value.toMutableMap()
             newMap[messageToEdit.parentId] = newUserMessageId

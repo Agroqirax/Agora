@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -44,7 +45,7 @@ fun MessageList(
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
     viewportHeight: Int = 0,
     messageHeights: SnapshotStateMap<String, Int> = remember { mutableStateMapOf() },
-    onEditMessage: (String, String) -> Unit = { _, _ -> },
+    onEditMessage: (String, String, List<String>, AttachmentMeta?) -> Unit = { _, _, _, _ -> },
     onSwitchBranch: (String?, String, Int) -> Unit = { _, _, _ -> },
     onRegenerate: (String) -> Unit = {},
     onDelete: (String) -> Unit = {},
@@ -109,8 +110,8 @@ fun MessageList(
                 Box(modifier = Modifier.animateItem(fadeInSpec = tween(400), placementSpec = null, fadeOutSpec = null)) {
                 MessageItem(
                     message = message,
-                    onEdit = { id, text ->
-                        onEditMessage(id, text)
+                    onEdit = { id, text, images, attachmentMeta ->
+                        onEditMessage(id, text, images, attachmentMeta)
                         editingMessageId = null
                     },
                     // isStreaming driven by message status, not isLoading flag

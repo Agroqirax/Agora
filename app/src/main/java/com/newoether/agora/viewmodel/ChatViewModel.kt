@@ -980,7 +980,8 @@ class ChatViewModel(
         }
     }
 
-    fun editMessage(messageId: String, newText: String) = generationController.editMessage(messageId, newText)
+    fun editMessage(messageId: String, newText: String, images: List<String> = emptyList(), attachmentMeta: AttachmentMeta? = null) =
+        generationController.editMessage(messageId, newText, images, attachmentMeta)
 
     private fun getFileName(context: android.content.Context, uri: android.net.Uri): String {
         return try {
