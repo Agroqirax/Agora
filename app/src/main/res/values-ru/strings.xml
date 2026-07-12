@@ -991,7 +991,7 @@
     <string name="mcp_server_url">URL-адрес сервера</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
     <string name="mcp_server_bearer_token">Токен на предъявителя</string>
-    <string name="mcp_server_bearer_token_hint">Отправлено как разрешение: предъявитель…</string>
+    <string name="mcp_server_bearer_token_hint">Отправлено как Authorization: Bearer …</string>
     <string name="mcp_server_headers">Дополнительные заголовки</string>
     <string name="mcp_server_headers_hint">X-Api-Key: секрет</string>
     <string name="mcp_server_headers_desc">По одному заголовку в строке, например «Имя: значение».</string>

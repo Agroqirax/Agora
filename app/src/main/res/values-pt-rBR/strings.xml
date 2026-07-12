@@ -991,7 +991,7 @@
     <string name="mcp_server_url">URL do servidor</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
     <string name="mcp_server_bearer_token">Token do portador</string>
-    <string name="mcp_server_bearer_token_hint">Enviado como Autorização: Portador…</string>
+    <string name="mcp_server_bearer_token_hint">Enviado como Authorization: Bearer …</string>
     <string name="mcp_server_headers">Cabeçalhos adicionais</string>
     <string name="mcp_server_headers_hint">Chave X-Api: segredo</string>
     <string name="mcp_server_headers_desc">Um cabeçalho por linha, como \"Nome: valor\"</string>
