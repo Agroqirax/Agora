@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">Agora respondió</string>
@@ -212,6 +213,26 @@
     <string name="tool_generate_image">Generar imagen</string>
     <string name="tool_generating_image">Generando imagen…</string>
     <string name="tool_generated_image">Imagen generada</string>
+    <string name="tool_get_location">Obtener ubicación</string>
+    <string name="tool_getting_location">Obteniendo ubicación…</string>
+    <string name="tool_location_done">Ubicación actual obtenida</string>
+    <string name="tool_location_permission_denied">Permiso de ubicación denegado</string>
+    <string name="tool_location_denied">El usuario rechazó compartir su ubicación</string>
+    <string name="tool_location_failed">No se pudo obtener la ubicación</string>
+    <string name="tool_list_calendars">Listar calendarios</string>
+    <string name="tool_get_calendar_events">Obtener eventos del calendario</string>
+    <string name="tool_create_calendar_event">Crear evento del calendario</string>
+    <string name="tool_update_calendar_event">Actualizar evento del calendario</string>
+    <string name="tool_delete_calendar_event">Eliminar evento del calendario</string>
+    <string name="tool_search_contacts">Buscar contactos</string>
+    <string name="tool_get_contact">Obtener contacto</string>
+    <string name="tool_create_contact">Crear contacto</string>
+    <string name="tool_update_contact">Actualizar contacto</string>
+    <string name="tool_delete_contact">Eliminar contacto</string>
+    <string name="tool_calendar_denied">El usuario rechazó este cambio en el calendario</string>
+    <string name="tool_calendar_permission_denied">Permiso del calendario denegado</string>
+    <string name="tool_contacts_denied">El usuario rechazó este cambio en los contactos</string>
+    <string name="tool_contacts_permission_denied">Permiso de contactos denegado</string>
     <string name="img_action_save">Guardar en galería</string>
     <string name="img_action_share">Compartir</string>
     <string name="img_saved">Guardado en la galería</string>
@@ -303,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">Activa la capacidad de razonamiento del modelo</string>
     <string name="gen_thinking_level">Nivel de razonamiento</string>
     <string name="gen_thinking_level_desc">Controla la profundidad del razonamiento; mayor = razonamiento más exhaustivo</string>
+    <string name="gen_thinking_level_minimal">Muy bajo</string>
     <string name="gen_thinking_level_low">Bajo</string>
     <string name="gen_thinking_level_medium">Medio</string>
     <string name="gen_thinking_level_high">Alto</string>
-    <string name="gen_thinking_level_minimal">Muy bajo</string>
     <string name="gen_thinking_level_xhigh">Muy alto</string>
     <string name="gen_thinking_level_max">Máximo</string>
     <string name="thinking_effort_label">Esfuerzo de razonamiento</string>
@@ -329,7 +350,6 @@
     <string name="advanced_settings">Avanzado</string>
     <string name="advanced_generation_title">Ajustes avanzados</string>
     <string name="advanced_per_conversation">Anulaciones por conversación</string>
-    <string name="appearance_interface">Interfaz</string>
     <string name="message_display">Visualización de mensajes</string>
     <string name="tool_call_display_mode">Bloques de razonamiento y herramientas</string>
     <string name="tool_call_display_mode_timeline">Cronología</string>
@@ -338,9 +358,6 @@
     <string name="tool_call_display_mode_timeline_desc">Muestra respuesta, razonamiento y bloques de herramientas en orden cronológico</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">Mantiene el orden cronológico pero fusiona bloques consecutivos de razonamiento, herramientas e imágenes</string>
     <string name="tool_call_display_mode_compact_desc">Agrupa los bloques de razonamiento y herramientas encima de la respuesta</string>
-    <string name="interaction_feedback">Respuesta de interacción</string>
-    <string name="haptic_feedback">Respuesta háptica</string>
-    <string name="haptic_feedback_desc">Usa vibraciones sutiles para el estado de generación y acciones importantes.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Búsqueda web</string>
@@ -398,6 +415,29 @@
     <string name="shell_result_server">Servidor: %1$s</string>
     <string name="shell_device_type">Tipo</string>
 
+    <!-- Settings - Android Page -->
+    <string name="android_title">Android</string>
+    <string name="android_desc">Funciones de Android</string>
+    <string name="calendar_title">Calendario</string>
+    <string name="calendar_enable">Activar herramienta de calendario</string>
+    <string name="calendar_enable_desc">Permitir que el modelo vea tu calendario</string>
+    <string name="calendar_confirm_setting">Confirmar cambios en el calendario</string>
+    <string name="calendar_confirm_setting_desc">Preguntar antes de que el asistente pueda modificar o eliminar eventos del calendario</string>
+    <string name="contacts_title">Contactos</string>
+    <string name="contacts_enable">Activar herramienta de contactos</string>
+    <string name="contacts_enable_desc">Permitir que el modelo vea tus contactos</string>
+    <string name="contacts_confirm_setting">Confirmar cambios en los contactos</string>
+    <string name="contacts_confirm_setting_desc">Preguntar antes de que el asistente pueda modificar o eliminar contactos</string>
+    <string name="location_title">Ubicación</string>
+    <string name="location_enable">Activar herramienta de ubicación</string>
+    <string name="location_enable_desc">Permitir que el modelo vea tu ubicación</string>
+    <string name="location_confirm_setting">Confirmar ubicación</string>
+    <string name="location_confirm_setting_desc">Preguntar antes de que el asistente pueda obtener tu ubicación</string>
+    <string name="location_reverse_geocode_enable">Obtener dirección a partir de las coordenadas</string>
+    <string name="location_reverse_geocode_enable_desc">Buscar también una dirección postal para las coordenadas mediante Nominatim</string>
+    <string name="location_nominatim_base_url">URL del servidor Nominatim</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">Entorno aislado local</string>
     <string name="sandbox_enable">Activar entorno aislado local</string>
@@ -414,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">Uso del disco</string>
     <string name="sandbox_install">Instalar</string>
+    <string name="sandbox_upgrade">Actualizar</string>
     <string name="sandbox_install_packages">Instalar paquetes</string>
     <string name="sandbox_package_name">Nombre del paquete</string>
     <string name="sandbox_quick_install">Instalación rápida</string>
@@ -451,7 +492,6 @@
     <string name="sandbox_manage_desc">Instalar, configurar paquetes o restablecer</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">Paquetes instalados (%d)</string>
-    <string name="sandbox_upgrade">Actualizar</string>
     <string name="sandbox_browse_files">Explorar archivos</string>
     <string name="sandbox_browse_files_desc">Abrir directorio sandbox en administrador de archivos</string>
 
@@ -517,6 +557,7 @@
     <string name="settings_appearance">Apariencia</string>
     <string name="settings_appearance_desc">Tema, esquema de color y color dinámico</string>
     <string name="appearance_title">Apariencia</string>
+    <string name="appearance_interface">Interfaz</string>
     <string name="theme_mode">Modo de tema</string>
     <string name="theme_mode_light">Claro</string>
     <string name="theme_mode_dark">Oscuro</string>
@@ -547,6 +588,9 @@
     <string name="visual_effects">Efectos visuales</string>
     <string name="blur_effects">Efectos de desenfoque</string>
     <string name="blur_effects_desc">Desenfoca la parte superior de la lista de chat bajo la barra. Desactívalo para ahorrar rendimiento.</string>
+    <string name="interaction_feedback">Respuesta de interacción</string>
+    <string name="haptic_feedback">Respuesta háptica</string>
+    <string name="haptic_feedback_desc">Usa vibraciones sutiles para el estado de generación y acciones importantes.</string>
 
     <!-- Language -->
     <string name="language_title">Idioma</string>
@@ -831,12 +875,15 @@
     <string name="no_api_key_configured">No hay clave de API configurada.</string>
     <string name="no_api_key_for_provider">No hay credenciales configuradas para %s. Añade una clave de API o una URL base en Ajustes.</string>
     <string name="local_model_not_found">No se encontró el archivo del modelo local. Vuelve a importar el modelo.</string>
+    <string name="local_context_exceeded">Esta conversación necesita %1$d tokens de entrada, pero el contexto del modelo local es de %2$d tokens. Reduce la ventana de contexto o aumenta el tamaño del contexto del modelo.</string>
     <string name="all_messages_cached">Los %1$d mensajes están en caché.</string>
     <string name="cached_partial_failed">%1$d de %2$d en caché. %3$d fallaron.</string>
     <string name="retry">Reintentar</string>
     <string name="parse_error">Error de análisis</string>
     <string name="unknown_error">Error desconocido</string>
     <string name="could_not_read_file">No se pudo leer el archivo</string>
+    <string name="import_file_too_large">Archivo demasiado grande (%1$d MB). Elige un archivo de exportación más pequeño.</string>
+    <string name="import_out_of_memory">No hay suficiente memoria para importar este archivo. Elige una exportación más pequeña.</string>
 
     <!-- Documentation -->
     <string name="documentation">Documentación</string>
@@ -927,6 +974,58 @@
     <string name="shell_confirm_deny">Denegar</string>
     <string name="shell_confirm_setting">Confirmar acciones de shell remoto</string>
     <string name="shell_confirm_setting_desc">Preguntar antes de que el asistente ejecute comandos o escriba archivos en servidores SSH/Conch remotos</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">Servidores MCP</string>
+    <string name="mcp_desc">Conectarse a servidores de herramientas Model Context Protocol</string>
+    <string name="mcp_enable">Activar herramientas MCP</string>
+    <string name="mcp_enable_desc">Permitir que el modelo utilice las herramientas expuestas por los servidores MCP configurados</string>
+    <string name="mcp_servers">Servidores</string>
+    <string name="mcp_add_server">Añadir servidor</string>
+    <string name="mcp_remove_server">Eliminar</string>
+    <string name="mcp_no_servers">No hay servidores MCP configurados</string>
+    <string name="mcp_server_enabled">Activado</string>
+    <string name="mcp_server_name">Nombre</string>
+    <string name="mcp_server_name_hint">Mi servidor MCP</string>
+    <string name="mcp_server_desc">Descripción</string>
+    <string name="mcp_server_desc_hint">Para qué sirve este servidor</string>
+    <string name="mcp_server_url">URL del servidor</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">Token Bearer</string>
+    <string name="mcp_server_bearer_token_hint">Se envía como Authorization: Bearer …</string>
+    <string name="mcp_server_headers">Cabeceras adicionales</string>
+    <string name="mcp_server_headers_hint">X-Api-Key: secret</string>
+    <string name="mcp_server_headers_desc">Una cabecera por línea, con el formato \"Nombre: valor\"</string>
+    <string name="mcp_server_timeout">Tiempo de espera (segundos)</string>
+    <string name="mcp_timeout_value">%d s</string>
+    <string name="mcp_delete_confirm_title">Eliminar servidor MCP</string>
+    <string name="mcp_delete_confirm_message">¿Seguro que deseas eliminar \"%1$s\"?</string>
+    <string name="mcp_test_connection">Probar conexión</string>
+    <string name="mcp_test_connection_testing">Conectando…</string>
+    <string name="mcp_test_connection_success">Conectado — se encontraron %1$d herramienta(s)</string>
+    <string name="mcp_test_connection_success_none">Conectado — no se encontraron herramientas</string>
+    <string name="mcp_test_connection_failure">Error: %1$s</string>
+    <string name="mcp_confirm_title">¿Permitir \"%1$s\" en \"%2$s\"?</string>
+    <string name="mcp_confirm_allow">Permitir una vez</string>
+    <string name="mcp_confirm_always">Permitir siempre este servidor</string>
+    <string name="mcp_confirm_deny">Denegar</string>
+    <string name="mcp_confirm_setting">Confirmar llamadas destructivas de herramientas MCP</string>
+    <string name="mcp_confirm_setting_desc">Preguntar antes de que el asistente ejecute una herramienta que un servidor MCP marque como destructiva. Las herramientas de solo lectura siempre se ejecutan sin preguntar.</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">¿Compartir tu ubicación?</string>
+    <string name="location_confirm_message">El asistente quiere leer la ubicación actual de tu dispositivo y compartirla con el modelo.</string>
+    <string name="location_confirm_allow">Permitir</string>
+    <string name="location_confirm_deny">Denegar</string>
+    <string name="location_confirm_always_allow">Permitir siempre (no volver a preguntar)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">¿Permitir este cambio en el calendario?</string>
+    <string name="calendar_confirm_allow">Permitir</string>
+    <string name="calendar_confirm_deny">Denegar</string>
+    <string name="calendar_confirm_always_allow">Permitir siempre (no volver a preguntar)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">¿Permitir este cambio en los contactos?</string>
+    <string name="contacts_confirm_allow">Permitir</string>
+    <string name="contacts_confirm_deny">Denegar</string>
+    <string name="contacts_confirm_always_allow">Permitir siempre (no volver a preguntar)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora se cerró inesperadamente</string>

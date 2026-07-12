@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">Agora hat geantwortet</string>
@@ -323,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">Nachdenk-/Reasoning-Fähigkeit des Modells aktivieren</string>
     <string name="gen_thinking_level">Nachdenk-Stufe</string>
     <string name="gen_thinking_level_desc">Steuert die Nachdenktiefe; höher = gründlicheres Reasoning</string>
+    <string name="gen_thinking_level_minimal">Sehr niedrig</string>
     <string name="gen_thinking_level_low">Niedrig</string>
     <string name="gen_thinking_level_medium">Mittel</string>
     <string name="gen_thinking_level_high">Hoch</string>
-    <string name="gen_thinking_level_minimal">Sehr niedrig</string>
     <string name="gen_thinking_level_xhigh">Sehr hoch</string>
     <string name="gen_thinking_level_max">Maximum</string>
     <string name="thinking_effort_label">Nachdenkaufwand</string>
@@ -349,7 +350,6 @@
     <string name="advanced_settings">Erweitert</string>
     <string name="advanced_generation_title">Erweiterte Einstellungen</string>
     <string name="advanced_per_conversation">Überschreibungen pro Unterhaltung</string>
-    <string name="appearance_interface">Oberfläche</string>
     <string name="message_display">Nachrichtenanzeige</string>
     <string name="tool_call_display_mode">Nachdenk- und Werkzeugblöcke</string>
     <string name="tool_call_display_mode_timeline">Zeitverlauf</string>
@@ -358,9 +358,6 @@
     <string name="tool_call_display_mode_timeline_desc">Antworten, Nachdenken und Werkzeugblöcke in zeitlicher Reihenfolge anzeigen</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">Zeitliche Reihenfolge beibehalten, aber aufeinanderfolgende Nachdenk-, Werkzeug- und Bildblöcke zusammenfassen</string>
     <string name="tool_call_display_mode_compact_desc">Nachdenk- und Werkzeugblöcke oberhalb der Antwort gruppieren</string>
-    <string name="interaction_feedback">Interaktionsfeedback</string>
-    <string name="haptic_feedback">Haptisches Feedback</string>
-    <string name="haptic_feedback_desc">Dezente Vibrationen für Generierungsstatus und wichtige Aktionen verwenden.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Websuche</string>
@@ -417,7 +414,7 @@
     <string name="shell_result_exit_code">Exit-Code: %1$d</string>
     <string name="shell_result_server">Server: %1$s</string>
     <string name="shell_device_type">Typ</string>
-    
+
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Android-Funktionen</string>
@@ -457,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">Speichernutzung</string>
     <string name="sandbox_install">Installieren</string>
+    <string name="sandbox_upgrade">Aktualisieren</string>
     <string name="sandbox_install_packages">Pakete installieren</string>
     <string name="sandbox_package_name">Paketname</string>
     <string name="sandbox_quick_install">Schnellinstallation</string>
@@ -494,7 +492,6 @@
     <string name="sandbox_manage_desc">Pakete installieren, konfigurieren oder zurücksetzen</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">Installierte Pakete (%d)</string>
-    <string name="sandbox_upgrade">Aktualisieren</string>
     <string name="sandbox_browse_files">Dateien durchsuchen</string>
     <string name="sandbox_browse_files_desc">Sandbox-Verzeichnis im System-Dateimanager öffnen</string>
 
@@ -560,6 +557,7 @@
     <string name="settings_appearance">Erscheinungsbild</string>
     <string name="settings_appearance_desc">Design, Farbschema und dynamische Farbe</string>
     <string name="appearance_title">Erscheinungsbild</string>
+    <string name="appearance_interface">Oberfläche</string>
     <string name="theme_mode">Design-Modus</string>
     <string name="theme_mode_light">Hell</string>
     <string name="theme_mode_dark">Dunkel</string>
@@ -590,6 +588,9 @@
     <string name="visual_effects">Visuelle Effekte</string>
     <string name="blur_effects">Unschärfeeffekte</string>
     <string name="blur_effects_desc">Den oberen Bereich der Chatliste unter der Toolbar weichzeichnen. Zum Sparen von Leistung deaktivieren.</string>
+    <string name="interaction_feedback">Interaktionsfeedback</string>
+    <string name="haptic_feedback">Haptisches Feedback</string>
+    <string name="haptic_feedback_desc">Dezente Vibrationen für Generierungsstatus und wichtige Aktionen verwenden.</string>
 
     <!-- Language -->
     <string name="language_title">Sprache</string>
@@ -874,12 +875,15 @@
     <string name="no_api_key_configured">Kein API-Schlüssel konfiguriert.</string>
     <string name="no_api_key_for_provider">Keine Anmeldedaten für %s konfiguriert. Bitte füge in den Einstellungen einen API-Schlüssel oder eine Basis-URL hinzu.</string>
     <string name="local_model_not_found">Lokale Modelldatei nicht gefunden. Bitte importiere das Modell erneut.</string>
+    <string name="local_context_exceeded">Für diese Unterhaltung werden %1$d Prompt-Token benötigt, der lokale Modellkontext umfasst jedoch nur %2$d Token. Verkleinern Sie das Kontextfenster oder vergrößern Sie den Modellkontext.</string>
     <string name="all_messages_cached">Alle %1$d Nachrichten zwischengespeichert.</string>
     <string name="cached_partial_failed">%1$d von %2$d zwischengespeichert. %3$d fehlgeschlagen.</string>
     <string name="retry">Wiederholen</string>
     <string name="parse_error">Analysefehler</string>
     <string name="unknown_error">Unbekannter Fehler</string>
     <string name="could_not_read_file">Datei konnte nicht gelesen werden</string>
+    <string name="import_file_too_large">Die Datei ist zu groß (%1$d MB). Bitte wählen Sie eine kleinere Exportdatei aus.</string>
+    <string name="import_out_of_memory">Es ist nicht genügend Arbeitsspeicher vorhanden, um diese Datei zu importieren. Bitte wählen Sie einen kleineren Export aus.</string>
 
     <!-- Documentation -->
     <string name="documentation">Dokumentation</string>
