@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">Agora が応答しました</string>
@@ -212,6 +213,26 @@
     <string name="tool_generate_image">画像を生成</string>
     <string name="tool_generating_image">画像を生成中…</string>
     <string name="tool_generated_image">画像を生成しました</string>
+    <string name="tool_get_location">位置情報を取得</string>
+    <string name="tool_getting_location">場所がピックアップされています…</string>
+    <string name="tool_location_done">現在地を取得しました</string>
+    <string name="tool_location_permission_denied">位置情報の許可が拒否されました</string>
+    <string name="tool_location_denied">ユーザーが位置情報の共有を拒否しました</string>
+    <string name="tool_location_failed">場所を取得できませんでした</string>
+    <string name="tool_list_calendars">カレンダーを見る</string>
+    <string name="tool_get_calendar_events">カレンダーアイテムを取得する</string>
+    <string name="tool_create_calendar_event">カレンダーアイテムを作成する</string>
+    <string name="tool_update_calendar_event">カレンダーアイテムを更新する</string>
+    <string name="tool_delete_calendar_event">カレンダーアイテムを削除する</string>
+    <string name="tool_search_contacts">連絡先を探す</string>
+    <string name="tool_get_contact">連絡を取る</string>
+    <string name="tool_create_contact">連絡先の作成</string>
+    <string name="tool_update_contact">連絡先を更新する</string>
+    <string name="tool_delete_contact">連絡先を削除する</string>
+    <string name="tool_calendar_denied">ユーザーがこのカレンダーの変更を拒否しました</string>
+    <string name="tool_calendar_permission_denied">カレンダーの権限が拒否されました</string>
+    <string name="tool_contacts_denied">ユーザーがこの連絡先変更を拒否しました</string>
+    <string name="tool_contacts_permission_denied">連絡許可が拒否されました</string>
     <string name="img_action_save">ギャラリーに保存</string>
     <string name="img_action_share">共有</string>
     <string name="img_saved">ギャラリーに保存しました</string>
@@ -303,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">モデルの思考・推論機能を有効にする</string>
     <string name="gen_thinking_level">思考レベル</string>
     <string name="gen_thinking_level_desc">思考の深さを制御。高いほど徹底的な推論</string>
+    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_low">低</string>
     <string name="gen_thinking_level_medium">中</string>
     <string name="gen_thinking_level_high">高</string>
-    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_xhigh">超高</string>
     <string name="gen_thinking_level_max">最大</string>
     <string name="thinking_effort_label">思考強度</string>
@@ -329,7 +350,6 @@
     <string name="advanced_settings">詳細</string>
     <string name="advanced_generation_title">詳細設定</string>
     <string name="advanced_per_conversation">会話ごとの上書き</string>
-    <string name="appearance_interface">インターフェース</string>
     <string name="message_display">メッセージ表示</string>
     <string name="tool_call_display_mode">思考とツールブロック</string>
     <string name="tool_call_display_mode_timeline">タイムライン</string>
@@ -338,9 +358,6 @@
     <string name="tool_call_display_mode_timeline_desc">回答、思考、ツールブロックを時系列で表示します</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">時系列を保ちながら、連続する思考、ツール、画像ブロックを結合します</string>
     <string name="tool_call_display_mode_compact_desc">思考とツールブロックを回答の上にまとめて表示します</string>
-    <string name="interaction_feedback">操作フィードバック</string>
-    <string name="haptic_feedback">触覚フィードバック</string>
-    <string name="haptic_feedback_desc">生成状態と重要な操作に控えめな振動を使用します。</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">ウェブ検索</string>
@@ -398,6 +415,29 @@
     <string name="shell_result_server">サーバー: %1$s</string>
     <string name="shell_device_type">種類</string>
 
+    <!-- Settings - Android Page -->
+    <string name="android_title">アンドロイド</string>
+    <string name="android_desc">Androidの機能</string>
+    <string name="calendar_title">議題</string>
+    <string name="calendar_enable">カレンダーツールを有効にする</string>
+    <string name="calendar_enable_desc">モデルにカレンダーの表示を許可する</string>
+    <string name="calendar_confirm_setting">議題の変更を確認する</string>
+    <string name="calendar_confirm_setting_desc">アシスタントが予定表アイテムを変更または削除する前に確認を求める</string>
+    <string name="contacts_title">連絡先</string>
+    <string name="contacts_enable">連絡先ツールを有効にする</string>
+    <string name="contacts_enable_desc">モデルに連絡先を表示できるようにする</string>
+    <string name="contacts_confirm_setting">連絡先の変更を確認する</string>
+    <string name="contacts_confirm_setting_desc">アシスタントが連絡先を変更または削除する前に確認を求める</string>
+    <string name="location_title">位置</string>
+    <string name="location_enable">位置情報ツールを有効にする</string>
+    <string name="location_enable_desc">モデルにあなたの位置情報を表示できるようにする</string>
+    <string name="location_confirm_setting">場所を確認する</string>
+    <string name="location_confirm_setting_desc">アシスタントが現在地を取得する前に確認を求める</string>
+    <string name="location_reverse_geocode_enable">リバースジオコーディングによる住所の検索</string>
+    <string name="location_reverse_geocode_enable_desc">また、Nominatim を使用して住所の座標を検索します。</string>
+    <string name="location_nominatim_base_url">指定サーバー URL</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">ローカルサンドボックス</string>
     <string name="sandbox_enable">ローカルサンドボックスを有効にする</string>
@@ -414,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">ディスク使用量</string>
     <string name="sandbox_install">インストール</string>
+    <string name="sandbox_upgrade">アップグレード</string>
     <string name="sandbox_install_packages">パッケージをインストール</string>
     <string name="sandbox_package_name">パッケージ名</string>
     <string name="sandbox_quick_install">クイックインストール</string>
@@ -451,7 +492,6 @@
     <string name="sandbox_manage_desc">パッケージのインストール、設定、またはリセット</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">インストール済みパッケージ（%d）</string>
-    <string name="sandbox_upgrade">アップグレード</string>
     <string name="sandbox_browse_files">ファイルを閲覧</string>
     <string name="sandbox_browse_files_desc">システムのファイルマネージャーでサンドボックスディレクトリを開く</string>
 
@@ -517,6 +557,7 @@
     <string name="settings_appearance">外観</string>
     <string name="settings_appearance_desc">テーマ、配色、ダイナミックカラー</string>
     <string name="appearance_title">外観</string>
+    <string name="appearance_interface">インターフェース</string>
     <string name="theme_mode">テーマモード</string>
     <string name="theme_mode_light">ライト</string>
     <string name="theme_mode_dark">ダーク</string>
@@ -547,6 +588,9 @@
     <string name="visual_effects">視覚効果</string>
     <string name="blur_effects">ぼかし効果</string>
     <string name="blur_effects_desc">ツールバー下のチャット一覧上部をぼかします。オフにするとパフォーマンスを節約できます。</string>
+    <string name="interaction_feedback">操作フィードバック</string>
+    <string name="haptic_feedback">触覚フィードバック</string>
+    <string name="haptic_feedback_desc">生成状態と重要な操作に控えめな振動を使用します。</string>
 
     <!-- Language -->
     <string name="language_title">言語</string>
@@ -831,12 +875,15 @@
     <string name="no_api_key_configured">API キーが設定されていません。</string>
     <string name="no_api_key_for_provider">%s の認証情報が設定されていません。設定で API キーまたはベース URL を追加してください。</string>
     <string name="local_model_not_found">ローカルモデルファイルが見つかりません。モデルを再インポートしてください。</string>
+    <string name="local_context_exceeded">この呼び出しには %1$d プロンプト トークンが必要ですが、ローカル モデルは %2$d コンテキスト トークンのみをサポートします。コンテキスト ウィンドウを縮小するか、モデルのコンテキスト サイズを増やします。</string>
     <string name="all_messages_cached">%1$d 件すべてのメッセージをキャッシュしました。</string>
     <string name="cached_partial_failed">%2$d 件中 %1$d 件をキャッシュしました。%3$d 件失敗しました。</string>
     <string name="retry">再試行</string>
     <string name="parse_error">解析エラー</string>
     <string name="unknown_error">不明なエラー</string>
     <string name="could_not_read_file">ファイルを読み込めませんでした</string>
+    <string name="import_file_too_large">ファイルが大きすぎます (%1$d MB)。より小さいエクスポートを選択してください。</string>
+    <string name="import_out_of_memory">このファイルをインポートするにはメモリが不足しています。より小さいエクスポートを選択してください。</string>
 
     <!-- Documentation -->
     <string name="documentation">ドキュメント</string>
@@ -927,6 +974,58 @@
     <string name="shell_confirm_deny">拒否</string>
     <string name="shell_confirm_setting">リモートシェル操作を確認</string>
     <string name="shell_confirm_setting_desc">アシスタントがリモートの SSH/Conch サーバーでコマンドを実行したりファイルを書き込んだりする前に確認する</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">MCPサーバー</string>
+    <string name="mcp_desc">モデル コンテキスト プロトコル ツール サーバーに接続する</string>
+    <string name="mcp_enable">MCP ツールを有効にする</string>
+    <string name="mcp_enable_desc">構成された MCP サーバーによって提供されるツールをモデルが使用できるようにする</string>
+    <string name="mcp_servers">サーバー</string>
+    <string name="mcp_add_server">サーバーの追加</string>
+    <string name="mcp_remove_server">削除するには</string>
+    <string name="mcp_no_servers">MCP サーバーが構成されていません</string>
+    <string name="mcp_server_enabled">有効</string>
+    <string name="mcp_server_name">名前</string>
+    <string name="mcp_server_name_hint">私のMCPサーバー</string>
+    <string name="mcp_server_desc">説明</string>
+    <string name="mcp_server_desc_hint">このサーバーの目的</string>
+    <string name="mcp_server_url">サーバーURL</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">無記名トークン</string>
+    <string name="mcp_server_bearer_token_hint">承認として送信: ベアラー…</string>
+    <string name="mcp_server_headers">追加のヘッダー</string>
+    <string name="mcp_server_headers_hint">X-Api-Key: シークレット</string>
+    <string name="mcp_server_headers_desc">1 行に 1 つのヘッダー (「名前: 値」として)</string>
+    <string name="mcp_server_timeout">タイムアウト (秒)</string>
+    <string name="mcp_timeout_value">%d 秒</string>
+    <string name="mcp_delete_confirm_title">MCP サーバーを削除する</string>
+    <string name="mcp_delete_confirm_message">「%1$s」を削除してもよろしいですか?</string>
+    <string name="mcp_test_connection">テスト接続</string>
+    <string name="mcp_test_connection_testing">接続する…</string>
+    <string name="mcp_test_connection_success">接続されました — %1$d 個のツールが見つかりました</string>
+    <string name="mcp_test_connection_success_none">接続済み — ツールが見つかりません</string>
+    <string name="mcp_test_connection_failure">失敗しました: %1$s</string>
+    <string name="mcp_confirm_title">「%2$s」で「%1$s」を許可しますか?</string>
+    <string name="mcp_confirm_allow">一度許可する</string>
+    <string name="mcp_confirm_always">このサーバーを常に許可する</string>
+    <string name="mcp_confirm_deny">拒否する</string>
+    <string name="mcp_confirm_setting">破壊的な MCP ツール呼び出しを確認する</string>
+    <string name="mcp_confirm_setting_desc">MCP サーバーによって破壊的とマークされたツールをアシスタントが実行する前に、確認を要求します。読み取り専用ツールは常に確認なしで実行されます。</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">現在地を共有しますか?</string>
+    <string name="location_confirm_message">アシスタントはデバイスの現在の位置を要求し、それをモデルと共有します。</string>
+    <string name="location_confirm_allow">許可する</string>
+    <string name="location_confirm_deny">拒否する</string>
+    <string name="location_confirm_always_allow">常に許可する (二度と質問しない)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">この議題の変更を許可しますか?</string>
+    <string name="calendar_confirm_allow">許可する</string>
+    <string name="calendar_confirm_deny">拒否する</string>
+    <string name="calendar_confirm_always_allow">常に許可する (二度と質問しない)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">この連絡先の変更を許可しますか?</string>
+    <string name="contacts_confirm_allow">許可する</string>
+    <string name="contacts_confirm_deny">拒否する</string>
+    <string name="contacts_confirm_always_allow">常に許可する (二度と質問しない)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora が予期せず終了しました</string>

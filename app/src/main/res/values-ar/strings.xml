@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">ردّت Agora</string>
@@ -212,6 +213,26 @@
     <string name="tool_generate_image">توليد صورة</string>
     <string name="tool_generating_image">جارٍ توليد الصورة…</string>
     <string name="tool_generated_image">تم توليد الصورة</string>
+    <string name="tool_get_location">احصل على الموقع</string>
+    <string name="tool_getting_location">يتم التقاط الموقع…</string>
+    <string name="tool_location_done">تم استرداد الموقع الحالي</string>
+    <string name="tool_location_permission_denied">تم رفض إذن تحديد الموقع</string>
+    <string name="tool_location_denied">لقد رفض المستخدم مشاركة الموقع</string>
+    <string name="tool_location_failed">تعذر الحصول على الموقع</string>
+    <string name="tool_list_calendars">عرض التقاويم</string>
+    <string name="tool_get_calendar_events">استرداد عناصر التقويم</string>
+    <string name="tool_create_calendar_event">إنشاء عنصر التقويم</string>
+    <string name="tool_update_calendar_event">تحديث عنصر التقويم</string>
+    <string name="tool_delete_calendar_event">حذف عنصر التقويم</string>
+    <string name="tool_search_contacts">البحث عن جهات الاتصال</string>
+    <string name="tool_get_contact">احصل على اتصال</string>
+    <string name="tool_create_contact">إنشاء جهة اتصال</string>
+    <string name="tool_update_contact">تحديث جهة الاتصال</string>
+    <string name="tool_delete_contact">حذف جهة الاتصال</string>
+    <string name="tool_calendar_denied">رفض المستخدم هذا التغيير في التقويم</string>
+    <string name="tool_calendar_permission_denied">تم رفض إذن التقويم</string>
+    <string name="tool_contacts_denied">رفض المستخدم تغيير جهة الاتصال هذا</string>
+    <string name="tool_contacts_permission_denied">تم رفض إذن الاتصال</string>
     <string name="img_action_save">حفظ في المعرض</string>
     <string name="img_action_share">مشاركة</string>
     <string name="img_saved">تم الحفظ في المعرض</string>
@@ -303,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">تفعيل قدرة النموذج على التفكير/الاستدلال</string>
     <string name="gen_thinking_level">مستوى التفكير</string>
     <string name="gen_thinking_level_desc">يتحكم في عمق التفكير؛ أعلى = استدلال أكثر دقة</string>
+    <string name="gen_thinking_level_minimal">منخفض جدًا</string>
     <string name="gen_thinking_level_low">منخفض</string>
     <string name="gen_thinking_level_medium">متوسط</string>
     <string name="gen_thinking_level_high">عالٍ</string>
-    <string name="gen_thinking_level_minimal">منخفض جدًا</string>
     <string name="gen_thinking_level_xhigh">عالٍ جدًا</string>
     <string name="gen_thinking_level_max">الحد الأقصى</string>
     <string name="thinking_effort_label">جهد التفكير</string>
@@ -329,7 +350,6 @@
     <string name="advanced_settings">متقدم</string>
     <string name="advanced_generation_title">الإعدادات المتقدمة</string>
     <string name="advanced_per_conversation">تجاوزات لكل محادثة</string>
-    <string name="appearance_interface">الواجهة</string>
     <string name="message_display">عرض الرسائل</string>
     <string name="tool_call_display_mode">كتل التفكير والأدوات</string>
     <string name="tool_call_display_mode_timeline">المخطط الزمني</string>
@@ -338,9 +358,6 @@
     <string name="tool_call_display_mode_timeline_desc">إظهار الإجابة والتفكير وكتل الأدوات حسب الترتيب الزمني</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">الحفاظ على ترتيب المخطط الزمني مع دمج كتل التفكير والأدوات والصور المتتالية</string>
     <string name="tool_call_display_mode_compact_desc">تجميع كتل التفكير والأدوات فوق الإجابة</string>
-    <string name="interaction_feedback">تعليقات التفاعل</string>
-    <string name="haptic_feedback">الاهتزاز اللمسي</string>
-    <string name="haptic_feedback_desc">استخدام اهتزاز خفيف لحالة التوليد والإجراءات المهمة.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">بحث الويب</string>
@@ -398,6 +415,29 @@
     <string name="shell_result_server">الخادم: %1$s</string>
     <string name="shell_device_type">النوع</string>
 
+    <!-- Settings - Android Page -->
+    <string name="android_title">أندرويد</string>
+    <string name="android_desc">مميزات الاندرويد</string>
+    <string name="calendar_title">جدول الأعمال</string>
+    <string name="calendar_enable">تمكين أداة التقويم</string>
+    <string name="calendar_enable_desc">اسمح للنموذج بعرض التقويم الخاص بك</string>
+    <string name="calendar_confirm_setting">تأكيد تغييرات جدول الأعمال</string>
+    <string name="calendar_confirm_setting_desc">اطلب التأكيد قبل أن يتمكن المساعد من تغيير عناصر التقويم أو حذفها</string>
+    <string name="contacts_title">اتصالات</string>
+    <string name="contacts_enable">تمكين أداة جهات الاتصال</string>
+    <string name="contacts_enable_desc">اسمح للنموذج بعرض جهات الاتصال الخاصة بك</string>
+    <string name="contacts_confirm_setting">تأكيد تغييرات جهة الاتصال</string>
+    <string name="contacts_confirm_setting_desc">اطلب التأكيد قبل أن يتمكن المساعد من تغيير جهات الاتصال أو حذفها</string>
+    <string name="location_title">موقع</string>
+    <string name="location_enable">تمكين أداة تحديد الموقع</string>
+    <string name="location_enable_desc">السماح للنموذج بعرض موقعك</string>
+    <string name="location_confirm_setting">تأكيد الموقع</string>
+    <string name="location_confirm_setting_desc">اطلب التأكيد قبل أن يتمكن المساعد من تحديد موقعك</string>
+    <string name="location_reverse_geocode_enable">ابحث عن عنوان عبر الترميز الجغرافي العكسي</string>
+    <string name="location_reverse_geocode_enable_desc">ابحث أيضًا عن عنوان الشارع للحصول على الإحداثيات عبر Nominatim</string>
+    <string name="location_nominatim_base_url">عنوان URL للخادم الاسمي</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">صندوق رمل محلي</string>
     <string name="sandbox_enable">تفعيل الصندوق الرملي المحلي</string>
@@ -414,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">استخدام القرص</string>
     <string name="sandbox_install">تثبيت</string>
+    <string name="sandbox_upgrade">ترقية</string>
     <string name="sandbox_install_packages">تثبيت الحزم</string>
     <string name="sandbox_package_name">اسم الحزمة</string>
     <string name="sandbox_quick_install">تثبيت سريع</string>
@@ -451,7 +492,6 @@
     <string name="sandbox_manage_desc">تثبيت الحزم أو تهيئتها أو إعادة التعيين</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">الحزم المثبتة (%d)</string>
-    <string name="sandbox_upgrade">ترقية</string>
     <string name="sandbox_browse_files">استعراض الملفات</string>
     <string name="sandbox_browse_files_desc">فتح دليل الصندوق الرملي في مدير ملفات النظام</string>
 
@@ -517,6 +557,7 @@
     <string name="settings_appearance">المظهر</string>
     <string name="settings_appearance_desc">السمة ونظام الألوان واللون الديناميكي</string>
     <string name="appearance_title">المظهر</string>
+    <string name="appearance_interface">الواجهة</string>
     <string name="theme_mode">وضع السمة</string>
     <string name="theme_mode_light">فاتح</string>
     <string name="theme_mode_dark">داكن</string>
@@ -547,6 +588,9 @@
     <string name="visual_effects">المؤثرات البصرية</string>
     <string name="blur_effects">تأثيرات التمويه</string>
     <string name="blur_effects_desc">تمويه أعلى قائمة الدردشة أسفل شريط الأدوات. عطّله لتوفير الأداء.</string>
+    <string name="interaction_feedback">تعليقات التفاعل</string>
+    <string name="haptic_feedback">الاهتزاز اللمسي</string>
+    <string name="haptic_feedback_desc">استخدام اهتزاز خفيف لحالة التوليد والإجراءات المهمة.</string>
 
     <!-- Language -->
     <string name="language_title">اللغة</string>
@@ -831,12 +875,15 @@
     <string name="no_api_key_configured">لا يوجد مفتاح API مهيأ.</string>
     <string name="no_api_key_for_provider">لا توجد بيانات اعتماد مهيأة لـ %s. يرجى إضافة مفتاح API أو عنوان URL أساسي في الإعدادات.</string>
     <string name="local_model_not_found">لم يتم العثور على ملف النموذج المحلي. يرجى إعادة استيراد النموذج.</string>
+    <string name="local_context_exceeded">يتطلب هذا الاستدعاء %1$d من الرموز المميزة للمطالبة، لكن النموذج المحلي يدعم فقط %2$d من الرموز المميزة للسياق. قم بتقليل نافذة السياق أو زيادة حجم سياق النموذج.</string>
     <string name="all_messages_cached">تم تخزين جميع الرسائل البالغ عددها %1$d مؤقتًا.</string>
     <string name="cached_partial_failed">تم تخزين %1$d من %2$d مؤقتًا. فشل %3$d.</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="parse_error">خطأ في التحليل</string>
     <string name="unknown_error">خطأ غير معروف</string>
     <string name="could_not_read_file">تعذّر قراءة الملف</string>
+    <string name="import_file_too_large">الملف كبير جدًا (%1$d ميغابايت). اختر تصديرًا أصغر.</string>
+    <string name="import_out_of_memory">الذاكرة غير كافية لاستيراد هذا الملف. اختر تصديرًا أصغر.</string>
 
     <!-- Documentation -->
     <string name="documentation">الوثائق</string>
@@ -927,6 +974,58 @@
     <string name="shell_confirm_deny">رفض</string>
     <string name="shell_confirm_setting">تأكيد إجراءات الصدفة البعيدة</string>
     <string name="shell_confirm_setting_desc">الطلب قبل أن يشغّل المساعد أوامر أو يكتب ملفات على خوادم SSH/Conch البعيدة</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">خوادم MCP</string>
+    <string name="mcp_desc">الاتصال بخوادم أدوات بروتوكول السياق النموذجي</string>
+    <string name="mcp_enable">تمكين أدوات MCP</string>
+    <string name="mcp_enable_desc">اسمح للنموذج باستخدام الأدوات التي توفرها خوادم MCP التي تم تكوينها</string>
+    <string name="mcp_servers">الخوادم</string>
+    <string name="mcp_add_server">أضف الخادم</string>
+    <string name="mcp_remove_server">للحذف</string>
+    <string name="mcp_no_servers">لم يتم تكوين خوادم MCP</string>
+    <string name="mcp_server_enabled">ممكّن</string>
+    <string name="mcp_server_name">اسم</string>
+    <string name="mcp_server_name_hint">خادم MCP الخاص بي</string>
+    <string name="mcp_server_desc">وصف</string>
+    <string name="mcp_server_desc_hint">ما هو هذا الخادم ل</string>
+    <string name="mcp_server_url">عنوان URL للخادم</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">رمز حامل</string>
+    <string name="mcp_server_bearer_token_hint">تم الإرسال كتفويض: حامل…</string>
+    <string name="mcp_server_headers">رؤوس إضافية</string>
+    <string name="mcp_server_headers_hint">X-Api-Key: سر</string>
+    <string name="mcp_server_headers_desc">رأس واحد لكل سطر، مثل \"الاسم: القيمة\"</string>
+    <string name="mcp_server_timeout">المهلة (ثواني)</string>
+    <string name="mcp_timeout_value">%d ث</string>
+    <string name="mcp_delete_confirm_title">إزالة خادم MCP</string>
+    <string name="mcp_delete_confirm_message">هل أنت متأكد أنك تريد حذف \"%1$s\"؟</string>
+    <string name="mcp_test_connection">اتصال الاختبار</string>
+    <string name="mcp_test_connection_testing">يتصل…</string>
+    <string name="mcp_test_connection_success">متصلة — تم العثور على %1$d من الأدوات</string>
+    <string name="mcp_test_connection_success_none">متصل - لم يتم العثور على أدوات</string>
+    <string name="mcp_test_connection_failure">فشل: %1$s</string>
+    <string name="mcp_confirm_title">هل تريد السماح بـ \"%1$s\" على \"%2$s\"؟</string>
+    <string name="mcp_confirm_allow">السماح مرة واحدة</string>
+    <string name="mcp_confirm_always">السماح لهذا الخادم دائمًا</string>
+    <string name="mcp_confirm_deny">لرفض</string>
+    <string name="mcp_confirm_setting">قم بتأكيد استدعاءات أداة MCP المدمرة</string>
+    <string name="mcp_confirm_setting_desc">اطلب التأكيد قبل أن يقوم المساعد بتشغيل الأداة التي تم وضع علامة عليها على أنها مدمرة بواسطة خادم MCP. تعمل أدوات القراءة فقط دائمًا دون تأكيد.</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">هل تريد مشاركة موقعك؟</string>
+    <string name="location_confirm_message">سيطلب المساعد الموقع الحالي لجهازك ويشاركه مع النموذج.</string>
+    <string name="location_confirm_allow">يسمح</string>
+    <string name="location_confirm_deny">لرفض</string>
+    <string name="location_confirm_always_allow">السماح دائمًا (عدم السؤال مرة أخرى)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">هل تريد السماح بتغيير جدول الأعمال هذا؟</string>
+    <string name="calendar_confirm_allow">يسمح</string>
+    <string name="calendar_confirm_deny">لرفض</string>
+    <string name="calendar_confirm_always_allow">السماح دائمًا (عدم السؤال مرة أخرى)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">هل تريد السماح بتغيير جهة الاتصال هذه؟</string>
+    <string name="contacts_confirm_allow">يسمح</string>
+    <string name="contacts_confirm_deny">لرفض</string>
+    <string name="contacts_confirm_always_allow">السماح دائمًا (عدم السؤال مرة أخرى)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">أُغلق Agora بشكل غير متوقع</string>

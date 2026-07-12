@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <resources>
     <string name="app_name">Agora</string>
     <string name="agora_responded">Agora ответила</string>
@@ -212,6 +213,26 @@
     <string name="tool_generate_image">Создать изображение</string>
     <string name="tool_generating_image">Создание изображения…</string>
     <string name="tool_generated_image">Изображение создано</string>
+    <string name="tool_get_location">Получить местоположение</string>
+    <string name="tool_getting_location">Место выбрано…</string>
+    <string name="tool_location_done">Текущее местоположение получено.</string>
+    <string name="tool_location_permission_denied">Разрешение на определение местоположения отклонено</string>
+    <string name="tool_location_denied">Пользователь отказался делиться местоположением</string>
+    <string name="tool_location_failed">Не удалось определить местоположение</string>
+    <string name="tool_list_calendars">Просмотр календарей</string>
+    <string name="tool_get_calendar_events">Получить элементы календаря</string>
+    <string name="tool_create_calendar_event">Создать элемент календаря</string>
+    <string name="tool_update_calendar_event">Обновить элемент календаря</string>
+    <string name="tool_delete_calendar_event">Удалить элемент календаря</string>
+    <string name="tool_search_contacts">Найти контакты</string>
+    <string name="tool_get_contact">Получить контакт</string>
+    <string name="tool_create_contact">Создать контакт</string>
+    <string name="tool_update_contact">Обновить контакт</string>
+    <string name="tool_delete_contact">Удалить контакт</string>
+    <string name="tool_calendar_denied">Пользователь отклонил это изменение календаря</string>
+    <string name="tool_calendar_permission_denied">Разрешение на Календарь отклонено</string>
+    <string name="tool_contacts_denied">Пользователь отклонил это изменение контакта</string>
+    <string name="tool_contacts_permission_denied">Разрешение на контакт отклонено</string>
     <string name="img_action_save">Сохранить в галерею</string>
     <string name="img_action_share">Поделиться</string>
     <string name="img_saved">Сохранено в галерею</string>
@@ -303,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">Включить способность модели к размышлению/рассуждению</string>
     <string name="gen_thinking_level">Уровень размышления</string>
     <string name="gen_thinking_level_desc">Управляет глубиной размышления; выше = более тщательное рассуждение</string>
+    <string name="gen_thinking_level_minimal">Очень низкий</string>
     <string name="gen_thinking_level_low">Низкий</string>
     <string name="gen_thinking_level_medium">Средний</string>
     <string name="gen_thinking_level_high">Высокий</string>
-    <string name="gen_thinking_level_minimal">Очень низкий</string>
     <string name="gen_thinking_level_xhigh">Очень высокий</string>
     <string name="gen_thinking_level_max">Максимум</string>
     <string name="thinking_effort_label">Глубина размышления</string>
@@ -329,7 +350,6 @@
     <string name="advanced_settings">Дополнительно</string>
     <string name="advanced_generation_title">Дополнительные настройки</string>
     <string name="advanced_per_conversation">Переопределения для отдельной беседы</string>
-    <string name="appearance_interface">Интерфейс</string>
     <string name="message_display">Отображение сообщений</string>
     <string name="tool_call_display_mode">Блоки размышлений и инструментов</string>
     <string name="tool_call_display_mode_timeline">Хронология</string>
@@ -338,9 +358,6 @@
     <string name="tool_call_display_mode_timeline_desc">Показывать ответ, размышления и блоки инструментов в хронологическом порядке</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">Сохранять хронологию, но объединять соседние блоки размышлений, инструментов и изображений</string>
     <string name="tool_call_display_mode_compact_desc">Группировать блоки размышлений и инструментов над ответом</string>
-    <string name="interaction_feedback">Обратная связь взаимодействия</string>
-    <string name="haptic_feedback">Тактильная отдача</string>
-    <string name="haptic_feedback_desc">Использовать легкую вибрацию для статуса генерации и важных действий.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Веб-поиск</string>
@@ -398,6 +415,29 @@
     <string name="shell_result_server">Сервер: %1$s</string>
     <string name="shell_device_type">Тип</string>
 
+    <!-- Settings - Android Page -->
+    <string name="android_title">Андроид</string>
+    <string name="android_desc">Возможности Android</string>
+    <string name="calendar_title">Повестка дня</string>
+    <string name="calendar_enable">Включить инструмент календаря</string>
+    <string name="calendar_enable_desc">Разрешите модели просматривать ваш календарь</string>
+    <string name="calendar_confirm_setting">Подтвердите изменения в повестке дня</string>
+    <string name="calendar_confirm_setting_desc">Попросите подтверждение, прежде чем помощник сможет изменить или удалить элементы календаря.</string>
+    <string name="contacts_title">Контакты</string>
+    <string name="contacts_enable">Включить инструмент «Контакты»</string>
+    <string name="contacts_enable_desc">Разрешите модели просматривать ваши контакты</string>
+    <string name="contacts_confirm_setting">Подтвердить изменение контакта</string>
+    <string name="contacts_confirm_setting_desc">Попросите подтверждение, прежде чем помощник сможет изменить или удалить контакты.</string>
+    <string name="location_title">Расположение</string>
+    <string name="location_enable">Включить инструмент определения местоположения</string>
+    <string name="location_enable_desc">Разрешите модели видеть ваше местоположение</string>
+    <string name="location_confirm_setting">Подтвердить местоположение</string>
+    <string name="location_confirm_setting_desc">Попросите подтверждение, прежде чем помощник сможет определить ваше местоположение.</string>
+    <string name="location_reverse_geocode_enable">Найдите адрес с помощью обратного геокодирования</string>
+    <string name="location_reverse_geocode_enable_desc">Также найдите адрес по координатам через Nominatim.</string>
+    <string name="location_nominatim_base_url">URL-адрес сервера Nominatim</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">Локальная песочница</string>
     <string name="sandbox_enable">Включить локальную песочницу</string>
@@ -414,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">Использование диска</string>
     <string name="sandbox_install">Установить</string>
+    <string name="sandbox_upgrade">Обновить</string>
     <string name="sandbox_install_packages">Установить пакеты</string>
     <string name="sandbox_package_name">Имя пакета</string>
     <string name="sandbox_quick_install">Быстрая установка</string>
@@ -451,7 +492,6 @@
     <string name="sandbox_manage_desc">Установка, настройка пакетов или сброс</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">Установленные пакеты (%d)</string>
-    <string name="sandbox_upgrade">Обновить</string>
     <string name="sandbox_browse_files">Обзор файлов</string>
     <string name="sandbox_browse_files_desc">Открыть каталог песочницы в системном файловом менеджере</string>
 
@@ -517,6 +557,7 @@
     <string name="settings_appearance">Оформление</string>
     <string name="settings_appearance_desc">Тема, цветовая схема и динамические цвета</string>
     <string name="appearance_title">Оформление</string>
+    <string name="appearance_interface">Интерфейс</string>
     <string name="theme_mode">Режим темы</string>
     <string name="theme_mode_light">Светлая</string>
     <string name="theme_mode_dark">Тёмная</string>
@@ -547,6 +588,9 @@
     <string name="visual_effects">Визуальные эффекты</string>
     <string name="blur_effects">Эффекты размытия</string>
     <string name="blur_effects_desc">Размывать верхнюю часть списка чата под панелью инструментов. Отключите, чтобы сэкономить производительность.</string>
+    <string name="interaction_feedback">Обратная связь взаимодействия</string>
+    <string name="haptic_feedback">Тактильная отдача</string>
+    <string name="haptic_feedback_desc">Использовать легкую вибрацию для статуса генерации и важных действий.</string>
 
     <!-- Language -->
     <string name="language_title">Язык</string>
@@ -831,12 +875,15 @@
     <string name="no_api_key_configured">API-ключ не настроен.</string>
     <string name="no_api_key_for_provider">Учётные данные для %s не настроены. Добавьте API-ключ или базовый URL в настройках.</string>
     <string name="local_model_not_found">Файл локальной модели не найден. Импортируйте модель повторно.</string>
+    <string name="local_context_exceeded">Для этого вызова требуется %1$d токенов приглашения, но локальная модель поддерживает только %2$d токенов контекста. Уменьшите контекстное окно или увеличьте контекстный размер модели.</string>
     <string name="all_messages_cached">Все %1$d сообщений кэшированы.</string>
     <string name="cached_partial_failed">Кэшировано %1$d из %2$d. Ошибок: %3$d.</string>
     <string name="retry">Повторить</string>
     <string name="parse_error">Ошибка разбора</string>
     <string name="unknown_error">Неизвестная ошибка</string>
     <string name="could_not_read_file">Не удалось прочитать файл</string>
+    <string name="import_file_too_large">Файл слишком велик (%1$d МБ). Выберите меньший экспорт.</string>
+    <string name="import_out_of_memory">Недостаточно памяти для импорта этого файла. Выберите меньший экспорт.</string>
 
     <!-- Documentation -->
     <string name="documentation">Документация</string>
@@ -927,6 +974,58 @@
     <string name="shell_confirm_deny">Отклонить</string>
     <string name="shell_confirm_setting">Подтверждать действия удалённой оболочки</string>
     <string name="shell_confirm_setting_desc">Спрашивать перед тем, как ассистент выполнит команды или запишет файлы на удалённых серверах SSH/Conch</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">MCP-серверы</string>
+    <string name="mcp_desc">Подключение к серверам инструментов протокола контекста модели</string>
+    <string name="mcp_enable">Включить инструменты MCP</string>
+    <string name="mcp_enable_desc">Разрешите модели использовать инструменты, предоставляемые настроенными вами серверами MCP.</string>
+    <string name="mcp_servers">Серверы</string>
+    <string name="mcp_add_server">Добавить сервер</string>
+    <string name="mcp_remove_server">Чтобы удалить</string>
+    <string name="mcp_no_servers">Серверы MCP не настроены</string>
+    <string name="mcp_server_enabled">Включено</string>
+    <string name="mcp_server_name">Имя</string>
+    <string name="mcp_server_name_hint">Мой МСР-сервер</string>
+    <string name="mcp_server_desc">Описание</string>
+    <string name="mcp_server_desc_hint">Для чего нужен этот сервер</string>
+    <string name="mcp_server_url">URL-адрес сервера</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">Токен на предъявителя</string>
+    <string name="mcp_server_bearer_token_hint">Отправлено как разрешение: предъявитель…</string>
+    <string name="mcp_server_headers">Дополнительные заголовки</string>
+    <string name="mcp_server_headers_hint">X-Api-Key: секрет</string>
+    <string name="mcp_server_headers_desc">По одному заголовку в строке, например «Имя: значение».</string>
+    <string name="mcp_server_timeout">Тайм-аут (секунды)</string>
+    <string name="mcp_timeout_value">%d с</string>
+    <string name="mcp_delete_confirm_title">Удалить MCP-сервер</string>
+    <string name="mcp_delete_confirm_message">Вы уверены, что хотите удалить \"%1$s\"?</string>
+    <string name="mcp_test_connection">Тестовое соединение</string>
+    <string name="mcp_test_connection_testing">Соединять…</string>
+    <string name="mcp_test_connection_success">Подключено — найдено %1$d инструментов</string>
+    <string name="mcp_test_connection_success_none">Подключено — инструменты не найдены</string>
+    <string name="mcp_test_connection_failure">Ошибка: %1$s</string>
+    <string name="mcp_confirm_title">Разрешить \"%1$s\" на \"%2$s\"?</string>
+    <string name="mcp_confirm_allow">Разрешить один раз</string>
+    <string name="mcp_confirm_always">Всегда разрешать этот сервер</string>
+    <string name="mcp_confirm_deny">Отказаться</string>
+    <string name="mcp_confirm_setting">Подтвердите деструктивные вызовы инструмента MCP</string>
+    <string name="mcp_confirm_setting_desc">Запросите подтверждение, прежде чем помощник запустит инструмент, помеченный сервером MCP как разрушительный. Инструменты только для чтения всегда запускаются без подтверждения.</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">Поделитесь своим местоположением?</string>
+    <string name="location_confirm_message">Ассистент запросит текущее местоположение вашего устройства и сообщит его модели.</string>
+    <string name="location_confirm_allow">Позволять</string>
+    <string name="location_confirm_deny">Отказаться</string>
+    <string name="location_confirm_always_allow">Всегда разрешать (больше не спрашивать)</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">Разрешить изменение повестки дня?</string>
+    <string name="calendar_confirm_allow">Позволять</string>
+    <string name="calendar_confirm_deny">Отказаться</string>
+    <string name="calendar_confirm_always_allow">Всегда разрешать (больше не спрашивать)</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">Разрешить изменение этого контакта?</string>
+    <string name="contacts_confirm_allow">Позволять</string>
+    <string name="contacts_confirm_deny">Отказаться</string>
+    <string name="contacts_confirm_always_allow">Всегда разрешать (больше не спрашивать)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora неожиданно завершилась</string>

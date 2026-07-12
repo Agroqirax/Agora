@@ -1,5 +1,7 @@
-﻿<resources>
+<?xml version="1.0" encoding="UTF-8"?>
+<resources>
     <string name="app_name">Agora</string>
+    <string name="agora_responded">聲網回應</string>
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">新增附件</string>
@@ -52,14 +54,79 @@
     <string name="tool_shell_done">終端機命令完成</string>
     <string name="tool_shell_failed">終端機命令失敗</string>
     <string name="tool_thinking">思考</string>
-
-    <!-- System Prompt -->
-    <string name="system_prompt">系統指令</string>
-    <string name="no_system_prompt">無</string>
-
-    <!-- Drawer -->
-    <string name="conversations">對話</string>
-    <string name="new_chat">新對話</string>
+    <string name="tool_read_memory_success">讀取記憶</string>
+    <string name="tool_read_memory_failed">讀取記憶失敗</string>
+    <string name="scroll_to_bottom">捲動到底部</string>
+    <string name="tool_read_memory_count">讀取了 %1$d 筆記憶</string>
+    <string name="tool_read_memory_name">讀取 %1$s</string>
+    <string name="tool_save_memory_failed">儲存記憶失敗</string>
+    <string name="tool_save_memory_name">已儲存 %1$s</string>
+    <string name="tool_save_memory_default">已儲存一筆記憶</string>
+    <string name="tool_edit_memory_failed">編輯記憶失敗</string>
+    <string name="tool_edit_memory_name">已更新 %1$s</string>
+    <string name="tool_edit_memory_default">已更新一筆記憶</string>
+    <string name="tool_delete_memory_failed">刪除記憶失敗</string>
+    <string name="tool_delete_memory_name">已刪除 %1$s</string>
+    <string name="tool_delete_memory_default">已刪除一筆記憶</string>
+    <string name="tool_lookup_failed">尋找記憶失敗</string>
+    <string name="tool_lookup_count">檢視了 %1$d 筆已儲存的記憶</string>
+    <string name="tool_lookup_default">檢視了已儲存的記憶</string>
+    <string name="tool_update_active_failed">更新活躍記憶失敗</string>
+    <string name="tool_update_active_default">已更新活躍記憶</string>
+    <string name="tool_searching_conversations_default">正在搜尋對話</string>
+    <string name="tool_call_failed">工具呼叫失敗</string>
+    <string name="tool_done">完成</string>
+    <string name="tool_context">工具</string>
+    <!-- New tool display names (P0) -->
+    <string name="tool_list_conversations">列出對話</string>
+    <string name="tool_read_conversation">閱讀對話</string>
+    <string name="tool_file_read">讀取檔案</string>
+    <string name="tool_file_write">寫入檔案</string>
+    <string name="tool_file_edit">編輯檔案</string>
+    <string name="tool_file_glob">尋找檔案</string>
+    <string name="tool_file_grep">搜尋檔案</string>
+    <!-- Tool in-progress states (doing) -->
+    <string name="tool_listing_conversations">列出對話中…</string>
+    <string name="tool_reading_conversation">閱讀對話中…</string>
+    <string name="tool_reading_file">讀取 %1$s…</string>
+    <string name="tool_writing_file">寫入 %1$s…</string>
+    <string name="tool_editing_file">編輯 %1$s…</string>
+    <string name="tool_finding_files">尋找 %1$s…</string>
+    <string name="tool_searching_file">搜尋 %1$s…</string>
+    <string name="tool_executing_shell">執行中: %1$s…</string>
+    <string name="tool_reading_memory">讀取 %1$s…</string>
+    <string name="tool_saving_memory">儲存 %1$s…</string>
+    <string name="tool_updating_memory">更新 %1$s…</string>
+    <string name="tool_removing_memory">刪除 %1$s…</string>
+    <string name="tool_looking_up_memories">查詢記憶中…</string>
+    <string name="tool_updating_active">更新活躍記憶中…</string>
+    <string name="tool_listing_shells">列出Shell中…</string>
+    <string name="tool_searching_for">搜尋 \'%1$s\'…</string>
+    <!-- Tool done states (P0 + P1) -->
+    <string name="tool_listed_conversations">已列出 %1$d 個對話</string>
+    <string name="tool_listed_no_conversations">未找到對話</string>
+    <string name="tool_read_conversation_done">已閱讀對話: %1$s</string>
+    <string name="tool_read_file_done">已讀取 %1$s</string>
+    <string name="tool_wrote_file">已寫入 %1$s</string>
+    <string name="tool_edited_file">已編輯 %1$s</string>
+    <string name="tool_found_files">找到 %1$d 個檔案</string>
+    <string name="tool_found_no_files">無符合檔案</string>
+    <string name="tool_searched_file">找到 %1$d 處符合</string>
+    <string name="tool_executed_shell">已執行: %1$s (%2$d 位元組)</string>
+    <string name="tool_executed_no_output">已執行: %1$s (無輸出)</string>
+    <string name="tool_read_file_failed">讀取檔案失敗</string>
+    <string name="crash_log_label">崩潰日誌</string>
+    <string name="message_info">詳細資訊</string>
+    <string name="time_with_label">時間：%1$s</string>
+    <string name="model_with_label">模型：%1$s</string>
+    <string name="cancel">取消</string>
+    <string name="copy">複製</string>
+    <string name="edit">編輯</string>
+    <string name="info">資訊</string>
+    <string name="more">更多的</string>
+    <string name="arguments_label">參數：</string>
+    <string name="result_label">結果：</string>
+    <string name="cost_tokens">消耗 %1$d Tokens</string>
     <string name="thinking_ellipsis">思考中…</string>
     <string name="answering_ellipsis">回覆中…</string>
     <string name="sending_ellipsis">傳送中…</string>
@@ -70,13 +137,22 @@
     <string name="thought_for_seconds_called_tools">思考了 %1$d 秒，呼叫 %2$d 個工具</string>
     <string name="thought_for_minutes_called_tools">思考了 %1$d 分 %2$d 秒，呼叫 %3$d 個工具</string>
     <string name="called_n_tools">呼叫 %1$d 個工具</string>
-    <string name="welcome_to_agora">歡迎使用 Agora。</string>
     <string name="failed_to_generate">生成失敗。</string>
     <string name="generation_stopped">生成已停止。</string>
     <string name="import_invalid_gguf_title">無效的 GGUF 檔案</string>
     <string name="import_invalid_gguf_desc">所選檔案不是有效的 GGUF 模型檔案。</string>
     <string name="ok">確定</string>
     <string name="generation_retry_attempt">重試 %1$d/%2$d</string>
+    <string name="action">操作</string>
+    <string name="video">影片</string>
+
+    <!-- System Prompt -->
+    <string name="system_prompt">系統指令</string>
+    <string name="no_system_prompt">無</string>
+
+    <!-- Drawer -->
+    <string name="conversations">對話</string>
+    <string name="new_chat">新對話</string>
 
     <!-- Settings - Main -->
     <string name="settings_title">設定</string>
@@ -137,6 +213,26 @@
     <string name="tool_generate_image">生成圖片</string>
     <string name="tool_generating_image">正在生成圖片…</string>
     <string name="tool_generated_image">已生成圖片</string>
+    <string name="tool_get_location">取得位置</string>
+    <string name="tool_getting_location">位置已拾取…</string>
+    <string name="tool_location_done">檢索到目前位置</string>
+    <string name="tool_location_permission_denied">位置權限被拒絕</string>
+    <string name="tool_location_denied">用戶已拒絕位置共享</string>
+    <string name="tool_location_failed">無法取得位置</string>
+    <string name="tool_list_calendars">查看日曆</string>
+    <string name="tool_get_calendar_events">檢索日曆項目</string>
+    <string name="tool_create_calendar_event">建立日曆項目</string>
+    <string name="tool_update_calendar_event">更新日曆項目</string>
+    <string name="tool_delete_calendar_event">刪除日曆項目</string>
+    <string name="tool_search_contacts">尋找聯絡人</string>
+    <string name="tool_get_contact">取得聯絡方式</string>
+    <string name="tool_create_contact">創建聯絡人</string>
+    <string name="tool_update_contact">更新聯絡方式</string>
+    <string name="tool_delete_contact">刪除聯絡人</string>
+    <string name="tool_calendar_denied">使用者拒絕了此日曆更改</string>
+    <string name="tool_calendar_permission_denied">日曆權限被拒絕</string>
+    <string name="tool_contacts_denied">用戶拒絕了此聯絡人更改</string>
+    <string name="tool_contacts_permission_denied">聯繫權限被拒絕</string>
     <string name="img_action_save">儲存到相簿</string>
     <string name="img_action_share">分享</string>
     <string name="img_saved">已儲存到相簿</string>
@@ -228,10 +324,10 @@
     <string name="gen_thinking_enabled_desc">啟用模型思考/推理能力</string>
     <string name="gen_thinking_level">思考深度</string>
     <string name="gen_thinking_level_desc">控制思考深度；越高推理越深入</string>
+    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_low">低</string>
     <string name="gen_thinking_level_medium">中</string>
     <string name="gen_thinking_level_high">高</string>
-    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_xhigh">超高</string>
     <string name="gen_thinking_level_max">最大</string>
     <string name="thinking_effort_label">思考深度</string>
@@ -254,6 +350,14 @@
     <string name="advanced_settings">進階</string>
     <string name="advanced_generation_title">進階設定</string>
     <string name="advanced_per_conversation">逐對話覆蓋</string>
+    <string name="message_display">訊息顯示</string>
+    <string name="tool_call_display_mode">思考與工具區塊</string>
+    <string name="tool_call_display_mode_timeline">時間軸</string>
+    <string name="tool_call_display_mode_grouped_timeline">分組</string>
+    <string name="tool_call_display_mode_compact">精簡</string>
+    <string name="tool_call_display_mode_timeline_desc">依時間順序顯示回答、思考和工具區塊</string>
+    <string name="tool_call_display_mode_grouped_timeline_desc">保留時間順序，但合併連續的思考、工具和圖片區塊</string>
+    <string name="tool_call_display_mode_compact_desc">將思考和工具區塊聚合顯示在回答上方</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">網頁搜尋</string>
@@ -279,10 +383,10 @@
     <string name="web_search_tavily_key_hint">來自 tavily.com 的 API 金鑰</string>
     <string name="web_search_num_results">最大結果數</string>
     <string name="web_search_num_results_desc">取得的結果數量：%1$d（1-10）</string>
-    <string name="web_search_searxng_url">SearXNG 基礎 URL</string>
-    <string name="web_search_searxng_url_hint">https://searx.be</string>
     <string name="web_search_searxng_fallback_desc">公用執行個體常有頻率限制，建議自行架設以獲得穩定體驗。</string>
     <string name="web_search_advanced">進階</string>
+    <string name="web_search_searxng_url">SearXNG 基礎 URL</string>
+    <string name="web_search_searxng_url_hint">https://searx.be</string>
 
     <!-- Settings - Shell Page -->
     <string name="shell_title">終端機</string>
@@ -311,6 +415,29 @@
     <string name="shell_result_server">伺服器: %1$s</string>
     <string name="shell_device_type">類型</string>
 
+    <!-- Settings - Android Page -->
+    <string name="android_title">安卓</string>
+    <string name="android_desc">安卓功能</string>
+    <string name="calendar_title">議程</string>
+    <string name="calendar_enable">啟用日曆工具</string>
+    <string name="calendar_enable_desc">允許模特兒查看您的日曆</string>
+    <string name="calendar_confirm_setting">確認議程變更</string>
+    <string name="calendar_confirm_setting_desc">在助理更改或刪除日曆項目之前請求確認</string>
+    <string name="contacts_title">聯絡方式</string>
+    <string name="contacts_enable">啟用聯絡人工具</string>
+    <string name="contacts_enable_desc">允許模特兒查看您的聯絡人</string>
+    <string name="contacts_confirm_setting">確認聯絡方式變更</string>
+    <string name="contacts_confirm_setting_desc">在助理更改或刪除聯絡人之前請求確認</string>
+    <string name="location_title">地點</string>
+    <string name="location_enable">啟用定位工具</string>
+    <string name="location_enable_desc">允許模特兒查看您的位置</string>
+    <string name="location_confirm_setting">確認位置</string>
+    <string name="location_confirm_setting_desc">在助理獲取您的位置之前請求確認</string>
+    <string name="location_reverse_geocode_enable">透過反向地理編碼查找地址</string>
+    <string name="location_reverse_geocode_enable_desc">也可以透過 Nominatim 找到街道地址以取得座標</string>
+    <string name="location_nominatim_base_url">指定伺服器 URL</string>
+    <string name="location_nominatim_base_url_hint">https://nominatim.openstreetmap.org</string>
+
     <!-- Settings - Linux Sandbox -->
     <string name="sandbox_title">本機沙箱</string>
     <string name="sandbox_enable">啟用本機沙箱</string>
@@ -327,6 +454,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">磁碟使用</string>
     <string name="sandbox_install">安裝</string>
+    <string name="sandbox_upgrade">升級</string>
     <string name="sandbox_install_packages">安裝套件</string>
     <string name="sandbox_package_name">套件名稱</string>
     <string name="sandbox_quick_install">快速安裝</string>
@@ -364,7 +492,6 @@
     <string name="sandbox_manage_desc">安裝、設定套件或重設環境</string>
     <string name="sandbox_package_placeholder">python3, git, curl…</string>
     <string name="sandbox_installed_fmt">已安裝套件 (%d)</string>
-    <string name="sandbox_upgrade">升級</string>
     <string name="sandbox_browse_files">瀏覽檔案</string>
     <string name="sandbox_browse_files_desc">在系統檔案管理員中開啟沙箱目錄</string>
 
@@ -430,6 +557,7 @@
     <string name="settings_appearance">外觀</string>
     <string name="settings_appearance_desc">主題、配色方案和動態顏色</string>
     <string name="appearance_title">外觀</string>
+    <string name="appearance_interface">介面</string>
     <string name="theme_mode">主題模式</string>
     <string name="theme_mode_light">淺色</string>
     <string name="theme_mode_dark">深色</string>
@@ -457,18 +585,9 @@
     <string name="font_invalid_file">無效的字體檔案</string>
     <string name="dynamic_color">動態顏色</string>
     <string name="dynamic_color_desc">根據桌布使用系統生成的顏色（Android 12+）</string>
-    <string name="appearance_interface">介面</string>
     <string name="visual_effects">視覺效果</string>
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">對聊天列表頂部工具列下方套用模糊。關閉可節省效能。</string>
-    <string name="message_display">訊息顯示</string>
-    <string name="tool_call_display_mode">思考與工具區塊</string>
-    <string name="tool_call_display_mode_timeline">時間軸</string>
-    <string name="tool_call_display_mode_grouped_timeline">分組</string>
-    <string name="tool_call_display_mode_compact">精簡</string>
-    <string name="tool_call_display_mode_timeline_desc">依時間順序顯示回答、思考和工具區塊</string>
-    <string name="tool_call_display_mode_grouped_timeline_desc">保留時間順序，但合併連續的思考、工具和圖片區塊</string>
-    <string name="tool_call_display_mode_compact_desc">將思考和工具區塊聚合顯示在回答上方</string>
     <string name="interaction_feedback">互動回饋</string>
     <string name="haptic_feedback">觸覺回饋</string>
     <string name="haptic_feedback_desc">為生成狀態和關鍵操作使用輕微震動。</string>
@@ -564,105 +683,6 @@
     <string name="conversation_read_page">頁面：訊息 %1$d-%2$d</string>
     <string name="conversation_read_more">使用更高的 offset 檢視更多訊息。</string>
 
-    <string name="tool_call_failed">工具呼叫失敗</string>
-    <string name="database_incompatible">資料庫不相容</string>
-    <string name="database_incompatible_desc">資料庫版本較新，無法降級。請解除安裝並重新安裝應用程式。</string>
-
-    <!-- Tool Details -->
-    <string name="tool_read_memory_success">讀取記憶</string>
-    <string name="tool_read_memory_failed">讀取記憶失敗</string>
-    <string name="scroll_to_bottom">捲動到底部</string>
-    <string name="tool_read_memory_count">讀取了 %1$d 筆記憶</string>
-    <string name="tool_read_memory_name">讀取 %1$s</string>
-    <string name="tool_save_memory_failed">儲存記憶失敗</string>
-    <string name="tool_save_memory_name">已儲存 %1$s</string>
-    <string name="tool_save_memory_default">已儲存一筆記憶</string>
-    <string name="tool_edit_memory_failed">編輯記憶失敗</string>
-    <string name="tool_edit_memory_name">已更新 %1$s</string>
-    <string name="tool_edit_memory_default">已更新一筆記憶</string>
-    <string name="tool_delete_memory_failed">刪除記憶失敗</string>
-    <string name="tool_delete_memory_name">已刪除 %1$s</string>
-    <string name="tool_delete_memory_default">已刪除一筆記憶</string>
-    <string name="tool_lookup_failed">尋找記憶失敗</string>
-    <string name="tool_lookup_count">檢視了 %1$d 筆已儲存的記憶</string>
-    <string name="tool_lookup_default">檢視了已儲存的記憶</string>
-    <string name="tool_update_active_failed">更新活躍記憶失敗</string>
-    <string name="tool_update_active_default">已更新活躍記憶</string>
-    <string name="tool_searching_conversations_default">正在搜尋對話</string>
-    <string name="tool_done">完成</string>
-    <string name="tool_context">工具</string>
-    <!-- New tool display names (P0) -->
-    <string name="tool_list_conversations">列出對話</string>
-    <string name="tool_read_conversation">閱讀對話</string>
-    <string name="tool_file_read">讀取檔案</string>
-    <string name="tool_file_write">寫入檔案</string>
-    <string name="tool_file_edit">編輯檔案</string>
-    <string name="tool_file_glob">尋找檔案</string>
-    <string name="tool_file_grep">搜尋檔案</string>
-    <!-- Tool in-progress states (doing) -->
-    <string name="tool_listing_conversations">列出對話中…</string>
-    <string name="tool_reading_conversation">閱讀對話中…</string>
-    <string name="tool_reading_file">讀取 %1$s…</string>
-    <string name="tool_writing_file">寫入 %1$s…</string>
-    <string name="tool_editing_file">編輯 %1$s…</string>
-    <string name="tool_finding_files">尋找 %1$s…</string>
-    <string name="tool_searching_file">搜尋 %1$s…</string>
-    <string name="tool_executing_shell">執行中: %1$s…</string>
-    <string name="tool_reading_memory">讀取 %1$s…</string>
-    <string name="tool_saving_memory">儲存 %1$s…</string>
-    <string name="tool_updating_memory">更新 %1$s…</string>
-    <string name="tool_removing_memory">刪除 %1$s…</string>
-    <string name="tool_looking_up_memories">查詢記憶中…</string>
-    <string name="tool_updating_active">更新活躍記憶中…</string>
-    <string name="tool_listing_shells">列出Shell中…</string>
-    <string name="tool_searching_for">搜尋 \'%1$s\'…</string>
-    <!-- Tool done states (P0 + P1) -->
-    <string name="tool_listed_conversations">已列出 %1$d 個對話</string>
-    <string name="tool_listed_no_conversations">未找到對話</string>
-    <string name="tool_read_conversation_done">已閱讀對話: %1$s</string>
-    <string name="tool_read_file_done">已讀取 %1$s</string>
-    <string name="tool_wrote_file">已寫入 %1$s</string>
-    <string name="tool_edited_file">已編輯 %1$s</string>
-    <string name="tool_found_files">找到 %1$d 個檔案</string>
-    <string name="tool_found_no_files">無符合檔案</string>
-    <string name="tool_searched_file">找到 %1$d 處符合</string>
-    <string name="tool_executed_shell">已執行: %1$s (%2$d 位元組)</string>
-    <string name="tool_executed_no_output">已執行: %1$s (無輸出)</string>
-    <string name="tool_read_file_failed">讀取檔案失敗</string>
-    <string name="crash_log_label">崩潰日誌</string>
-
-    <!-- Message Info -->
-    <string name="message_info">詳細資訊</string>
-    <string name="time_with_label">時間：%1$s</string>
-    <string name="model_with_label">模型：%1$s</string>
-    <string name="arguments_label">參數：</string>
-    <string name="result_label">結果：</string>
-
-    <!-- Cost & Tokens -->
-    <string name="cost_tokens">消耗 %1$d Tokens</string>
-    <string name="total_tokens">總計：%1$d Tokens</string>
-
-    <!-- General Actions -->
-    <string name="action">操作</string>
-    <string name="video">影片</string>
-    <string name="copy">複製</string>
-    <string name="edit">編輯</string>
-    <string name="info">資訊</string>
-    <string name="cancel">取消</string>
-    <string name="save">儲存</string>
-    <string name="delete">刪除</string>
-    <string name="rename">重新命名</string>
-    <string name="quit">退出</string>
-
-    <!-- Chat Actions -->
-    <string name="generate_title">生成標題</string>
-    <string name="rename_chat">重新命名對話</string>
-    <string name="delete_chat">刪除對話</string>
-    <string name="delete_chat_confirm">確定要刪除此對話嗎？此操作無法復原。</string>
-    <string name="clear_database">清除資料庫</string>
-    <string name="conversation_prompt">對話指令</string>
-    <string name="global_default_format">全域預設（%1$s）</string>
-
     <!-- General -->
     <string name="back">返回</string>
     <string name="remove">移除</string>
@@ -671,20 +691,28 @@
     <string name="video_thumbnail">影片縮圖</string>
     <string name="play">播放</string>
     <string name="video_preview">影片預覽</string>
+    <string name="total_tokens">總計：%1$d Tokens</string>
+    <string name="welcome_to_agora">歡迎使用 Agora。</string>
+    <string name="database_incompatible">資料庫不相容</string>
+    <string name="database_incompatible_desc">資料庫版本較新，無法降級。請解除安裝並重新安裝應用程式。</string>
+    <string name="quit">退出</string>
+    <string name="clear_database">清除資料庫</string>
+    <string name="generate_title">生成標題</string>
+    <string name="rename">重新命名</string>
+    <string name="delete">刪除</string>
+    <string name="rename_chat">重新命名對話</string>
+    <string name="delete_chat">刪除對話</string>
+    <string name="delete_chat_confirm">確定要刪除此對話嗎？此操作無法復原。</string>
+    <string name="delete_message_title">刪除訊息？</string>
+    <string name="delete_message_confirm">此貼及後續所有回覆將永久刪除。</string>
+    <string name="conversation_prompt">對話指令</string>
+    <string name="global_default_format">全域預設（%1$s）</string>
+    <string name="save">儲存</string>
 
     <!-- Local Chat Provider -->
     <string name="local_chat_models">本機聊天模型</string>
+    <string name="local_models_title">本機模型</string>
     <string name="local_chat_models_count">已匯入 %1$d 個模型</string>
-    <string name="import_model_chat">匯入 GGUF 模型</string>
-    <string name="add_local_chat_model">新增本機模型</string>
-    <string name="local_ctx_size">上下文大小</string>
-    <string name="local_temperature">溫度</string>
-    <string name="local_top_p">Top P</string>
-    <string name="local_max_tokens">最大 Token 數</string>
-    <string name="local_chat_delete_title">刪除本機模型？</string>
-    <string name="local_chat_delete_text">確定要刪除 \'%1$s\' 嗎？這將同時刪除模型檔案。</string>
-    <string name="model_id_label">ID</string>
-    <string name="model_alias_label">別名</string>
     <string name="local_title">本機</string>
     <string name="not_configured">未設定</string>
     <string name="provider_built_in">內建服務商</string>
@@ -694,27 +722,19 @@
     <string name="provider_no_local_models_desc">匯入 GGUF 模型以開始使用</string>
     <string name="provider_keys_summary">%1$d 個 API 金鑰</string>
     <string name="provider_connection">連線</string>
-    <string name="local_models_title">本機模型</string>
+    <string name="import_model_chat">匯入 GGUF 模型</string>
+    <string name="add_local_chat_model">新增本機模型</string>
+    <string name="local_ctx_size">上下文大小</string>
+    <string name="local_temperature">溫度</string>
+    <string name="local_top_p">Top P</string>
+    <string name="local_max_tokens">最大 Token 數</string>
     <string name="local_mmproj_path">Vision Projector 路徑（選用）</string>
     <string name="local_mmproj_path_hint">選擇 vision 的 mmproj .gguf 檔案</string>
     <string name="local_mmproj_path_label">Vision projector (.mmproj)</string>
-
-    <!-- Video Slicing -->
-    <string name="video_slice_title">影片幀擷取</string>
-    <string name="video_duration">時長: %1$s</string>
-    <string name="by_frame_count">按幀數</string>
-    <string name="by_interval">按間隔</string>
-    <string name="frames_count">幀數: %1$d</string>
-    <string name="interval_seconds">間隔: %1$ds</string>
-    <string name="extract_frames">擷取 %1$d 幀</string>
-
-    <!-- File Validation -->
-    <string name="file_unsupported_title">不支援的檔案</string>
-    <string name="file_unknown_type">未知檔案類型</string>
-    <string name="file_unsupported_type">不支援的檔案類型: %1$s</string>
-    <string name="file_too_large">檔案過大 (最大 20 MB)</string>
-    <string name="pdf_render_failed">PDF 渲染失敗</string>
-    <string name="pdf_selected">已選擇</string>
+    <string name="local_chat_delete_title">刪除本機模型？</string>
+    <string name="local_chat_delete_text">確定要刪除 \'%1$s\' 嗎？這將同時刪除模型檔案。</string>
+    <string name="model_id_label">ID</string>
+    <string name="model_alias_label">別名</string>
 
     <!-- Settings - Group Labels -->
     <string name="settings_group_memory_data">記憶與資料</string>
@@ -779,19 +799,22 @@
     <string name="export_button">匯出</string>
     <string name="exporting_label">匯出中…</string>
     <string name="export_success">資料匯出成功。</string>
+
     <string name="export_failed">匯出失敗: %1$s</string>
     <string name="import_preview_title">匯入資料</string>
     <string name="import_from">匯出時間 %1$s\n來自 Agora v%2$s</string>
+    <string name="import_strategy_merge">合併</string>
+    <string name="import_strategy_replace">取代</string>
+    <string name="import_strategy_skip">略過</string>
+    <string name="import_api_keys_warning">此匯出包含 API 金鑰。金鑰將以明文形式匯入。僅在信任來源時繼續。</string>
     <string name="import_button">匯入</string>
     <string name="importing_label">匯入中…</string>
     <string name="import_success">匯入完成: %1$s</string>
     <string name="import_failed">匯入失敗: %1$s</string>
     <string name="import_invalid_file">無效的 .agora 檔案。請選擇有效的匯出檔案。</string>
     <string name="import_no_data">此匯出檔案不包含可匯入資料。</string>
-    <string name="import_strategy_merge">合併</string>
-    <string name="import_strategy_replace">取代</string>
-    <string name="import_strategy_skip">略過</string>
-    <string name="import_api_keys_warning">此匯出包含 API 金鑰。金鑰將以明文形式匯入。僅在信任來源時繼續。</string>
+
+    <!-- Claude Chat Import -->
     <string name="third_party_import">第三方</string>
     <string name="claude_import_title">從 Claude 匯入</string>
     <string name="claude_import_subtitle">從 Claude 匯出的 .zip 檔案中匯入對話。</string>
@@ -825,6 +848,23 @@
     <string name="gpt_import_no_data">此檔案中沒有可匯入的資料。</string>
     <string name="select_all">全選</string>
     <string name="deselect_all">取消全選</string>
+
+    <!-- Video Slicing -->
+    <string name="video_slice_title">影片幀擷取</string>
+    <string name="video_duration">時長: %1$s</string>
+    <string name="by_frame_count">按幀數</string>
+    <string name="by_interval">按間隔</string>
+    <string name="frames_count">幀數: %1$d</string>
+    <string name="interval_seconds">間隔: %1$ds</string>
+    <string name="extract_frames">擷取 %1$d 幀</string>
+
+    <!-- File Validation -->
+    <string name="file_unsupported_title">不支援的檔案</string>
+    <string name="file_unknown_type">未知檔案類型</string>
+    <string name="file_unsupported_type">不支援的檔案類型: %1$s</string>
+    <string name="file_too_large">檔案過大 (最大 20 MB)</string>
+    <string name="pdf_render_failed">PDF 渲染失敗</string>
+    <string name="pdf_selected">已選擇</string>
 
     <!-- Caching & Sync -->
     <string name="embedding_model_caching">嵌入模型 \"%1$s\" 正在快取…</string>
@@ -934,6 +974,58 @@
     <string name="shell_confirm_deny">拒絕</string>
     <string name="shell_confirm_setting">確認遠端 Shell 操作</string>
     <string name="shell_confirm_setting_desc">在助手於遠端 SSH/Conch 伺服器上執行命令或寫入檔案前詢問</string>
+    <!-- MCP (Model Context Protocol) servers -->
+    <string name="mcp_title">MCP伺服器</string>
+    <string name="mcp_desc">連接到模型上下文協定工具伺服器</string>
+    <string name="mcp_enable">啟用 MCP 工具</string>
+    <string name="mcp_enable_desc">允許模型使用您配置的 MCP 伺服器提供的工具</string>
+    <string name="mcp_servers">伺服器</string>
+    <string name="mcp_add_server">新增伺服器</string>
+    <string name="mcp_remove_server">刪除</string>
+    <string name="mcp_no_servers">未配置 MCP 伺服器</string>
+    <string name="mcp_server_enabled">啟用</string>
+    <string name="mcp_server_name">姓名</string>
+    <string name="mcp_server_name_hint">我的 MCP 伺服器</string>
+    <string name="mcp_server_desc">描述</string>
+    <string name="mcp_server_desc_hint">這個伺服器的用途是什麼</string>
+    <string name="mcp_server_url">伺服器位址</string>
+    <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_bearer_token">不記名令牌</string>
+    <string name="mcp_server_bearer_token_hint">作為授權發送：持票人...</string>
+    <string name="mcp_server_headers">附加標頭</string>
+    <string name="mcp_server_headers_hint">X-Api-Key：秘密</string>
+    <string name="mcp_server_headers_desc">每行一個標頭，如“名稱：值”</string>
+    <string name="mcp_server_timeout">超時（秒）</string>
+    <string name="mcp_timeout_value">%ds</string>
+    <string name="mcp_delete_confirm_title">刪除 MCP 伺服器</string>
+    <string name="mcp_delete_confirm_message">您確定要刪除“%1$s”嗎？</string>
+    <string name="mcp_test_connection">測試連接</string>
+    <string name="mcp_test_connection_testing">連接…</string>
+    <string name="mcp_test_connection_success">已連線 — 找到 %1$d 個工具</string>
+    <string name="mcp_test_connection_success_none">已連線 — 未找到工具</string>
+    <string name="mcp_test_connection_failure">失敗：%1$s</string>
+    <string name="mcp_confirm_title">允許“%2$s”上的“%1$s”嗎？</string>
+    <string name="mcp_confirm_allow">允許一次</string>
+    <string name="mcp_confirm_always">始終允許該伺服器</string>
+    <string name="mcp_confirm_deny">拒絕</string>
+    <string name="mcp_confirm_setting">確認破壞性 MCP 工具調用</string>
+    <string name="mcp_confirm_setting_desc">在助手運行被 MCP 伺服器標記為破壞性的工具之前請求確認。只讀工具始終無需確認即可運作。</string>
+    <!-- Location confirmation gate -->
+    <string name="location_confirm_title">分享您的位置？</string>
+    <string name="location_confirm_message">助手將請求您設備的當前位置並與模型共用。</string>
+    <string name="location_confirm_allow">允許</string>
+    <string name="location_confirm_deny">拒絕</string>
+    <string name="location_confirm_always_allow">始終允許（不要再問）</string>
+    <!-- Calendar confirmation gate -->
+    <string name="calendar_confirm_title">允許改變議程嗎？</string>
+    <string name="calendar_confirm_allow">允許</string>
+    <string name="calendar_confirm_deny">拒絕</string>
+    <string name="calendar_confirm_always_allow">始終允許（不要再問）</string>
+    <!-- Contacts confirmation gate -->
+    <string name="contacts_confirm_title">允許更改此聯絡人嗎？</string>
+    <string name="contacts_confirm_allow">允許</string>
+    <string name="contacts_confirm_deny">拒絕</string>
+    <string name="contacts_confirm_always_allow">始終允許（不要再問）</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora 意外退出</string>
