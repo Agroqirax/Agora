@@ -394,6 +394,7 @@
     <string name="shell_enable">Activar herramienta de shell</string>
     <string name="shell_enable_desc">Permite que el modelo ejecute comandos de shell en servidores remotos</string>
     <string name="shell_device_name">Nombre</string>
+    <string name="shell_device_enabled">Activado</string>
     <string name="shell_device_name_hint">Mi servidor</string>
     <string name="shell_device_desc">Descripción</string>
     <string name="shell_device_desc_hint">Servidor de compilación en la oficina</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Funciones de Android</string>
+    <string name="digital_assistant_title">Asistente Digital</string>
+    <string name="digital_assistant_desc">Inicie Agora con texto en pantalla adjunto mediante el gesto de asistencia</string>
+    <string name="digital_assistant_status_active">Agora es tu asistente digital</string>
     <string name="calendar_title">Calendario</string>
     <string name="calendar_enable">Activar herramienta de calendario</string>
     <string name="calendar_enable_desc">Permitir que el modelo vea tu calendario</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Permitir que el modelo vea tus contactos</string>
     <string name="contacts_confirm_setting">Confirmar cambios en los contactos</string>
     <string name="contacts_confirm_setting_desc">Preguntar antes de que el asistente pueda modificar o eliminar contactos</string>
+    <string name="device_info_title">Dispositivo</string>
+    <string name="device_info_enable">Herramienta de información del dispositivo</string>
+    <string name="device_info_enable_desc">Permite que el asistente verifique la batería, el modo de timbre, la red, el almacenamiento y otros estados actuales del dispositivo.</string>
+    <string name="package_query_enable">Herramienta de aplicaciones instaladas</string>
+    <string name="package_query_enable_desc">Permite que el asistente enumere las aplicaciones instaladas en este dispositivo. No disponible en las compilaciones de Google Play.</string>
+    <string name="package_query_not_supported">Herramienta de aplicaciones instaladas no compatible</string>
+    <string name="package_query_not_supported_desc">Esta característica no está disponible en la versión actual.</string>
     <string name="location_title">Ubicación</string>
     <string name="location_enable">Activar herramienta de ubicación</string>
     <string name="location_enable_desc">Permitir que el modelo vea tu ubicación</string>

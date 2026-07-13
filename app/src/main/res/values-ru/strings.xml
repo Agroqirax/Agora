@@ -394,6 +394,7 @@
     <string name="shell_enable">Включить инструмент оболочки</string>
     <string name="shell_enable_desc">Разрешить модели выполнять команды оболочки на удалённых серверах</string>
     <string name="shell_device_name">Название</string>
+    <string name="shell_device_enabled">Включено</string>
     <string name="shell_device_name_hint">Мой сервер</string>
     <string name="shell_device_desc">Описание</string>
     <string name="shell_device_desc_hint">Сервер сборки в офисе</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Андроид</string>
     <string name="android_desc">Возможности Android</string>
+    <string name="digital_assistant_title">Цифровой помощник</string>
+    <string name="digital_assistant_desc">Запустите Agora с текстом на экране, прикрепленным с помощью вспомогательного жеста.</string>
+    <string name="digital_assistant_status_active">Агора — ваш цифровой помощник</string>
     <string name="calendar_title">Повестка дня</string>
     <string name="calendar_enable">Включить инструмент календаря</string>
     <string name="calendar_enable_desc">Разрешите модели просматривать ваш календарь</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Разрешите модели просматривать ваши контакты</string>
     <string name="contacts_confirm_setting">Подтвердить изменение контакта</string>
     <string name="contacts_confirm_setting_desc">Попросите подтверждение, прежде чем помощник сможет изменить или удалить контакты.</string>
+    <string name="device_info_title">Устройство</string>
+    <string name="device_info_enable">Инструмент информации об устройстве</string>
+    <string name="device_info_enable_desc">Позволяет помощнику проверять аккумулятор, режим звонка, сеть, хранилище и другое текущее состояние устройства.</string>
+    <string name="package_query_enable">Инструмент установленных приложений</string>
+    <string name="package_query_enable_desc">Позволяет помощнику составить список приложений, установленных на этом устройстве. Недоступно в сборках Google Play.</string>
+    <string name="package_query_not_supported">Инструмент «Установленные приложения» не поддерживается</string>
+    <string name="package_query_not_supported_desc">Эта функция недоступна в текущей сборке.</string>
     <string name="location_title">Расположение</string>
     <string name="location_enable">Включить инструмент определения местоположения</string>
     <string name="location_enable_desc">Разрешите модели видеть ваше местоположение</string>

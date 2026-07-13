@@ -394,6 +394,7 @@
     <string name="shell_enable">Shell-Werkzeug aktivieren</string>
     <string name="shell_enable_desc">Dem Modell erlauben, Shell-Befehle auf Remote-Servern auszuführen</string>
     <string name="shell_device_name">Name</string>
+    <string name="shell_device_enabled">Ermöglicht</string>
     <string name="shell_device_name_hint">Mein Server</string>
     <string name="shell_device_desc">Beschreibung</string>
     <string name="shell_device_desc_hint">Build-Server im Büro</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Android-Funktionen</string>
+    <string name="digital_assistant_title">Digitaler Assistent</string>
+    <string name="digital_assistant_desc">Starten Sie Agora mit angehängtem Bildschirmtext über die Assist-Geste</string>
+    <string name="digital_assistant_status_active">Agora ist Ihr digitaler Assistent</string>
     <string name="calendar_title">Kalender</string>
     <string name="calendar_enable">Kalenderwerkzeug aktivieren</string>
     <string name="calendar_enable_desc">Dem Modell Zugriff auf Ihren Kalender erlauben</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Dem Modell Zugriff auf Ihre Kontakte erlauben</string>
     <string name="contacts_confirm_setting">Kontaktänderungen bestätigen</string>
     <string name="contacts_confirm_setting_desc">Vor Änderungen oder dem Löschen von Kontakten nachfragen</string>
+    <string name="device_info_title">Gerät</string>
+    <string name="device_info_enable">Geräteinfo-Tool</string>
+    <string name="device_info_enable_desc">Ermöglicht dem Assistenten, den Akku, den Ruftonmodus, das Netzwerk, den Speicher und andere aktuelle Gerätezustände zu überprüfen</string>
+    <string name="package_query_enable">Installiertes Apps-Tool</string>
+    <string name="package_query_enable_desc">Ermöglicht dem Assistenten, auf diesem Gerät installierte Apps aufzulisten. Nicht verfügbar für Google Play-Builds.</string>
+    <string name="package_query_not_supported">Installiertes Apps-Tool wird nicht unterstützt</string>
+    <string name="package_query_not_supported_desc">Diese Funktion ist im aktuellen Build nicht verfügbar</string>
     <string name="location_title">Standort</string>
     <string name="location_enable">Standortwerkzeug aktivieren</string>
     <string name="location_enable_desc">Dem Modell Zugriff auf Ihren Standort erlauben</string>

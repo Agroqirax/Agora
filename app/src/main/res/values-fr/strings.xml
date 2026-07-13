@@ -394,6 +394,7 @@
     <string name="shell_enable">Activer l\'outil shell</string>
     <string name="shell_enable_desc">Permettre au modèle d\'exécuter des commandes shell sur des serveurs distants</string>
     <string name="shell_device_name">Nom</string>
+    <string name="shell_device_enabled">Activé</string>
     <string name="shell_device_name_hint">Mon serveur</string>
     <string name="shell_device_desc">Description</string>
     <string name="shell_device_desc_hint">Serveur de build au bureau</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Androïde</string>
     <string name="android_desc">Fonctionnalités Android</string>
+    <string name="digital_assistant_title">Assistante numérique</string>
+    <string name="digital_assistant_desc">Lancez Agora avec le texte à l'écran joint via le geste d'assistance</string>
+    <string name="digital_assistant_status_active">Agora est votre assistant numérique</string>
     <string name="calendar_title">Ordre du jour</string>
     <string name="calendar_enable">Activer l\'outil de calendrier</string>
     <string name="calendar_enable_desc">Autoriser le modèle à consulter votre calendrier</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Autoriser le modèle à voir vos contacts</string>
     <string name="contacts_confirm_setting">Confirmer les changements de contact</string>
     <string name="contacts_confirm_setting_desc">Demandez une confirmation avant que l\'assistant puisse modifier ou supprimer des contacts</string>
+    <string name="device_info_title">Appareil</string>
+    <string name="device_info_enable">Outil d'informations sur l'appareil</string>
+    <string name="device_info_enable_desc">Permet à l'assistant de vérifier la batterie, le mode de sonnerie, le réseau, le stockage et tout autre état actuel de l'appareil</string>
+    <string name="package_query_enable">Outil d'applications installées</string>
+    <string name="package_query_enable_desc">Permet à l'assistant de répertorier les applications installées sur cet appareil. Non disponible sur les versions de Google Play.</string>
+    <string name="package_query_not_supported">Outil d'applications installées non pris en charge</string>
+    <string name="package_query_not_supported_desc">Cette fonctionnalité n'est pas disponible dans la version actuelle</string>
     <string name="location_title">Emplacement</string>
     <string name="location_enable">Activer l\'outil de localisation</string>
     <string name="location_enable_desc">Autoriser le modèle à voir votre position</string>

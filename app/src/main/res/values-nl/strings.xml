@@ -394,6 +394,7 @@
     <string name="shell_enable">Shell-hulpmiddel inschakelen</string>
     <string name="shell_enable_desc">Sta het model toe shellopdrachten uit te voeren via externe servers</string>
     <string name="shell_device_name">Naam</string>
+    <string name="shell_device_enabled">Ingeschakeld</string>
     <string name="shell_device_name_hint">Mijn server</string>
     <string name="shell_device_desc">Beschrijving</string>
     <string name="shell_device_desc_hint">Buildserver op kantoor</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Android-functies</string>
+    <string name="digital_assistant_title">Digitale assistent</string>
+    <string name="digital_assistant_desc">Start Agora met tekst op het scherm toegevoegd via het hulpgebaar</string>
+    <string name="digital_assistant_status_active">Agora is uw digitale assistent</string>
     <string name="calendar_title">Agenda</string>
     <string name="calendar_enable">Agenda-hulpmiddel inschakelen</string>
     <string name="calendar_enable_desc">Sta het model toe je agenda te bekijken</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Sta het model toe je contacten te bekijken</string>
     <string name="contacts_confirm_setting">Contactwijzigingen bevestigen</string>
     <string name="contacts_confirm_setting_desc">Vraag om bevestiging voordat de assistent contacten kan wijzigen of verwijderen</string>
+    <string name="device_info_title">Apparaat</string>
+    <string name="device_info_enable">Apparaatinfo-tool</string>
+    <string name="device_info_enable_desc">Hiermee kan de assistent de batterij, belmodus, netwerk, opslag en andere huidige apparaatstatus controleren</string>
+    <string name="package_query_enable">Geïnstalleerde AppsTool</string>
+    <string name="package_query_enable_desc">Laat de assistent de apps weergeven die op dit apparaat zijn geïnstalleerd. Niet beschikbaar in Google Play-builds.</string>
+    <string name="package_query_not_supported">Geïnstalleerde Apps Tool wordt niet ondersteund</string>
+    <string name="package_query_not_supported_desc">Deze functie is niet beschikbaar in de huidige build</string>
     <string name="location_title">Locatie</string>
     <string name="location_enable">Locatie-hulpmiddel inschakelen</string>
     <string name="location_enable_desc">Sta het model toe je locatie te bekijken</string>

@@ -394,6 +394,7 @@
     <string name="shell_enable">シェルツールを有効にする</string>
     <string name="shell_enable_desc">モデルがリモートサーバー経由でシェルコマンドを実行できるようにする</string>
     <string name="shell_device_name">名前</string>
+    <string name="shell_device_enabled">有効</string>
     <string name="shell_device_name_hint">マイサーバー</string>
     <string name="shell_device_desc">説明</string>
     <string name="shell_device_desc_hint">オフィスのビルドサーバー</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">アンドロイド</string>
     <string name="android_desc">Androidの機能</string>
+    <string name="digital_assistant_title">デジタルアシスタント</string>
+    <string name="digital_assistant_desc">アシスト ジェスチャーを介して画面上のテキストを添付して Agora を起動します</string>
+    <string name="digital_assistant_status_active">Agora はあなたのデジタル アシスタントです</string>
     <string name="calendar_title">議題</string>
     <string name="calendar_enable">カレンダーツールを有効にする</string>
     <string name="calendar_enable_desc">モデルにカレンダーの表示を許可する</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">モデルに連絡先を表示できるようにする</string>
     <string name="contacts_confirm_setting">連絡先の変更を確認する</string>
     <string name="contacts_confirm_setting_desc">アシスタントが連絡先を変更または削除する前に確認を求める</string>
+    <string name="device_info_title">デバイス</string>
+    <string name="device_info_enable">デバイス情報ツール</string>
+    <string name="device_info_enable_desc">アシスタントはバッテリー、着信音モード、ネットワーク、ストレージ、その他の現在のデバイスの状態を確認できます</string>
+    <string name="package_query_enable">インストール済みアプリツール</string>
+    <string name="package_query_enable_desc">アシスタントがこのデバイスにインストールされているアプリを一覧表示できるようにします。 Google Play ビルドでは利用できません。</string>
+    <string name="package_query_not_supported">インストールされているアプリツールはサポートされていません</string>
+    <string name="package_query_not_supported_desc">この機能は現在のビルドでは利用できません</string>
     <string name="location_title">位置</string>
     <string name="location_enable">位置情報ツールを有効にする</string>
     <string name="location_enable_desc">モデルにあなたの位置情報を表示できるようにする</string>

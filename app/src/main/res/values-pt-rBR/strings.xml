@@ -394,6 +394,7 @@
     <string name="shell_enable">Ativar ferramenta shell</string>
     <string name="shell_enable_desc">Permitir que o modelo execute comandos shell em servidores remotos</string>
     <string name="shell_device_name">Nome</string>
+    <string name="shell_device_enabled">Habilitado</string>
     <string name="shell_device_name_hint">Meu servidor</string>
     <string name="shell_device_desc">Descrição</string>
     <string name="shell_device_desc_hint">Servidor de build no escritório</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Recursos do Android</string>
+    <string name="digital_assistant_title">Assistente digital</string>
+    <string name="digital_assistant_desc">Inicie o Agora com texto na tela anexado por meio do gesto de assistência</string>
+    <string name="digital_assistant_status_active">Agora é o seu assistente digital</string>
     <string name="calendar_title">Agenda</string>
     <string name="calendar_enable">Ativar ferramenta de calendário</string>
     <string name="calendar_enable_desc">Permitir que o modelo visualize seu calendário</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">Permitir que a modelo visualize seus contatos</string>
     <string name="contacts_confirm_setting">Confirmar alterações de contato</string>
     <string name="contacts_confirm_setting_desc">Peça confirmação antes que o assistente possa alterar ou excluir contatos</string>
+    <string name="device_info_title">Dispositivo</string>
+    <string name="device_info_enable">Ferramenta de informações do dispositivo</string>
+    <string name="device_info_enable_desc">Permite que o assistente verifique a bateria, o modo de campainha, a rede, o armazenamento e outros estados atuais do dispositivo</string>
+    <string name="package_query_enable">Ferramenta de aplicativos instalados</string>
+    <string name="package_query_enable_desc">Permite que o assistente liste os aplicativos instalados neste dispositivo. Não disponível nas versões do Google Play.</string>
+    <string name="package_query_not_supported">Ferramenta de aplicativos instalados não suportada</string>
+    <string name="package_query_not_supported_desc">Este recurso não está disponível na versão atual</string>
     <string name="location_title">Localização</string>
     <string name="location_enable">Ativar ferramenta de localização</string>
     <string name="location_enable_desc">Permitir que o modelo visualize sua localização</string>

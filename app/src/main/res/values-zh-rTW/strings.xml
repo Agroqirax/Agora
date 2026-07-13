@@ -394,6 +394,7 @@
     <string name="shell_enable">啟用終端機工具</string>
     <string name="shell_enable_desc">允許模型透過遠端伺服器執行 Shell 命令</string>
     <string name="shell_device_name">名稱</string>
+    <string name="shell_device_enabled">啟用</string>
     <string name="shell_device_name_hint">我的伺服器</string>
     <string name="shell_device_desc">說明</string>
     <string name="shell_device_desc_hint">辦公室的建置伺服器</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">安卓</string>
     <string name="android_desc">安卓功能</string>
+    <string name="digital_assistant_title">數位助理</string>
+    <string name="digital_assistant_desc">啟動 Agora，並透過輔助手勢附加螢幕文本</string>
+    <string name="digital_assistant_status_active">Agora是您的數位助理</string>
     <string name="calendar_title">議程</string>
     <string name="calendar_enable">啟用日曆工具</string>
     <string name="calendar_enable_desc">允許模特兒查看您的日曆</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">允許模特兒查看您的聯絡人</string>
     <string name="contacts_confirm_setting">確認聯絡方式變更</string>
     <string name="contacts_confirm_setting_desc">在助理更改或刪除聯絡人之前請求確認</string>
+    <string name="device_info_title">裝置</string>
+    <string name="device_info_enable">設備資訊工具</string>
+    <string name="device_info_enable_desc">請助手檢查電池、鈴聲模式、網路、儲存和其他目前設備狀態</string>
+    <string name="package_query_enable">安裝的應用程式工具</string>
+    <string name="package_query_enable_desc">請助手列出該設備上安裝的應用程式。不適用於 Google Play 版本。</string>
+    <string name="package_query_not_supported">不支援已安裝的應用程式工具</string>
+    <string name="package_query_not_supported_desc">此功能在目前版本中不可用</string>
     <string name="location_title">地點</string>
     <string name="location_enable">啟用定位工具</string>
     <string name="location_enable_desc">允許模特兒查看您的位置</string>

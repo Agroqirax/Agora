@@ -394,6 +394,7 @@
     <string name="shell_enable">تفعيل أداة الصدفة</string>
     <string name="shell_enable_desc">السماح للنموذج بتنفيذ أوامر الصدفة عبر الخوادم البعيدة</string>
     <string name="shell_device_name">الاسم</string>
+    <string name="shell_device_enabled">ممكّن</string>
     <string name="shell_device_name_hint">خادمي</string>
     <string name="shell_device_desc">الوصف</string>
     <string name="shell_device_desc_hint">خادم البناء في المكتب</string>
@@ -418,6 +419,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">أندرويد</string>
     <string name="android_desc">مميزات الاندرويد</string>
+    <string name="digital_assistant_title">مساعد رقمي</string>
+    <string name="digital_assistant_desc">قم بتشغيل Agora مع إرفاق النص الذي يظهر على الشاشة عبر إيماءة المساعدة</string>
+    <string name="digital_assistant_status_active">Agora هو مساعدك الرقمي</string>
     <string name="calendar_title">جدول الأعمال</string>
     <string name="calendar_enable">تمكين أداة التقويم</string>
     <string name="calendar_enable_desc">اسمح للنموذج بعرض التقويم الخاص بك</string>
@@ -428,6 +432,13 @@
     <string name="contacts_enable_desc">اسمح للنموذج بعرض جهات الاتصال الخاصة بك</string>
     <string name="contacts_confirm_setting">تأكيد تغييرات جهة الاتصال</string>
     <string name="contacts_confirm_setting_desc">اطلب التأكيد قبل أن يتمكن المساعد من تغيير جهات الاتصال أو حذفها</string>
+    <string name="device_info_title">جهاز</string>
+    <string name="device_info_enable">أداة معلومات الجهاز</string>
+    <string name="device_info_enable_desc">يتيح للمساعد التحقق من البطارية ووضع الرنين والشبكة والتخزين وحالة الجهاز الحالية الأخرى</string>
+    <string name="package_query_enable">أداة التطبيقات المثبتة</string>
+    <string name="package_query_enable_desc">يتيح للمساعد إدراج التطبيقات المثبتة على هذا الجهاز. غير متوفر في إصدارات Google Play.</string>
+    <string name="package_query_not_supported">أداة التطبيقات المثبتة غير مدعومة</string>
+    <string name="package_query_not_supported_desc">هذه الميزة غير متوفرة في الإصدار الحالي</string>
     <string name="location_title">موقع</string>
     <string name="location_enable">تمكين أداة تحديد الموقع</string>
     <string name="location_enable_desc">السماح للنموذج بعرض موقعك</string>
