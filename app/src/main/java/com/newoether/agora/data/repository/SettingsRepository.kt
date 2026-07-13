@@ -88,6 +88,8 @@ class SettingsRepository(
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
     val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
+    val deviceInfoEnabled: StateFlow<Boolean> = hot(settingsManager.deviceInfoEnabled, false)
+    val packageQueryEnabled: StateFlow<Boolean> = hot(settingsManager.packageQueryEnabled, false)
     val calendarEnabled: StateFlow<Boolean> = hot(settingsManager.calendarEnabled, false)
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val locationEnabled: StateFlow<Boolean> = hot(settingsManager.locationEnabled, false)
@@ -344,6 +346,8 @@ class SettingsRepository(
     fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
+    fun setDeviceInfoEnabled(enabled: Boolean) = scope.launch { settingsManager.saveDeviceInfoEnabled(enabled) }
+    fun setPackageQueryEnabled(enabled: Boolean) = scope.launch { settingsManager.savePackageQueryEnabled(enabled) }
     fun setCalendarEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalendarEnabled(enabled) }
     fun setCalendarConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalendarConfirmEnabled(enabled) }
     fun setContactsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsEnabled(enabled) }

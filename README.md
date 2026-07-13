@@ -25,7 +25,7 @@
     alt="Get it on GitHub"
     height="80">](https://github.com/newo-ether/Agora/releases/latest)
 
-Note: the google play version does not include the local shell. Download from GitHub or F-Droid instead if you want this feature.
+Note: the google play version does not include certain features. Download from GitHub or F-Droid instead.
 
 ---
 

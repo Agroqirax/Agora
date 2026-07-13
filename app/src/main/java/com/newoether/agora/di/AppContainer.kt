@@ -76,6 +76,33 @@ class AppContainer(private val appContext: Context) {
         }
     }
 
+    // ── Installed-package listing (flavor-specific) ───────────
+
+    val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? by lazy {
+        try {
+            // fdroid flavor provides FdroidPackageQueryProvider (needs QUERY_ALL_PACKAGES,
+            // only declared in that flavor's manifest)
+            Class.forName("com.newoether.agora.tool.FdroidPackageQueryProvider")
+                .getDeclaredConstructor(Context::class.java)
+                .newInstance(appContext) as com.newoether.agora.tool.PackageQueryProvider
+        } catch (_: ClassNotFoundException) {
+            // play flavor provides PlayPackageQueryProvider (always unavailable)
+            try {
+                Class.forName("com.newoether.agora.tool.PlayPackageQueryProvider")
+                    .getDeclaredConstructor()
+                    .newInstance() as com.newoether.agora.tool.PackageQueryProvider
+            } catch (_: ClassNotFoundException) {
+                null
+            } catch (e: Exception) {
+                com.newoether.agora.util.DebugLog.e("AppContainer", "PlayPackageQueryProvider init failed", e)
+                null
+            }
+        } catch (e: Exception) {
+            com.newoether.agora.util.DebugLog.e("AppContainer", "FdroidPackageQueryProvider init failed", e)
+            null
+        }
+    }
+
     // ── Auto Backup ───────────────────────────────────────────
 
     val autoBackupManager: AutoBackupManager by lazy {
@@ -86,7 +113,7 @@ class AppContainer(private val appContext: Context) {
 
     fun chatViewModelFactory(): ChatViewModelFactory =
         ChatViewModelFactory(
-            application, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory,
+            application, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory, packageQueryProvider,
             autoBackupManager, conversationRepository, settingsRepository
         )
 }

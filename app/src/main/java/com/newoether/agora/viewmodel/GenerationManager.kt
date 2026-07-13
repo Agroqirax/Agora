@@ -22,10 +22,12 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
+import com.newoether.agora.tool.DeviceInfoToolProvider
 import com.newoether.agora.tool.ImageGenToolProvider
 import com.newoether.agora.tool.LocationToolProvider
 import com.newoether.agora.tool.McpToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
+import com.newoether.agora.tool.PackageQueryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
@@ -87,6 +89,8 @@ data class GenerationContext(
     val imageGenSize: String = "1024x1024",
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
+    val deviceInfoEnabled: Boolean = true,
+    val packageQueryEnabled: Boolean = false,
     val sandboxEnabled: Boolean = false,
     val mcpEnabled: Boolean = false,
     val mcpServers: List<com.newoether.agora.data.McpServerConfig> = emptyList(),
@@ -146,7 +150,8 @@ class GenerationManager(
     private val memoryManager: MemoryManager,
     private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
-    private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null
+    private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
+    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? = null
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
@@ -197,6 +202,8 @@ class GenerationManager(
         lp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
     }
+    private val deviceInfoToolProvider = DeviceInfoToolProvider(app)
+    private val packageQueryToolProvider = PackageQueryToolProvider(packageQueryProvider)
     private val calendarToolProvider = CalendarToolProvider(app).also { cp ->
         cp.confirmWrite = { summary -> onConfirmCalendarWrite?.invoke(summary) ?: true }
         cp.requestPermission = { onRequestCalendarPermission?.invoke() ?: false }
@@ -207,8 +214,15 @@ class GenerationManager(
     }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
-        locationToolProvider, calendarToolProvider, contactsToolProvider, mcpToolProvider
+        locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
+        contactsToolProvider, mcpToolProvider
     )
+
+    fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
+        deviceInfoToolProvider.definitions(ctx)
+
+    fun buildPackageQueryTool(ctx: GenerationContext): List<ToolDefinition> =
+        packageQueryToolProvider.definitions(ctx)
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         imageGenToolProvider.definitions(ctx)
@@ -435,10 +449,12 @@ class GenerationManager(
         val fileTool = buildFileTool(ctx)
         val imageGenTool = buildImageGenTool(ctx)
         val locationTool = buildLocationTool(ctx)
+        val deviceInfoTool = buildDeviceInfoTool(ctx)
+        val packageQueryTool = buildPackageQueryTool(ctx)
         val calendarTool = buildCalendarTool(ctx)
         val contactsTool = buildContactsTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + calendarTool + contactsTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

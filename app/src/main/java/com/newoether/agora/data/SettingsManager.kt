@@ -169,6 +169,8 @@ class SettingsManager(private val context: Context) {
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
+        val DEVICE_INFO_ENABLED = booleanPreferencesKey("device_info_enabled")
+        val PACKAGE_QUERY_ENABLED = booleanPreferencesKey("package_query_enabled")
         val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
         val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
@@ -344,6 +346,12 @@ class SettingsManager(private val context: Context) {
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
+    // Battery/ringer/network/storage/build info — no dangerous permission involved, so
+    // this defaults on like shell/mcp rather than off like location/calendar/contacts.
+    val deviceInfoEnabled: Flow<Boolean> = context.dataStore.data.map { it[DEVICE_INFO_ENABLED] ?: true }
+    // Reveals the user's installed-apps list — opt-in like location/calendar/contacts,
+    // and only ever actually available on the fdroid flavor regardless of this toggle.
+    val packageQueryEnabled: Flow<Boolean> = context.dataStore.data.map { it[PACKAGE_QUERY_ENABLED] ?: false }
     val calendarEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_ENABLED] ?: false }
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
     val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
@@ -718,6 +726,12 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveShellEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
+    }
+    suspend fun saveDeviceInfoEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[DEVICE_INFO_ENABLED] = enabled }
+    }
+    suspend fun savePackageQueryEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[PACKAGE_QUERY_ENABLED] = enabled }
     }
     suspend fun saveCalendarEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CALENDAR_ENABLED] = enabled }

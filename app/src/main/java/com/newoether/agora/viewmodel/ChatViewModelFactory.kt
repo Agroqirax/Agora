@@ -19,6 +19,7 @@ class ChatViewModelFactory(
     private val memoryManager: MemoryManager,
     private val context: Context,
     private val sandboxFactory: SandboxManagerFactory? = null,
+    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? = null,
     private val autoBackupManager: AutoBackupManager,
     private val conversationRepository: ConversationRepository,
     private val settingsRepository: SettingsRepository
@@ -27,7 +28,7 @@ class ChatViewModelFactory(
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return ChatViewModel(
-                application, chatDao, settingsManager, memoryManager, context, sandboxFactory,
+                application, chatDao, settingsManager, memoryManager, context, sandboxFactory, packageQueryProvider,
                 autoBackupManager, conversationRepository, settingsRepository
             ) as T
         }

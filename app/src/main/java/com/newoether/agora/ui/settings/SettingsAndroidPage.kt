@@ -9,6 +9,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assistant
+import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
@@ -42,6 +44,8 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
+    val deviceInfoEnabled by viewModel.settings.deviceInfoEnabled.collectAsState()
+    val packageQueryEnabled by viewModel.settings.packageQueryEnabled.collectAsState()
     val locationEnabled by viewModel.settings.locationEnabled.collectAsState()
     val locationConfirmEnabled by viewModel.settings.locationConfirmEnabled.collectAsState()
     val locationReverseGeocodeEnabled by viewModel.settings.locationReverseGeocodeEnabled.collectAsState()
@@ -60,6 +64,41 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         SettingsGroupColumn {
             SettingsGroup(title = stringResource(R.string.digital_assistant_title), items = buildList {
                 add { DigitalAssistantSettingsItem() }
+            })
+
+            SettingsGroup(title = stringResource(R.string.device_info_title), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.device_info_enable)) },
+                        supportingContent = { Text(stringResource(R.string.device_info_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = deviceInfoEnabled, onCheckedChange = { viewModel.settings.setDeviceInfoEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.settings.setDeviceInfoEnabled(!deviceInfoEnabled) }
+                    )
+                }
+                // Only ever functional on fdroid/GitHub builds — QUERY_ALL_PACKAGES isn't
+                // declared in the play flavor's manifest at all. Shown greyed-out rather
+                // than hidden on play, same treatment as the Local Sandbox row when
+                // !isSandboxFlavor. See tool/PackageQueryProvider.kt.
+                add {
+                    if (viewModel.isPackageQueryAvailable) {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.package_query_enable)) },
+                            supportingContent = { Text(stringResource(R.string.package_query_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Apps, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = packageQueryEnabled, onCheckedChange = { viewModel.settings.setPackageQueryEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.settings.setPackageQueryEnabled(!packageQueryEnabled) }
+                        )
+                    } else {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.package_query_not_supported)) },
+                            supportingContent = { Text(stringResource(R.string.package_query_not_supported_desc)) },
+                            leadingContent = {
+                                Icon(Icons.Default.Apps, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                            }
+                        )
+                    }
+                }
             })
 
             SettingsGroup(title = stringResource(R.string.location_title), items = buildList {

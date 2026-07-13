@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Flavor-specific manifest, merged only into the fdroid variant (F-Droid + GitHub
+    release APKs). QUERY_ALL_PACKAGES backs the "list_installed_apps" assistant tool
+    (see tool/FdroidPackageQueryProvider.kt). Deliberately excluded from the play flavor:
+    Google Play requires an explicit declared-use justification for this permission that
+    isn't worth pursuing for a single tool call — the play flavor's PlayPackageQueryProvider
+    always reports the feature unavailable instead, and this permission is simply absent
+    from that build.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+</manifest>

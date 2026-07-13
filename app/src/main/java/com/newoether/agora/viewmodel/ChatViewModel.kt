@@ -79,6 +79,7 @@ class ChatViewModel(
     val memoryManager: MemoryManager,
     private val appContext: Context,
     private val sandboxFactory: SandboxManagerFactory? = null,
+    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? = null,
     // All injected via AppContainer/ChatViewModelFactory — the single construction site.
     val autoBackupManager: AutoBackupManager,
     conversationRepository: ConversationRepository,
@@ -256,7 +257,8 @@ class ChatViewModel(
             memoryManager = memoryManager,
             providers = providerRegistry.all,
             context = appContext,
-            sandboxFactory = sandboxFactory
+            sandboxFactory = sandboxFactory,
+            packageQueryProvider = packageQueryProvider
         ).also { gm ->
             gm.onMessagePersisted = { messageId, text ->
                 if (settings.autoCacheEnabled.value && (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG || settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)) {
@@ -278,6 +280,11 @@ class ChatViewModel(
         sandboxFactory?.create()
     }
     val isSandboxFlavor: Boolean = sandboxFactory?.isAvailable() == true
+
+    /** Whether "list_installed_apps" can actually work on this build — used by
+     *  SettingsAndroidPage to hide the toggle entirely on Play builds rather than
+     *  showing a control that would only ever produce an "unavailable" error. */
+    val isPackageQueryAvailable: Boolean = packageQueryProvider?.isAvailable() == true
 
     override fun onCleared() {
         super.onCleared()

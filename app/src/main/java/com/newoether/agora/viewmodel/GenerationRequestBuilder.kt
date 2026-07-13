@@ -157,6 +157,8 @@ class GenerationRequestBuilder(
             // never reach the model: excluded from list_shells, execute_shell_command's
             // server resolution, and error-message suggestions all at this one source.
             shellDevices = settings.shellDevices.value.filter { it.enabled },
+            deviceInfoEnabled = settings.deviceInfoEnabled.value,
+            packageQueryEnabled = settings.packageQueryEnabled.value,
             sandboxEnabled = settings.sandboxEnabled.value,
             mcpEnabled = settings.mcpEnabled.value,
             mcpServers = settings.mcpServers.value,
