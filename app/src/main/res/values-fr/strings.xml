@@ -770,6 +770,9 @@
     <string name="about_privacy_policy">Politique de confidentialité</string>
     <string name="about_source_code">Code source</string>
     <string name="about_version">Version</string>
+    <string name="about_flavor">Distribution</string>
+    <string name="about_flavor_play">Google Play</string>
+    <string name="about_flavor_fdroid">F-Droid</string>
     <string name="about_rating">Noter l\'application</string>
     <string name="about_rating_desc">Ce projet a été développé par une seule personne. J\'apprécie vraiment vos retours.</string>
     <string name="about_updates">Mises à jour</string>

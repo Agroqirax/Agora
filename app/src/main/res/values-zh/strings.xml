@@ -770,6 +770,9 @@
     <string name="about_privacy_policy">隐私政策</string>
     <string name="about_source_code">源代码</string>
     <string name="about_version">版本</string>
+    <string name="about_flavor">发行渠道</string>
+    <string name="about_flavor_play">Google Play</string>
+    <string name="about_flavor_fdroid">F-Droid</string>
     <string name="about_rating">评价应用</string>
     <string name="about_rating_desc">这个项目由一个人独立开发。真诚地感谢您的反馈。</string>
     <string name="about_updates">更新</string>

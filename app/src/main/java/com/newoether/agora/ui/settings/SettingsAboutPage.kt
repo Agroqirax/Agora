@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.BuildConfig
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.util.UpdateInfo
@@ -36,6 +37,12 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     }
     val versionName = packageInfo?.versionName ?: "?"
     val versionCode = packageInfo?.longVersionCode ?: 0
+
+    val flavorLabel = when (BuildConfig.FLAVOR) {
+        "play" -> stringResource(R.string.about_flavor_play)
+        "fdroid" -> stringResource(R.string.about_flavor_fdroid)
+        else -> BuildConfig.FLAVOR.replaceFirstChar { it.uppercase() }
+    }
 
     val autoUpdateCheck by viewModel.settings.autoUpdateCheck.collectAsState()
     var updateStatus by remember { mutableStateOf<String?>(null) }
@@ -65,6 +72,12 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     headlineContent = { Text(stringResource(R.string.about_version)) },
                     supportingContent = { Text("v$versionName ($versionCode)") },
                     leadingContent = { Icon(Icons.Default.Info, contentDescription = null) }
+                )
+            }, {
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.about_flavor)) },
+                    supportingContent = { Text(flavorLabel) },
+                    leadingContent = { Icon(Icons.Default.Store, contentDescription = null) }
                 )
             }))
 

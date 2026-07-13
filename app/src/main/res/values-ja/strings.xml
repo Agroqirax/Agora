@@ -770,6 +770,9 @@
     <string name="about_privacy_policy">プライバシーポリシー</string>
     <string name="about_source_code">ソースコード</string>
     <string name="about_version">バージョン</string>
+    <string name="about_flavor">配布形態</string>
+    <string name="about_flavor_play">Google Play</string>
+    <string name="about_flavor_fdroid">F-Droid</string>
     <string name="about_rating">アプリを評価</string>
     <string name="about_rating_desc">このプロジェクトは一人で開発しています。フィードバックを心より感謝します。</string>
     <string name="about_updates">アップデート</string>

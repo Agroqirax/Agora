@@ -91,6 +91,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     // Extract .so files to disk for ProcessBuilder exec (Kai approach)

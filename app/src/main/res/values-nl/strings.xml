@@ -770,6 +770,9 @@
     <string name="about_privacy_policy">Privacybeleid</string>
     <string name="about_source_code">Broncode</string>
     <string name="about_version">Versie</string>
+    <string name="about_flavor">Distributie</string>
+    <string name="about_flavor_play">Google Play</string>
+    <string name="about_flavor_fdroid">F-Droid</string>
     <string name="about_rating">Beoordeel de app</string>
     <string name="about_rating_desc">Dit project is ontwikkeld door één persoon. Ik waardeer je feedback enorm.</string>
     <string name="about_updates">Updates</string>

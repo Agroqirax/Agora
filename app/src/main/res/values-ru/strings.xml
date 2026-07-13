@@ -770,6 +770,9 @@
     <string name="about_privacy_policy">Политика конфиденциальности</string>
     <string name="about_source_code">Исходный код</string>
     <string name="about_version">Версия</string>
+    <string name="about_flavor">Дистрибутив</string>
+    <string name="about_flavor_play">Google Play</string>
+    <string name="about_flavor_fdroid">F-Droid</string>
     <string name="about_rating">Оценить приложение</string>
     <string name="about_rating_desc">Этот проект разработан одним человеком. Я искренне ценю ваши отзывы.</string>
     <string name="about_updates">Обновления</string>
