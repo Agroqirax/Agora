@@ -105,7 +105,12 @@ fun ChatBottomBar(
     onExpand: () -> Unit = {},
     showWebSearch: Boolean = true,
     showShell: Boolean = true,
-    onAdvancedClick: () -> Unit = {}
+    onAdvancedClick: () -> Unit = {},
+    // Set once by ChatApp right after a digital-assistant screen capture launches a fresh
+    // chat (see AgoraVoiceInteractionSession). Queued into the composer's attachment list
+    // exactly like a manually-picked .txt file, then immediately consumed.
+    pendingAssistAttachmentUri: android.net.Uri? = null,
+    onAssistAttachmentConsumed: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     BackHandler(enabled = isExpanded) { onCollapse() }
@@ -136,6 +141,15 @@ fun ChatBottomBar(
     val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris -> composer.onPickFiles(uris, onInitPdfSelection) }
+
+    // Digital-assistant hand-off: attach the captured-screen-text file the same way a
+    // manually-picked file would be attached, then tell the ViewModel it's been consumed
+    // so rotations / recompositions don't re-add it.
+    LaunchedEffect(pendingAssistAttachmentUri) {
+        val uri = pendingAssistAttachmentUri ?: return@LaunchedEffect
+        composer.onPickFiles(listOf(uri), onInitPdfSelection)
+        onAssistAttachmentConsumed()
+    }
 
     Box(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)) {
         Column(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)) {

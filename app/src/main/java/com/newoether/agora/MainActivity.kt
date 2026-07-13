@@ -89,9 +89,24 @@ class MainActivity : ComponentActivity() {
     // Compose can react even if this Activity instance was already running.
     private var settingsIntentTrigger by mutableIntStateOf(0)
 
+    // Set when the Activity is (re)started by AgoraVoiceInteractionSession after an
+    // assist-gesture screen capture. Null contextUri means the assist session ran but
+    // found no readable on-screen text (e.g. a FLAG_SECURE window) — still open a fresh
+    // chat, just without a pre-attached file.
+    private var pendingAssistContextUri by mutableStateOf<Uri?>(null)
+    private var assistLaunchTrigger by mutableIntStateOf(0)
+
     private fun Intent?.registerIfSettingsRequest() {
         if (this?.action == Intent.ACTION_APPLICATION_PREFERENCES) {
             settingsIntentTrigger++
+        }
+    }
+
+    private fun Intent?.registerIfAssistLaunch() {
+        if (this?.action == com.newoether.agora.assistant.AssistLaunch.ACTION_ASSIST_LAUNCH) {
+            val uriString = this.getStringExtra(com.newoether.agora.assistant.AssistLaunch.EXTRA_CONTEXT_URI)
+            pendingAssistContextUri = uriString?.let { Uri.parse(it) }
+            assistLaunchTrigger++
         }
     }
 
@@ -129,6 +144,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         intent.registerIfSettingsRequest()
+        intent.registerIfAssistLaunch()
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -232,7 +248,13 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         false -> {
-                            MainNavigation(viewModel, settingsManager, openSettingsTrigger = settingsIntentTrigger)
+                            MainNavigation(
+                                viewModel,
+                                settingsManager,
+                                openSettingsTrigger = settingsIntentTrigger,
+                                assistLaunchTrigger = assistLaunchTrigger,
+                                pendingAssistContextUri = pendingAssistContextUri
+                            )
                         }
                     }
                 }
@@ -244,6 +266,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         intent.registerIfSettingsRequest()
+        intent.registerIfAssistLaunch()
     }
 
     override fun onResume() {
@@ -405,11 +428,27 @@ fun MainNavigation(
     // > 0 means the Activity was opened (or re-delivered an intent) via the system
     // App Info page's shortcut to this app's own settings. Each increment — including
     // repeat taps while the app is already running — should (re)open the settings screen.
-    openSettingsTrigger: Int = 0
+    openSettingsTrigger: Int = 0,
+    // > 0 means the Activity was (re)started by AgoraVoiceInteractionSession after an
+    // assist-gesture screen capture. Each increment starts a fresh chat, optionally with
+    // pendingAssistContextUri queued as a pending file attachment (null = no readable
+    // text was found on screen, e.g. FLAG_SECURE).
+    assistLaunchTrigger: Int = 0,
+    pendingAssistContextUri: Uri? = null
 ) {
     var showSettings by rememberSaveable { mutableStateOf(openSettingsTrigger > 0) }
     LaunchedEffect(openSettingsTrigger) {
         if (openSettingsTrigger > 0) showSettings = true
+    }
+    LaunchedEffect(assistLaunchTrigger) {
+        if (assistLaunchTrigger > 0) {
+            showSettings = false
+            if (pendingAssistContextUri != null) {
+                viewModel.handleAssistLaunch(pendingAssistContextUri)
+            } else {
+                viewModel.createNewChat()
+            }
+        }
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
     var fullScreenMediaIndex by remember { mutableIntStateOf(0) }

@@ -101,6 +101,7 @@ fun ChatApp(
         }
     )
 
+    val pendingAssistAttachmentUri by viewModel.pendingAssistAttachmentUri.collectAsState()
     val conversations by viewModel.conversations.collectAsState()
     val messages by viewModel.messages.collectAsState()
     val allMessages by viewModel.allMessages.collectAsState()
@@ -779,7 +780,9 @@ fun ChatApp(
                         onTogglePdfSelection = onTogglePdfSelection,
                         onInitPdfSelection = onInitPdfSelection,
                         fullScreenViewerUrls = fullScreenViewerUrls,
-                        onAdvancedClick = { showAdvancedDialog = true }
+                        onAdvancedClick = { showAdvancedDialog = true },
+                        pendingAssistAttachmentUri = pendingAssistAttachmentUri,
+                        onAssistAttachmentConsumed = { viewModel.consumePendingAssistAttachment() }
                     )
                 }
             }

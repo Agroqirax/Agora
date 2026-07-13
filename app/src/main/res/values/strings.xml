@@ -418,6 +418,9 @@
     <!-- Settings - Android Page -->
     <string name="android_title">Android</string>
     <string name="android_desc">Android features</string>
+    <string name="digital_assistant_title">Digital Assistant</string>
+    <string name="digital_assistant_desc">Launch Agora with on-screen text attached via the assist gesture</string>
+    <string name="digital_assistant_status_active">Agora is your digital assistant</string>
     <string name="calendar_title">Calendar</string>
     <string name="calendar_enable">Enable Calendar Tool</string>
     <string name="calendar_enable_desc">Allow the model to view your calendar</string>

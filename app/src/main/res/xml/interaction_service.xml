@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Declares Agora's voice interaction session + recognizer components, and marks the
+    service as assist-capable (supportsAssist) so the system offers it as a candidate
+    for android.app.role.ASSISTANT. settingsActivity is opened when the user taps
+    "Assistant app settings" from system Settings — it's just Agora's normal entry point.
+-->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="com.newoether.agora.assistant.AgoraVoiceInteractionSessionService"
+    android:recognitionService="com.newoether.agora.assistant.AgoraRecognitionService"
+    android:supportsAssist="true"
+    android:settingsActivity="com.newoether.agora.MainActivity" />

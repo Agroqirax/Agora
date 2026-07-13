@@ -11,6 +11,8 @@ object Constants {
     const val MAX_CHUNK_TEXT_LENGTH = 500
     /** Max file content to read from user-attached text files */
     const val MAX_FILE_CONTENT_READ_LENGTH = 500_000
+    /** Max characters captured from an on-screen assist (AssistStructure) invocation */
+    const val MAX_ASSIST_CONTEXT_LENGTH = 20_000
     /** Browser-like User-Agent for web_fetch. Many sites (e.g. Wikimedia) reject the
      *  default OkHttp UA with 403, which surfaced as a "no_response" error. */
     const val WEB_FETCH_USER_AGENT =

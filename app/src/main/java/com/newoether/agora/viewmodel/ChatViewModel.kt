@@ -508,6 +508,25 @@ class ChatViewModel(
     private val _isTransitioningToNewChat = MutableStateFlow(false)
     val isTransitioningToNewChat: StateFlow<Boolean> = _isTransitioningToNewChat.asStateFlow()
 
+    // ── Digital assistant hand-off ─────────────────────────────
+    // Set by MainActivity when it's launched from AgoraVoiceInteractionSession with a
+    // captured-screen-text file already sitting in cache. One-shot: ChatBottomBar picks
+    // it up via composer.onPickFiles(...) (the same path a manually-picked .txt file
+    // takes) and immediately calls consumePendingAssistAttachment().
+    private val _pendingAssistAttachmentUri = MutableStateFlow<Uri?>(null)
+    val pendingAssistAttachmentUri: StateFlow<Uri?> = _pendingAssistAttachmentUri.asStateFlow()
+
+    /** Called by MainActivity on an assist-launch intent: starts a fresh chat with the
+     *  captured screen text queued as a pending file attachment. */
+    fun handleAssistLaunch(contextUri: Uri) {
+        createNewChat()
+        _pendingAssistAttachmentUri.value = contextUri
+    }
+
+    fun consumePendingAssistAttachment() {
+        _pendingAssistAttachmentUri.value = null
+    }
+
     private val _pendingSystemPromptId = MutableStateFlow<String?>(null)
     val pendingSystemPromptId: StateFlow<String?> = _pendingSystemPromptId.asStateFlow()
 

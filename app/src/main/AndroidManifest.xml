@@ -76,6 +76,47 @@
             android:name=".service.AgoraForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
+
+        <!--
+            Digital assistant integration. Together these three services satisfy the
+            android.app.role.ASSISTANT role requirements so Agora can be selected in
+            Settings > Apps > Default apps > Digital assistant app. See assistant/ for
+            the actual assist-capture logic; the role itself grants no functionality
+            beyond making Agora launchable via the system assist gesture (long-press
+            home / power, or the assist swipe gesture).
+        -->
+        <service
+            android:name=".assistant.AgoraVoiceInteractionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/interaction_service" />
+        </service>
+
+        <service
+            android:name=".assistant.AgoraVoiceInteractionSessionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true" />
+
+        <!--
+            Stub recognizer: required because voice_interaction_service metadata must
+            reference a RecognitionService in this package (the system binds to it).
+            Agora does not do speech-to-text here — screen text is captured via
+            AssistStructure instead — so this immediately reports an error if the
+            system ever actually starts listening on it.
+        -->
+        <service
+            android:name=".assistant.AgoraRecognitionService"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

@@ -1,11 +1,16 @@
 package com.newoether.agora.ui.settings
 
+import android.app.role.RoleManager
+import android.content.Intent
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assistant
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
@@ -14,10 +19,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.newoether.agora.R
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -49,6 +58,10 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         floatingActionButton = { if (showDocFab) DocumentationFab("android.md") }
     ) {
         SettingsGroupColumn {
+            SettingsGroup(title = stringResource(R.string.digital_assistant_title), items = buildList {
+                add { DigitalAssistantSettingsItem() }
+            })
+
             SettingsGroup(title = stringResource(R.string.location_title), items = buildList {
                 add {
                     SettingsItem(
@@ -170,6 +183,80 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             })
+        }
+    }
+}
+
+/**
+ * Lets the user set Agora as the system digital assistant (android.app.role.ASSISTANT),
+ * which is what makes the assist gesture (long-press home/power, assist swipe) launch
+ * [com.newoether.agora.assistant.AgoraVoiceInteractionSession] instead of whatever
+ * assistant is currently assigned. Role granting itself needs API 29+ (RoleManager);
+ * below that we just point at the manual Settings path, since some AOSP-derived ROMs
+ * still support it via the old ACTION_ASSIST-handling mechanism.
+ */
+@Composable
+private fun DigitalAssistantSettingsItem() {
+    val context = LocalContext.current
+
+    // isRoleHeld() only gets re-read on recomposition, and nothing triggers one when the
+    // user comes back from the system Settings screen — so without this, the status line
+    // shows stale info until something else happens to recompose the page. ON_RESUME
+    // fires right as this Activity comes back to the foreground, which is exactly when
+    // the role may have just changed.
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshTrigger++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isHeld = remember(refreshTrigger) {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+    }
+
+    SettingsItem(
+        modifier = Modifier.clickable { openManualAssistantSettings(context) },
+        headlineContent = { Text(stringResource(R.string.digital_assistant_title)) },
+        supportingContent = {
+            Text(
+                if (isHeld) stringResource(R.string.digital_assistant_status_active)
+                else stringResource(R.string.digital_assistant_desc)
+            )
+        },
+        leadingContent = {
+            Icon(
+                if (isHeld) Icons.Default.CheckCircle else Icons.Default.Assistant,
+                null,
+                tint = if (isHeld) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    )
+}
+
+/**
+ * Deep-links as close as possible to Settings → Apps → Default apps → Digital assistant
+ * app. ACTION_VOICE_INPUT_SETTINGS is the closest direct hit on most AOSP-derived builds;
+ * ACTION_MANAGE_DEFAULT_APPS_SETTINGS (the general "Default apps" list, one tap further)
+ * is the broader-compatibility fallback.
+ */
+private fun openManualAssistantSettings(context: android.content.Context) {
+    val candidates = listOf(
+        android.provider.Settings.ACTION_VOICE_INPUT_SETTINGS,
+        android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS
+    )
+    for (action in candidates) {
+        try {
+            val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(intent)
+                return
+            }
+        } catch (e: Exception) {
+            // Try the next candidate.
         }
     }
 }
