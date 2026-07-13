@@ -153,7 +153,10 @@ class GenerationRequestBuilder(
             imageGenModel = resolveImageGenModelId(),
             imageGenSize = settings.imageGenSize.value,
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
-            shellDevices = settings.shellDevices.value,
+            // Disabled devices are still kept in settings (so the toggle round-trips) but
+            // never reach the model: excluded from list_shells, execute_shell_command's
+            // server resolution, and error-message suggestions all at this one source.
+            shellDevices = settings.shellDevices.value.filter { it.enabled },
             sandboxEnabled = settings.sandboxEnabled.value,
             mcpEnabled = settings.mcpEnabled.value,
             mcpServers = settings.mcpServers.value,

@@ -784,7 +784,7 @@ fun ChatApp(
                         onCollapse = { haptics.action(); isExpanded = false },
                         onExpand = { haptics.action(); isExpanded = true },
                         showWebSearch = globalWebSearch,
-                        showShell = shellDevices.isNotEmpty() && globalShell,
+                        showShell = shellDevices.any { it.enabled } && globalShell,
                         onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
                         onPdfPreviewSelect = { pages, idx -> haptics.action(); onPdfPreviewSelect?.invoke(pages, idx) },
                         pdfViewerSelection = pdfViewerSelection,

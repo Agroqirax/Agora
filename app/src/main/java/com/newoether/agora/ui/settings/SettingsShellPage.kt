@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
@@ -220,6 +221,7 @@ private fun DeviceEditor(
 ) {
     val isNewlyAdded = device.id == newlyAddedDeviceId
     var expanded by remember(device.id) { mutableStateOf(false) }
+    var enabledInput by remember(device.id) { mutableStateOf(device.enabled) }
     var nameInput by remember(device.id) { mutableStateOf(device.name) }
     var descInput by remember(device.id) { mutableStateOf(device.description) }
     var typeInput by remember(device.id) { mutableStateOf(device.type) }
@@ -241,6 +243,7 @@ private fun DeviceEditor(
     var verifyError by remember(device.id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(device) {
+        enabledInput = device.enabled
         nameInput = device.name; descInput = device.description; typeInput = device.type
         urlInput = device.serverUrl; keyInput = device.apiKey
         sshHostInput = device.sshHost; sshPortInput = device.sshPort.toString()
@@ -276,7 +279,7 @@ private fun DeviceEditor(
                 if (device.description.isNotBlank()) Text(device.description)
                 else if (typeInput == "ssh" && sshHostInput.isNotBlank()) Text("$sshUserInput@$sshHostInput:$sshPortInput")
             },
-            leadingContent = { Icon(Icons.Default.Devices, null, tint = MaterialTheme.colorScheme.primary) },
+            leadingContent = { Icon(Icons.Default.Devices, null, tint = if (device.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
             trailingContent = {
                 IconButton(onClick = { expanded = !expanded }) {
                     Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, stringResource(R.string.edit))
@@ -288,6 +291,15 @@ private fun DeviceEditor(
         AnimatedVisibility(visible = expanded, enter = expandVertically(), exit = shrinkVertically()) {
             Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Spacer(Modifier.height(8.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { enabledInput = !enabledInput }
+                ) {
+                    Checkbox(checked = enabledInput, onCheckedChange = { enabledInput = it })
+                    Text(stringResource(R.string.shell_device_enabled), style = MaterialTheme.typography.bodyMedium)
+                }
+                Spacer(Modifier.height(10.dp))
 
                 // Type selector
                 ExposedDropdownMenuBox(expanded = typeMenuExpanded, onExpandedChange = { typeMenuExpanded = it }) {
@@ -423,6 +435,7 @@ private fun DeviceEditor(
                     }
                     Button(onClick = {
                         viewModel.updateShellDevice(device.copy(
+                            enabled = enabledInput,
                             name = nameInput.trim(), description = descInput.trim(), type = typeInput,
                             serverUrl = if (typeInput == "conch") urlInput.trim() else "",
                             apiKey = if (typeInput == "conch") keyInput.trim() else "",

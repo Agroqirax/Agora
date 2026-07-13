@@ -394,6 +394,7 @@
     <string name="shell_enable">Enable Shell Tool</string>
     <string name="shell_enable_desc">Allow the model to execute shell commands via remote servers</string>
     <string name="shell_device_name">Name</string>
+    <string name="shell_device_enabled">Enabled</string>
     <string name="shell_device_name_hint">My Server</string>
     <string name="shell_device_desc">Description</string>
     <string name="shell_device_desc_hint">Build server in the office</string>

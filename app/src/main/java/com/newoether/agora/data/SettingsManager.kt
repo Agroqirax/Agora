@@ -42,6 +42,7 @@ data class ShellDeviceConfig(
     val name: String,
     val description: String = "",
     val type: String = "conch",          // "conch" | "ssh"
+    val enabled: Boolean = true,
     // Conch fields (type=conch)
     val serverUrl: String = "",
     val apiKey: String = "",
