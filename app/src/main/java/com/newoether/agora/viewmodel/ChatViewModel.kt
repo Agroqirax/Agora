@@ -527,6 +527,35 @@ class ChatViewModel(
         _pendingAssistAttachmentUri.value = null
     }
 
+    // ── Share target hand-off ───────────────────────────────────
+    // Set by MainActivity when Agora is launched as an ACTION_SEND / ACTION_SEND_MULTIPLE
+    // target from another app's share sheet. Shared text goes straight into the prompt
+    // input (ChatApp prefills textFieldState); shared files/images/videos are queued into
+    // the composer's attachment list via the same onPickImages/onPickVideos/onPickFiles
+    // paths a manual pick would use — see ChatBottomBar. Both are one-shot, consumed
+    // independently since text lands in ChatApp but attachments land in ChatBottomBar.
+    private val _pendingShareText = MutableStateFlow<String?>(null)
+    val pendingShareText: StateFlow<String?> = _pendingShareText.asStateFlow()
+
+    private val _pendingShareAttachmentUris = MutableStateFlow<List<Uri>>(emptyList())
+    val pendingShareAttachmentUris: StateFlow<List<Uri>> = _pendingShareAttachmentUris.asStateFlow()
+
+    /** Called by MainActivity on a share-target launch: starts a fresh chat with any
+     *  shared text queued for the prompt input and any shared files queued as attachments. */
+    fun handleShareLaunch(text: String?, uris: List<Uri>) {
+        createNewChat()
+        _pendingShareText.value = text
+        _pendingShareAttachmentUris.value = uris
+    }
+
+    fun consumePendingShareText() {
+        _pendingShareText.value = null
+    }
+
+    fun consumePendingShareAttachments() {
+        _pendingShareAttachmentUris.value = emptyList()
+    }
+
     private val _pendingSystemPromptId = MutableStateFlow<String?>(null)
     val pendingSystemPromptId: StateFlow<String?> = _pendingSystemPromptId.asStateFlow()
 

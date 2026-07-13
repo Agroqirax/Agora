@@ -96,6 +96,13 @@ class MainActivity : ComponentActivity() {
     private var pendingAssistContextUri by mutableStateOf<Uri?>(null)
     private var assistLaunchTrigger by mutableIntStateOf(0)
 
+    // Set when the Activity is (re)started as a share target (another app's share sheet
+    // sending Agora ACTION_SEND / ACTION_SEND_MULTIPLE). Shared text is prefilled into the
+    // prompt input; shared streams (images/videos/docs) are queued as attachments.
+    private var pendingShareText by mutableStateOf<String?>(null)
+    private var pendingShareUris by mutableStateOf<List<Uri>>(emptyList())
+    private var shareLaunchTrigger by mutableIntStateOf(0)
+
     private fun Intent?.registerIfSettingsRequest() {
         if (this?.action == Intent.ACTION_APPLICATION_PREFERENCES) {
             settingsIntentTrigger++
@@ -108,6 +115,26 @@ class MainActivity : ComponentActivity() {
             pendingAssistContextUri = uriString?.let { Uri.parse(it) }
             assistLaunchTrigger++
         }
+    }
+
+    private fun Intent?.registerIfShareRequest() {
+        val action = this?.action
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        val text = this.getStringExtra(Intent.EXTRA_TEXT)
+        val uris: List<Uri> = when (action) {
+            Intent.ACTION_SEND ->
+                androidx.core.content.IntentCompat.getParcelableExtra(this, Intent.EXTRA_STREAM, Uri::class.java)
+                    ?.let { listOf(it) } ?: emptyList()
+            Intent.ACTION_SEND_MULTIPLE ->
+                androidx.core.content.IntentCompat.getParcelableArrayListExtra(this, Intent.EXTRA_STREAM, Uri::class.java)
+                    ?: emptyList()
+            else -> emptyList()
+        }
+        // Nothing usable — don't bump the trigger (e.g. some apps share EXTRA_SUBJECT-only).
+        if (text.isNullOrBlank() && uris.isEmpty()) return
+        pendingShareText = text
+        pendingShareUris = uris
+        shareLaunchTrigger++
     }
 
     override fun attachBaseContext(newBase: Context) {
@@ -145,6 +172,7 @@ class MainActivity : ComponentActivity() {
 
         intent.registerIfSettingsRequest()
         intent.registerIfAssistLaunch()
+        intent.registerIfShareRequest()
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -253,7 +281,10 @@ class MainActivity : ComponentActivity() {
                                 settingsManager,
                                 openSettingsTrigger = settingsIntentTrigger,
                                 assistLaunchTrigger = assistLaunchTrigger,
-                                pendingAssistContextUri = pendingAssistContextUri
+                                pendingAssistContextUri = pendingAssistContextUri,
+                                shareLaunchTrigger = shareLaunchTrigger,
+                                pendingShareText = pendingShareText,
+                                pendingShareUris = pendingShareUris
                             )
                         }
                     }
@@ -267,6 +298,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         intent.registerIfSettingsRequest()
         intent.registerIfAssistLaunch()
+        intent.registerIfShareRequest()
     }
 
     override fun onResume() {
@@ -434,7 +466,13 @@ fun MainNavigation(
     // pendingAssistContextUri queued as a pending file attachment (null = no readable
     // text was found on screen, e.g. FLAG_SECURE).
     assistLaunchTrigger: Int = 0,
-    pendingAssistContextUri: Uri? = null
+    pendingAssistContextUri: Uri? = null,
+    // > 0 means the Activity was (re)started as a share target (another app's share
+    // sheet). pendingShareText goes into the prompt input; pendingShareUris are queued
+    // as attachments, routed by mime type in ChatBottomBar.
+    shareLaunchTrigger: Int = 0,
+    pendingShareText: String? = null,
+    pendingShareUris: List<Uri> = emptyList()
 ) {
     var showSettings by rememberSaveable { mutableStateOf(openSettingsTrigger > 0) }
     LaunchedEffect(openSettingsTrigger) {
@@ -448,6 +486,12 @@ fun MainNavigation(
             } else {
                 viewModel.createNewChat()
             }
+        }
+    }
+    LaunchedEffect(shareLaunchTrigger) {
+        if (shareLaunchTrigger > 0) {
+            showSettings = false
+            viewModel.handleShareLaunch(pendingShareText, pendingShareUris)
         }
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }

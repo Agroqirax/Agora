@@ -217,6 +217,17 @@ fun ChatApp(
     val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
     val inputFocusRequester = remember { FocusRequester() }
 
+    // Share-target hand-off: shared text goes straight into the prompt input (attachments
+    // are routed by mime type inside ChatBottomBar instead, since that's where the
+    // image/video/file picker plumbing already lives).
+    val pendingShareText by viewModel.pendingShareText.collectAsState()
+    val pendingShareAttachmentUris by viewModel.pendingShareAttachmentUris.collectAsState()
+    LaunchedEffect(pendingShareText) {
+        val text = pendingShareText ?: return@LaunchedEffect
+        textFieldState.edit { replace(0, length, text) }
+        viewModel.consumePendingShareText()
+    }
+
     val messageHeights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
     var viewportHeightPx by remember { mutableIntStateOf(0) }
 
@@ -782,7 +793,9 @@ fun ChatApp(
                         fullScreenViewerUrls = fullScreenViewerUrls,
                         onAdvancedClick = { showAdvancedDialog = true },
                         pendingAssistAttachmentUri = pendingAssistAttachmentUri,
-                        onAssistAttachmentConsumed = { viewModel.consumePendingAssistAttachment() }
+                        onAssistAttachmentConsumed = { viewModel.consumePendingAssistAttachment() },
+                        pendingShareAttachmentUris = pendingShareAttachmentUris,
+                        onShareAttachmentsConsumed = { viewModel.consumePendingShareAttachments() }
                     )
                 }
             }

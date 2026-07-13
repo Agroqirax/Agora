@@ -49,6 +49,40 @@
 
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+
+            <!--
+                Share target: lets other apps' share sheets send text/files to Agora.
+                Shared text is prefilled into the prompt input; shared images/videos/docs
+                are queued as attachments (mime whitelist mirrors util/FileValidator.kt
+                for docs, plus image/* and video/* which aren't size/type restricted).
+                See MainActivity.registerIfShareRequest() / assistant/ for the capture path.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/yaml" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="text/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/xml" />
+                <data android:mimeType="application/yaml" />
+            </intent-filter>
         </activity>
 
         <provider

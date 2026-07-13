@@ -110,7 +110,12 @@ fun ChatBottomBar(
     // chat (see AgoraVoiceInteractionSession). Queued into the composer's attachment list
     // exactly like a manually-picked .txt file, then immediately consumed.
     pendingAssistAttachmentUri: android.net.Uri? = null,
-    onAssistAttachmentConsumed: () -> Unit = {}
+    onAssistAttachmentConsumed: () -> Unit = {},
+    // Set once by ChatApp right after a share-target launch (another app's share sheet).
+    // Routed by mime type below into the same onPickImages/onPickVideos/onPickFiles paths
+    // a manual pick would use, then immediately consumed.
+    pendingShareAttachmentUris: List<android.net.Uri> = emptyList(),
+    onShareAttachmentsConsumed: () -> Unit = {}
 ) {
     val scrollState = rememberScrollState()
     BackHandler(enabled = isExpanded) { onCollapse() }
@@ -149,6 +154,29 @@ fun ChatBottomBar(
         val uri = pendingAssistAttachmentUri ?: return@LaunchedEffect
         composer.onPickFiles(listOf(uri), onInitPdfSelection)
         onAssistAttachmentConsumed()
+    }
+
+    // Share-target hand-off: sort shared streams by mime type into the same picker
+    // entry points a manual attach would use. Anything that isn't image/* or video/*
+    // (docs, pdf, text, etc.) goes through onPickFiles, which already validates against
+    // FileValidator's whitelist and branches pdf vs. plain "file" internally.
+    LaunchedEffect(pendingShareAttachmentUris) {
+        if (pendingShareAttachmentUris.isEmpty()) return@LaunchedEffect
+        val images = mutableListOf<android.net.Uri>()
+        val videos = mutableListOf<android.net.Uri>()
+        val files = mutableListOf<android.net.Uri>()
+        for (uri in pendingShareAttachmentUris) {
+            val mime = try { context.contentResolver.getType(uri) } catch (e: Exception) { null }
+            when {
+                mime?.startsWith("image/") == true -> images.add(uri)
+                mime?.startsWith("video/") == true -> videos.add(uri)
+                else -> files.add(uri)
+            }
+        }
+        if (images.isNotEmpty()) composer.onPickImages(images)
+        if (videos.isNotEmpty()) composer.onPickVideos(videos)
+        if (files.isNotEmpty()) composer.onPickFiles(files, onInitPdfSelection)
+        onShareAttachmentsConsumed()
     }
 
     Box(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)) {
