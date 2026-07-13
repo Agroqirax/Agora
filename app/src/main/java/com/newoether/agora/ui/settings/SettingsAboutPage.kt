@@ -44,6 +44,12 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         else -> BuildConfig.FLAVOR.replaceFirstChar { it.uppercase() }
     }
 
+    val storeUrl = when (BuildConfig.FLAVOR) {
+        "play" -> "https://play.google.com/store/apps/details?id=${BuildConfig.APPLICATION_ID}"
+        "fdroid" -> "https://f-droid.org/packages/${BuildConfig.APPLICATION_ID}"
+        else -> "https://github.com/newo-ether/Agora"
+    }
+
     val autoUpdateCheck by viewModel.settings.autoUpdateCheck.collectAsState()
     var updateStatus by remember { mutableStateOf<String?>(null) }
     var isChecking by remember { mutableStateOf(false) }
@@ -65,19 +71,37 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_developer)) },
                     supportingContent = { Text(stringResource(R.string.about_developer_name)) },
-                    leadingContent = { Icon(Icons.Default.Person, contentDescription = null) }
+                    leadingContent = { Icon(Icons.Default.Person, contentDescription = null) },
+                    modifier = Modifier.clickable {
+                        openUrl("https://github.com/newo-ether")
+                    },
+                    trailingContent = {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                    }
                 )
             }, {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_version)) },
                     supportingContent = { Text("v$versionName ($versionCode)") },
-                    leadingContent = { Icon(Icons.Default.Info, contentDescription = null) }
+                    leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
+                    modifier = Modifier.clickable {
+                        openUrl("https://github.com/newo-ether/Agora/releases")
+                    },
+                    trailingContent = {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
+                    }
                 )
             }, {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_flavor)) },
                     supportingContent = { Text(flavorLabel) },
-                    leadingContent = { Icon(Icons.Default.Store, contentDescription = null) }
+                    leadingContent = { Icon(Icons.Default.Store, contentDescription = null) },
+                    trailingContent = {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+                    },
+                    modifier = Modifier.clickable(enabled = storeUrl != null) {
+                        storeUrl?.let(::openUrl)
+                    }
                 )
             }))
 

@@ -53,6 +53,9 @@ plugins:
             Overview: 概述
             Web Search: 网络搜索
             Remote Shell (Conch): 远程 Shell (Conch)
+            MCP Servers: MCP 服务器
+            Android: Android
+            Network Proxy: 网络代理
             Knowledge Management: 知识管理
             Conversation Search: 对话搜索
             Embedding / RAG: 嵌入 / RAG
@@ -87,6 +90,9 @@ plugins:
             Overview: 概述
             Web Search: 網路搜尋
             Remote Shell (Conch): 遠端 Shell (Conch)
+            MCP Servers: MCP 伺服器
+            Android: Android
+            Network Proxy: 網路代理
             Knowledge Management: 知識管理
             Conversation Search: 對話搜尋
             Embedding / RAG: 嵌入 / RAG
@@ -121,6 +127,9 @@ plugins:
             Overview: Descripción General
             Web Search: Búsqueda Web
             Remote Shell (Conch): Shell Remoto (Conch)
+            MCP Servers: Servidores MCP
+            Android: Android
+            Network Proxy: Proxy de red
             Knowledge Management: Gestión de Conocimiento
             Conversation Search: Búsqueda de Conversaciones
             Embedding / RAG: Embedding / RAG
@@ -155,6 +164,9 @@ plugins:
             Overview: Aperçu
             Web Search: Recherche Web
             Remote Shell (Conch): Shell Distant (Conch)
+            MCP Servers: Serveurs MCP
+            Android: Android
+            Network Proxy: Proxy réseau
             Knowledge Management: Gestion des Connaissances
             Conversation Search: Recherche de Conversations
             Embedding / RAG: Embedding / RAG
@@ -189,6 +201,9 @@ plugins:
             Overview: Übersicht
             Web Search: Websuche
             Remote Shell (Conch): Remote Shell (Conch)
+            MCP Servers: MCP-Server
+            Android: Android
+            Network Proxy: Netzwerk-Proxy
             Knowledge Management: Wissensverwaltung
             Conversation Search: Unterhaltungssuche
             Embedding / RAG: Embedding / RAG
@@ -223,6 +238,9 @@ plugins:
             Overview: Обзор
             Web Search: Веб-Поиск
             Remote Shell (Conch): Удалённый Shell (Conch)
+            MCP Servers: MCP-серверы
+            Android: Android
+            Network Proxy: Сетевой прокси
             Knowledge Management: Управление Знаниями
             Conversation Search: Поиск по Диалогам
             Embedding / RAG: Эмбеддинг / RAG
@@ -257,6 +275,9 @@ plugins:
             Overview: Visão Geral
             Web Search: Busca na Web
             Remote Shell (Conch): Shell Remoto (Conch)
+            MCP Servers: Servidores MCP
+            Android: Android
+            Network Proxy: Proxy de Rede
             Knowledge Management: Gestão de Conhecimento
             Conversation Search: Busca de Conversas
             Embedding / RAG: Embedding / RAG
@@ -291,6 +312,9 @@ plugins:
             Overview: 概要
             Web Search: ウェブ検索
             Remote Shell (Conch): リモートシェル (Conch)
+            MCP Servers: MCP サーバー
+            Android: Android
+            Network Proxy: ネットワークプロキシ
             Knowledge Management: ナレッジ管理
             Conversation Search: 会話検索
             Embedding / RAG: 埋め込み / RAG
@@ -325,6 +349,9 @@ plugins:
             Overview: 개요
             Web Search: 웹 검색
             Remote Shell (Conch): 원격 셸 (Conch)
+            MCP Servers: MCP 서버
+            Android: Android
+            Network Proxy: 네트워크 프록시
             Knowledge Management: 지식 관리
             Conversation Search: 대화 검색
             Embedding / RAG: 임베딩 / RAG
@@ -359,6 +386,9 @@ plugins:
             Overview: نظرة عامة
             Web Search: بحث الويب
             Remote Shell (Conch): الصدفة البعيدة (Conch)
+            MCP Servers: خوادم MCP
+            Android: Android
+            Network Proxy: وكيل الشبكة
             Knowledge Management: إدارة المعرفة
             Conversation Search: بحث المحادثات
             Embedding / RAG: التضمين / RAG
@@ -380,6 +410,43 @@ plugins:
             Shell Setup: إعداد الصدفة
             Sandbox: الصندوق الرملي
             About: حول
+        - locale: nl
+          name: Nederlands
+          build: true
+          nav_translations:
+            Home: Home
+            Getting Started: Aan de slag
+            Conversations: Gesprekken
+            API Providers: API-providers
+            System Prompts: Systeemprompts
+            Agentic Tools: Agentische hulpmiddelen
+            Overview: Overzicht
+            Web Search: Web zoeken
+            Remote Shell (Conch): Remote Shell (Conch)
+            MCP Servers: MCP-servers
+            Android: Android
+            Knowledge Management: Kennisbeheer
+            Conversation Search: Gesprekken zoeken
+            Embedding / RAG: Embedding / RAG
+            Memory & Cache: Geheugen en cache
+            Local Models: Lokale modellen
+            PDF Import: PDF importeren
+            Data Portability: Gegevensoverdracht
+            Network Proxy: Netwerkproxy
+            FAQ: Veelgestelde vragen
+            Models: Modellen
+            Manage Models: Modellen beheren
+            Generation: Generatie
+            Parameters: Parameters
+            Title Generation: Titelgeneratie
+            Image Transcription: Afbeeldingstrancriptie
+            Image Generation: Afbeeldinggeneratie
+            Appearance: Uiterlijk
+            Appearance & Language: Uiterlijk en taal
+            Language: Taal
+            Shell Setup: Shell instellen
+            Sandbox: Sandbox
+            About: Over
   - search
 
 markdown_extensions:
@@ -413,7 +480,7 @@ nav:
           - Shell Setup: shell.md
           - Sandbox: sandbox.md
       - MCP Servers: mcp.md
-      - Android Tools: android.md
+      - Android: android.md
   - Knowledge Management:
       - Conversation Search: search.md
       - Embedding / RAG: embedding.md

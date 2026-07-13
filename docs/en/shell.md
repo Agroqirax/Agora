@@ -42,7 +42,8 @@ Deploy the Conch server on your target machine. See the [Conch repository](https
 2. Enable **Shell Tool**
 3. Tap **Add Device**
 4. Choose the device type: **Conch** or **SSH**
-5. Fill in the device details:
+5. Check **Enabled** (checked by default) — unchecking it keeps the device configured but hides it from the model entirely, without deleting your settings
+6. Fill in the device details:
 
 === "Conch"
 
@@ -82,6 +83,10 @@ Add multiple shell devices to let the model work across machines:
 - **Development VM** — edit code and run scripts
 
 Each device is independently configured with its own name, URL, and credentials. The model can distinguish between them and choose the right device for each task.
+
+### Enabling/Disabling Devices
+
+Every device has its own **Enabled** checkbox. Turning it off is a quick way to take a device out of rotation — for maintenance, or to temporarily stop the model from reaching a particular machine — without losing its saved configuration. Disabled devices don't appear in the model's list of available shell devices at all, and if every configured device is disabled, the shell toggle disappears from the chat composer entirely.
 
 ---
 

@@ -59,6 +59,10 @@ Connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and
 - **Location**: Retrieve the device's approximate or precise location
 - **Contacts**: Search and read contacts stored on the device
 - **Calendar**: Read upcoming events and create new calendar entries
+- **Device Info**: Battery, ringer mode, network, storage, and other current device state — no permission required
+- **Installed Apps**: List apps installed on the device — fdroid/GitHub builds only, unavailable on Google Play
+
+See [Android](android.md) for setup and details.
 
 ### File Operations
 
@@ -127,6 +131,8 @@ You control which tools the model can access:
 | Web Search          | Settings → Web Search                         | Off     |
 | Shell               | Settings → Shell                              | Off     |
 | MCP Servers         | Settings → MCP Servers                        | Off     |
+| Device Info         | Settings → Android                            | On      |
+| Installed Apps      | Settings → Android (fdroid/GitHub builds only) | Off     |
 | Memory (Saved)      | Settings → Memory → Access Saved Memories     | Off     |
 | Memory (Active)     | Settings → Memory → Access Active Memory      | Off     |
 | Past Conversations  | Settings → Memory → Access Past Conversations | Off     |

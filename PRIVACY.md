@@ -25,17 +25,18 @@ Please review the privacy policy of the provider you use.
 
 ## Permissions
 
-- **Internet**: Required to communicate with AI provider APIs.
-- **Notifications**: Used for foreground service to keep ongoing generations alive.
+- [**Internet**](https://developer.android.com/reference/android/Manifest.permission#INTERNET): Required to communicate with AI provider APIs.
+- [**Notifications**](https://developer.android.com/reference/android/Manifest.permission#POST_NOTIFICATIONS): Used for foreground service to keep ongoing generations alive.
 - **Storage / File Access**: Only when you explicitly attach images, videos, or files to a message.
+- [**Query packages**](https://developer.android.com/reference/android/Manifest.permission#QUERY_ALL_PACKAGES): F‑Droid build only – let the AI check what apps are installed.
 
 ### Optional permissions
 
-These permissions are available to enhance the AIs capability, but are not required.
+These permissions are available to enhance the AI's capability, but are not required.
 
-- **Location**: Give the AI access to your current coordinates. Optionally fetch and address using [nominatim](https://nominatim.openstreetmap.org).
-- **Calendar**: Give the AI access to read, create, edit or remove events from your calendar.
-- **Contacts**: Give the AI access to read, create, edit or remove contacts.
+- [**Location**](https://developer.android.com/reference/android/Manifest.permission#ACCESS_FINE_LOCATION): Give the AI access to your current coordinates. Optionally fetch and address using [Nominatim](https://nominatim.openstreetmap.org).
+- [**Calendar**](https://developer.android.com/reference/android/Manifest.permission#WRITE_CALENDAR): Give the AI access to read, create, edit or remove events from your calendar.
+- [**Contacts**](https://developer.android.com/reference/android/Manifest.permission#WRITE_CONTACTS): Give the AI access to read, create, edit or remove contacts.
 
 ## Data Retention
 

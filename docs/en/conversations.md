@@ -8,6 +8,33 @@ Tap **New Chat** in the conversations drawer, or simply start typing in the chat
 
 Conversations are auto-titled after the first response (if [Title Generation](system-prompts.md#auto-title-generation) is enabled), or you can rename them manually.
 
+## Starting a Conversation from Outside Agora
+
+Besides opening the app directly, Agora can start a fresh conversation from two Android entry points, each with content already attached so you don't have to re-type or re-attach it:
+
+### Digital Assistant
+
+Agora can be set as your device's **digital assistant** — the app that opens when you long-press the home button or power button (or use the assist swipe gesture, depending on your launcher). When invoked this way, Agora reads the visible **text** of whatever app was on screen (no screenshot, no OCR) and opens a new chat with that text already attached as a file — you just type your question about it.
+
+Password fields and any screen an app marks as secure (banking apps, some video players) never expose their text this way; Agora still opens normally, just without anything pre-attached.
+
+To enable it:
+
+1. Go to **Settings → Android → Digital Assistant**
+2. Tap the card — it opens your system's **Default apps → Digital assistant app** setting
+3. Select **Agora**
+
+Some manufacturers (notably heavily customized Android skins) restrict the assistant role to their own built-in assistant and won't offer Agora as an option at all — there's no workaround for this from within Agora if that's the case.
+
+### Share Target
+
+Agora appears in other apps' **share sheets** — sharing text, images, videos, or documents (PDF, plain text, JSON/XML/YAML) to Agora starts a new conversation with:
+
+- **Shared text** — placed directly in the prompt input, ready to send once you add your question
+- **Shared files** — attached the same way a manually-picked photo, video, or file would be, sorted automatically by type
+
+Nothing is sent automatically — review the prefilled text and attachments, then send when ready.
+
 ## Managing Conversations
 
 ### Switch Conversations

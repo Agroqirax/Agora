@@ -126,6 +126,7 @@ Note: the google play version does not include certain features. Download from G
 - iOS-style collapsing large-title in settings with shared page transition animations
 - Blur effects with configurable performance toggle
 - English, Chinese, and Traditional Chinese language support
+- Can be set as digital assistant app (hold power button or swipe from bottom corner)
 
 ## Documentation
 
