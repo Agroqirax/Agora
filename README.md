@@ -66,7 +66,7 @@ Note: the google play version does not include certain features. Download from G
 - **Remote Shell & File I/O** — Execute commands, read/write/edit/glob/grep files on remote servers via [Conch](https://github.com/newo-ether/conch)
 - **Memory** — Persistent active memory and saved memory files across conversations
 - **Conversation Search** — RAG-powered semantic search over chat history
-- **Android device** — Get the current location and r+w calendar & contacts
+- **Android device** — Get the current location, device info and r+w calendar & contacts
 - **MCP Servers** — Connect to mcp servers and use their tools
 
 ### Thinking & Reasoning

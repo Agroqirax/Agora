@@ -1,0 +1,8 @@
+* Added location, calendar, contacts & device info tools
+* Added MCP server support
+* Added device assistant integration
+* Added share target support
+* Fix render images in chat
+* Added Dutch language
+* Improved app info & settings pages
+* Fixed attachments when editing messages

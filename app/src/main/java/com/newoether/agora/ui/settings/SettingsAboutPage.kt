@@ -99,8 +99,8 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     trailingContent = {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
                     },
-                    modifier = Modifier.clickable(enabled = storeUrl != null) {
-                        storeUrl?.let(::openUrl)
+                    modifier = Modifier.clickable {
+                        storeUrl.let(::openUrl)
                     }
                 )
             }))
