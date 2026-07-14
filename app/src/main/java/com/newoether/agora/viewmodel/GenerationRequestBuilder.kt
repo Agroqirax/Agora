@@ -167,6 +167,7 @@ class GenerationRequestBuilder(
             locationNominatimBaseUrl = settings.locationNominatimBaseUrl.value.ifBlank { com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL },
             calendarEnabled = settings.calendarEnabled.value,
             contactsEnabled = settings.contactsEnabled.value,
+            alarmEnabled = settings.alarmEnabled.value,
             imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
             imageTranscriptionModel = settings.imageTranscriptionModel.value,
             imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,

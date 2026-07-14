@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Api
@@ -861,6 +862,51 @@ fun MainNavigation(
                     onClick = { viewModel.resolveContactsWriteConfirmation(allow = false) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.contacts_confirm_deny)) }
+            }
+        )
+    }
+
+    // Alarm tool: in-app "set/dismiss/snooze this alarm?" confirmation gate. No runtime
+    // permission bridge needed here — AlarmClock intents don't require a dangerous
+    // permission, unlike calendar/contacts/location above.
+    val pendingAlarmWrite by viewModel.pendingAlarmWriteConfirmation.collectAsState()
+    pendingAlarmWrite?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveAlarmWriteConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Alarm, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.alarm_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.alarm_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveAlarmWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
+                    Text(stringResource(R.string.alarm_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveAlarmWriteConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.alarm_confirm_deny)) }
             }
         )
     }

@@ -233,6 +233,12 @@
     <string name="tool_calendar_permission_denied">Calendar permission denied</string>
     <string name="tool_contacts_denied">User declined this contacts change</string>
     <string name="tool_contacts_permission_denied">Contacts permission denied</string>
+    <string name="tool_set_alarm">Set Alarm</string>
+    <string name="tool_set_timer">Set Timer</string>
+    <string name="tool_show_alarms">Show Alarms</string>
+    <string name="tool_dismiss_alarm">Dismiss Alarm</string>
+    <string name="tool_snooze_alarm">Snooze Alarm</string>
+    <string name="tool_alarm_denied">User declined this alarm change</string>
     <string name="img_action_save">Save to gallery</string>
     <string name="img_action_share">Share</string>
     <string name="img_saved">Saved to gallery</string>
@@ -432,6 +438,11 @@
     <string name="contacts_enable_desc">Allow the model to view your contacts</string>
     <string name="contacts_confirm_setting">Confirm changes to contacts</string>
     <string name="contacts_confirm_setting_desc">Ask before the assistant can change or delete contacts</string>
+    <string name="alarm_title">Alarms &amp; Timers</string>
+    <string name="alarm_enable">Enable Alarm Tool</string>
+    <string name="alarm_enable_desc">Allow the model to set alarms, start timers, and manage them via your clock app</string>
+    <string name="alarm_confirm_setting">Confirm alarm changes</string>
+    <string name="alarm_confirm_setting_desc">Ask before the assistant can set, dismiss, or snooze an alarm or timer</string>
     <string name="device_info_title">Device</string>
     <string name="device_info_enable">Device Info Tool</string>
     <string name="device_info_enable_desc">Lets the assistant check battery, ringer mode, network, storage, and other current device state</string>
@@ -1040,6 +1051,10 @@
     <string name="contacts_confirm_allow">Allow</string>
     <string name="contacts_confirm_deny">Deny</string>
     <string name="contacts_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <string name="alarm_confirm_title">Allow this alarm change?</string>
+    <string name="alarm_confirm_allow">Allow</string>
+    <string name="alarm_confirm_deny">Deny</string>
+    <string name="alarm_confirm_always_allow">Always allow (don\'t ask again)</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora quit unexpectedly</string>

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Shield
@@ -37,9 +38,10 @@ import kotlinx.coroutines.delay
 /**
  * Settings for on-device Android integrations exposed to the model as tools:
  * [com.newoether.agora.tool.LocationToolProvider], [com.newoether.agora.tool.CalendarToolProvider],
- * and [com.newoether.agora.tool.ContactsToolProvider]. Each "Enable X Tool" switch calls into
- * [com.newoether.agora.viewmodel.ChatViewModel] (not [com.newoether.agora.data.repository.SettingsRepository]
- * directly) because enabling a tool also proactively requests its runtime permission.
+ * [com.newoether.agora.tool.ContactsToolProvider], and [com.newoether.agora.tool.AlarmToolProvider].
+ * Each "Enable X Tool" switch calls into [com.newoether.agora.viewmodel.ChatViewModel] (not
+ * [com.newoether.agora.data.repository.SettingsRepository] directly) because enabling a tool
+ * also proactively requests its runtime permission where one is needed (alarms need none).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +56,8 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val calendarConfirmEnabled by viewModel.settings.calendarConfirmEnabled.collectAsState()
     val contactsEnabled by viewModel.settings.contactsEnabled.collectAsState()
     val contactsConfirmEnabled by viewModel.settings.contactsConfirmEnabled.collectAsState()
+    val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
+    val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -218,6 +222,29 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = { Switch(checked = contactsConfirmEnabled, onCheckedChange = { viewModel.settings.setContactsConfirmEnabled(it) }) },
                             modifier = Modifier.clickable { viewModel.settings.setContactsConfirmEnabled(!contactsConfirmEnabled) }
+                        )
+                    }
+                }
+            })
+
+            SettingsGroup(title = stringResource(R.string.alarm_title), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.alarm_enable)) },
+                        supportingContent = { Text(stringResource(R.string.alarm_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Alarm, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = alarmEnabled, onCheckedChange = { viewModel.setAlarmEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setAlarmEnabled(!alarmEnabled) }
+                    )
+                }
+                if (alarmEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.alarm_confirm_setting)) },
+                            supportingContent = { Text(stringResource(R.string.alarm_confirm_setting_desc)) },
+                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = alarmConfirmEnabled, onCheckedChange = { viewModel.settings.setAlarmConfirmEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.settings.setAlarmConfirmEnabled(!alarmConfirmEnabled) }
                         )
                     }
                 }

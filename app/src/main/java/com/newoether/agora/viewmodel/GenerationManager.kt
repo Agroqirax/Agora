@@ -20,6 +20,7 @@ import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
+import com.newoether.agora.tool.AlarmToolProvider
 import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
 import com.newoether.agora.tool.DeviceInfoToolProvider
@@ -99,6 +100,7 @@ data class GenerationContext(
     val locationNominatimBaseUrl: String = com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL,
     val calendarEnabled: Boolean = false,
     val contactsEnabled: Boolean = false,
+    val alarmEnabled: Boolean = false,
     val imageTranscriptionEnabled: Boolean = false,
     val imageTranscriptionModel: String? = null,
     val imageTranscriptionBatchSize: Int = 3,
@@ -178,6 +180,10 @@ class GenerationManager(
     /** Runtime calendar-permission request gate. Set by the ViewModel. */
     var onRequestCalendarPermission: (suspend () -> Boolean)? = null
 
+    /** User-confirmation gate for setting/dismissing/snoozing alarms and timers.
+     *  Set by the ViewModel. Returns true to proceed, false to deny. */
+    var onConfirmAlarmWrite: (suspend (summary: String) -> Boolean)? = null
+
     /** User-confirmation gate for contacts create/update/delete. Set by the ViewModel.
      *  Returns true to proceed, false to deny. */
     var onConfirmContactsWrite: (suspend (summary: String) -> Boolean)? = null
@@ -212,10 +218,13 @@ class GenerationManager(
         cp.confirmWrite = { summary -> onConfirmContactsWrite?.invoke(summary) ?: true }
         cp.requestPermission = { onRequestContactsPermission?.invoke() ?: false }
     }
+    private val alarmToolProvider = AlarmToolProvider(app).also { ap ->
+        ap.confirmWrite = { summary -> onConfirmAlarmWrite?.invoke(summary) ?: true }
+    }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
-        contactsToolProvider, mcpToolProvider
+        contactsToolProvider, alarmToolProvider, mcpToolProvider
     )
 
     fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
@@ -235,6 +244,9 @@ class GenerationManager(
 
     fun buildContactsTool(ctx: GenerationContext): List<ToolDefinition> =
         contactsToolProvider.definitions(ctx)
+
+    fun buildAlarmTool(ctx: GenerationContext): List<ToolDefinition> =
+        alarmToolProvider.definitions(ctx)
 
     private val transcriptionManager = TranscriptionManager(providers, conversations, context)
 
@@ -453,8 +465,9 @@ class GenerationManager(
         val packageQueryTool = buildPackageQueryTool(ctx)
         val calendarTool = buildCalendarTool(ctx)
         val contactsTool = buildContactsTool(ctx)
+        val alarmTool = buildAlarmTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

@@ -273,6 +273,7 @@ class ChatViewModel(
             gm.onRequestCalendarPermission = { calendarPermission.request() }
             gm.onConfirmContactsWrite = { summary -> contactsWriteConfirmation.confirm(summary) }
             gm.onRequestContactsPermission = { contactsPermission.request() }
+            gm.onConfirmAlarmWrite = { summary -> alarmWriteConfirmation.confirm(summary) }
         }
     }
 
@@ -426,6 +427,23 @@ class ChatViewModel(
         settings.setContactsEnabled(enabled)
         if (enabled) viewModelScope.launch { contactsPermission.requestIfNeeded(appContext) }
     }
+
+    // ── Alarm tool write-confirmation gate ────────────────────
+    /** In-app "set/dismiss/snooze this alarm?" prompt (see [WriteConfirmationController]).
+     *  Unlike calendar/contacts, alarms/timers don't need a dangerous runtime permission
+     *  (AlarmClock intents are handled by whatever clock app is installed), so there's no
+     *  matching [RuntimePermissionController] here. */
+    private val alarmWriteConfirmation = WriteConfirmationController(
+        confirmEnabled = { settings.alarmConfirmEnabled.value },
+        setConfirmEnabled = { settings.setAlarmConfirmEnabled(it) }
+    )
+    val pendingAlarmWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
+        get() = alarmWriteConfirmation.pendingWrite
+
+    fun resolveAlarmWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        alarmWriteConfirmation.resolve(allow, alwaysAllow)
+
+    fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
 
     // ── Auto Backup ───────────────────────────────────────────
 

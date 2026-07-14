@@ -92,9 +92,11 @@ class SettingsRepository(
     val packageQueryEnabled: StateFlow<Boolean> = hot(settingsManager.packageQueryEnabled, false)
     val calendarEnabled: StateFlow<Boolean> = hot(settingsManager.calendarEnabled, false)
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
+    val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
     val locationEnabled: StateFlow<Boolean> = hot(settingsManager.locationEnabled, false)
     val calendarConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.calendarConfirmEnabled, false)
     val contactsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.contactsConfirmEnabled, false)
+    val alarmConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmConfirmEnabled, false)
     val locationConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.locationConfirmEnabled, false)
     val locationReverseGeocodeEnabled: StateFlow<Boolean> = hot(settingsManager.locationReverseGeocodeEnabled, true)
     val locationNominatimBaseUrl: StateFlow<String> = hot(settingsManager.locationNominatimBaseUrl, com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL)
@@ -352,6 +354,8 @@ class SettingsRepository(
     fun setCalendarConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalendarConfirmEnabled(enabled) }
     fun setContactsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsEnabled(enabled) }
     fun setContactsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsConfirmEnabled(enabled) }
+    fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
+    fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
     fun setLocationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationEnabled(enabled) }
     fun setLocationConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationConfirmEnabled(enabled) }
     fun setLocationReverseGeocodeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationReverseGeocodeEnabled(enabled) }

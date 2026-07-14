@@ -42,6 +42,11 @@ internal fun toolDisplayName(toolName: String?): String {
         "create_contact" -> stringResource(R.string.tool_create_contact)
         "update_contact" -> stringResource(R.string.tool_update_contact)
         "delete_contact" -> stringResource(R.string.tool_delete_contact)
+        "set_alarm" -> stringResource(R.string.tool_set_alarm)
+        "set_timer" -> stringResource(R.string.tool_set_timer)
+        "show_alarms" -> stringResource(R.string.tool_show_alarms)
+        "dismiss_alarm" -> stringResource(R.string.tool_dismiss_alarm)
+        "snooze_alarm" -> stringResource(R.string.tool_snooze_alarm)
         else -> {
             val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
             (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }

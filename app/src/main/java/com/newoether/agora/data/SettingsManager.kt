@@ -173,8 +173,10 @@ class SettingsManager(private val context: Context) {
         val PACKAGE_QUERY_ENABLED = booleanPreferencesKey("package_query_enabled")
         val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
+        val ALARM_ENABLED = booleanPreferencesKey("alarm_enabled")
         val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
         val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
+        val ALARM_CONFIRM_ENABLED = booleanPreferencesKey("alarm_confirm_enabled")
         val CONTACTS_CONFIRM_ENABLED = booleanPreferencesKey("contacts_confirm_enabled")
         val LOCATION_CONFIRM_ENABLED = booleanPreferencesKey("location_confirm_enabled")
         val LOCATION_REVERSE_GEOCODE_ENABLED = booleanPreferencesKey("location_reverse_geocode_enabled")
@@ -354,8 +356,10 @@ class SettingsManager(private val context: Context) {
     val packageQueryEnabled: Flow<Boolean> = context.dataStore.data.map { it[PACKAGE_QUERY_ENABLED] ?: false }
     val calendarEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_ENABLED] ?: false }
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
+    val alarmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_ENABLED] ?: false }
     val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
     val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
+    val alarmConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_CONFIRM_ENABLED] ?: true }
     val contactsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_CONFIRM_ENABLED] ?: true }
     val locationConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_CONFIRM_ENABLED] ?: true }
     val locationReverseGeocodeEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_REVERSE_GEOCODE_ENABLED] ?: true }
@@ -741,6 +745,12 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveContactsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CONTACTS_ENABLED] = enabled }
+    }
+    suspend fun saveAlarmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[ALARM_ENABLED] = enabled }
+    }
+    suspend fun saveAlarmConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[ALARM_CONFIRM_ENABLED] = enabled }
     }
     suspend fun saveContactsConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CONTACTS_CONFIRM_ENABLED] = enabled }

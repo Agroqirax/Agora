@@ -9,6 +9,7 @@ Agora can securely integrate with Android — both as **tools the model can call
 | **Location**       | Retrieve the device's approximate or precise location          | Runtime (location)                           |
 | **Contacts**       | Search and read contacts stored on the device                  | Runtime (contacts)                           |
 | **Calendar**       | Read upcoming events and create new calendar entries           | Runtime (calendar)                           |
+| **Alarms & Timers**| Set alarms and timers, and dismiss/snooze them                 | None (normal permission)                     |
 | **Device Info**    | Battery, ringer mode, network, storage, and other device state | None                                         |
 | **Installed Apps** | List apps installed on the device                              | None (fdroid/GitHub builds only — see below) |
 
@@ -17,6 +18,8 @@ The model automatically discovers enabled tools and decides when they are useful
 ## Privacy & Permissions
 
 Location, Contacts, and Calendar require standard Android runtime permissions — the first time the model attempts to use one, Agora requests the appropriate permission, and only when that tool is first needed.
+
+Alarms & Timers doesn't use a runtime permission either: setting an alarm/timer is a "normal" Android permission that's granted automatically at install, and the action itself is handed off to whatever clock app is installed on the device (Google Clock, Samsung Clock, etc.) rather than touching any protected data.
 
 Device Info and Installed Apps don't use runtime permissions at all: the values they read (battery, ringer mode, network type, storage, build info, installed package list) are exposed by Android without a permission dialog. Installed Apps has a separate, build-level restriction instead — see [Installed Apps](#installed-apps).
 
@@ -33,6 +36,7 @@ Device Info and Installed Apps don't use runtime permissions at all: the values 
    - **Location**
    - **Contacts**
    - **Calendar**
+   - **Alarms & Timers**
 3. Grant the requested Android permissions when prompted (Location/Contacts/Calendar only).
 
 Once enabled, the model can access these tools automatically whenever they're helpful during a conversation.
@@ -77,6 +81,20 @@ Typical uses include:
 - Reviewing meeting details
 
 Creating or modifying events requires calendar write permission.
+
+## Alarms & Timers
+
+The Alarms & Timers tool lets the model set a device alarm or start a countdown timer, open the clock app's alarm list, and — on Android 10+ with a supporting clock app — dismiss or snooze an alarm.
+
+Typical uses include:
+
+- "Wake me up at 7am"
+- "Set a repeating alarm for weekdays at 6:30"
+- "Start a 10 minute timer for the pasta"
+- "What alarms do I have set?"
+- "Dismiss the alarm" / "Snooze it for 5 more minutes"
+
+Unlike Calendar/Contacts, this doesn't read or write any personal data — it just hands the request to your device's clock app, the same as a voice assistant would. By default, a confirmation prompt still appears before an alarm or timer is actually set, dismissed, or snoozed; you can turn this off in **Settings → Android → Alarms & Timers**.
 
 ## Device Info
 
