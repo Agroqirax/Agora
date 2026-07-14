@@ -124,6 +124,7 @@ class SettingsRepository(
     val dynamicColor: StateFlow<Boolean> = hot(settingsManager.dynamicColor, true)
     val blurEffectsEnabled: StateFlow<Boolean> = hot(settingsManager.blurEffectsEnabled, true)
     val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
+    val reducedMotionEnabled: StateFlow<Boolean> = hot(settingsManager.reducedMotionEnabled, false)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
     val schemeStyle: StateFlow<String> = hot(settingsManager.schemeStyle, "TONAL_SPOT")
     val fontPreference: StateFlow<String> = hot(settingsManager.fontPreference, "app_default")
@@ -382,6 +383,7 @@ class SettingsRepository(
     fun setDynamicColor(enabled: Boolean) = scope.launch { settingsManager.saveDynamicColor(enabled) }
     fun setBlurEffectsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveBlurEffectsEnabled(enabled) }
     fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
+    fun setReducedMotionEnabled(enabled: Boolean) = scope.launch { settingsManager.saveReducedMotionEnabled(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
     fun setSchemeStyle(style: String) = scope.launch { settingsManager.saveSchemeStyle(style) }
     fun setFontPreference(value: String) = scope.launch { settingsManager.saveFontPreference(value) }

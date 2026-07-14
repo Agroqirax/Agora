@@ -145,6 +145,7 @@ fun ChatApp(
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = convOverride?.contextWindow ?: maxContextWindow
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
+    val reducedMotionEnabled by viewModel.settings.reducedMotionEnabled.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
 
@@ -490,7 +491,7 @@ fun ChatApp(
             }
             val ca by animateFloatAsState(targetCa, tween(800))
             val qa by animateFloatAsState(targetQa, tween(800))
-            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark)
+            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark, reduceMotion = reducedMotionEnabled)
 
             Scaffold(
                 containerColor = Color.Transparent,
@@ -618,6 +619,7 @@ fun ChatApp(
                                         style = MaterialTheme.typography.headlineMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onBackground,
+                                        reduceMotion = reducedMotionEnabled,
                                         modifier = Modifier.padding(top = ((LocalConfiguration.current.screenHeightDp + topBarH.value / 2f - bottomBarHeight.value) / 2).coerceAtLeast(0f).dp)
                                     )
                                 }

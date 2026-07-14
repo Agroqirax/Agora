@@ -32,11 +32,16 @@ fun TypewriterText(
     typeSpeedMs: Int = 100,
     deleteSpeedMs: Int = 50,
     pauseAfterTypeMs: Int = 2000,
-    pauseAfterDeleteMs: Int = 600
+    pauseAfterDeleteMs: Int = 600,
+    reduceMotion: Boolean = false
 ) {
-    var visibleCount by remember { mutableIntStateOf(0) }
+    var visibleCount by remember { mutableIntStateOf(if (reduceMotion) text.length else 0) }
 
-    LaunchedEffect(text) {
+    LaunchedEffect(text, reduceMotion) {
+        if (reduceMotion) {
+            visibleCount = text.length
+            return@LaunchedEffect
+        }
         while (true) {
             for (i in 1..text.length) {
                 visibleCount = i
@@ -51,14 +56,17 @@ fun TypewriterText(
         }
     }
 
-    val cursorAlpha by rememberInfiniteTransition().animateFloat(
-        initialValue = 1f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(530, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
+    val cursorAlpha = if (reduceMotion) 0f else {
+        val animatedAlpha by rememberInfiniteTransition().animateFloat(
+            initialValue = 1f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(530, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart
+            )
         )
-    )
+        animatedAlpha
+    }
 
     Row(modifier = modifier) {
         Text(

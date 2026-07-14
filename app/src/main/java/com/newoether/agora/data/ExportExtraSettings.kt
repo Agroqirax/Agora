@@ -71,6 +71,7 @@ object ExportExtraSettings {
         put("dynamicColor", JsonPrimitive(sm.dynamicColor.first()))
         put("blurEffectsEnabled", JsonPrimitive(sm.blurEffectsEnabled.first()))
         put("hapticsEnabled", JsonPrimitive(sm.hapticsEnabled.first()))
+        put("reducedMotionEnabled", JsonPrimitive(sm.reducedMotionEnabled.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
         put("fontPreference", JsonPrimitive(sm.fontPreference.first()))
         put("customFontPath", JsonPrimitive(sm.customFontPath.first()))
@@ -144,6 +145,7 @@ object ExportExtraSettings {
         obj["dynamicColor"]?.jsonPrimitive?.boolean?.let { sm.saveDynamicColor(it) }
         obj["blurEffectsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveBlurEffectsEnabled(it) }
         obj["hapticsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveHapticsEnabled(it) }
+        obj["reducedMotionEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveReducedMotionEnabled(it) }
         obj["schemeStyle"]?.jsonPrimitive?.contentOrNull?.let { sm.saveSchemeStyle(it) }
         obj["fontPreference"]?.jsonPrimitive?.contentOrNull?.let { sm.saveFontPreference(it) }
         obj["customFontPath"]?.jsonPrimitive?.contentOrNull?.let { sm.saveCustomFontPath(it) }

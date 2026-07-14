@@ -610,6 +610,8 @@
     <string name="visual_effects">Visual Effects</string>
     <string name="blur_effects">Blur Effects</string>
     <string name="blur_effects_desc">Blur the top of the chat list under the toolbar. Turn off to save performance.</string>
+    <string name="reduced_motion">Reduce Motion</string>
+    <string name="reduced_motion_desc">Turn off decorative animations, like the background blobs and cycling placeholder text. Defaults to your device\'s accessibility setting.</string>
     <string name="interaction_feedback">Interaction Feedback</string>
     <string name="haptic_feedback">Haptic Feedback</string>
     <string name="haptic_feedback_desc">Use subtle vibration for generation status and key actions.</string>

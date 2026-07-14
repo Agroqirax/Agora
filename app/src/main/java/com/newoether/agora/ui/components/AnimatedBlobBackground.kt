@@ -43,7 +43,8 @@ fun AnimatedBlobBackground(
     centerAlpha: Float = 0.10f,
     quarterAlpha: Float = 0.05f,
     edgeAlpha: Float = 0.0f,
-    dark: Boolean = true
+    dark: Boolean = true,
+    reduceMotion: Boolean = false
 ) {
     val density = LocalDensity.current
     val cs = MaterialTheme.colorScheme
@@ -77,7 +78,8 @@ fun AnimatedBlobBackground(
 
     var timeSec by remember { mutableStateOf(0.0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(reduceMotion) {
+        if (reduceMotion) return@LaunchedEffect
         val startNanos = System.nanoTime()
         while (true) {
             timeSec = (System.nanoTime() - startNanos) / 1_000_000_000.0

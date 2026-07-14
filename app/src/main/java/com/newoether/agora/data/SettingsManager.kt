@@ -1,6 +1,7 @@
 package com.newoether.agora.data
 
 import android.content.Context
+import android.provider.Settings
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
@@ -22,6 +23,21 @@ import java.util.Locale
 import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
+
+/**
+ * Reads Android's own "Remove animations" accessibility setting (Settings > Accessibility >
+ * Remove animations, API 31+; on older versions the same underlying scale is toggled by
+ * "Developer options > Animator duration scale" or some OEM accessibility menus). That
+ * setting drives [Settings.Global.ANIMATOR_DURATION_SCALE] (and the matching window/transition
+ * scales) to 0 when animations should be removed system-wide. We only use this as the
+ * *initial* default for our own in-app toggle — Compose's animation APIs aren't driven by
+ * this system scale, so [REDUCED_MOTION_ENABLED] is what Agora's UI actually checks.
+ */
+private fun systemReducedMotionDefault(context: Context): Boolean = try {
+    Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+} catch (_: Exception) {
+    false
+}
 
 @Serializable
 data class ApiKeyEntry(
@@ -203,6 +219,7 @@ class SettingsManager(private val context: Context) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+        val REDUCED_MOTION_ENABLED = booleanPreferencesKey("reduced_motion_enabled")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
         val FONT_PREFERENCE = stringPreferencesKey("font_preference")
@@ -392,6 +409,12 @@ class SettingsManager(private val context: Context) {
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
+    /** Defaults to whatever Android's own "Remove animations" accessibility setting is
+     *  currently set to (see [systemReducedMotionDefault]) until the user picks explicitly,
+     *  so a device already configured for reduced motion doesn't need a second opt-in. */
+    val reducedMotionEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[REDUCED_MOTION_ENABLED] ?: systemReducedMotionDefault(context)
+    }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
     val schemeStyle: Flow<String> = context.dataStore.data.map { it[SCHEME_STYLE] ?: "TONAL_SPOT" }
     val fontPreference: Flow<String> = context.dataStore.data.map { it[FONT_PREFERENCE] ?: "app_default" }
@@ -816,6 +839,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[HAPTICS_ENABLED] = enabled }
+    }
+
+    suspend fun saveReducedMotionEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[REDUCED_MOTION_ENABLED] = enabled }
     }
 
     suspend fun saveToolCallDisplayMode(mode: String) {
