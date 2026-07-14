@@ -47,6 +47,8 @@ internal fun toolDisplayName(toolName: String?): String {
         "show_alarms" -> stringResource(R.string.tool_show_alarms)
         "dismiss_alarm" -> stringResource(R.string.tool_dismiss_alarm)
         "snooze_alarm" -> stringResource(R.string.tool_snooze_alarm)
+        "get_playback_state" -> stringResource(R.string.tool_get_playback_state)
+        "control_media_playback" -> stringResource(R.string.tool_control_media_playback)
         else -> {
             val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
             (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
@@ -262,6 +264,45 @@ internal fun toolSummary(seg: MessageSegment): String {
         "create_contact", "update_contact", "delete_contact" -> genericWriteSummary(
             content, isError, R.string.tool_contacts_permission_denied, R.string.tool_contacts_denied
         )
+        "get_playback_state" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_getting_playback_state)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val active = (obj?.get("active") as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: false
+                val title = (obj?.get("title") as? JsonPrimitive)?.content
+                when {
+                    errorCode == "permission_denied" -> stringResource(R.string.tool_media_permission_denied)
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    !active -> stringResource(R.string.tool_media_nothing_playing)
+                    title != null -> stringResource(R.string.tool_media_now_playing, title)
+                    else -> stringResource(R.string.tool_done)
+                }
+            }
+        }
+        "control_media_playback" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_controlling_media)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val effect = (obj?.get("effect") as? JsonPrimitive)?.content
+                when {
+                    errorCode == "permission_denied" -> stringResource(R.string.tool_media_permission_denied)
+                    errorCode == "no_active_session" -> stringResource(R.string.tool_media_nothing_playing)
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    else -> when (effect) {
+                        "played" -> stringResource(R.string.tool_media_played)
+                        "paused" -> stringResource(R.string.tool_media_paused)
+                        "skipped_next" -> stringResource(R.string.tool_media_skipped_next)
+                        "skipped_previous" -> stringResource(R.string.tool_media_skipped_previous)
+                        "stopped" -> stringResource(R.string.tool_media_stopped)
+                        else -> stringResource(R.string.tool_done)
+                    }
+                }
+            }
+        }
         else -> {
             if (isError) stringResource(R.string.tool_call_failed)
             else stringResource(R.string.tool_done)

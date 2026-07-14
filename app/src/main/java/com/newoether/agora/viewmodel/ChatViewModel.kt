@@ -274,6 +274,10 @@ class ChatViewModel(
             gm.onConfirmContactsWrite = { summary -> contactsWriteConfirmation.confirm(summary) }
             gm.onRequestContactsPermission = { contactsPermission.request() }
             gm.onConfirmAlarmWrite = { summary -> alarmWriteConfirmation.confirm(summary) }
+            gm.onRequestMediaControlPermission = {
+                com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(getApplication())
+                com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(getApplication())
+            }
         }
     }
 
@@ -376,6 +380,18 @@ class ChatViewModel(
     fun setLocationEnabled(enabled: Boolean) {
         settings.setLocationEnabled(enabled)
         if (enabled) viewModelScope.launch { locationPermission.requestIfNeeded(appContext) }
+    }
+
+    /** Enables/disables the media control tool. Turning it on opens the notification-access
+     *  settings screen right away (if not already granted) — unlike [setLocationEnabled],
+     *  there's no runtime-permission dialog for this special access, so this is a one-way
+     *  nudge rather than something we can await the result of. */
+    fun setMediaControlEnabled(enabled: Boolean) {
+        settings.setMediaControlEnabled(enabled)
+        val app: Application = getApplication()
+        if (enabled && !com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(app)) {
+            com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(app)
+        }
     }
 
     // ── Calendar tool write-confirmation + runtime permission gates ──────

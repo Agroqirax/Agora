@@ -168,6 +168,7 @@ class GenerationRequestBuilder(
             calendarEnabled = settings.calendarEnabled.value,
             contactsEnabled = settings.contactsEnabled.value,
             alarmEnabled = settings.alarmEnabled.value,
+            mediaControlEnabled = settings.mediaControlEnabled.value,
             imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
             imageTranscriptionModel = settings.imageTranscriptionModel.value,
             imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,

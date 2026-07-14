@@ -17,6 +17,8 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,7 +40,8 @@ import kotlinx.coroutines.delay
 /**
  * Settings for on-device Android integrations exposed to the model as tools:
  * [com.newoether.agora.tool.LocationToolProvider], [com.newoether.agora.tool.CalendarToolProvider],
- * [com.newoether.agora.tool.ContactsToolProvider], and [com.newoether.agora.tool.AlarmToolProvider].
+ * [com.newoether.agora.tool.ContactsToolProvider], [com.newoether.agora.tool.AlarmToolProvider],
+ * and [com.newoether.agora.tool.MediaControlToolProvider].
  * Each "Enable X Tool" switch calls into [com.newoether.agora.viewmodel.ChatViewModel] (not
  * [com.newoether.agora.data.repository.SettingsRepository] directly) because enabling a tool
  * also proactively requests its runtime permission where one is needed (alarms need none).
@@ -58,6 +61,7 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val contactsConfirmEnabled by viewModel.settings.contactsConfirmEnabled.collectAsState()
     val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
     val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
+    val mediaControlEnabled by viewModel.settings.mediaControlEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -249,6 +253,21 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             })
+
+            SettingsGroup(title = stringResource(R.string.media_control_title), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.media_control_enable)) },
+                        supportingContent = { Text(stringResource(R.string.media_control_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.PlayCircle, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = mediaControlEnabled, onCheckedChange = { viewModel.setMediaControlEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setMediaControlEnabled(!mediaControlEnabled) }
+                    )
+                }
+                if (mediaControlEnabled) {
+                    add { MediaControlAccessSettingsItem() }
+                }
+            })
         }
     }
 }
@@ -325,4 +344,52 @@ private fun openManualAssistantSettings(context: android.content.Context) {
             // Try the next candidate.
         }
     }
+}
+
+/**
+ * Shows whether notification access — the special access [MediaControlToolProvider]
+ * needs for [android.media.session.MediaSessionManager.getActiveSessions] — is
+ * currently granted, and links to the system settings screen to enable it. Same
+ * resume-refresh trick as [DigitalAssistantSettingsItem]: there's no callback for when
+ * the user comes back from that settings screen, so re-read the live status on
+ * ON_RESUME instead.
+ */
+@Composable
+private fun MediaControlAccessSettingsItem() {
+    val context = LocalContext.current
+
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshTrigger++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val hasAccess = remember(refreshTrigger) {
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
+
+    SettingsItem(
+        modifier = Modifier.clickable {
+            com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(
+                context.applicationContext as android.app.Application
+            )
+        },
+        headlineContent = { Text(stringResource(R.string.media_control_notification_access_title)) },
+        supportingContent = {
+            Text(
+                if (hasAccess) stringResource(R.string.media_control_notification_access_granted)
+                else stringResource(R.string.media_control_notification_access_needed)
+            )
+        },
+        leadingContent = {
+            Icon(
+                if (hasAccess) Icons.Default.CheckCircle else Icons.Default.NotificationsActive,
+                null,
+                tint = if (hasAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    )
 }

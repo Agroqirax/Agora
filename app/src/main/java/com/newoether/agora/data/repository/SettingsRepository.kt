@@ -93,6 +93,7 @@ class SettingsRepository(
     val calendarEnabled: StateFlow<Boolean> = hot(settingsManager.calendarEnabled, false)
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
+    val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
     val locationEnabled: StateFlow<Boolean> = hot(settingsManager.locationEnabled, false)
     val calendarConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.calendarConfirmEnabled, false)
     val contactsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.contactsConfirmEnabled, false)
@@ -357,6 +358,7 @@ class SettingsRepository(
     fun setContactsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsConfirmEnabled(enabled) }
     fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
     fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
+    fun setMediaControlEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMediaControlEnabled(enabled) }
     fun setLocationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationEnabled(enabled) }
     fun setLocationConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationConfirmEnabled(enabled) }
     fun setLocationReverseGeocodeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationReverseGeocodeEnabled(enabled) }
