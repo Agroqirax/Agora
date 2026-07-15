@@ -53,7 +53,7 @@ class AgoraVoiceInteractionSession(context: Context) : VoiceInteractionSession(c
 
         // Launches the target activity and finishes this (headless) session — there is no
         // content view to tear down since onCreateContentView was never overridden.
-        startAssistantActivity(launchIntent)
+        context.startActivity(launchIntent)
         finish()
     }
 
