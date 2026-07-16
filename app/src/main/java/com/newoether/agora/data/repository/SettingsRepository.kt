@@ -94,6 +94,11 @@ class SettingsRepository(
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
     val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
+    val torchEnabled: StateFlow<Boolean> = hot(settingsManager.torchEnabled, false)
+    val weatherEnabled: StateFlow<Boolean> = hot(settingsManager.weatherEnabled, false)
+    val weatherUnits: StateFlow<String> = hot(settingsManager.weatherUnits, com.newoether.agora.data.SettingsManager.DEFAULT_WEATHER_UNITS)
+    val weatherBaseUrl: StateFlow<String> = hot(settingsManager.weatherBaseUrl, com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL)
+    val weatherGeocodingBaseUrl: StateFlow<String> = hot(settingsManager.weatherGeocodingBaseUrl, com.newoether.agora.tool.WeatherToolProvider.DEFAULT_GEOCODING_BASE_URL)
     val locationEnabled: StateFlow<Boolean> = hot(settingsManager.locationEnabled, false)
     val calendarConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.calendarConfirmEnabled, false)
     val contactsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.contactsConfirmEnabled, false)
@@ -359,6 +364,11 @@ class SettingsRepository(
     fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
     fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
     fun setMediaControlEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMediaControlEnabled(enabled) }
+    fun setTorchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTorchEnabled(enabled) }
+    fun setWeatherEnabled(enabled: Boolean) = scope.launch { settingsManager.saveWeatherEnabled(enabled) }
+    fun setWeatherUnits(units: String) = scope.launch { settingsManager.saveWeatherUnits(units) }
+    fun setWeatherBaseUrl(url: String) = scope.launch { settingsManager.saveWeatherBaseUrl(url) }
+    fun setWeatherGeocodingBaseUrl(url: String) = scope.launch { settingsManager.saveWeatherGeocodingBaseUrl(url) }
     fun setLocationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationEnabled(enabled) }
     fun setLocationConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationConfirmEnabled(enabled) }
     fun setLocationReverseGeocodeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveLocationReverseGeocodeEnabled(enabled) }

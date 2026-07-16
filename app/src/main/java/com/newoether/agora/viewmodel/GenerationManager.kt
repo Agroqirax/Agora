@@ -33,6 +33,8 @@ import com.newoether.agora.tool.PackageQueryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
+import com.newoether.agora.tool.TorchToolProvider
+import com.newoether.agora.tool.WeatherToolProvider
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +105,11 @@ data class GenerationContext(
     val contactsEnabled: Boolean = false,
     val alarmEnabled: Boolean = false,
     val mediaControlEnabled: Boolean = false,
+    val torchEnabled: Boolean = false,
+    val weatherEnabled: Boolean = false,
+    val weatherUnits: String = "metric",
+    val weatherBaseUrl: String = com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL,
+    val weatherGeocodingBaseUrl: String = com.newoether.agora.tool.WeatherToolProvider.DEFAULT_GEOCODING_BASE_URL,
     val imageTranscriptionEnabled: Boolean = false,
     val imageTranscriptionModel: String? = null,
     val imageTranscriptionBatchSize: Int = 3,
@@ -230,10 +237,18 @@ class GenerationManager(
     private val mediaControlToolProvider = MediaControlToolProvider(app).also { mp ->
         mp.requestPermission = { onRequestMediaControlPermission?.invoke() ?: false }
     }
+    private val torchToolProvider = TorchToolProvider(app)
+    private val weatherToolProvider = WeatherToolProvider(app).also { wp ->
+        // Only consulted on the device-location auto-detect path — same permission and
+        // confirm gates as LocationToolProvider, since it's the same underlying data.
+        wp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
+        wp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
+    }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
-        contactsToolProvider, alarmToolProvider, mediaControlToolProvider, mcpToolProvider
+        contactsToolProvider, alarmToolProvider, mediaControlToolProvider, torchToolProvider,
+        weatherToolProvider, mcpToolProvider
     )
 
     fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
@@ -259,6 +274,12 @@ class GenerationManager(
 
     fun buildMediaControlTool(ctx: GenerationContext): List<ToolDefinition> =
         mediaControlToolProvider.definitions(ctx)
+
+    fun buildTorchTool(ctx: GenerationContext): List<ToolDefinition> =
+        torchToolProvider.definitions(ctx)
+
+    fun buildWeatherTool(ctx: GenerationContext): List<ToolDefinition> =
+        weatherToolProvider.definitions(ctx)
 
     private val transcriptionManager = TranscriptionManager(providers, conversations, context)
 
@@ -479,8 +500,10 @@ class GenerationManager(
         val contactsTool = buildContactsTool(ctx)
         val alarmTool = buildAlarmTool(ctx)
         val mediaControlTool = buildMediaControlTool(ctx)
+        val torchTool = buildTorchTool(ctx)
+        val weatherTool = buildWeatherTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mediaControlTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mediaControlTool + torchTool + weatherTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

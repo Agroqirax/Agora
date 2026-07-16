@@ -191,6 +191,12 @@ class SettingsManager(private val context: Context) {
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
         val ALARM_ENABLED = booleanPreferencesKey("alarm_enabled")
         val MEDIA_CONTROL_ENABLED = booleanPreferencesKey("media_control_enabled")
+        val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
+        val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
+        val WEATHER_UNITS = stringPreferencesKey("weather_units")
+        val WEATHER_BASE_URL = stringPreferencesKey("weather_base_url")
+        val WEATHER_GEOCODING_BASE_URL = stringPreferencesKey("weather_geocoding_base_url")
+        const val DEFAULT_WEATHER_UNITS = "metric"
         val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
         val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
         val ALARM_CONFIRM_ENABLED = booleanPreferencesKey("alarm_confirm_enabled")
@@ -376,6 +382,16 @@ class SettingsManager(private val context: Context) {
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
     val alarmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_ENABLED] ?: false }
     val mediaControlEnabled: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL_ENABLED] ?: false }
+    // Torch on/off has no dangerous permission or confirm-gate, same reasoning as media control.
+    val torchEnabled: Flow<Boolean> = context.dataStore.data.map { it[TORCH_ENABLED] ?: false }
+    val weatherEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEATHER_ENABLED] ?: false }
+    val weatherUnits: Flow<String> = context.dataStore.data.map { it[WEATHER_UNITS] ?: DEFAULT_WEATHER_UNITS }
+    val weatherBaseUrl: Flow<String> = context.dataStore.data.map {
+        it[WEATHER_BASE_URL] ?: com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL
+    }
+    val weatherGeocodingBaseUrl: Flow<String> = context.dataStore.data.map {
+        it[WEATHER_GEOCODING_BASE_URL] ?: com.newoether.agora.tool.WeatherToolProvider.DEFAULT_GEOCODING_BASE_URL
+    }
     val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
     val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
     val alarmConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_CONFIRM_ENABLED] ?: true }
@@ -779,6 +795,21 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveMediaControlEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MEDIA_CONTROL_ENABLED] = enabled }
+    }
+    suspend fun saveTorchEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[TORCH_ENABLED] = enabled }
+    }
+    suspend fun saveWeatherEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[WEATHER_ENABLED] = enabled }
+    }
+    suspend fun saveWeatherUnits(units: String) {
+        context.dataStore.edit { it[WEATHER_UNITS] = units }
+    }
+    suspend fun saveWeatherBaseUrl(url: String) {
+        context.dataStore.edit { it[WEATHER_BASE_URL] = url }
+    }
+    suspend fun saveWeatherGeocodingBaseUrl(url: String) {
+        context.dataStore.edit { it[WEATHER_GEOCODING_BASE_URL] = url }
     }
     suspend fun saveContactsConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CONTACTS_CONFIRM_ENABLED] = enabled }

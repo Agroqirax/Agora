@@ -49,6 +49,9 @@ internal fun toolDisplayName(toolName: String?): String {
         "snooze_alarm" -> stringResource(R.string.tool_snooze_alarm)
         "get_playback_state" -> stringResource(R.string.tool_get_playback_state)
         "control_media_playback" -> stringResource(R.string.tool_control_media_playback)
+        "get_torch_state" -> stringResource(R.string.tool_get_torch_state)
+        "set_torch" -> stringResource(R.string.tool_set_torch)
+        "get_weather" -> stringResource(R.string.tool_get_weather)
         else -> {
             val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
             (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
@@ -300,6 +303,53 @@ internal fun toolSummary(seg: MessageSegment): String {
                         "stopped" -> stringResource(R.string.tool_media_stopped)
                         else -> stringResource(R.string.tool_done)
                     }
+                }
+            }
+        }
+        "get_torch_state" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_getting_torch_state)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val isOn = (obj?.get("is_on") as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: false
+                when {
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    isOn -> stringResource(R.string.tool_torch_on)
+                    else -> stringResource(R.string.tool_torch_off)
+                }
+            }
+        }
+        "set_torch" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_controlling_torch)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val isOn = (obj?.get("is_on") as? JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: false
+                when {
+                    errorCode == "no_flash" -> stringResource(R.string.tool_torch_no_flash)
+                    errorCode == "camera_busy" -> stringResource(R.string.tool_torch_camera_busy)
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    isOn -> stringResource(R.string.tool_torch_turned_on)
+                    else -> stringResource(R.string.tool_torch_turned_off)
+                }
+            }
+        }
+        "get_weather" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_getting_weather)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val location = (obj?.get("location") as? JsonPrimitive)?.content
+                when {
+                    errorCode == "location_not_found" -> stringResource(R.string.tool_weather_no_location)
+                    errorCode == "permission_denied" -> stringResource(R.string.tool_location_permission_denied)
+                    errorCode == "user_denied" -> stringResource(R.string.tool_location_denied)
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    location != null -> stringResource(R.string.tool_weather_done_for, location)
+                    else -> stringResource(R.string.tool_done)
                 }
             }
         }

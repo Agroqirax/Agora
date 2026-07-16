@@ -10,6 +10,9 @@ Agora can securely integrate with Android — both as **tools the model can call
 | **Contacts**       | Search and read contacts stored on the device                  | Runtime (contacts)                           |
 | **Calendar**       | Read upcoming events and create new calendar entries           | Runtime (calendar)                           |
 | **Alarms & Timers**| Set alarms and timers, and dismiss/snooze them                 | None (normal permission)                     |
+| **Media Control**  | See what's playing and control playback (play/pause/skip)      | None (notification access)                   |
+| **Torch**          | Turn the flashlight on or off                                  | None                                         |
+| **Weather**        | Current conditions and forecast for a location                 | Runtime (location), only if auto-detecting |
 | **Device Info**    | Battery, ringer mode, network, storage, and other device state | None                                         |
 | **Installed Apps** | List apps installed on the device                              | None (fdroid/GitHub builds only — see below) |
 
@@ -37,6 +40,9 @@ Device Info and Installed Apps don't use runtime permissions at all: the values 
    - **Contacts**
    - **Calendar**
    - **Alarms & Timers**
+   - **Media Control**
+   - **Torch**
+   - **Weather**
 3. Grant the requested Android permissions when prompted (Location/Contacts/Calendar only).
 
 Once enabled, the model can access these tools automatically whenever they're helpful during a conversation.
@@ -95,6 +101,32 @@ Typical uses include:
 - "Dismiss the alarm" / "Snooze it for 5 more minutes"
 
 Unlike Calendar/Contacts, this doesn't read or write any personal data — it just hands the request to your device's clock app, the same as a voice assistant would. By default, a confirmation prompt still appears before an alarm or timer is actually set, dismissed, or snoozed; you can turn this off in **Settings → Android → Alarms & Timers**.
+
+## Torch
+
+The Torch tool lets the model turn your device's flashlight on or off, or toggle it if it isn't sure of the current state.
+
+Typical uses include:
+
+- "Turn on the flashlight"
+- "Turn off the torch"
+- "Toggle the flashlight" / checking whether it's currently on
+
+It doesn't require any permission — Android exposes torch control to any app — so there's no permission prompt and no confirmation gate, the same treatment as Media Control. If another app currently has the camera open, the model is told the torch can't be controlled right now rather than the request silently failing.
+
+## Weather
+
+The Weather tool gives the model current conditions and a multi-day forecast, via the free [Open-Meteo](https://open-meteo.com) API.
+
+The model can pick a location three ways:
+
+- A free-text place name it names itself (e.g. "weather in Lisbon")
+- Coordinates it already has (e.g. from the Location tool)
+- Nothing at all — it automatically uses your device's current location
+
+For automatic location, it uses the exact same permission request and "confirm before sharing location" flow as the Location tool (fine location if granted and available, else coarse) — it does not have a separate no-permission fallback, so the first time it needs to auto-detect, expect the same permission prompt the Location tool would show.
+
+You can set your preferred units (metric/imperial) in **Settings → Android → Weather**. Open-Meteo is also self-hostable, so the forecast and geocoding server URLs can be overridden there too, though the defaults work for virtually everyone.
 
 ## Device Info
 

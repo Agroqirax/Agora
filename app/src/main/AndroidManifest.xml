@@ -16,6 +16,10 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <!-- Torch control (CameraManager.setTorchMode) needs no permission, only declared here
+         so Play/app stores know the flash unit is optional, not required, hardware. -->
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- Normal permission (auto-granted), lets AlarmToolProvider create alarms without
          the clock app's UI showing on devices that support EXTRA_SKIP_UI. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
