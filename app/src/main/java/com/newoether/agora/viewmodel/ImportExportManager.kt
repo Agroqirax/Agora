@@ -3,6 +3,7 @@ package com.newoether.agora.viewmodel
 import android.app.Application
 import android.net.Uri
 import com.newoether.agora.R
+import com.newoether.agora.automation.AutomationExecutionGate
 import com.newoether.agora.data.ClaudeChatImporter
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
@@ -50,6 +51,9 @@ class ImportExportManager(
     private val scope: CoroutineScope,
     private val emitSnackbar: suspend (SnackbarEvent) -> Unit,
     private val onDataChanged: suspend () -> Unit,
+    private val automationExecutionGate: AutomationExecutionGate,
+    private val quiesceAutomation: suspend () -> Unit,
+    private val resumeAutomationScheduling: () -> Unit,
 ) {
     private val _exportProgress = MutableStateFlow<Float?>(null)
     val exportProgress: StateFlow<Float?> = _exportProgress.asStateFlow()
@@ -111,7 +115,7 @@ class ImportExportManager(
                     return@launch
                 }
                 val preview = importer.preview(uri)
-                if (preview.conversationCount == 0 && preview.memoryCount == 0 &&
+                if (!preview.hasConversationGraph && preview.memoryCount == 0 &&
                     preview.systemPromptCount == 0 && !preview.settingsPresent) {
                     emitSnackbar(SnackbarEvent(app.getString(R.string.import_no_data)))
                     return@launch
@@ -375,8 +379,21 @@ class ImportExportManager(
         scope.launch(Dispatchers.IO) {
             try {
                 val importer = DataImporter(app, chatDao, settingsManager, memoryManager)
-                val result = importer.import(uri, decisions) { progress ->
+                suspend fun performImport() = importer.import(uri, decisions) { progress ->
                     _importProgress.value = progress
+                }
+                val importsConversationGraph = decisions[DataExporter.ExportCategory.CONVERSATIONS]
+                    ?.let { it != DataImporter.ImportStrategy.SKIP } == true
+                val result = if (importsConversationGraph) {
+                    try {
+                        automationExecutionGate.withExclusiveImport(
+                            onQuiescing = quiesceAutomation,
+                        ) { performImport() }
+                    } finally {
+                        resumeAutomationScheduling()
+                    }
+                } else {
+                    performImport()
                 }
                 _importProgress.value = null
                 _importManifest.value = null
@@ -385,6 +402,8 @@ class ImportExportManager(
 
                 val parts = mutableListOf<String>()
                 if (result.conversationsImported > 0) parts.add("${result.conversationsImported} conversations")
+                if (result.tasksImported > 0) parts.add("${result.tasksImported} tasks")
+                if (result.loopsImported > 0) parts.add("${result.loopsImported} loops")
                 if (result.memoriesImported > 0) parts.add("${result.memoriesImported} memories")
                 if (result.systemPromptsImported > 0) parts.add("${result.systemPromptsImported} prompts")
                 if (result.settingsImported) parts.add("settings")

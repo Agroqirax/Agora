@@ -31,6 +31,11 @@ internal fun toolDisplayName(toolName: String?): String {
         "file_glob" -> stringResource(R.string.tool_file_glob)
         "file_grep" -> stringResource(R.string.tool_file_grep)
         "generate_image" -> stringResource(R.string.tool_generate_image)
+        "create_task" -> stringResource(R.string.tool_create_task)
+        "list_tasks" -> stringResource(R.string.tool_list_tasks)
+        "delete_task" -> stringResource(R.string.tool_delete_task)
+        "start_loop" -> stringResource(R.string.tool_start_loop)
+        "stop_loop" -> stringResource(R.string.tool_stop_loop)
         else -> (toolName ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
     }
 }
@@ -216,6 +221,31 @@ internal fun toolSummary(seg: MessageSegment): String {
             isError -> stringResource(R.string.tool_call_failed)
             content.isEmpty() -> stringResource(R.string.tool_generating_image)
             else -> stringResource(R.string.tool_generated_image)
+        }
+        "create_task" -> when {
+            isError -> stringResource(R.string.tool_automation_failed)
+            content.isBlank() -> stringResource(R.string.tool_creating_task)
+            else -> stringResource(R.string.tool_created_task)
+        }
+        "list_tasks" -> when {
+            isError -> stringResource(R.string.tool_automation_failed)
+            content.isBlank() -> stringResource(R.string.tool_listing_tasks)
+            else -> stringResource(R.string.tool_listed_tasks)
+        }
+        "delete_task" -> when {
+            isError -> stringResource(R.string.tool_automation_failed)
+            content.isBlank() -> stringResource(R.string.tool_deleting_task)
+            else -> stringResource(R.string.tool_deleted_task)
+        }
+        "start_loop" -> when {
+            isError -> stringResource(R.string.tool_automation_failed)
+            content.isBlank() -> stringResource(R.string.tool_starting_loop)
+            else -> stringResource(R.string.tool_started_loop)
+        }
+        "stop_loop" -> when {
+            isError -> stringResource(R.string.tool_automation_failed)
+            content.isBlank() -> stringResource(R.string.tool_stopping_loop)
+            else -> stringResource(R.string.tool_stopped_loop)
         }
         else -> {
             if (isError) stringResource(R.string.tool_call_failed)

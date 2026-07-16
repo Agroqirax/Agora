@@ -18,6 +18,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -46,6 +47,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.util.gradientBlur
@@ -66,8 +68,11 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
+private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
+private const val MESSAGE_RESOLVE_TIMEOUT_MS = 750L
 
 // isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
 // MessageItemSegments.kt.
@@ -77,6 +82,7 @@ private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 fun ChatApp(
     viewModel: ChatViewModel,
     onOpenSettings: () -> Unit,
+    onOpenTasks: (String?) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit,
     onFileContentClick: ((String, String) -> Unit)? = null,
     onPdfPagesClick: ((List<String>, Int) -> Unit)? = null,
@@ -106,6 +112,10 @@ fun ChatApp(
     val allMessages by viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
+    val currentConversation by viewModel.currentConversation.collectAsState()
+    val automationTasks by viewModel.tasks.collectAsState()
+    val currentLoop by viewModel.currentLoop.collectAsState()
+    val runningLoopIds by viewModel.runningLoopConversationIds.collectAsState()
     val generatingInConversationId by viewModel.generatingInConversationId.collectAsState()
     val selectedModel by viewModel.currentActiveModel.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
@@ -320,8 +330,29 @@ fun ChatApp(
             viewModel.setSwitching(false)
             return@LaunchedEffect
         }
-        if (currentConversationId != null) {
-            snapshotFlow { messages }.filter { it.isNotEmpty() }.first()
+        val targetConversationId = currentConversationId
+        if (targetConversationId != null) {
+            // A notification or stale execution-log entry can point at a conversation that was
+            // deleted before navigation reached the UI. Do not leave the switching scrim up
+            // forever: wait a bounded amount for Room to resolve the target, then fall back.
+            val resolvedConversation = withTimeoutOrNull(CONVERSATION_RESOLVE_TIMEOUT_MS) {
+                snapshotFlow { currentConversation }
+                    .filter { it?.id == targetConversationId }
+                    .first()
+            }
+            if (resolvedConversation == null) {
+                viewModel.createNewChat()
+                return@LaunchedEffect
+            }
+
+            // Empty conversations are valid (for example, a just-created execution). Give the
+            // message Flow a short chance to populate, but never require a non-empty emission in
+            // order to release the switching overlay.
+            if (messages.isEmpty()) {
+                withTimeoutOrNull(MESSAGE_RESOLVE_TIMEOUT_MS) {
+                    snapshotFlow { messages }.filter { it.isNotEmpty() }.first()
+                }
+            }
             val targetIndex = messages.indexOfLast { it.participant == Participant.USER }
 
             if (targetIndex != -1) {
@@ -456,6 +487,7 @@ fun ChatApp(
                 onDrawerProgress = { drawerProgress = it },
                 onSettingsButtonTop = { settingsButtonTopDp = it },
                 onOpenSettings = onOpenSettings,
+                onOpenTasks = { onOpenTasks(null) },
                 onRequestRename = { id, title -> showRenameDialog = id; conversationToRename = title },
                 onRequestDelete = { id -> showDeleteConfirmDialog = id },
                 onPendingDrawerHaptic = { pendingDrawerConversationHaptic = it }
@@ -488,6 +520,7 @@ fun ChatApp(
                         isNewChatMode = isNewChatMode,
                         conversations = conversations,
                         currentConversationId = currentConversationId,
+                        currentConversationTitle = currentConversation?.title,
                         totalTokens = totalTokens,
                         onOpenDrawer = { haptics.action(); focusManager.clearFocus(); scope.launch { drawerState.open() } },
                         onSystemPromptClick = { haptics.action(); showPromptDialog = true },
@@ -535,6 +568,7 @@ fun ChatApp(
                             } else {
                                 Modifier.fillMaxSize()
                             }
+                            Box(modifier = Modifier.fillMaxSize()) {
                             MessageList(
                                 messages = messages,
                                 allMessages = allMessages,
@@ -588,6 +622,36 @@ fun ChatApp(
                                     bottom = bottomBarHeight + 8.dp
                                 )
                             )
+                            val taskId = currentConversation?.taskId
+                            if (taskId != null) {
+                                val taskName = automationTasks.firstOrNull { it.id == taskId }?.name
+                                    ?: currentConversation?.title.orEmpty()
+                                Surface(
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(
+                                            top = padding.calculateTopPadding() + 8.dp,
+                                            start = 16.dp,
+                                            end = 16.dp,
+                                        )
+                                        .fillMaxWidth()
+                                        .clickable { onOpenTasks(taskId) },
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    shape = RoundedCornerShape(14.dp),
+                                    tonalElevation = 2.dp,
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.task_from_banner, taskName),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                            }
                         } else if (targetShowLaunch) {
                             Box(
                                 modifier = Modifier
@@ -750,6 +814,9 @@ fun ChatApp(
                         thinkingLevel = thinkingLevel,
                         thinkingBudgetEnabled = thinkingBudgetEnabled,
                         thinkingBudgetTokens = thinkingBudgetTokens,
+                        activeLoop = currentLoop,
+                        loopRunning = currentConversationId in runningLoopIds,
+                        onStopLoop = { viewModel.stopCurrentLoop() },
                         onCodeExecutionToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
                         onGoogleSearchToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
                         onThinkingToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
@@ -819,4 +886,3 @@ fun ChatApp(
         ChatAdvancedSettingsDialog(viewModel = viewModel, onDismiss = { showAdvancedDialog = false })
     }
 }
-

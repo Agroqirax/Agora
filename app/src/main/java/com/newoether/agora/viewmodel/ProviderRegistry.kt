@@ -13,11 +13,27 @@ import com.newoether.agora.api.openai.QwenProvider
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.util.Constants
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
+
+/** Pure policy boundary used by both production code and JVM tests. Missing providers fail shut. */
+internal fun providerConfigurationIsValid(
+    providerName: String,
+    activeKey: String,
+    registered: Boolean,
+    builtIn: Boolean,
+    effectiveBaseUrl: String?,
+): Boolean = when {
+    providerName == Constants.PROVIDER_UNKNOWN -> false
+    !registered -> false
+    providerName == Constants.PROVIDER_LOCAL -> true
+    !builtIn || providerName == Constants.PROVIDER_OLLAMA -> !effectiveBaseUrl.isNullOrBlank()
+    else -> activeKey.isNotBlank()
+}
 
 /**
  * Owns the set of LLM providers — built-in plus user-defined custom OpenAI-compatible
@@ -48,24 +64,29 @@ class ProviderRegistry(
 
     // Declared as MutableMap so `in`/`contains` keep Map (containsKey) semantics (KT-18053).
     private val providers: MutableMap<String, LlmProvider> = ConcurrentHashMap(builtInProviders)
+    private val initialCustomProviderSync = CompletableDeferred<Unit>()
 
     /** Live, thread-safe read view shared with the generation pipeline. */
     val all: Map<String, LlmProvider> get() = providers
 
     fun isBuiltIn(name: String): Boolean = name in builtInProviders
 
-    fun getInstance(name: String): LlmProvider = providers[name] ?: GeminiProvider()
+    fun getInstance(name: String): LlmProvider = requireNotNull(providers[name]) {
+        "Provider is not registered: $name"
+    }
 
     fun getEffectiveBaseUrl(providerName: String): String? =
         settings.providerBaseUrls.value[providerName]
-            ?: if (!isBuiltIn(providerName)) getInstance(providerName).defaultBaseUrl else null
+            ?: providers[providerName]?.takeIf { !isBuiltIn(providerName) }?.defaultBaseUrl
 
-    fun isConfigured(providerName: String, activeKey: String): Boolean = when {
-        providerName == Constants.PROVIDER_UNKNOWN -> false
-        providerName == Constants.PROVIDER_LOCAL -> true
-        !isBuiltIn(providerName) || providerName == Constants.PROVIDER_OLLAMA -> !getEffectiveBaseUrl(providerName).isNullOrBlank()
-        else -> activeKey.isNotBlank()
-    }
+    fun isConfigured(providerName: String, activeKey: String): Boolean =
+        providerConfigurationIsValid(
+            providerName = providerName,
+            activeKey = activeKey,
+            registered = providerName in providers,
+            builtIn = isBuiltIn(providerName),
+            effectiveBaseUrl = getEffectiveBaseUrl(providerName),
+        )
 
     fun providerForModel(modelId: String): String {
         // Prefixed IDs (e.g. "OpenAI:gpt-4"): extract provider directly
@@ -105,6 +126,9 @@ class ProviderRegistry(
             }
         }
     }
+
+    /** Waits until the live map reflects persisted custom provider names and base URLs. */
+    suspend fun awaitInitialSync() = initialCustomProviderSync.await()
 
     /**
      * Fetches the live model list for a single provider and caches it. Unlike a full
@@ -156,12 +180,24 @@ class ProviderRegistry(
     fun launchSyncJobs() {
         // Sync custom providers into the live map whenever the persisted set changes.
         scope.launch {
-            settings.customProviders.collect { custom ->
-                providers.keys.filter { !isBuiltIn(it) }.forEach { providers.remove(it) }
-                val baseUrls = settings.getProviderBaseUrls()
-                custom.forEach { config ->
-                    providers[config.name] = CustomOpenAiProvider(config.name, baseUrls[config.name] ?: "")
+            try {
+                // Avoid treating the eager empty default as an authoritative provider set during
+                // a Worker cold start. The first collected value is now the on-disk snapshot.
+                settings.awaitInitialLoad()
+                settings.customProviders.collect { custom ->
+                    providers.keys.filter { !isBuiltIn(it) }.forEach { providers.remove(it) }
+                    val baseUrls = settings.getProviderBaseUrls()
+                    custom.forEach { config ->
+                        providers[config.name] = CustomOpenAiProvider(
+                            config.name,
+                            baseUrls[config.name] ?: "",
+                        )
+                    }
+                    initialCustomProviderSync.complete(Unit)
                 }
+            } catch (error: Throwable) {
+                initialCustomProviderSync.completeExceptionally(error)
+                throw error
             }
         }
         // Auto-clear cached available models when a provider loses its credentials.

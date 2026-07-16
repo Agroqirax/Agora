@@ -38,6 +38,10 @@ import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
+/** Never route a request through an arbitrary fallback provider. */
+internal fun <T> requireRegisteredProvider(providers: Map<String, T>, name: String): T =
+    requireNotNull(providers[name]) { "Provider is not registered: $name" }
+
 data class GenerationConfig(
     val providerName: String,
     val modelId: String,
@@ -81,6 +85,9 @@ data class GenerationContext(
     val imageGenBaseUrl: String = "",
     val imageGenModel: String = "gpt-image-1",
     val imageGenSize: String = "1024x1024",
+    val automationToolsEnabled: Boolean = false,
+    /** Workers use WorkManager's foreground execution instead of starting our service. */
+    val foregroundServiceManagedExternally: Boolean = false,
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val sandboxEnabled: Boolean = false,
@@ -135,7 +142,8 @@ class GenerationManager(
     private val memoryManager: MemoryManager,
     private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
-    private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null
+    private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
+    additionalToolProviders: List<ToolProvider> = emptyList(),
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
@@ -151,9 +159,10 @@ class GenerationManager(
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
     }
-    private val toolProviders: List<ToolProvider> = listOf(
+    private val builtInToolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider
     )
+    private val toolProviders: List<ToolProvider> = builtInToolProviders + additionalToolProviders
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         imageGenToolProvider.definitions(ctx)
@@ -165,7 +174,7 @@ class GenerationManager(
     }
 
     private fun getProviderInstance(name: String): LlmProvider =
-        providers[name] ?: providers.values.first()
+        requireRegisteredProvider(providers, name)
 
     // Image/video frame extraction lives in ImageProcessor (single source of truth).
     private val imageProcessor = ImageProcessor(app)
@@ -209,6 +218,8 @@ class GenerationManager(
                 }
             }
             "Unknown tool: $name"
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             "Error executing tool '$name': ${e.localizedMessage ?: "Unknown error"}"
         }
@@ -351,13 +362,7 @@ class GenerationManager(
                 } else path
             }
 
-        val memoryTools = buildMemoryTools(ctx)
-        val webSearchTool = buildWebSearchTool(ctx)
-        val ragTool = buildRagTool(ctx)
-        val shellTool = buildShellTool(ctx)
-        val fileTool = buildFileTool(ctx)
-        val imageGenTool = buildImageGenTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool
+        val allTools = toolProviders.flatMap { it.definitions(ctx) }
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,
@@ -396,16 +401,11 @@ class GenerationManager(
     ) {
         // Destructure into locals so the body below reads exactly as before.
         val (onStreamUpdate, onLoadingChange, onGeneratingIdChange, onStreamClear, isLatestPersist) = callbacks
-        val provider = getProviderInstance(config.providerName)
 
-        onLoadingChange(true)
-        onGeneratingIdChange(conversationId)
-        com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName} regen=$isRegenerate")
-        withContext(Dispatchers.Main) { AgoraForegroundService.start(app) }
-
+        var foregroundLeaseAcquired = false
         var totalText = ""
         var totalThoughts = ""
-        val thinkingPlaceholder = context.getString(R.string.thinking_ellipsis)
+        var thinkingPlaceholder = ""
         var totalThoughtTitle: String? = null
         var totalTokenCount = 0
         var totalThoughtTimeMs: Long? = null
@@ -419,8 +419,7 @@ class GenerationManager(
         var currentAnswerBuf = StringBuilder()
         var currentThoughtBuf = StringBuilder()
         var currentThoughtSignature: String? = null
-        val placeholder = conversations.getMessagesForConversationSnapshot(conversationId).find { it.id == modelMessageId }
-        val parentId = placeholder?.parentId
+        var parentId: String? = null
         var toolPath = emptyList<ChatMessage>()
 
         fun liveThoughtDurationMs(): Long? {
@@ -440,6 +439,20 @@ class GenerationManager(
         }
 
         try {
+            val provider = getProviderInstance(config.providerName)
+            onLoadingChange(true)
+            onGeneratingIdChange(conversationId)
+            com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName} regen=$isRegenerate")
+            thinkingPlaceholder = context.getString(R.string.thinking_ellipsis)
+            val placeholder = conversations.getMessagesForConversationSnapshot(conversationId)
+                .find { it.id == modelMessageId }
+            parentId = placeholder?.parentId
+            if (!ctx.foregroundServiceManagedExternally) {
+                foregroundLeaseAcquired = withContext(Dispatchers.Main) {
+                    AgoraForegroundService.acquire(app, modelMessageId)
+                }
+            }
+
             // Stage 1: Image Transcription
             var transcriptionPerformed = false
             if (ctx.imageTranscriptionEnabled && ctx.transcriptionModelId.isNotEmpty()) {
@@ -579,7 +592,7 @@ class GenerationManager(
                         onStreamUpdate(modelMessage())
                         lastEmitMs = System.currentTimeMillis()
                         val result = executeTool(event.name, event.arguments, ctx)
-                        generatedImages.addAll(imageGenToolProvider.drainImages())
+                        generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                         val clipped = result.take(Constants.MAX_TOOL_RESULT_LENGTH)
                         val idx = segments.indexOfLast { it.toolCallId == event.id }
                         if (idx >= 0) {
@@ -604,7 +617,7 @@ class GenerationManager(
                         lastEmitMs = System.currentTimeMillis()
                         val tcds = event.calls.map { call ->
                             val result = executeTool(call.name, call.arguments, ctx)
-                            generatedImages.addAll(imageGenToolProvider.drainImages())
+                            generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                             val clipped = result.take(Constants.MAX_TOOL_RESULT_LENGTH)
                             val idx = segments.indexOfLast { it.toolCallId == call.id }
                             if (idx >= 0) {
@@ -748,6 +761,9 @@ class GenerationManager(
             }
         } finally {
             withContext(NonCancellable) {
+                // A cancellation can arrive as ImageGenToolProvider's withContext returns,
+                // after the file was queued but before the normal post-tool drain ran.
+                generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                 try {
                     if (isLatestPersist()) {
                         val conversationExists = conversations.getConversation(conversationId) != null
@@ -786,9 +802,11 @@ class GenerationManager(
                 onStreamClear()
                 onLoadingChange(false)
                 onGeneratingIdChange(null)
-                AgoraForegroundService.stop(app)
+                if (foregroundLeaseAcquired) {
+                    AgoraForegroundService.release(app, modelMessageId)
+                }
                 if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
-                    AgoraForegroundService.showCompletionNotification(app, totalText)
+                    AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
                 }
             }
         }

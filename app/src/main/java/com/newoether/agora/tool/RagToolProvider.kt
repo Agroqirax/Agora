@@ -125,7 +125,7 @@ class RagToolProvider(
             val allWindows = mutableListOf<SearchWindow>()
 
             for ((convId, matchIds) in matchesByConv) {
-                val conversation = conversations.getConversation(convId) ?: continue
+                val conversation = conversations.getSearchableConversation(convId) ?: continue
                 val allMsgs = conversations.getMessagesForConversation(convId).first()
                     .filter { it.participant in listOf(Participant.USER, Participant.MODEL) }
 
@@ -244,7 +244,7 @@ class RagToolProvider(
         val offset = ((args["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
 
         return try {
-            val allConversations = conversations.getAllConversationsList()
+            val allConversations = conversations.getSearchableConversationsList()
             val sorted = if (order == "desc") allConversations.reversed() else allConversations
             val total = sorted.size
             val page = if (offset < total) {
@@ -294,7 +294,7 @@ class RagToolProvider(
         val offset = ((args["offset"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0).coerceAtLeast(0)
 
         return try {
-            val conversation = conversations.getConversation(conversationId)
+            val conversation = conversations.getSearchableConversation(conversationId)
                 ?: return buildJsonObject {
                     put("type", "read_conversation")
                     put("conversation_id", conversationId)
@@ -419,7 +419,9 @@ class RagToolProvider(
         val best = scored.maxOfOrNull { it.second } ?: 0f
         DebugLog.d("AgoraVM", "GM RAG: best cosine = ${"%.4f".format(best)}")
         val aboveThreshold = scored.filter { it.second > ctx.ragThreshold }
-        val messagesById = conversations.getMessagesByIds(aboveThreshold.map { it.first.messageId }).associateBy { it.id }
+        val messagesById = conversations
+            .getSearchableMessagesByIds(aboveThreshold.map { it.first.messageId })
+            .associateBy { it.id }
         val filtered = aboveThreshold
             .filter { (messagesById[it.first.messageId]?.text?.length ?: 0) >= 10 }
             .sortedByDescending { it.second }

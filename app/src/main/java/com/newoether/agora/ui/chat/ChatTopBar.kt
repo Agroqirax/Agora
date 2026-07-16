@@ -34,6 +34,7 @@ internal fun ChatTopBar(
     isNewChatMode: Boolean,
     conversations: List<ChatConversation>,
     currentConversationId: String?,
+    currentConversationTitle: String? = null,
     totalTokens: Int,
     onOpenDrawer: () -> Unit,
     onSystemPromptClick: () -> Unit,
@@ -63,8 +64,10 @@ internal fun ChatTopBar(
                 // before the conversation/title has loaded. Both the brand TEXT and the
                 // brand font SIZE are gated on this single value, so the title never
                 // changes size before the text swaps (no transient "Agora at 17sp").
-                val resolvedTitle = if (isNewChatMode) null
-                    else conversations.find { it.id == currentConversationId }?.title?.takeIf { it.isNotBlank() }
+                val resolvedTitle = if (isNewChatMode) null else {
+                    currentConversationTitle?.takeIf { it.isNotBlank() }
+                        ?: conversations.find { it.id == currentConversationId }?.title?.takeIf { it.isNotBlank() }
+                }
                 val showBrandTitle = resolvedTitle == null
 
                 // Title capsule: menu + title

@@ -2,6 +2,7 @@ package com.newoether.agora.data
 
 import android.content.Context
 import android.net.Uri
+import com.newoether.agora.automation.LoopPolicy
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
@@ -38,7 +39,7 @@ class DataExporter(
 
     @Serializable
     private data class ExportManifest(
-        @SerialName("agora_export_version") val version: Int = 1,
+        @SerialName("agora_export_version") val version: Int,
         @SerialName("app_version") val appVersion: String,
         @SerialName("exported_at") val exportedAt: String,
         val categories: List<String>,
@@ -48,7 +49,9 @@ class DataExporter(
     @Serializable
     private data class ExportConversations(
         val conversations: List<ExportChatEntity>,
-        val messages: List<ExportMessageEntity>
+        val messages: List<ExportMessageEntity>,
+        val tasks: List<ExportTaskEntity> = emptyList(),
+        val loops: List<ExportLoopEntity> = emptyList()
     )
 
     @Serializable
@@ -58,7 +61,38 @@ class DataExporter(
         val lastUpdated: Long,
         val selectedBranchesJson: String? = null,
         val systemPromptId: String? = null,
-        val modelId: String? = null
+        val modelId: String? = null,
+        val taskId: String? = null,
+        val origin: String = "user",
+        val graduated: Boolean = false
+    )
+
+    @Serializable
+    private data class ExportTaskEntity(
+        val id: String,
+        val name: String,
+        val prompt: String,
+        val systemPrompt: String? = null,
+        val modelId: String? = null,
+        val cronExpr: String,
+        /** Informational snapshot; importers recompute this device-local derived value. */
+        val nextRunAt: Long,
+        val enabled: Boolean = true,
+        val createdAt: Long,
+        val lastRunAt: Long? = null
+    )
+
+    @Serializable
+    private data class ExportLoopEntity(
+        val conversationId: String,
+        val intervalMs: Long,
+        val prompt: String? = null,
+        val nextFireAt: Long,
+        val cycleCount: Int = 0,
+        /** New v2 archives always emit the bounded default for legacy null values. */
+        val maxCycles: Int? = LoopPolicy.DEFAULT_MAX_CYCLES,
+        val active: Boolean = true,
+        val revision: Long = 0L
     )
 
     @Serializable
@@ -156,6 +190,7 @@ class DataExporter(
             .format(java.util.Date())
 
         val manifest = ExportManifest(
+            version = 2,
             appVersion = appVersion,
             exportedAt = exportedAt,
             categories = categories.map { it.manifestKey },
@@ -233,7 +268,17 @@ class DataExporter(
                 }
 
                 val conversations = chatDao.getAllConversationsList().map { c ->
-                    ExportChatEntity(c.id, c.title, c.lastUpdated, c.selectedBranchesJson, c.systemPromptId, c.modelId)
+                    ExportChatEntity(
+                        id = c.id,
+                        title = c.title,
+                        lastUpdated = c.lastUpdated,
+                        selectedBranchesJson = c.selectedBranchesJson,
+                        systemPromptId = c.systemPromptId,
+                        modelId = c.modelId,
+                        taskId = c.taskId,
+                        origin = c.origin,
+                        graduated = c.graduated
+                    )
                 }
                 val messages = allMessages.map { m ->
                     // Only include images that were successfully exported
@@ -242,8 +287,35 @@ class DataExporter(
                         m.thoughts, m.thoughtTitle, m.tokenCount, m.status.name, m.participant.name,
                         m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson, m.attachmentMeta)
                 }
+                val tasks = chatDao.getAllTasksList().map { task ->
+                    ExportTaskEntity(
+                        id = task.id,
+                        name = task.name,
+                        prompt = task.prompt,
+                        systemPrompt = task.systemPrompt,
+                        modelId = task.modelId,
+                        cronExpr = task.cronExpr,
+                        nextRunAt = task.nextRunAt,
+                        enabled = task.enabled,
+                        createdAt = task.createdAt,
+                        lastRunAt = task.lastRunAt
+                    )
+                }
+                val loops = chatDao.getAllLoopsList().map { loop ->
+                    val sanitized = sanitizeImportedLoop(loop)
+                    ExportLoopEntity(
+                        conversationId = sanitized.conversationId,
+                        intervalMs = sanitized.intervalMs,
+                        prompt = sanitized.prompt,
+                        nextFireAt = sanitized.nextFireAt,
+                        cycleCount = sanitized.cycleCount,
+                        maxCycles = sanitized.maxCycles,
+                        active = sanitized.active,
+                        revision = sanitized.revision
+                    )
+                }
                 zip.putNextEntry(ZipEntry("conversations.json"))
-                Json.encodeToStream(ExportConversations(conversations, messages), zip)
+                Json.encodeToStream(ExportConversations(conversations, messages, tasks, loops), zip)
                 zip.closeEntry()
                 step()
             }

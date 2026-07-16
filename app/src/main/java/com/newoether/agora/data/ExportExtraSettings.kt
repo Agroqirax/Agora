@@ -76,6 +76,8 @@ object ExportExtraSettings {
         put("customFontPath", JsonPrimitive(sm.customFontPath.first()))
         put("customFontName", JsonPrimitive(sm.customFontName.first()))
         put("autoUpdateCheck", JsonPrimitive(sm.autoUpdateCheck.first()))
+        put("automationToolsEnabled", JsonPrimitive(sm.automationToolsEnabled.first()))
+        put("exactExecutionEnabled", JsonPrimitive(sm.exactExecutionEnabled.first()))
         put("proxyEnabled", JsonPrimitive(sm.proxyEnabled.first()))
         put("proxyType", JsonPrimitive(sm.proxyType.first()))
         put("proxyHost", JsonPrimitive(sm.proxyHost.first()))
@@ -149,6 +151,8 @@ object ExportExtraSettings {
         obj["customFontPath"]?.jsonPrimitive?.contentOrNull?.let { sm.saveCustomFontPath(it) }
         obj["customFontName"]?.jsonPrimitive?.contentOrNull?.let { sm.saveCustomFontName(it) }
         obj["autoUpdateCheck"]?.jsonPrimitive?.boolean?.let { sm.saveAutoUpdateCheck(it) }
+        obj["automationToolsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveAutomationToolsEnabled(it) }
+        obj["exactExecutionEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveExactExecutionEnabled(it) }
 
         obj["modelAliases"]?.jsonObject?.let { aliasesObj ->
             val map = aliasesObj.mapNotNull { (k, v) ->

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -95,6 +96,7 @@ internal fun ChatDrawerContent(
     onDrawerProgress: (Float) -> Unit,
     onSettingsButtonTop: (Float) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenTasks: () -> Unit,
     onRequestRename: (String, String) -> Unit,
     onRequestDelete: (String) -> Unit,
     onPendingDrawerHaptic: (String?) -> Unit
@@ -161,6 +163,23 @@ internal fun ChatDrawerContent(
             Spacer(modifier = Modifier.height(12.dp))
 
             if (!search.isActive) {
+                FilledTonalButton(
+                    onClick = {
+                        haptics.action()
+                        focusManager.clearFocus()
+                        onOpenTasks()
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.Repeat, null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.tasks), style = ChatType.drawerButton)
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
                 val newChatDisabled = isSwitching
                 val newChatContainer by animateColorAsState(
                     if (newChatDisabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)

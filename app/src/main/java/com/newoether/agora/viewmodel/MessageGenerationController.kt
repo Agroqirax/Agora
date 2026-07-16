@@ -7,6 +7,7 @@ import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.api.ProviderConfig
 import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.api.local.LocalProvider
+import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.ChatEntity
@@ -51,6 +52,7 @@ class MessageGenerationController(
     private val payloadBuilder: MessagePayloadBuilder,
     private val providerRegistry: ProviderRegistry,
     private val localProvider: LocalProvider,
+    private val executionCoordinator: ConversationExecutionCoordinator,
     // ── 共享 UI 状态:必须是 ChatViewModel 里的同一个实例 ──
     private val allMessages: MutableStateFlow<List<ChatMessage>>,          // = _allMessages
     private val selectedChildren: MutableStateFlow<Map<String?, String>>,  // = _selectedChildren
@@ -72,6 +74,9 @@ class MessageGenerationController(
     // conversation-open auto-scroll (the send's own scroll-to-message handles it) and
     // avoid a double scroll on the first message of a new chat.
     private val onConversationCreatedBySend: () -> Unit = {},
+    // Called once when a hidden task/loop execution becomes searchable. The callback
+    // only enqueues background work; embedding computation must not run under the send lock.
+    private val onConversationGraduated: (String) -> Unit = {},
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
 
@@ -111,6 +116,7 @@ class MessageGenerationController(
         }
 
         viewModelScope.launch(Dispatchers.IO) {
+            executionCoordinator.withConversationLock(currentId) lock@ {
             // Wait for STOPPED DB finalization to complete before deleting.
             // Without this join, a concurrent upsertMessage from stop finalization
             // could resurrect the deleted row as a zombie/orphan after our DELETE.
@@ -119,7 +125,7 @@ class MessageGenerationController(
             // Recompute staleIds from the latest allMessages after join(),
             // in case the message tree changed during finalization.
             val allMsgs = allMessages.value
-            if (allMsgs.none { it.id == messageId }) return@launch  // already deleted during wait
+            if (allMsgs.none { it.id == messageId }) return@lock  // already deleted during wait
             val staleIds = linkedSetOf(messageId)
             val queue = mutableListOf(messageId)
             while (queue.isNotEmpty()) {
@@ -170,6 +176,7 @@ class MessageGenerationController(
                 }
             }
             if (changed) selectedChildren.value = newSelected
+            }
         }
 
         return previewIds.size
@@ -222,7 +229,8 @@ class MessageGenerationController(
             stopFinalization?.join()
             val myPersistId = session.nextPersistId()
             try {
-                allMessages.value.find { it.id == parentId } ?: return@launch
+                executionCoordinator.withConversationLock(currentId) lock@ {
+                allMessages.value.find { it.id == parentId } ?: return@lock
 
                 if (isErrorOrStopped && isLatest) {
                     // Purge stale tool call children, thinking content, and embeddings
@@ -262,6 +270,7 @@ class MessageGenerationController(
                     providerName, modelId, activeKey, myUiToken, myPersistId,
                     callerTag = "regenerate"
                 )
+                }
             } finally {
                 session.loadingChange(myUiToken, false)
             }
@@ -345,7 +354,8 @@ class MessageGenerationController(
             stopFinalization?.join()
             val myPersistId = session.nextPersistId()
             try {
-            val messageToEdit = allMessages.value.find { it.id == messageId } ?: return@launch
+            executionCoordinator.withConversationLock(currentId) lock@ {
+            val messageToEdit = allMessages.value.find { it.id == messageId } ?: return@lock
             val newUserMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
                 id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
@@ -385,6 +395,7 @@ class MessageGenerationController(
                 providerName, modelId, activeKey, myUiToken, myPersistId,
                 callerTag = "editMessage"
             )
+            }
             } finally {
                 session.loadingChange(myUiToken, false)
             }
@@ -438,6 +449,11 @@ class MessageGenerationController(
                 isNewChatMode.value = false
                 currentId = newId
             }
+            executionCoordinator.withConversationLock(currentId) {
+            // First user turn into a task/loop execution graduates it into the main list.
+            if (convRepo.graduateConversation(currentId)) {
+                onConversationGraduated(currentId)
+            }
             // Apply pending per-conversation settings if any (from Advanced dialog in new chat)
             val pendingSettings = pendingConversationSettings.value
             if (pendingSettings != null) {
@@ -487,6 +503,7 @@ class MessageGenerationController(
             val lastMsg = allMessages.value.find { it.id == modelMessageId }
             if (wasNewChat && settings.titleGenerationEnabled.value && session.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
                 generateTitle(currentId)
+            }
             }
         } finally {
             // Token-gated: only the still-current generation clears the button, so a

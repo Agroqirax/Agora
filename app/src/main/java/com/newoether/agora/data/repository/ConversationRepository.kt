@@ -20,10 +20,35 @@ class ConversationRepository(
 ) {
     // ── Conversations ─────────────────────────────────────────
 
+    private fun ChatEntity.toConversation() = ChatConversation(
+        id = id, title = title, systemPromptId = systemPromptId, modelId = modelId,
+        taskId = taskId, origin = origin, graduated = graduated
+    )
+
     fun getAllConversations(): Flow<List<ChatConversation>> =
-        chatDao.getAllConversations().map { entities ->
-            entities.map { ChatConversation(id = it.id, title = it.title, systemPromptId = it.systemPromptId, modelId = it.modelId) }
+        chatDao.getAllConversations().map { entities -> entities.map { it.toConversation() } }
+
+    fun observeConversation(id: String): Flow<ChatConversation?> =
+        chatDao.observeConversation(id).map { it?.toConversation() }
+
+    /** Executions spawned by [taskId], newest first — the task's execution log. */
+    fun getExecutionsForTask(taskId: String): Flow<List<ChatConversation>> =
+        chatDao.getExecutionsForTask(taskId).map { entities -> entities.map { it.toConversation() } }
+
+    /** Observes message-level changes for every execution belonging to [taskId]. */
+    fun observeExecutionMessagesForTask(taskId: String): Flow<List<MessageEntity>> =
+        chatDao.observeExecutionMessagesForTask(taskId)
+
+    /** Promotes a task/loop execution into the main list once the user takes it over.
+     *  Returns true only for the transition that made the conversation searchable. */
+    suspend fun graduateConversation(id: String): Boolean {
+        val conv = chatDao.getConversation(id) ?: return false
+        if (conv.origin != "user" && !conv.graduated) {
+            chatDao.upsertConversation(conv.copy(graduated = true, lastUpdated = System.currentTimeMillis()))
+            return true
         }
+        return false
+    }
 
     suspend fun getConversation(id: String): ChatEntity? =
         chatDao.getConversation(id)
@@ -52,12 +77,21 @@ class ConversationRepository(
     suspend fun getMessagesForConversationSnapshot(conversationId: String): List<MessageEntity> =
         chatDao.getMessagesForConversation(conversationId).first()
 
+    suspend fun getLastMessageForConversation(conversationId: String): MessageEntity? =
+        chatDao.getLastMessageForConversation(conversationId)
+
     suspend fun upsertMessage(entity: MessageEntity) = chatDao.upsertMessage(entity)
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity> =
         chatDao.getMessagesByIds(ids)
+
+    suspend fun getSearchableMessagesByIds(ids: List<String>): List<MessageEntity> =
+        if (ids.isEmpty()) emptyList() else chatDao.getSearchableMessagesByIds(ids)
+
+    suspend fun isMessageSearchable(messageId: String): Boolean =
+        chatDao.isMessageSearchable(messageId)
 
     // ── Branch Selection ──────────────────────────────────────
 
@@ -113,6 +147,9 @@ class ConversationRepository(
     suspend fun upsertEmbedding(entity: EmbeddingEntity) =
         chatDao.upsertEmbedding(entity)
 
+    suspend fun upsertEmbeddingIfSearchable(entity: EmbeddingEntity): Boolean =
+        chatDao.upsertEmbeddingIfSearchable(entity)
+
     suspend fun deleteAllConversations() =
         chatDao.deleteAllConversations()
 
@@ -138,6 +175,12 @@ class ConversationRepository(
 
     suspend fun getAllConversationsList(): List<ChatEntity> =
         chatDao.getAllConversationsList()
+
+    suspend fun getSearchableConversation(id: String): ChatEntity? =
+        chatDao.getSearchableConversation(id)
+
+    suspend fun getSearchableConversationsList(): List<ChatEntity> =
+        chatDao.getSearchableConversationsList()
 
     suspend fun getAllMessagesList(): List<MessageEntity> =
         chatDao.getAllMessagesList()

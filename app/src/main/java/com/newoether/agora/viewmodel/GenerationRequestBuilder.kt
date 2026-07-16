@@ -152,6 +152,7 @@ class GenerationRequestBuilder(
             imageGenBaseUrl = resolveImageGenBaseUrl(),
             imageGenModel = resolveImageGenModelId(),
             imageGenSize = settings.imageGenSize.value,
+            automationToolsEnabled = settings.automationToolsEnabled.value,
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
             shellDevices = settings.shellDevices.value,
             sandboxEnabled = settings.sandboxEnabled.value,

@@ -10,8 +10,10 @@ import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.EmbeddingModelType
 import com.newoether.agora.data.local.EmbeddingEntity
+import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.SnackbarEvent
@@ -31,6 +33,14 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
+
+internal fun messagesEligibleForRagBackfill(messages: List<MessageEntity>): List<MessageEntity> =
+    messages.filter { message ->
+        (message.participant == Participant.USER || message.participant == Participant.MODEL) &&
+            message.text.isNotBlank() &&
+            !message.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
+            !message.id.startsWith(Constants.RESULT_MSG_PREFIX)
+    }
 
 /**
  * Owns the embedding subsystem: embedding-model CRUD, the RAG cache (per-model
@@ -287,39 +297,75 @@ class RagManager(
 
     fun indexMessageForRag(messageId: String, text: String) {
         scope.launch(Dispatchers.IO) {
-            val model = activeEmbeddingModel.value
-            if (model == null) {
-                DebugLog.d("AgoraVM", "RAG index: no active model, skipping $messageId")
-                return@launch
+            indexMessageForRagNow(messageId, text)
+        }
+    }
+
+    /**
+     * A hidden automation execution was deliberately excluded from incremental RAG indexing.
+     * Once the user takes it over, enqueue its existing visible messages for the same guarded
+     * indexing path. Processing is sequential to avoid concurrent local-engine work per message.
+     */
+    fun backfillConversationForRag(conversationId: String) {
+        scope.launch(Dispatchers.IO) {
+            val ragEnabled = settings.autoCacheEnabled.value &&
+                (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG ||
+                    settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)
+            if (!ragEnabled) return@launch
+
+            val messages = messagesEligibleForRagBackfill(
+                conversations.getMessagesForConversationSnapshot(conversationId)
+            )
+            messages.forEach { message ->
+                indexMessageForRagNow(message.id, message.text)
             }
-            DebugLog.d("AgoraVM", "RAG index: indexing $messageId with model '${model.name}'")
-            val toEmbed = text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH)
-            val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
-                if (!LlamaEngine.isModelReady(model.localFilePath)) {
-                    DebugLog.w("AgoraVM", "RAG index: local model not ready, skipping")
-                    return@launch
-                }
-                LlamaEngine.computeEmbedding(toEmbed, model.localFilePath) {
-                    localProvider.releaseEngineBlocking()
-                }
-            } else {
-                val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
-                if (apiKey.isBlank()) {
-                    DebugLog.w("AgoraVM", "RAG index: no API key, skipping")
-                    return@launch
-                }
-                val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                EmbeddingClient.computeEmbedding(toEmbed, apiKey, model.remoteModelName, baseUrl)
+        }
+    }
+
+    private suspend fun indexMessageForRagNow(messageId: String, text: String) {
+        if (!conversations.isMessageSearchable(messageId)) {
+            // A task execution remains private to its Task log until the user graduates it.
+            // Purge any stale pre-fix embedding as well as refusing the new write.
+            conversations.deleteEmbedding(messageId)
+            DebugLog.d("AgoraVM", "RAG index: hidden/non-searchable message, skipping $messageId")
+            return
+        }
+        val model = activeEmbeddingModel.value
+        if (model == null) {
+            DebugLog.d("AgoraVM", "RAG index: no active model, skipping $messageId")
+            return
+        }
+        DebugLog.d("AgoraVM", "RAG index: indexing $messageId with model '${model.name}'")
+        val toEmbed = text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH)
+        val embedding: FloatArray? = if (model.type == EmbeddingModelType.LOCAL) {
+            if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                DebugLog.w("AgoraVM", "RAG index: local model not ready, skipping")
+                return
             }
-            if (embedding != null) {
-                conversations.upsertEmbedding(EmbeddingEntity(
-                    messageId = messageId,
-                    modelId = model.id,
-                    embedding = EmbeddingIndexer.floatsToBytes(embedding),
-                    chunkText = text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
-                    dimension = embedding.size
-                ))
+            LlamaEngine.computeEmbedding(toEmbed, model.localFilePath) {
+                localProvider.releaseEngineBlocking()
+            }
+        } else {
+            val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
+            if (apiKey.isBlank()) {
+                DebugLog.w("AgoraVM", "RAG index: no API key, skipping")
+                return
+            }
+            val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
+            EmbeddingClient.computeEmbedding(toEmbed, apiKey, model.remoteModelName, baseUrl)
+        }
+        if (embedding != null) {
+            val stored = conversations.upsertEmbeddingIfSearchable(EmbeddingEntity(
+                messageId = messageId,
+                modelId = model.id,
+                embedding = EmbeddingIndexer.floatsToBytes(embedding),
+                chunkText = text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
+                dimension = embedding.size
+            ))
+            if (stored) {
                 DebugLog.d("AgoraVM", "RAG index: stored embedding (dim=${embedding.size}) for $messageId")
+            } else {
+                DebugLog.d("AgoraVM", "RAG index: visibility changed before write, skipped $messageId")
             }
         }
     }

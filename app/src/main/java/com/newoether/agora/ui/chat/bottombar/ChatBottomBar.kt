@@ -75,6 +75,9 @@ fun ChatBottomBar(
     thinkingLevel: String = "medium",
     thinkingBudgetEnabled: Boolean = false,
     thinkingBudgetTokens: Int = 4096,
+    activeLoop: com.newoether.agora.data.local.LoopEntity? = null,
+    loopRunning: Boolean = false,
+    onStopLoop: () -> Unit = {},
     webSearchEnabled: Boolean = false,
     shellEnabled: Boolean = false,
     onCodeExecutionToggle: (Boolean) -> Unit = {},
@@ -148,6 +151,15 @@ fun ChatBottomBar(
             }
 
             Column(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).animateContentSize(tween(400))) {
+        AnimatedVisibility(
+            visible = activeLoop != null,
+            enter = androidx.compose.animation.expandVertically(tween(250)) + fadeIn(tween(200)),
+            exit = shrinkVertically(tween(250)) + fadeOut(tween(180)),
+        ) {
+            activeLoop?.let { loop ->
+                LoopControlBar(loop = loop, isRunning = loopRunning, onStop = onStopLoop)
+            }
+        }
         if (composer.selectedAttachments.isNotEmpty() && !isExpanded) {
             AttachmentPreviewRow(
                 composer = composer,

@@ -9,6 +9,7 @@ import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -23,20 +24,15 @@ import java.util.UUID
 /**
  * Tool that generates images from a text prompt via an OpenAI-compatible
  * `/images/generations` endpoint (BYOK). The decoded image is written to
- * filesDir as `img_<uuid>.jpg` and its path is collected in [pending] so the
+ * filesDir as `img_<uuid>.jpg` and its path is collected by conversation so the
  * GenerationManager can attach it to the model message for inline display.
  */
 class ImageGenToolProvider(private val app: Application) : ToolProvider {
 
-    /** File paths of images produced since the last [drainImages]. Thread-safe. */
-    private val pending = java.util.Collections.synchronizedList(mutableListOf<String>())
+    private val pending = PendingImagesByConversation()
 
-    /** Atomically take and clear the images generated so far. */
-    fun drainImages(): List<String> = synchronized(pending) {
-        val copy = pending.toList()
-        pending.clear()
-        copy
-    }
+    /** Atomically takes only images generated for [conversationId]. */
+    fun drainImages(conversationId: String): List<String> = pending.drain(conversationId)
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.imageGenEnabled) return emptyList()
@@ -58,6 +54,8 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
     override fun handles(name: String): Boolean = name == "generate_image"
 
     override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
+        val conversationId = ctx.conversationId?.takeIf { it.isNotBlank() }
+            ?: return err("missing_conversation", "Image generation requires a conversation.")
         val argsStr = arguments.ifBlank { "{}" }
         val args = try {
             Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
@@ -103,13 +101,15 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
 
                 val file = File(app.filesDir, "img_${UUID.randomUUID()}.jpg")
                 file.outputStream().use { it.write(bytes) }
-                pending.add(file.absolutePath)
+                pending.add(conversationId, file.absolutePath)
 
                 buildJsonObject {
                     put("type", "image_generation")
                     put("status", "ok")
                     put("size", size)
                 }.toString()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 DebugLog.e("ImageGenTool", "generate_image failed", e)
                 err("generation_error", e.message)
@@ -122,4 +122,17 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
         put("error", code)
         if (!message.isNullOrBlank()) put("message", message)
     }.toString()
+}
+
+/** Small pure-Kotlin queue used to prevent generated images leaking across conversations. */
+internal class PendingImagesByConversation {
+    private val pending = mutableMapOf<String, MutableList<String>>()
+
+    fun add(conversationId: String, path: String) = synchronized(pending) {
+        pending.getOrPut(conversationId) { mutableListOf() }.add(path)
+    }
+
+    fun drain(conversationId: String): List<String> = synchronized(pending) {
+        pending.remove(conversationId)?.toList().orEmpty()
+    }
 }

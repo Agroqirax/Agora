@@ -39,14 +39,68 @@ class MessageConverters {
     }
 }
 
-@Entity(tableName = "conversations")
+@Entity(tableName = "conversations", indices = [Index(value = ["taskId"])])
 data class ChatEntity(
     @PrimaryKey val id: String,
     val title: String,
     val lastUpdated: Long = System.currentTimeMillis(),
     val selectedBranchesJson: String? = null,
     val systemPromptId: String? = null,
-    val modelId: String? = null
+    val modelId: String? = null,
+    /** Which task spawned this conversation; null = ordinary user conversation. */
+    val taskId: String? = null,
+    /** How this conversation was created: "user" | "task" | "loop". */
+    val origin: String = "user",
+    /** True once the user has taken over a task execution, promoting it into the main list. */
+    val graduated: Boolean = false
+)
+
+/** A saved automation: a prompt + schedule that fans out a fresh conversation on each run. */
+@Entity(tableName = "tasks")
+data class TaskEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    /** Replayed as the first user message of every execution. */
+    val prompt: String,
+    val systemPrompt: String? = null,
+    /** null = use the app default model. */
+    val modelId: String? = null,
+    /** 5-field cron expression driving the local schedule. */
+    val cronExpr: String,
+    /** Local derived value; imports clear it until the user explicitly re-enables the task. */
+    val nextRunAt: Long,
+    val enabled: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis(),
+    val lastRunAt: Long? = null
+)
+
+/** A loop attached to a single conversation: periodically re-injects a user turn in-context. */
+@Entity(
+    tableName = "loops",
+    foreignKeys = [
+        ForeignKey(
+            entity = ChatEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
+data class LoopEntity(
+    @PrimaryKey val conversationId: String,
+    val intervalMs: Long,
+    /** null = a generic "continue" turn. */
+    val prompt: String? = null,
+    val nextFireAt: Long,
+    val cycleCount: Int = 0,
+    /**
+     * Safety ceiling. The column remains nullable for schema/backward compatibility, but domain
+     * code normalizes legacy nulls to the bounded LoopPolicy default.
+     */
+    val maxCycles: Int? = null,
+    val active: Boolean = true,
+    /** Configuration generation used to keep a stale in-flight cycle from overwriting stop/restart. */
+    val revision: Long = 0L
 )
 
 @Entity(
@@ -111,11 +165,19 @@ data class MessageEntity(
 
 @Dao
 interface ChatDao {
-    @Query("SELECT * FROM conversations ORDER BY lastUpdated DESC")
+    // Main list hides un-graduated task executions; they surface only via the task's
+    // own execution log until the user takes one over (graduated = 1).
+    @Query("SELECT * FROM conversations WHERE taskId IS NULL OR graduated = 1 ORDER BY lastUpdated DESC")
     fun getAllConversations(): Flow<List<ChatEntity>>
+
+    @Query("SELECT * FROM conversations WHERE taskId = :taskId ORDER BY lastUpdated DESC")
+    fun getExecutionsForTask(taskId: String): Flow<List<ChatEntity>>
 
     @Query("SELECT * FROM conversations WHERE id = :conversationId")
     suspend fun getConversation(conversationId: String): ChatEntity?
+
+    @Query("SELECT * FROM conversations WHERE id = :conversationId")
+    fun observeConversation(conversationId: String): Flow<ChatEntity?>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: String): Flow<List<MessageEntity>>
@@ -141,11 +203,16 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId NOT IN (SELECT id FROM messages)")
     suspend fun deleteOrphanedEmbeddings()
 
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (m.text LIKE '%' || :query || '%' OR c.title LIKE '%' || :query || '%') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND (m.text LIKE '%' || :query || '%' OR c.title LIKE '%' || :query || '%') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastMessageForConversation(conversationId: String): MessageEntity?
+
+    /** Message invalidations for task execution summaries. Unlike getExecutionsForTask(),
+     * this Flow observes the messages table, so terminal status/snippet changes are emitted. */
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId = :taskId ORDER BY m.timestamp ASC")
+    fun observeExecutionMessagesForTask(taskId: String): Flow<List<MessageEntity>>
 
     // Embeddings
     @Upsert
@@ -160,26 +227,49 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
-    @Query("SELECT * FROM embeddings WHERE modelId = :modelId")
+    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
 
     @Query("DELETE FROM embeddings WHERE modelId = :modelId")
     suspend fun deleteEmbeddingsByModel(modelId: String)
 
-    @Query("SELECT COUNT(*) FROM embeddings WHERE modelId = :modelId")
+    @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddingCountByModel(modelId: String): Int
 
-    @Query("SELECT messageId FROM embeddings WHERE modelId = :modelId")
+    @Query("SELECT e.messageId FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddedMessageIdsByModel(modelId: String): List<String>
 
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getAllMessagesForIndexing(): List<MessageEntity>
 
-    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getIndexableMessageCount(): Int
 
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
+
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id IN (:ids) AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    suspend fun getSearchableMessagesByIds(ids: List<String>): List<MessageEntity>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id = :messageId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%')")
+    suspend fun isMessageSearchable(messageId: String): Boolean
+
+    /** Atomically enforces the search-visibility invariant for incremental indexing. */
+    @Transaction
+    suspend fun upsertEmbeddingIfSearchable(embedding: EmbeddingEntity): Boolean {
+        if (!isMessageSearchable(embedding.messageId)) {
+            deleteEmbedding(embedding.messageId)
+            return false
+        }
+        upsertEmbedding(embedding)
+        return true
+    }
+
+    @Query("SELECT * FROM conversations WHERE id = :conversationId AND (taskId IS NULL OR graduated = 1)")
+    suspend fun getSearchableConversation(conversationId: String): ChatEntity?
+
+    @Query("SELECT * FROM conversations WHERE taskId IS NULL OR graduated = 1 ORDER BY lastUpdated ASC")
+    suspend fun getSearchableConversationsList(): List<ChatEntity>
 
     // Bulk export/import
     @Query("SELECT * FROM conversations")
@@ -193,10 +283,150 @@ interface ChatDao {
 
     @Query("SELECT id FROM messages WHERE id IN (:ids)")
     suspend fun findExistingMessageIds(ids: List<String>): List<String>
+
+    /**
+     * Replaces the complete conversation/automation graph atomically. Parent rows are restored
+     * before their message/loop children, so malformed backup data rolls the whole replacement
+     * back instead of leaving the user's database partially cleared.
+     */
+    @Transaction
+    suspend fun replaceImportedConversations(
+        tasks: List<TaskEntity>,
+        conversations: List<ChatEntity>,
+        messages: List<MessageEntity>,
+        loops: List<LoopEntity>,
+    ) {
+        deleteAllLoops()
+        deleteAllConversations()
+        deleteAllTasks()
+        // Embeddings have no FK cascade. At this point there are no messages, so this clears
+        // stale vectors before imported messages (which may reuse the same IDs) are inserted.
+        deleteOrphanedEmbeddings()
+        tasks.forEach { upsertTask(it) }
+        conversations.forEach { upsertConversation(it) }
+        messages.forEach { upsertMessage(it) }
+        loops.forEach { upsertLoop(it) }
+    }
+
+    /** MERGE is also one graph transaction; a malformed row must not leave a partial import. */
+    @Transaction
+    suspend fun mergeImportedConversations(
+        tasks: List<TaskEntity>,
+        conversations: List<ChatEntity>,
+        messages: List<MessageEntity>,
+        loops: List<LoopEntity>,
+    ) {
+        tasks.forEach { upsertTask(it) }
+        conversations.forEach { upsertConversation(it) }
+        val existingIds = findExistingMessageIds(messages.map { it.id }).toSet()
+        messages.filter { it.id !in existingIds }.forEach { upsertMessage(it) }
+        // Preserve local message edits, but attach restored media when the backup carries it.
+        messages.filter { it.id in existingIds && it.images.isNotEmpty() }
+            .forEach { upsertMessage(it) }
+        loops.forEach { upsertLoop(it) }
+    }
+
+    // ── Tasks ─────────────────────────────────────────────────
+    @Query("SELECT * FROM tasks ORDER BY createdAt DESC")
+    fun getAllTasks(): Flow<List<TaskEntity>>
+
+    @Query("SELECT * FROM tasks WHERE id = :id")
+    suspend fun getTask(id: String): TaskEntity?
+
+    @Query("SELECT * FROM tasks WHERE enabled = 1")
+    suspend fun getEnabledTasks(): List<TaskEntity>
+
+    @Upsert
+    suspend fun upsertTask(task: TaskEntity)
+
+    /** Clock-change CAS: never overwrite a concurrent edit/disable/execution advancement. */
+    @Query(
+        """
+        UPDATE tasks SET nextRunAt = :replacementNextRunAt
+        WHERE id = :id AND enabled = 1 AND cronExpr = :expectedCronExpr
+          AND nextRunAt = :expectedNextRunAt
+        """
+    )
+    suspend fun updateTaskNextRunAtIfUnchanged(
+        id: String,
+        expectedCronExpr: String,
+        expectedNextRunAt: Long,
+        replacementNextRunAt: Long,
+    ): Int
+
+    @Query("DELETE FROM tasks WHERE id = :id")
+    suspend fun deleteTask(id: String)
+
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAllTasks()
+
+    // Bulk export/import
+    @Query("SELECT * FROM tasks")
+    suspend fun getAllTasksList(): List<TaskEntity>
+
+    // ── Loops ─────────────────────────────────────────────────
+    @Query("SELECT * FROM loops WHERE conversationId = :conversationId")
+    fun getLoop(conversationId: String): Flow<LoopEntity?>
+
+    @Query("SELECT * FROM loops WHERE active = 1")
+    suspend fun getActiveLoops(): List<LoopEntity>
+
+    @Query("SELECT * FROM loops WHERE active = 1")
+    fun observeActiveLoops(): Flow<List<LoopEntity>>
+
+    @Upsert
+    suspend fun upsertLoop(loop: LoopEntity)
+
+    /** Clock-change CAS: only the observed active loop revision/cycle may be moved. */
+    @Query(
+        """
+        UPDATE loops SET nextFireAt = :replacementNextFireAt
+        WHERE conversationId = :conversationId AND active = 1
+          AND revision = :expectedRevision AND cycleCount = :expectedCycleCount
+          AND intervalMs = :expectedIntervalMs AND nextFireAt = :expectedNextFireAt
+        """
+    )
+    suspend fun updateLoopNextFireAtIfUnchanged(
+        conversationId: String,
+        expectedRevision: Long,
+        expectedCycleCount: Int,
+        expectedIntervalMs: Long,
+        expectedNextFireAt: Long,
+        replacementNextFireAt: Long,
+    ): Int
+
+    /** Safely quarantines an invalid legacy loop without reviving or clobbering a newer state. */
+    @Query(
+        """
+        UPDATE loops
+        SET active = 0, nextFireAt = 0, revision = revision + 1,
+            maxCycles = :normalizedMaxCycles
+        WHERE conversationId = :conversationId AND active = 1
+          AND revision = :expectedRevision AND cycleCount = :expectedCycleCount
+          AND intervalMs = :expectedIntervalMs AND nextFireAt = :expectedNextFireAt
+        """
+    )
+    suspend fun deactivateLoopIfUnchanged(
+        conversationId: String,
+        expectedRevision: Long,
+        expectedCycleCount: Int,
+        expectedIntervalMs: Long,
+        expectedNextFireAt: Long,
+        normalizedMaxCycles: Int,
+    ): Int
+
+    @Query("DELETE FROM loops WHERE conversationId = :conversationId")
+    suspend fun deleteLoop(conversationId: String)
+
+    @Query("DELETE FROM loops")
+    suspend fun deleteAllLoops()
+
+    @Query("SELECT * FROM loops")
+    suspend fun getAllLoopsList(): List<LoopEntity>
 }
 
 @Database(
-    entities = [ChatEntity::class, MessageEntity::class, EmbeddingEntity::class],
+    entities = [ChatEntity::class, MessageEntity::class, EmbeddingEntity::class, TaskEntity::class, LoopEntity::class],
     version = ChatDatabase.CURRENT_VERSION,
     exportSchema = true
 )@TypeConverters(MessageConverters::class)
@@ -204,7 +434,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 12
+        const val CURRENT_VERSION = 14
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -275,6 +505,49 @@ abstract class ChatDatabase : RoomDatabase() {
             object : Migration(11, 12) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE messages ADD COLUMN attachmentMeta TEXT")
+                }
+            },
+            // v12 → v13 adds the automation layer: tasks + loops tables, and the
+            // task-execution columns on conversations (origin/taskId/graduated).
+            object : Migration(12, 13) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN taskId TEXT")
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN origin TEXT NOT NULL DEFAULT 'user'")
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN graduated INTEGER NOT NULL DEFAULT 0")
+                    db.execSQL("CREATE INDEX IF NOT EXISTS index_conversations_taskId ON conversations (taskId)")
+                    db.execSQL("""
+                        CREATE TABLE IF NOT EXISTS tasks (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            name TEXT NOT NULL,
+                            prompt TEXT NOT NULL,
+                            systemPrompt TEXT,
+                            modelId TEXT,
+                            cronExpr TEXT NOT NULL,
+                            nextRunAt INTEGER NOT NULL,
+                            enabled INTEGER NOT NULL DEFAULT 1,
+                            createdAt INTEGER NOT NULL,
+                            lastRunAt INTEGER
+                        )
+                    """)
+                    db.execSQL("""
+                        CREATE TABLE IF NOT EXISTS loops (
+                            conversationId TEXT PRIMARY KEY NOT NULL,
+                            intervalMs INTEGER NOT NULL,
+                            prompt TEXT,
+                            nextFireAt INTEGER NOT NULL,
+                            cycleCount INTEGER NOT NULL DEFAULT 0,
+                            maxCycles INTEGER,
+                            active INTEGER NOT NULL DEFAULT 1,
+                            FOREIGN KEY(conversationId) REFERENCES conversations(id) ON DELETE CASCADE
+                        )
+                    """)
+                }
+            },
+            // v13 → v14 adds an optimistic revision to loop state. A cycle that was
+            // already running can then observe a stop/restart and avoid overwriting it.
+            object : Migration(13, 14) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE loops ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
                 }
             }
         )

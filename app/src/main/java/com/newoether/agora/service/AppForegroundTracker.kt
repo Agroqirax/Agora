@@ -1,9 +1,14 @@
 package com.newoether.agora.service
 
 import java.util.concurrent.CopyOnWriteArraySet
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 object AppForegroundTracker {
     private val listeners = CopyOnWriteArraySet<(Boolean) -> Unit>()
+    private val _foreground = MutableStateFlow(false)
+    val foreground: StateFlow<Boolean> = _foreground.asStateFlow()
 
     @Volatile
     var isInForeground: Boolean = false
@@ -12,6 +17,7 @@ object AppForegroundTracker {
     fun setInForeground(inForeground: Boolean) {
         if (isInForeground == inForeground) return
         isInForeground = inForeground
+        _foreground.value = inForeground
         listeners.forEach { it(inForeground) }
     }
 

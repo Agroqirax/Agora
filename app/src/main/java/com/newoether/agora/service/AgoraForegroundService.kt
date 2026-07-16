@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -18,17 +19,53 @@ import com.newoether.agora.R
 import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.util.DebugLog
 
+/**
+ * Thread-safe owner set for the shared generation foreground service. The transition callbacks
+ * run under the same lock as the set mutation, preventing a last-release stop from racing past a
+ * new first-acquire start. Duplicate acquires/releases are deliberately idempotent.
+ */
+internal class ForegroundOwnerLeases {
+    private val owners = linkedSetOf<String>()
+
+    fun acquire(owner: String, onFirstAcquire: () -> Boolean): Boolean = synchronized(owners) {
+        if (!owners.add(owner)) return@synchronized false
+        if (owners.size == 1 && !onFirstAcquire()) {
+            owners.remove(owner)
+            return@synchronized false
+        }
+        true
+    }
+
+    fun release(owner: String, onLastRelease: () -> Unit): Boolean = synchronized(owners) {
+        if (!owners.remove(owner)) return@synchronized false
+        if (owners.isEmpty()) onLastRelease()
+        true
+    }
+
+    fun size(): Int = synchronized(owners) { owners.size }
+}
+
+/** Uses all non-sign bits, including the Int.MIN_VALUE edge that Math.abs cannot normalize. */
+internal fun stableCompletionNotificationId(conversationId: String): Int =
+    conversationId.hashCode() and Int.MAX_VALUE
+
 class AgoraForegroundService : Service() {
 
     companion object {
         const val CHANNEL_ID = "agora_generation_status"
         const val NOTIFICATION_ID = 1
         private const val COMPLETION_CHANNEL_ID = "agora_completed"
-        private const val COMPLETION_NOTIFICATION_ID = 2
         private const val TAG = "AgoraForegroundService"
         private var instance: AgoraForegroundService? = null
+        private val ownerLeases = ForegroundOwnerLeases()
 
-        fun start(context: Context) {
+        /** Acquires this generation's lease; returns false for a duplicate owner/start failure. */
+        fun acquire(context: Context, owner: String): Boolean {
+            if (owner.isBlank()) return false
+            return ownerLeases.acquire(owner) { startService(context) }
+        }
+
+        private fun startService(context: Context): Boolean {
             val appContext = context.applicationContext
             val intent = Intent(appContext, AgoraForegroundService::class.java)
             // Diagnostic trail for the unreproducible "did not start in time" crash:
@@ -39,16 +76,18 @@ class AgoraForegroundService : Service() {
                 "importance=${info.importance} trim=${info.lastTrimLevel}"
             } catch (e: Exception) { "importance=?" }
             CrashReporter.note("FGS.start api=${Build.VERSION.SDK_INT} $state")
-            try {
+            return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     appContext.startForegroundService(intent)
                 } else {
                     appContext.startService(intent)
                 }
                 CrashReporter.note("FGS.startForegroundService ok")
+                true
             } catch (e: RuntimeException) {
                 CrashReporter.note("FGS.startForegroundService threw ${e.javaClass.simpleName}")
                 DebugLog.w(TAG, "Failed to start foreground service", e)
+                false
             }
         }
 
@@ -56,10 +95,14 @@ class AgoraForegroundService : Service() {
             instance?.updateNotificationText(text)
         }
 
-        fun stop(context: Context) {
-            CrashReporter.note("FGS.stop foregroundStarted=${instance?.foregroundStarted}")
-            val intent = Intent(context, AgoraForegroundService::class.java)
-            context.stopService(intent)
+        /** Releases only [owner]'s lease. The service stops after the final distinct owner. */
+        fun release(context: Context, owner: String) {
+            val released = ownerLeases.release(owner) {
+                CrashReporter.note("FGS.stop foregroundStarted=${instance?.foregroundStarted}")
+                val appContext = context.applicationContext
+                appContext.stopService(Intent(appContext, AgoraForegroundService::class.java))
+            }
+            CrashReporter.note("FGS.release released=$released owners=${ownerLeases.size()}")
         }
 
         fun createChannel(context: Context) {
@@ -77,14 +120,14 @@ class AgoraForegroundService : Service() {
             manager.createNotificationChannel(channel)
         }
 
-        fun showCompletionNotification(context: Context, responseText: String) {
+        fun showCompletionNotification(context: Context, responseText: String, conversationId: String) {
             createCompletionChannel(context)
             val manager = context.getSystemService(NotificationManager::class.java)
             val notification = NotificationCompat.Builder(context, COMPLETION_CHANNEL_ID)
                 .setContentTitle(context.getString(R.string.agora_responded))
                 .setContentText(if (responseText.length > 200) responseText.take(200) + "…" else responseText)
                 .setSmallIcon(R.drawable.ic_notification)
-                .setContentIntent(createPendingIntent(context, 1))
+                .setContentIntent(createPendingIntent(context, stableCompletionNotificationId(conversationId), conversationId))
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setStyle(
@@ -95,7 +138,7 @@ class AgoraForegroundService : Service() {
                 .build()
 
             try {
-                manager.notify(COMPLETION_NOTIFICATION_ID, notification)
+                manager.notify(stableCompletionNotificationId(conversationId), notification)
             } catch (e: RuntimeException) {
                 DebugLog.w(TAG, "Failed to show completion notification", e)
             }
@@ -115,12 +158,24 @@ class AgoraForegroundService : Service() {
             manager.createNotificationChannel(channel)
         }
 
-        private fun createPendingIntent(context: Context, requestCode: Int): PendingIntent {
+        private fun createPendingIntent(
+            context: Context,
+            requestCode: Int,
+            conversationId: String? = null,
+        ): PendingIntent {
             return PendingIntent.getActivity(
                 context,
                 requestCode,
                 Intent(context, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    conversationId?.let {
+                        data = Uri.Builder()
+                            .scheme("agora")
+                            .authority("conversation")
+                            .appendPath(it)
+                            .build()
+                        putExtra(MainActivity.EXTRA_CONVERSATION_ID, it)
+                    }
                 },
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )

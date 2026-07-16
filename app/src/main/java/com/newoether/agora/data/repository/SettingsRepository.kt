@@ -13,11 +13,15 @@ import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 
 /**
@@ -36,8 +40,37 @@ class SettingsRepository(
     private val settingsManager: SettingsManager,
     private val scope: CoroutineScope
 ) {
-    private fun <T> hot(flow: kotlinx.coroutines.flow.Flow<T>, initial: T): StateFlow<T> =
-        flow.stateIn(scope, SharingStarted.Eagerly, initial)
+    /** One latch per eagerly-shared DataStore flow; populated completely during construction. */
+    private val initialLoadSignals = mutableListOf<CompletableDeferred<Unit>>()
+
+    private fun <T> hot(flow: kotlinx.coroutines.flow.Flow<T>, initial: T): StateFlow<T> {
+        val loaded = CompletableDeferred<Unit>()
+        initialLoadSignals += loaded
+        val state = MutableStateFlow(initial)
+        flow
+            .onEach { value ->
+                // Publish first: an awaiter must never resume while `.value` still exposes the
+                // eager default for this particular setting.
+                state.value = value
+                loaded.complete(Unit)
+            }
+            .catch { error ->
+                loaded.completeExceptionally(error)
+                throw error
+            }
+            .launchIn(scope)
+        return state.asStateFlow()
+    }
+
+    /**
+     * Suspends until every settings StateFlow has received its first on-disk DataStore value.
+     * Background workers must cross this barrier before reading `.value`; otherwise a cold-start
+     * alarm can briefly observe repository defaults (for example the sample model or empty custom
+     * providers) and permanently consume the scheduled occurrence with the wrong configuration.
+     */
+    suspend fun awaitInitialLoad() {
+        initialLoadSignals.toList().forEach { it.await() }
+    }
 
     // ── Read StateFlows (eagerly shared) ──────────────────────
 
@@ -87,6 +120,8 @@ class SettingsRepository(
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
     val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
+    val automationToolsEnabled: StateFlow<Boolean> = hot(settingsManager.automationToolsEnabled, false)
+    val exactExecutionEnabled: StateFlow<Boolean> = hot(settingsManager.exactExecutionEnabled, false)
     val proxyEnabled: StateFlow<Boolean> = hot(settingsManager.proxyEnabled, false)
     val proxyType: StateFlow<String> = hot(settingsManager.proxyType, "http")
     val proxyHost: StateFlow<String> = hot(settingsManager.proxyHost, com.newoether.agora.data.SettingsManager.DEFAULT_PROXY_HOST)
@@ -329,6 +364,8 @@ class SettingsRepository(
     fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
+    fun setAutomationToolsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAutomationToolsEnabled(enabled) }
+    fun setExactExecutionEnabled(enabled: Boolean) = scope.launch { settingsManager.saveExactExecutionEnabled(enabled) }
     fun setProxyEnabled(enabled: Boolean) = scope.launch { settingsManager.saveProxyEnabled(enabled) }
     fun setProxyType(type: String) = scope.launch { settingsManager.saveProxyType(type) }
     fun setProxyHost(host: String) = scope.launch { settingsManager.saveProxyHost(host) }

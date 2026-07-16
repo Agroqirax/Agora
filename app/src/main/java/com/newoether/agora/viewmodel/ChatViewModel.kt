@@ -82,7 +82,16 @@ class ChatViewModel(
     // All injected via AppContainer/ChatViewModelFactory — the single construction site.
     val autoBackupManager: AutoBackupManager,
     conversationRepository: ConversationRepository,
-    settingsRepository: SettingsRepository
+    settingsRepository: SettingsRepository,
+    // Process-scoped generation singletons, shared with background task execution.
+    private val localProvider: LocalProvider,
+    private val providerRegistry: ProviderRegistry,
+    // App-scoped automation orchestrator (task CRUD + run-now).
+    private val taskManager: com.newoether.agora.automation.TaskManager,
+    private val loopManager: com.newoether.agora.automation.LoopManager,
+    private val automationToolProvider: com.newoether.agora.tool.AutomationToolProvider,
+    private val conversationExecutionCoordinator: com.newoether.agora.automation.ConversationExecutionCoordinator,
+    private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -100,8 +109,6 @@ class ChatViewModel(
      * receive the repository (not raw DAO) for a uniform boundary.
      */
     private val convRepo: ConversationRepository = conversationRepository
-
-    private val localProvider = LocalProvider(appContext, settings)
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
     val ragManager = RagManager(
@@ -126,13 +133,19 @@ class ChatViewModel(
         scope = viewModelScope,
         emitSnackbar = { _snackbarMessage.emit(it) },
         onDataChanged = { refreshDataCounts() },
+        automationExecutionGate = automationExecutionGate,
+        quiesceAutomation = {
+            taskManager.cancelAllExecutionsForImport()
+            loopManager.cancelAllExecutionsForImport()
+        },
+        resumeAutomationScheduling = taskManager::refreshSchedulingAfterImport,
     )
 
     /** Local (on-device) chat-model configuration CRUD. */
     val modelManager = ModelManager(settings, viewModelScope)
 
-    /** Built-in + custom provider instances, resolution, and model discovery (see [ProviderRegistry]). */
-    private val providerRegistry = ProviderRegistry(settings, localProvider, viewModelScope)
+    // [providerRegistry] and [localProvider] are now constructor-injected, process-scoped
+    // singletons (see AppContainer) so background task execution shares the same instances.
 
     /**
      * Startup jobs deferred until all StateFlow/property backing fields are
@@ -241,8 +254,8 @@ class ChatViewModel(
                 }
             }
         }
-        // Keep the provider map and cached model lists consistent with settings.
-        providerRegistry.launchSyncJobs()
+        // Provider map / model-list sync jobs now run on the process-scoped registry
+        // (launched once in AppContainer), so they survive ViewModel recreation.
     }
 
     // Generation lifecycle (IO scope, current job, send gate, race-free stop/persist
@@ -256,7 +269,8 @@ class ChatViewModel(
             memoryManager = memoryManager,
             providers = providerRegistry.all,
             context = appContext,
-            sandboxFactory = sandboxFactory
+            sandboxFactory = sandboxFactory,
+            additionalToolProviders = listOf(automationToolProvider),
         ).also { gm ->
             gm.onMessagePersisted = { messageId, text ->
                 if (settings.autoCacheEnabled.value && (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG || settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)) {
@@ -275,7 +289,6 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         sandboxManager?.close()
-        localProvider.close()
         session.cancelScope()
         autoBackupManager.destroy()
     }
@@ -326,12 +339,59 @@ class ChatViewModel(
 
     fun setShellConfirmEnabled(enabled: Boolean) = shellConfirmation.setEnabled(enabled)
 
+    // ── Tasks (automation) ────────────────────────────────────
+    /** Saved automation tasks; CRUD + run-now delegate to the app-scoped [taskManager]. */
+    val tasks: StateFlow<List<com.newoether.agora.data.local.TaskEntity>> get() = taskManager.tasks
+    val runningTaskIds: StateFlow<Set<String>> get() = taskManager.runningTaskIds
+
+    fun executionsForTask(taskId: String) = taskManager.executionsForTask(taskId)
+    fun executionSummariesForTask(taskId: String) = taskManager.executionSummariesForTask(taskId)
+    suspend fun getTask(taskId: String) = taskManager.getTask(taskId)
+
+    fun saveTask(task: com.newoether.agora.data.local.TaskEntity) {
+        viewModelScope.launch { taskManager.saveTask(task) }
+    }
+
+    fun deleteTask(taskId: String) {
+        viewModelScope.launch { taskManager.deleteTask(taskId) }
+    }
+
+    fun runTaskNow(task: com.newoether.agora.data.local.TaskEntity) = taskManager.runNow(task)
+
     // ── Auto Backup ───────────────────────────────────────────
 
-        val conversations: StateFlow<List<ChatConversation>> = convRepo.getAllConversations()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val conversations: StateFlow<List<ChatConversation>> = convRepo.getAllConversations()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     private val _currentConversationId = MutableStateFlow<String?>(null)
     val currentConversationId: StateFlow<String?> = _currentConversationId.asStateFlow()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val currentConversation: StateFlow<ChatConversation?> = _currentConversationId
+        .flatMapLatest { id -> if (id == null) flowOf(null) else convRepo.observeConversation(id) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val currentLoop: StateFlow<com.newoether.agora.data.local.LoopEntity?> = _currentConversationId
+        .flatMapLatest { id ->
+            if (id == null) {
+                flowOf(null)
+            } else {
+                combine(
+                    loopManager.loopForConversation(id),
+                    loopManager.runningConversationIds,
+                ) { loop, runningIds ->
+                    // A final cycle claims its durable slot by setting active=false before the
+                    // model call. Keep its control bar visible while the Worker is still alive so
+                    // the user can stop it instead of losing the only cancellation affordance.
+                    loop?.takeIf { it.active || id in runningIds }
+                }
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val runningLoopConversationIds: StateFlow<Set<String>> get() = loopManager.runningConversationIds
+
+    fun stopCurrentLoop() {
+        val id = _currentConversationId.value ?: return
+        viewModelScope.launch { loopManager.stopLoop(id) }
+    }
 
     private val _allMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val allMessages: StateFlow<List<ChatMessage>> = _allMessages.asStateFlow()
@@ -460,6 +520,7 @@ class ChatViewModel(
             payloadBuilder = payloadBuilder,
             providerRegistry = providerRegistry,
             localProvider = localProvider,
+            executionCoordinator = conversationExecutionCoordinator,
             allMessages = _allMessages,
             selectedChildren = _selectedChildren,
             streamingMessage = _streamingMessage,
@@ -476,6 +537,7 @@ class ChatViewModel(
             onSnackbarSuspend = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
             onPersistSelectedChildren = { convId, map -> persistSelectedChildren(convId, map) },
             onConversationCreatedBySend = { suppressNextOpenScroll = true },
+            onConversationGraduated = ragManager::backfillConversationForRag,
         )
     }
 
@@ -829,8 +891,13 @@ class ChatViewModel(
             stopGeneration()
         }
         viewModelScope.launch(Dispatchers.IO) {
-            convRepo.deleteConversation(id)
-            if (_currentConversationId.value == id) createNewChat()
+            loopManager.stopLoop(id)
+            conversationExecutionCoordinator.withConversationLock(id) {
+                convRepo.deleteConversation(id)
+            }
+            if (_currentConversationId.value == id) {
+                withContext(Dispatchers.Main) { createNewChat() }
+            }
         }
     }
 

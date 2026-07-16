@@ -66,7 +66,6 @@ import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.data.local.ChatDatabase
-import com.newoether.agora.di.AppContainer
 import com.newoether.agora.ui.chat.ChatApp
 import com.newoether.agora.ui.chat.FullScreenMediaViewer
 import com.newoether.agora.ui.onboarding.WelcomeScreen
@@ -79,6 +78,12 @@ import kotlinx.coroutines.flow.first
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+
+    private val notificationConversationId = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+
+    companion object {
+        const val EXTRA_CONVERSATION_ID = "com.newoether.agora.extra.CONVERSATION_ID"
+    }
 
     override fun attachBaseContext(newBase: Context) {
         val langCode = kotlinx.coroutines.runBlocking {
@@ -111,6 +116,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        handleNavigationIntent(intent)
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -194,8 +200,9 @@ class MainActivity : ComponentActivity() {
                         showOnboarding = !settingsManager.onboardingCompleted.first()
                     }
 
-                    // Create ViewModel via DI container
-                    val container = remember { AppContainer(this@MainActivity) }
+                    // Create ViewModel via the process-scoped DI container (owned by AgoraApplication),
+                    // so the same shared singletons back both the UI and background task execution.
+                    val container = (application as AgoraApplication).container
                     val factory = remember { container.chatViewModelFactory() }
                     val viewModel: ChatViewModel = viewModel(factory = factory)
 
@@ -214,7 +221,14 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         false -> {
-                            MainNavigation(viewModel, settingsManager)
+                            MainNavigation(
+                                viewModel = viewModel,
+                                settingsManager = settingsManager,
+                                notificationConversationId = notificationConversationId,
+                                onNotificationConversationConsumed = { expectedId ->
+                                    consumeNotificationTarget(notificationConversationId, expectedId)
+                                },
+                            )
                         }
                     }
                 }
@@ -230,6 +244,20 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         super.onPause()
         AppForegroundTracker.setInForeground(false)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    private fun handleNavigationIntent(intent: Intent?) {
+        notificationConversationId.value = intent?.getStringExtra(EXTRA_CONVERSATION_ID)
+            ?.takeIf { it.isNotBlank() }
+            ?: intent?.data?.takeIf { uri ->
+                uri.scheme == "agora" && uri.host == "conversation"
+            }?.lastPathSegment?.takeIf { it.isNotBlank() }
     }
 }
 
@@ -375,8 +403,36 @@ private fun Modifier.consumePointerInput(): Modifier =
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
+fun MainNavigation(
+    viewModel: ChatViewModel,
+    settingsManager: SettingsManager,
+    notificationConversationId: kotlinx.coroutines.flow.StateFlow<String?>,
+    onNotificationConversationConsumed: (String) -> Unit,
+) {
+    val appContext = LocalContext.current.applicationContext
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var showTasks by rememberSaveable { mutableStateOf(false) }
+    var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
+    val notificationTarget by notificationConversationId.collectAsState()
+    LaunchedEffect(notificationTarget) {
+        val id = notificationTarget ?: return@LaunchedEffect
+        try {
+            val exists = withContext(Dispatchers.IO) {
+                (appContext as AgoraApplication).container.conversationRepository
+                    .getConversation(id) != null
+            }
+            if (exists) {
+                showSettings = false
+                showTasks = false
+                taskToOpen = null
+                viewModel.selectConversation(id)
+            }
+        } finally {
+            // A newer notification may have replaced [id] while this effect was suspended.
+            // Only consume the event this effect actually handled.
+            onNotificationConversationConsumed(id)
+        }
+    }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
     var fullScreenMediaIndex by remember { mutableIntStateOf(0) }
     var pdfViewerSelection by remember { mutableStateOf(setOf<Int>()) }
@@ -739,6 +795,10 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                 onOpenSettings = {
                     showSettings = true
                 },
+                onOpenTasks = { taskId ->
+                    taskToOpen = taskId
+                    showTasks = true
+                },
                 onMediaClick = { urls, index ->
                     focusManager.clearFocus()
                     fullScreenMediaUrls = urls
@@ -777,6 +837,22 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
                     viewModel = viewModel,
                     onBack = {
                         showSettings = false
+                    }
+                )
+            }
+
+            SettingsOverlayHost(
+                visible = showTasks,
+                onDismiss = { showTasks = false }
+            ) {
+                com.newoether.agora.ui.tasks.TasksScreen(
+                    viewModel = viewModel,
+                    initialTaskId = taskToOpen,
+                    onInitialTaskHandled = { taskToOpen = null },
+                    onBack = { showTasks = false },
+                    onOpenConversation = { conversationId ->
+                        showTasks = false
+                        viewModel.selectConversation(conversationId)
                     }
                 )
             }
@@ -889,6 +965,11 @@ fun MainNavigation(viewModel: ChatViewModel, settingsManager: SettingsManager) {
         }
     }
 }
+
+internal fun consumeNotificationTarget(
+    target: kotlinx.coroutines.flow.MutableStateFlow<String?>,
+    expectedId: String,
+): Boolean = target.compareAndSet(expectedId, null)
 
 private fun snackbarTimeoutMillis(
     visuals: SnackbarVisuals,

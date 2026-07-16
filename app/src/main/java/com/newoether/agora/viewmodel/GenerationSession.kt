@@ -8,7 +8,6 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
@@ -162,7 +161,6 @@ class GenerationSession(
         val stoppedMessages = stoppedMsg?.let { listOf(it) } ?: fallbackStoppedMessages
         val finalizationJob = launchStopFinalization(StopFinalizationState(stoppedConversationId, stoppedMessages))
         if (releaseSendGate) sendGate.set(false)
-        AgoraForegroundService.stop(app)
         return finalizationJob ?: currentStopFinalizationJob()
     }
 

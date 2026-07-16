@@ -72,5 +72,9 @@ data class ChatConversation(
     val id: String = UUID.randomUUID().toString(),
     val title: String,
     val systemPromptId: String? = null,
-    val modelId: String? = null
+    val modelId: String? = null,
+    /** Set when this conversation is a task execution; drives the "from task" banner. */
+    val taskId: String? = null,
+    val origin: String = "user",
+    val graduated: Boolean = false
 )

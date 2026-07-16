@@ -153,6 +153,8 @@ class SettingsManager(private val context: Context) {
         val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
+        val AUTOMATION_TOOLS_ENABLED = booleanPreferencesKey("automation_tools_enabled")
+        val EXACT_EXECUTION_ENABLED = booleanPreferencesKey("exact_execution_enabled")
         val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
         val PROXY_TYPE = stringPreferencesKey("proxy_type")
         val PROXY_HOST = stringPreferencesKey("proxy_host")
@@ -316,6 +318,8 @@ class SettingsManager(private val context: Context) {
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
+    val automationToolsEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTOMATION_TOOLS_ENABLED] ?: false }
+    val exactExecutionEnabled: Flow<Boolean> = context.dataStore.data.map { it[EXACT_EXECUTION_ENABLED] ?: false }
     val proxyEnabled: Flow<Boolean> = context.dataStore.data.map { it[PROXY_ENABLED] ?: false }
     val proxyType: Flow<String> = context.dataStore.data.map { it[PROXY_TYPE] ?: "http" }
     val proxyHost: Flow<String> = context.dataStore.data.map { it[PROXY_HOST] ?: DEFAULT_PROXY_HOST }
@@ -674,6 +678,14 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveShellEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
+    }
+
+    suspend fun saveAutomationToolsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[AUTOMATION_TOOLS_ENABLED] = enabled }
+    }
+
+    suspend fun saveExactExecutionEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[EXACT_EXECUTION_ENABLED] = enabled }
     }
     suspend fun saveProxyEnabled(enabled: Boolean) { context.dataStore.edit { it[PROXY_ENABLED] = enabled } }
     suspend fun saveProxyType(type: String) { context.dataStore.edit { it[PROXY_TYPE] = type } }

@@ -702,9 +702,14 @@ private fun ImportPreviewDialog(
                 )
                 Spacer(Modifier.height(24.dp))
 
-                if (preview.conversationCount > 0) {
+                if (preview.hasConversationGraph) {
                     StrategyRow(
-                        "${stringResource(R.string.export_category_conversations)} (${preview.conversationCount})",
+                        stringResource(
+                            R.string.import_conversation_graph_counts,
+                            preview.conversationCount,
+                            preview.taskCount,
+                            preview.loopCount,
+                        ),
                         convStrategy, { convStrategy = it })
                     Spacer(Modifier.height(8.dp))
                 }
@@ -747,7 +752,9 @@ private fun ImportPreviewDialog(
         confirmButton = {
             TextButton(onClick = {
                 val decisions = mutableMapOf<DataExporter.ExportCategory, DataImporter.ImportStrategy>()
-                if (preview.conversationCount > 0) decisions[DataExporter.ExportCategory.CONVERSATIONS] = convStrategy
+                if (preview.hasConversationGraph) {
+                    decisions[DataExporter.ExportCategory.CONVERSATIONS] = convStrategy
+                }
                 if (preview.memoryCount > 0) decisions[DataExporter.ExportCategory.MEMORIES] = memStrategy
                 if (preview.systemPromptCount > 0) decisions[DataExporter.ExportCategory.SYSTEM_PROMPTS] = promptStrategy
                 if (preview.settingsPresent) decisions[DataExporter.ExportCategory.SETTINGS] = settingsStrategy
