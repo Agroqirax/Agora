@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
@@ -65,6 +66,10 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
     val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
     val mediaControlEnabled by viewModel.settings.mediaControlEnabled.collectAsState()
+    val notificationsEnabled by viewModel.settings.notificationsEnabled.collectAsState()
+    val notificationsConfirmEnabled by viewModel.settings.notificationsConfirmEnabled.collectAsState()
+    val notificationsReadConfirmEnabled by viewModel.settings.notificationsReadConfirmEnabled.collectAsState()
+    val notificationsInteractAllowedApps by viewModel.notificationsInteractAllowedApps.collectAsState()
     val torchEnabled by viewModel.settings.torchEnabled.collectAsState()
     val weatherEnabled by viewModel.settings.weatherEnabled.collectAsState()
     val weatherUnits by viewModel.settings.weatherUnits.collectAsState()
@@ -274,6 +279,62 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
                 if (mediaControlEnabled) {
                     add { MediaControlAccessSettingsItem() }
+                }
+            })
+
+            SettingsGroup(title = stringResource(R.string.notifications_title), items = buildList {
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.notifications_enable)) },
+                        supportingContent = { Text(stringResource(R.string.notifications_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Notifications, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = notificationsEnabled, onCheckedChange = { viewModel.setNotificationsEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setNotificationsEnabled(!notificationsEnabled) }
+                    )
+                }
+                if (notificationsEnabled) {
+                    add { NotificationAccessSettingsItem() }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.notifications_read_confirm_setting)) },
+                            supportingContent = { Text(stringResource(R.string.notifications_read_confirm_setting_desc)) },
+                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = notificationsReadConfirmEnabled, onCheckedChange = { viewModel.settings.setNotificationsReadConfirmEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.settings.setNotificationsReadConfirmEnabled(!notificationsReadConfirmEnabled) }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.notifications_confirm_setting)) },
+                            supportingContent = { Text(stringResource(R.string.notifications_confirm_setting_desc)) },
+                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = notificationsConfirmEnabled, onCheckedChange = { viewModel.settings.setNotificationsConfirmEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.settings.setNotificationsConfirmEnabled(!notificationsConfirmEnabled) }
+                        )
+                    }
+                    if (notificationsInteractAllowedApps.isNotEmpty()) {
+                        val context = LocalContext.current
+                        notificationsInteractAllowedApps.sorted().forEach { pkg ->
+                            val label = remember(pkg) {
+                                try {
+                                    val pm = context.packageManager
+                                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+                                } catch (e: Exception) { pkg }
+                            }
+                            add {
+                                SettingsItem(
+                                    headlineContent = { Text(stringResource(R.string.notifications_allowed_app_row, label)) },
+                                    supportingContent = { Text(stringResource(R.string.notifications_allowed_app_row_desc)) },
+                                    leadingContent = { Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) },
+                                    trailingContent = {
+                                        TextButton(onClick = { viewModel.revokeNotificationInteractAppAllowed(pkg) }) {
+                                            Text(stringResource(R.string.notifications_allowed_app_revoke))
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             })
 
@@ -505,6 +566,49 @@ private fun MediaControlAccessSettingsItem() {
             Text(
                 if (hasAccess) stringResource(R.string.media_control_notification_access_granted)
                 else stringResource(R.string.media_control_notification_access_needed)
+            )
+        },
+        leadingContent = {
+            Icon(
+                if (hasAccess) Icons.Default.CheckCircle else Icons.Default.NotificationsActive,
+                null,
+                tint = if (hasAccess) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    )
+}
+
+@Composable
+private fun NotificationAccessSettingsItem() {
+    val context = LocalContext.current
+
+    var refreshTrigger by remember { mutableIntStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refreshTrigger++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    // Checks the enabled-listener grant only (not liveness/connection) so the UI reflects
+    // what the user actually toggled in system settings, even a moment before the service
+    // finishes (re)connecting.
+    val hasAccess = remember(refreshTrigger) {
+        androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(context).contains(context.packageName)
+    }
+
+    SettingsItem(
+        modifier = Modifier.clickable {
+            com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(
+                context.applicationContext as android.app.Application
+            )
+        },
+        headlineContent = { Text(stringResource(R.string.notifications_access_title)) },
+        supportingContent = {
+            Text(
+                if (hasAccess) stringResource(R.string.notifications_access_granted)
+                else stringResource(R.string.notifications_access_needed)
             )
         },
         leadingContent = {

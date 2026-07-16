@@ -94,6 +94,7 @@ class SettingsRepository(
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
     val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
+    val notificationsEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsEnabled, false)
     val torchEnabled: StateFlow<Boolean> = hot(settingsManager.torchEnabled, false)
     val weatherEnabled: StateFlow<Boolean> = hot(settingsManager.weatherEnabled, false)
     val weatherUnits: StateFlow<String> = hot(settingsManager.weatherUnits, com.newoether.agora.data.SettingsManager.DEFAULT_WEATHER_UNITS)
@@ -103,6 +104,9 @@ class SettingsRepository(
     val calendarConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.calendarConfirmEnabled, false)
     val contactsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.contactsConfirmEnabled, false)
     val alarmConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmConfirmEnabled, false)
+    val notificationsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsConfirmEnabled, false)
+    val notificationsReadConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsReadConfirmEnabled, false)
+    val notificationsInteractAllowedApps: StateFlow<Set<String>> = hot(settingsManager.notificationsInteractAllowedApps, emptySet())
     val locationConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.locationConfirmEnabled, false)
     val locationReverseGeocodeEnabled: StateFlow<Boolean> = hot(settingsManager.locationReverseGeocodeEnabled, true)
     val locationNominatimBaseUrl: StateFlow<String> = hot(settingsManager.locationNominatimBaseUrl, com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL)
@@ -364,6 +368,10 @@ class SettingsRepository(
     fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
     fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
     fun setMediaControlEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMediaControlEnabled(enabled) }
+    fun setNotificationsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsEnabled(enabled) }
+    fun setNotificationsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsConfirmEnabled(enabled) }
+    fun setNotificationsReadConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsReadConfirmEnabled(enabled) }
+    fun setNotificationInteractAppAllowed(packageName: String, allowed: Boolean) = scope.launch { settingsManager.saveNotificationInteractAppAllowed(packageName, allowed) }
     fun setTorchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTorchEnabled(enabled) }
     fun setWeatherEnabled(enabled: Boolean) = scope.launch { settingsManager.saveWeatherEnabled(enabled) }
     fun setWeatherUnits(units: String) = scope.launch { settingsManager.saveWeatherUnits(units) }

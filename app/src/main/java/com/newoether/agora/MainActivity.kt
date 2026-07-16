@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Api
 import androidx.compose.material3.*
@@ -907,6 +908,124 @@ fun MainNavigation(
                     onClick = { viewModel.resolveAlarmWriteConfirmation(allow = false) },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.alarm_confirm_deny)) }
+            }
+        )
+    }
+
+    // Notification tool: POST_NOTIFICATIONS runtime-permission bridge, for create_notification
+    // on API 33+ (auto-granted below that — RequestMultiplePermissions still works fine with
+    // a single-entry array). The listener-access grant list/get/interact/dismiss need is a
+    // special-access settings screen instead, handled the same way as MediaControlToolProvider's
+    // (see ChatViewModel.setNotificationsEnabled) — no launcher needed for that part.
+    val pendingNotificationPostPermission by viewModel.pendingNotificationPostPermissionRequest.collectAsState()
+    val notificationPostPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val granted = results[android.Manifest.permission.POST_NOTIFICATIONS] == true
+        viewModel.resolveNotificationPostPermission(granted)
+    }
+    LaunchedEffect(pendingNotificationPostPermission) {
+        if (pendingNotificationPostPermission != null) {
+            notificationPostPermLauncher.launch(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS))
+        }
+    }
+
+    // Notification tool: in-app "read your notifications?" confirmation gate (list/get)
+    val pendingNotificationRead by viewModel.pendingNotificationReadConfirmation.collectAsState()
+    pendingNotificationRead?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveNotificationReadConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Notifications, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.notifications_read_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.notifications_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.resolveNotificationReadConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
+                    Text(stringResource(R.string.notifications_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveNotificationReadConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.notifications_confirm_deny)) }
+            }
+        )
+    }
+
+    // Notification tool: in-app "interact with/dismiss this notification?" confirmation gate
+    val pendingNotificationWrite by viewModel.pendingNotificationWriteConfirmation.collectAsState()
+    pendingNotificationWrite?.let { pending ->
+        var alwaysAllow by remember(pending) { mutableStateOf(false) }
+        var alwaysAllowApp by remember(pending) { mutableStateOf(false) }
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { viewModel.resolveNotificationWriteConfirmation(allow = false) },
+            icon = { Icon(Icons.Default.Notifications, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
+            title = { Text(stringResource(R.string.notifications_confirm_title), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(
+                            pending.summary,
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
+                    ) {
+                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
+                        Text(stringResource(R.string.notifications_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
+                            .pointerInput(Unit) { detectTapGestures { alwaysAllowApp = !alwaysAllowApp } }
+                    ) {
+                        Checkbox(checked = alwaysAllowApp, onCheckedChange = { alwaysAllowApp = it })
+                        Text(
+                            stringResource(R.string.notifications_confirm_always_allow_app, pending.appLabel),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.resolveNotificationWriteConfirmation(allow = true, alwaysAllow = alwaysAllow, alwaysAllowApp = alwaysAllowApp)
+                }) {
+                    Text(stringResource(R.string.notifications_confirm_allow))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { viewModel.resolveNotificationWriteConfirmation(allow = false) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text(stringResource(R.string.notifications_confirm_deny)) }
             }
         )
     }

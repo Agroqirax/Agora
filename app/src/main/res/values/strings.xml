@@ -475,6 +475,19 @@
     <string name="media_control_notification_access_title">Notification access</string>
     <string name="media_control_notification_access_granted">Granted — media control is ready to use</string>
     <string name="media_control_notification_access_needed">Required for this tool to see and control what\'s playing. Tap to open settings.</string>
+    <string name="notifications_title">Notifications</string>
+    <string name="notifications_enable">Enable Notifications Tool</string>
+    <string name="notifications_enable_desc">Allow the model to read, tap, reply to, dismiss, and create notifications</string>
+    <string name="notifications_confirm_setting">Confirm notification actions</string>
+    <string name="notifications_confirm_setting_desc">Ask before the assistant can tap, reply to, or dismiss another app\'s notification</string>
+    <string name="notifications_read_confirm_setting">Confirm reading notifications</string>
+    <string name="notifications_read_confirm_setting_desc">Ask before the assistant can read your active notifications — titles, message previews, etc.</string>
+    <string name="notifications_allowed_app_row">%1$s always allowed</string>
+    <string name="notifications_allowed_app_row_desc">The assistant can tap, reply to, or dismiss this app\'s notifications without asking</string>
+    <string name="notifications_allowed_app_revoke">Revoke</string>
+    <string name="notifications_access_title">Notification access</string>
+    <string name="notifications_access_granted">Granted — reading, replying to, and dismissing notifications is ready to use</string>
+    <string name="notifications_access_needed">Required to read, reply to, or dismiss other apps\' notifications. Tap to open settings. Not needed just to create Agora\'s own notifications.</string>
     <string name="torch_title">Torch</string>
     <string name="torch_enable">Enable Torch Tool</string>
     <string name="torch_enable_desc">Allow the model to turn the flashlight on or off</string>
@@ -1100,6 +1113,12 @@
     <string name="alarm_confirm_allow">Allow</string>
     <string name="alarm_confirm_deny">Deny</string>
     <string name="alarm_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <string name="notifications_confirm_title">Allow this notification action?</string>
+    <string name="notifications_read_confirm_title">Allow reading notifications?</string>
+    <string name="notifications_confirm_allow">Allow</string>
+    <string name="notifications_confirm_deny">Deny</string>
+    <string name="notifications_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <string name="notifications_confirm_always_allow_app">Always allow interacting with %1$s notifications</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora quit unexpectedly</string>

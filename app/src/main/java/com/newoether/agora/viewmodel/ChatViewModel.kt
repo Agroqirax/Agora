@@ -278,6 +278,13 @@ class ChatViewModel(
                 com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(getApplication())
                 com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(getApplication())
             }
+            gm.onConfirmNotificationWrite = { summary, pkg, label -> notificationWriteConfirmation.confirm(summary, pkg, label) }
+            gm.onConfirmNotificationRead = { summary -> notificationReadConfirmation.confirm(summary) }
+            gm.onRequestNotificationAccessPermission = {
+                com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(getApplication())
+                com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(getApplication())
+            }
+            gm.onRequestNotificationPostPermission = { notificationPostPermission.request() }
         }
     }
 
@@ -460,6 +467,67 @@ class ChatViewModel(
         alarmWriteConfirmation.resolve(allow, alwaysAllow)
 
     fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
+
+    // ── Notification tool read/write-confirmation + runtime permission gates ──
+    /** In-app "read your notifications?" prompt for list/get — separate setting and
+     *  separate prompt from interact/dismiss below, since reading notification bodies is
+     *  its own trust tier and defaults to confirm-on. */
+    private val notificationReadConfirmation = WriteConfirmationController(
+        confirmEnabled = { settings.notificationsReadConfirmEnabled.value },
+        setConfirmEnabled = { settings.setNotificationsReadConfirmEnabled(it) }
+    )
+    val pendingNotificationReadConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
+        get() = notificationReadConfirmation.pendingWrite
+
+    fun resolveNotificationReadConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        notificationReadConfirmation.resolve(allow, alwaysAllow)
+
+    /** In-app "interact with/dismiss this notification?" prompt. Unlike the read gate above,
+     *  this one also supports permanently trusting a single app (e.g. "always allow Discord")
+     *  without turning off confirmation for every other app — see
+     *  [NotificationWriteConfirmationController]. */
+    private val notificationWriteConfirmation = NotificationWriteConfirmationController(
+        confirmEnabled = { settings.notificationsConfirmEnabled.value },
+        setConfirmEnabled = { settings.setNotificationsConfirmEnabled(it) },
+        isAppAlwaysAllowed = { pkg -> settings.notificationsInteractAllowedApps.value.contains(pkg) },
+        setAppAlwaysAllowed = { pkg, allowed -> settings.setNotificationInteractAppAllowed(pkg, allowed) }
+    )
+    val pendingNotificationWriteConfirmation: StateFlow<NotificationWriteConfirmationController.PendingWrite?>
+        get() = notificationWriteConfirmation.pendingWrite
+
+    fun resolveNotificationWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false, alwaysAllowApp: Boolean = false) =
+        notificationWriteConfirmation.resolve(allow, alwaysAllow, alwaysAllowApp)
+
+    /** POST_NOTIFICATIONS is an ordinary runtime permission (Android 13+; auto-granted
+     *  below that), unlike the notification-*listener* access `list`/`get`/`interact`/
+     *  `dismiss` need — so create_notification gets its own [RuntimePermissionController]
+     *  rather than reusing the settings-screen nudge below. */
+    private val notificationPostPermission = RuntimePermissionController(
+        arrayOf(android.Manifest.permission.POST_NOTIFICATIONS)
+    )
+    val pendingNotificationPostPermissionRequest: StateFlow<kotlinx.coroutines.CompletableDeferred<Boolean>?>
+        get() = notificationPostPermission.pendingRequest
+
+    fun resolveNotificationPostPermission(granted: Boolean) = notificationPostPermission.resolve(granted)
+
+    /** Currently always-allowed app packages for notification interact/dismiss, and a way
+     *  to revoke one — surfaced in Settings so this isn't a one-way ratchet. */
+    val notificationsInteractAllowedApps: StateFlow<Set<String>> get() = settings.notificationsInteractAllowedApps
+    fun revokeNotificationInteractAppAllowed(packageName: String) =
+        settings.setNotificationInteractAppAllowed(packageName, false)
+
+    /** Enables/disables the notification-reading tools. Turning it on opens the
+     *  notification-access settings screen right away (if not already granted) — same
+     *  one-way nudge as [setMediaControlEnabled], since there's no runtime-permission
+     *  dialog for this special access either. */
+    fun setNotificationsEnabled(enabled: Boolean) {
+        settings.setNotificationsEnabled(enabled)
+        val app: Application = getApplication()
+        if (enabled && !com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(app)) {
+            com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(app)
+        }
+        if (enabled) viewModelScope.launch { notificationPostPermission.requestIfNeeded(appContext) }
+    }
 
     // ── Auto Backup ───────────────────────────────────────────
 

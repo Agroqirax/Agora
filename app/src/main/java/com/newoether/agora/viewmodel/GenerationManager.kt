@@ -29,6 +29,7 @@ import com.newoether.agora.tool.LocationToolProvider
 import com.newoether.agora.tool.McpToolProvider
 import com.newoether.agora.tool.MediaControlToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
+import com.newoether.agora.tool.NotificationToolProvider
 import com.newoether.agora.tool.PackageQueryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
@@ -105,6 +106,7 @@ data class GenerationContext(
     val contactsEnabled: Boolean = false,
     val alarmEnabled: Boolean = false,
     val mediaControlEnabled: Boolean = false,
+    val notificationsEnabled: Boolean = false,
     val torchEnabled: Boolean = false,
     val weatherEnabled: Boolean = false,
     val weatherUnits: String = "metric",
@@ -204,6 +206,25 @@ class GenerationManager(
     /** Runtime contacts-permission request gate. Set by the ViewModel. */
     var onRequestContactsPermission: (suspend () -> Boolean)? = null
 
+    /** User-confirmation gate for interacting with/dismissing another app's notification.
+     *  Set by the ViewModel. Returns true to proceed, false to deny. Carries the source
+     *  app's package name and display label so the ViewModel can offer a per-app
+     *  "always allow" alongside the usual global one. */
+    var onConfirmNotificationWrite: (suspend (summary: String, packageName: String, appLabel: String) -> Boolean)? = null
+
+    /** User-confirmation gate for reading notification content (list/get) — separate from
+     *  [onConfirmNotificationWrite] since reading is its own trust tier. Set by the
+     *  ViewModel. */
+    var onConfirmNotificationRead: (suspend (summary: String) -> Boolean)? = null
+
+    /** Opens the notification-access settings screen when list/get/interact/dismiss-by-key
+     *  need it. Set by the ViewModel. Returns the post-open permission state. */
+    var onRequestNotificationAccessPermission: (suspend () -> Boolean)? = null
+
+    /** Runtime POST_NOTIFICATIONS permission request gate, for create_notification on
+     *  API 33+. Set by the ViewModel. */
+    var onRequestNotificationPostPermission: (suspend () -> Boolean)? = null
+
     private val memoryToolProvider = MemoryToolProvider(memoryManager)
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider(conversations)
@@ -237,6 +258,12 @@ class GenerationManager(
     private val mediaControlToolProvider = MediaControlToolProvider(app).also { mp ->
         mp.requestPermission = { onRequestMediaControlPermission?.invoke() ?: false }
     }
+    private val notificationToolProvider = NotificationToolProvider(app).also { np ->
+        np.confirmWrite = { summary, pkg, label -> onConfirmNotificationWrite?.invoke(summary, pkg, label) ?: true }
+        np.confirmRead = { summary -> onConfirmNotificationRead?.invoke(summary) ?: true }
+        np.requestAccessPermission = { onRequestNotificationAccessPermission?.invoke() ?: false }
+        np.requestPostPermission = { onRequestNotificationPostPermission?.invoke() ?: false }
+    }
     private val torchToolProvider = TorchToolProvider(app)
     private val weatherToolProvider = WeatherToolProvider(app).also { wp ->
         // Only consulted on the device-location auto-detect path — same permission and
@@ -247,8 +274,8 @@ class GenerationManager(
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
-        contactsToolProvider, alarmToolProvider, mediaControlToolProvider, torchToolProvider,
-        weatherToolProvider, mcpToolProvider
+        contactsToolProvider, alarmToolProvider, mediaControlToolProvider, notificationToolProvider,
+        torchToolProvider, weatherToolProvider, mcpToolProvider
     )
 
     fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
@@ -274,6 +301,9 @@ class GenerationManager(
 
     fun buildMediaControlTool(ctx: GenerationContext): List<ToolDefinition> =
         mediaControlToolProvider.definitions(ctx)
+
+    fun buildNotificationTool(ctx: GenerationContext): List<ToolDefinition> =
+        notificationToolProvider.definitions(ctx)
 
     fun buildTorchTool(ctx: GenerationContext): List<ToolDefinition> =
         torchToolProvider.definitions(ctx)
@@ -500,10 +530,11 @@ class GenerationManager(
         val contactsTool = buildContactsTool(ctx)
         val alarmTool = buildAlarmTool(ctx)
         val mediaControlTool = buildMediaControlTool(ctx)
+        val notificationTool = buildNotificationTool(ctx)
         val torchTool = buildTorchTool(ctx)
         val weatherTool = buildWeatherTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mediaControlTool + torchTool + weatherTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mediaControlTool + notificationTool + torchTool + weatherTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

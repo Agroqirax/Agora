@@ -191,6 +191,9 @@ class SettingsManager(private val context: Context) {
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
         val ALARM_ENABLED = booleanPreferencesKey("alarm_enabled")
         val MEDIA_CONTROL_ENABLED = booleanPreferencesKey("media_control_enabled")
+        val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
+        val NOTIFICATIONS_READ_CONFIRM_ENABLED = booleanPreferencesKey("notifications_read_confirm_enabled")
+        val NOTIFICATIONS_INTERACT_ALLOWED_APPS = stringSetPreferencesKey("notifications_interact_allowed_apps")
         val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
         val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
         val WEATHER_UNITS = stringPreferencesKey("weather_units")
@@ -201,6 +204,7 @@ class SettingsManager(private val context: Context) {
         val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
         val ALARM_CONFIRM_ENABLED = booleanPreferencesKey("alarm_confirm_enabled")
         val CONTACTS_CONFIRM_ENABLED = booleanPreferencesKey("contacts_confirm_enabled")
+        val NOTIFICATIONS_CONFIRM_ENABLED = booleanPreferencesKey("notifications_confirm_enabled")
         val LOCATION_CONFIRM_ENABLED = booleanPreferencesKey("location_confirm_enabled")
         val LOCATION_REVERSE_GEOCODE_ENABLED = booleanPreferencesKey("location_reverse_geocode_enabled")
         val LOCATION_NOMINATIM_BASE_URL = stringPreferencesKey("location_nominatim_base_url")
@@ -382,6 +386,11 @@ class SettingsManager(private val context: Context) {
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
     val alarmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_ENABLED] ?: false }
     val mediaControlEnabled: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL_ENABLED] ?: false }
+    val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: false }
+    // Reading notification content defaults to confirm-gated (true), unlike other read
+    // tools, since notification bodies routinely carry OTPs, message previews, etc.
+    val notificationsReadConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_READ_CONFIRM_ENABLED] ?: true }
+    val notificationsInteractAllowedApps: Flow<Set<String>> = context.dataStore.data.map { it[NOTIFICATIONS_INTERACT_ALLOWED_APPS] ?: emptySet() }
     // Torch on/off has no dangerous permission or confirm-gate, same reasoning as media control.
     val torchEnabled: Flow<Boolean> = context.dataStore.data.map { it[TORCH_ENABLED] ?: false }
     val weatherEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEATHER_ENABLED] ?: false }
@@ -396,6 +405,7 @@ class SettingsManager(private val context: Context) {
     val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
     val alarmConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_CONFIRM_ENABLED] ?: true }
     val contactsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_CONFIRM_ENABLED] ?: true }
+    val notificationsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_CONFIRM_ENABLED] ?: true }
     val locationConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_CONFIRM_ENABLED] ?: true }
     val locationReverseGeocodeEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_REVERSE_GEOCODE_ENABLED] ?: true }
     val locationNominatimBaseUrl: Flow<String> = context.dataStore.data.map { it[LOCATION_NOMINATIM_BASE_URL] ?: DEFAULT_NOMINATIM_BASE_URL }
@@ -795,6 +805,25 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveMediaControlEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MEDIA_CONTROL_ENABLED] = enabled }
+    }
+    suspend fun saveNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[NOTIFICATIONS_ENABLED] = enabled }
+    }
+    suspend fun saveNotificationsConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[NOTIFICATIONS_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveNotificationsReadConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[NOTIFICATIONS_READ_CONFIRM_ENABLED] = enabled }
+    }
+    /** Adds or removes a single app package from the "always allow interacting with this
+     *  app's notifications" list — used to bypass the per-call confirm prompt for a
+     *  specifically-trusted app (e.g. Discord) while leaving the confirm gate on for
+     *  everything else. */
+    suspend fun saveNotificationInteractAppAllowed(packageName: String, allowed: Boolean) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[NOTIFICATIONS_INTERACT_ALLOWED_APPS] ?: emptySet()
+            prefs[NOTIFICATIONS_INTERACT_ALLOWED_APPS] = if (allowed) current + packageName else current - packageName
+        }
     }
     suspend fun saveTorchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TORCH_ENABLED] = enabled }
