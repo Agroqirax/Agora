@@ -21,6 +21,7 @@ import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.tool.AlarmToolProvider
+import com.newoether.agora.tool.AppLaunchToolProvider
 import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
 import com.newoether.agora.tool.DeviceInfoToolProvider
@@ -105,6 +106,7 @@ data class GenerationContext(
     val calendarEnabled: Boolean = false,
     val contactsEnabled: Boolean = false,
     val alarmEnabled: Boolean = false,
+    val appLaunchEnabled: Boolean = false,
     val mediaControlEnabled: Boolean = false,
     val notificationsEnabled: Boolean = false,
     val torchEnabled: Boolean = false,
@@ -224,6 +226,7 @@ class GenerationManager(
     /** User-confirmation gate for setting/dismissing/snoozing alarms and timers.
      *  Set by the ViewModel. Returns true to proceed, false to deny. */
     var onConfirmAlarmWrite: (suspend (summary: String) -> Boolean)? = null
+    var onConfirmAppLaunchWrite: (suspend (summary: String) -> Boolean)? = null
 
     /** Opens the notification-access settings screen when the media control tool
      *  needs it. Set by the ViewModel. Returns the post-open permission state. */
@@ -273,7 +276,7 @@ class GenerationManager(
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
     }
     private val deviceInfoToolProvider = DeviceInfoToolProvider(app)
-    private val packageQueryToolProvider = PackageQueryToolProvider(packageQueryProvider)
+    private val packageQueryToolProvider = PackageQueryToolProvider(packageQueryProvider, app)
     private val calendarToolProvider = CalendarToolProvider(app).also { cp ->
         cp.confirmWrite = { summary -> onConfirmCalendarWrite?.invoke(summary) ?: true }
         cp.requestPermission = { onRequestCalendarPermission?.invoke() ?: false }
@@ -284,6 +287,9 @@ class GenerationManager(
     }
     private val alarmToolProvider = AlarmToolProvider(app).also { ap ->
         ap.confirmWrite = { summary -> onConfirmAlarmWrite?.invoke(summary) ?: true }
+    }
+    private val appLaunchToolProvider = AppLaunchToolProvider(app).also { alp ->
+        alp.confirmWrite = { summary -> onConfirmAppLaunchWrite?.invoke(summary) ?: true }
     }
     private val mediaControlToolProvider = MediaControlToolProvider(app).also { mp ->
         mp.requestPermission = { onRequestMediaControlPermission?.invoke() ?: false }
@@ -304,7 +310,7 @@ class GenerationManager(
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
-        contactsToolProvider, alarmToolProvider, mediaControlToolProvider, notificationToolProvider,
+        contactsToolProvider, alarmToolProvider, appLaunchToolProvider, mediaControlToolProvider, notificationToolProvider,
         torchToolProvider, weatherToolProvider, mcpToolProvider
     )
 
@@ -325,6 +331,9 @@ class GenerationManager(
 
     fun buildContactsTool(ctx: GenerationContext): List<ToolDefinition> =
         contactsToolProvider.definitions(ctx)
+
+    fun buildAppLaunchTool(ctx: GenerationContext): List<ToolDefinition> =
+        appLaunchToolProvider.definitions(ctx)
 
     fun buildAlarmTool(ctx: GenerationContext): List<ToolDefinition> =
         alarmToolProvider.definitions(ctx)
@@ -559,12 +568,13 @@ class GenerationManager(
         val calendarTool = buildCalendarTool(ctx)
         val contactsTool = buildContactsTool(ctx)
         val alarmTool = buildAlarmTool(ctx)
+        val appLaunchTool = buildAppLaunchTool(ctx)
         val mediaControlTool = buildMediaControlTool(ctx)
         val notificationTool = buildNotificationTool(ctx)
         val torchTool = buildTorchTool(ctx)
         val weatherTool = buildWeatherTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + mediaControlTool + notificationTool + torchTool + weatherTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + mediaControlTool + notificationTool + torchTool + weatherTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

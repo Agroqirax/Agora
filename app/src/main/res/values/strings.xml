@@ -473,6 +473,10 @@
     <string name="alarm_enable_desc">Set, dismiss, and snooze alarms and timers</string>
     <string name="alarm_confirm_setting">Confirm alarm changes</string>
     <string name="alarm_confirm_setting_desc">Ask before the assistant can set, dismiss, or snooze an alarm or timer</string>
+    <string name="app_launch_enable">Enable App-Launch Tool</string>
+    <string name="app_launch_enable_desc">Open apps and fire their static shortcuts</string>
+    <string name="app_launch_confirm_setting">Confirm before firing a shortcut</string>
+    <string name="app_launch_confirm_setting_desc">Ask before the assistant fires one of an app\'s shortcuts. Opening an app plainly is never gated.</string>
     <string name="media_control_title">Media Control</string>
     <string name="media_control_enable">Enable Media Control Tool</string>
     <string name="media_control_enable_desc">See and control what\'s playing in media apps</string>
@@ -503,9 +507,9 @@
     <string name="device_info_enable">Device Info Tool</string>
     <string name="device_info_enable_desc">Check battery, network, storage, and other device state</string>
     <string name="package_query_enable">Installed Apps Tool</string>
-    <string name="package_query_enable_desc">List installed apps. Not available on Google Play builds.</string>
+    <string name="package_query_enable_desc">List installed apps and look up details (version, shortcuts) for a specific one</string>
     <string name="package_query_not_supported">Installed Apps Tool Not Supported</string>
-    <string name="package_query_not_supported_desc">This feature is not available in the current build</string>
+    <string name="package_query_not_supported_desc">This feature failed to initialize on this build</string>
     <string name="location_title">Location</string>
     <string name="location_enable">Enable Location Tool</string>
     <string name="location_enable_desc">Allow the model to view your location</string>
@@ -1118,6 +1122,10 @@
     <string name="alarm_confirm_allow">Allow</string>
     <string name="alarm_confirm_deny">Deny</string>
     <string name="alarm_confirm_always_allow">Always allow (don\'t ask again)</string>
+    <string name="app_launch_confirm_title">Allow opening this shortcut?</string>
+    <string name="app_launch_confirm_allow">Allow</string>
+    <string name="app_launch_confirm_deny">Deny</string>
+    <string name="app_launch_confirm_always_allow">Always allow (don\'t ask again)</string>
     <string name="notifications_confirm_title">Allow this notification action?</string>
     <string name="notifications_read_confirm_title">Allow reading notifications?</string>
     <string name="notifications_confirm_allow">Allow</string>

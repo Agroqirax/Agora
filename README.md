@@ -178,12 +178,12 @@ Note: the google play version does not include certain features. Download from G
 ## Building from source
 
 ```sh
-git clone https://github.com/newo-ether/Agora # Clone
-cd Agora                                      # Change directory
-git submodule update --init                   # Initialize submodules: bundled llama.cpp & proot
-chmod +x ./gradlew                            # Make gradle exectuable
-./gradlew assembleRelease                     # Build release
-adb install ./app/build/outputs/apk/fdroid/release/app-fdroid-release.apk # Install apk
+git clone https://github.com/newo-ether/Agora     # Clone
+cd Agora                                          # Change directory
+git submodule update --init                       # Initialize submodules
+chmod +x ./gradlew                                # Make gradle exectuable
+./gradlew assembleRelease                         # Build release
+adb install ./app/release/app-fdroid-release.apk  # Install apk
 ```
 
 ## Tech Stack

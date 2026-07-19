@@ -28,6 +28,16 @@
          startActivity() find whatever clock app is installed to handle AlarmClock
          intents (set alarm/timer, show alarms, dismiss/snooze). -->
     <queries>
+        <!-- Special-cased by the platform: a <queries> intent signature matching
+             MAIN/LAUNCHER makes every app with a launcher icon visible to
+             queryIntentActivities()/getLaunchIntentForPackage(), on every flavor,
+             with no permission review and no QUERY_ALL_PACKAGES declaration. Backs
+             AppLaunchToolProvider's list_launchable_apps/open_app/*_shortcut tools.
+             See: https://developer.android.com/training/package-visibility -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.SET_ALARM" />
         </intent>

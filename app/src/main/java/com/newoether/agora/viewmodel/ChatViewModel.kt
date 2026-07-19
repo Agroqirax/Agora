@@ -274,6 +274,7 @@ class ChatViewModel(
             gm.onConfirmContactsWrite = { summary -> contactsWriteConfirmation.confirm(summary) }
             gm.onRequestContactsPermission = { contactsPermission.request() }
             gm.onConfirmAlarmWrite = { summary -> alarmWriteConfirmation.confirm(summary) }
+            gm.onConfirmAppLaunchWrite = { summary -> appLaunchWriteConfirmation.confirm(summary) }
             gm.onRequestMediaControlPermission = {
                 com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(getApplication())
                 com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(getApplication())
@@ -495,7 +496,21 @@ class ChatViewModel(
     fun resolveAlarmWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
         alarmWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
+    /** In-app "open this app/shortcut?" prompt (see [ToolConfirmationController]). Like
+     *  alarms, opening an app doesn't need a dangerous runtime permission, so there's no
+     *  matching [RuntimePermissionController] here either. */
+    private val appLaunchWriteConfirmation = ToolConfirmationController<Unit>(
+        confirmEnabled = { settings.appLaunchConfirmEnabled.value },
+        setConfirmEnabled = { settings.setAppLaunchConfirmEnabled(it) }
+    )
+    val pendingAppLaunchWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = appLaunchWriteConfirmation.pending
+
+    fun resolveAppLaunchWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        appLaunchWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
+
     fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
+    fun setAppLaunchEnabled(enabled: Boolean) = settings.setAppLaunchEnabled(enabled)
 
     // ── Notification tool read/write-confirmation + runtime permission gates ──
     /** In-app "read your notifications?" prompt for list/get — separate setting and

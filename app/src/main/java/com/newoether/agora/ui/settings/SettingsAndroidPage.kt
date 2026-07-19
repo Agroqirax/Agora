@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
@@ -60,6 +61,8 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val contactsConfirmEnabled by viewModel.settings.contactsConfirmEnabled.collectAsState()
     val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
     val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
+    val appLaunchEnabled by viewModel.settings.appLaunchEnabled.collectAsState()
+    val appLaunchConfirmEnabled by viewModel.settings.appLaunchConfirmEnabled.collectAsState()
     val mediaControlEnabled by viewModel.settings.mediaControlEnabled.collectAsState()
     val notificationsEnabled by viewModel.settings.notificationsEnabled.collectAsState()
     val notificationsConfirmEnabled by viewModel.settings.notificationsConfirmEnabled.collectAsState()
@@ -85,10 +88,9 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         modifier = Modifier.clickable { viewModel.settings.setDeviceInfoEnabled(!deviceInfoEnabled) }
                     )
                 }
-                // Only ever functional on fdroid/GitHub builds — QUERY_ALL_PACKAGES isn't
-                // declared in the play flavor's manifest at all. Shown greyed-out rather
-                // than hidden on play, same treatment as the Local Sandbox row when
-                // !isSandboxFlavor. See tool/PackageQueryProvider.kt.
+                // Falls back to this branch only if flavor detection itself failed (the
+                // reflective provider lookup in AppContainer came back null) — shouldn't
+                // happen on a normal build of either flavor. See tool/PackageQueryProvider.kt.
                 add {
                     if (viewModel.isPackageQueryAvailable) {
                         SettingsItem(
@@ -105,6 +107,26 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             leadingContent = {
                                 Icon(Icons.Default.Apps, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                             }
+                        )
+                    }
+                }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.app_launch_enable)) },
+                        supportingContent = { Text(stringResource(R.string.app_launch_enable_desc)) },
+                        leadingContent = { Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = appLaunchEnabled, onCheckedChange = { viewModel.setAppLaunchEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setAppLaunchEnabled(!appLaunchEnabled) }
+                    )
+                }
+                if (appLaunchEnabled) {
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.app_launch_confirm_setting)) },
+                            supportingContent = { Text(stringResource(R.string.app_launch_confirm_setting_desc)) },
+                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = { Switch(checked = appLaunchConfirmEnabled, onCheckedChange = { viewModel.settings.setAppLaunchConfirmEnabled(it) }) },
+                            modifier = Modifier.clickable { viewModel.settings.setAppLaunchConfirmEnabled(!appLaunchConfirmEnabled) }
                         )
                     }
                 }

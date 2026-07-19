@@ -86,11 +86,12 @@ class AppContainer(private val appContext: Context) {
                 .getDeclaredConstructor(Context::class.java)
                 .newInstance(appContext) as com.newoether.agora.tool.PackageQueryProvider
         } catch (_: ClassNotFoundException) {
-            // play flavor provides PlayPackageQueryProvider (always unavailable)
+            // play flavor provides PlayPackageQueryProvider (LAUNCHER-visible apps only,
+            // no QUERY_ALL_PACKAGES — see that class's doc comment)
             try {
                 Class.forName("com.newoether.agora.tool.PlayPackageQueryProvider")
-                    .getDeclaredConstructor()
-                    .newInstance() as com.newoether.agora.tool.PackageQueryProvider
+                    .getDeclaredConstructor(Context::class.java)
+                    .newInstance(appContext) as com.newoether.agora.tool.PackageQueryProvider
             } catch (_: ClassNotFoundException) {
                 null
             } catch (e: Exception) {

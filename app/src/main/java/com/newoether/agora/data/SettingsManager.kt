@@ -206,6 +206,7 @@ class SettingsManager(private val context: Context) {
         val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
         val ALARM_ENABLED = booleanPreferencesKey("alarm_enabled")
+        val APP_LAUNCH_ENABLED = booleanPreferencesKey("app_launch_enabled")
         val MEDIA_CONTROL_ENABLED = booleanPreferencesKey("media_control_enabled")
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val NOTIFICATIONS_READ_CONFIRM_ENABLED = booleanPreferencesKey("notifications_read_confirm_enabled")
@@ -219,6 +220,7 @@ class SettingsManager(private val context: Context) {
         val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
         val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
         val ALARM_CONFIRM_ENABLED = booleanPreferencesKey("alarm_confirm_enabled")
+        val APP_LAUNCH_CONFIRM_ENABLED = booleanPreferencesKey("app_launch_confirm_enabled")
         val CONTACTS_CONFIRM_ENABLED = booleanPreferencesKey("contacts_confirm_enabled")
         val NOTIFICATIONS_CONFIRM_ENABLED = booleanPreferencesKey("notifications_confirm_enabled")
         val LOCATION_CONFIRM_ENABLED = booleanPreferencesKey("location_confirm_enabled")
@@ -402,6 +404,7 @@ class SettingsManager(private val context: Context) {
     val calendarEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_ENABLED] ?: false }
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
     val alarmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_ENABLED] ?: false }
+    val appLaunchEnabled: Flow<Boolean> = context.dataStore.data.map { it[APP_LAUNCH_ENABLED] ?: false }
     val mediaControlEnabled: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL_ENABLED] ?: false }
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: false }
     // Reading notification content defaults to confirm-gated (true), unlike other read
@@ -421,6 +424,7 @@ class SettingsManager(private val context: Context) {
     val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
     val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
     val alarmConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_CONFIRM_ENABLED] ?: true }
+    val appLaunchConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[APP_LAUNCH_CONFIRM_ENABLED] ?: true }
     val contactsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_CONFIRM_ENABLED] ?: true }
     val notificationsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_CONFIRM_ENABLED] ?: true }
     val locationConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_CONFIRM_ENABLED] ?: true }
@@ -824,6 +828,12 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveAlarmConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[ALARM_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveAppLaunchConfirmEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[APP_LAUNCH_CONFIRM_ENABLED] = enabled }
+    }
+    suspend fun saveAppLaunchEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[APP_LAUNCH_ENABLED] = enabled }
     }
     suspend fun saveMediaControlEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MEDIA_CONTROL_ENABLED] = enabled }

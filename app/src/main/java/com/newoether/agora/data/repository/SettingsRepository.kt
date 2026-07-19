@@ -94,6 +94,7 @@ class SettingsRepository(
     val calendarEnabled: StateFlow<Boolean> = hot(settingsManager.calendarEnabled, false)
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
+    val appLaunchEnabled: StateFlow<Boolean> = hot(settingsManager.appLaunchEnabled, false)
     val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
     val notificationsEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsEnabled, false)
     val torchEnabled: StateFlow<Boolean> = hot(settingsManager.torchEnabled, false)
@@ -105,6 +106,7 @@ class SettingsRepository(
     val calendarConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.calendarConfirmEnabled, false)
     val contactsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.contactsConfirmEnabled, false)
     val alarmConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmConfirmEnabled, false)
+    val appLaunchConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.appLaunchConfirmEnabled, false)
     val notificationsConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsConfirmEnabled, false)
     val notificationsReadConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsReadConfirmEnabled, false)
     val notificationsInteractAllowedApps: StateFlow<Set<String>> = hot(settingsManager.notificationsInteractAllowedApps, emptySet())
@@ -368,7 +370,9 @@ class SettingsRepository(
     fun setContactsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsEnabled(enabled) }
     fun setContactsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsConfirmEnabled(enabled) }
     fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
+    fun setAppLaunchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAppLaunchEnabled(enabled) }
     fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
+    fun setAppLaunchConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAppLaunchConfirmEnabled(enabled) }
     fun setMediaControlEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMediaControlEnabled(enabled) }
     fun setNotificationsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsEnabled(enabled) }
     fun setNotificationsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsConfirmEnabled(enabled) }

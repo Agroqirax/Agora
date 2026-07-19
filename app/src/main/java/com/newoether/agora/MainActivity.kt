@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Terminal
@@ -747,6 +748,24 @@ fun MainNavigation(
             alwaysAllowLabel = stringResource(R.string.alarm_confirm_always_allow),
             allowLabel = stringResource(R.string.alarm_confirm_allow),
             denyLabel = stringResource(R.string.alarm_confirm_deny)
+        )
+    }
+
+    // App-launch tool: in-app "open this app/shortcut?" confirmation gate for open_app's
+    // launch/open_shortcut actions (list_shortcuts is a pure read and never reaches this).
+    // No runtime permission bridge needed — launching another app's activity doesn't
+    // require a dangerous permission.
+    val pendingAppLaunchWrite by viewModel.pendingAppLaunchWriteConfirmation.collectAsState()
+    pendingAppLaunchWrite?.let { pending ->
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveAppLaunchWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.Apps,
+            title = stringResource(R.string.app_launch_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.app_launch_confirm_always_allow),
+            allowLabel = stringResource(R.string.app_launch_confirm_allow),
+            denyLabel = stringResource(R.string.app_launch_confirm_deny)
         )
     }
 
