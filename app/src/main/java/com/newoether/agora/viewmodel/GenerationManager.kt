@@ -22,6 +22,7 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.tool.AlarmToolProvider
 import com.newoether.agora.tool.AppLaunchToolProvider
+import com.newoether.agora.tool.CalculatorToolProvider
 import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
 import com.newoether.agora.tool.DeviceInfoToolProvider
@@ -110,6 +111,7 @@ data class GenerationContext(
     val mediaControlEnabled: Boolean = false,
     val notificationsEnabled: Boolean = false,
     val torchEnabled: Boolean = false,
+    val calculatorEnabled: Boolean = true,
     val weatherEnabled: Boolean = false,
     val weatherUnits: String = "metric",
     val weatherBaseUrl: String = com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL,
@@ -307,15 +309,19 @@ class GenerationManager(
         wp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
         wp.confirm = { confirmLocationShared() }
     }
+    private val calculatorToolProvider = CalculatorToolProvider()
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
         contactsToolProvider, alarmToolProvider, appLaunchToolProvider, mediaControlToolProvider, notificationToolProvider,
-        torchToolProvider, weatherToolProvider, mcpToolProvider
+        torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider
     )
 
     fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
         deviceInfoToolProvider.definitions(ctx)
+
+    fun buildCalculatorTool(ctx: GenerationContext): List<ToolDefinition> =
+        calculatorToolProvider.definitions(ctx)
 
     fun buildPackageQueryTool(ctx: GenerationContext): List<ToolDefinition> =
         packageQueryToolProvider.definitions(ctx)
@@ -573,8 +579,9 @@ class GenerationManager(
         val notificationTool = buildNotificationTool(ctx)
         val torchTool = buildTorchTool(ctx)
         val weatherTool = buildWeatherTool(ctx)
+        val calculatorTool = buildCalculatorTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + mediaControlTool + notificationTool + torchTool + weatherTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

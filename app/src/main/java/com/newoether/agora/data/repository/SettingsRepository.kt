@@ -98,6 +98,7 @@ class SettingsRepository(
     val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
     val notificationsEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsEnabled, false)
     val torchEnabled: StateFlow<Boolean> = hot(settingsManager.torchEnabled, false)
+    val calculatorEnabled: StateFlow<Boolean> = hot(settingsManager.calculatorEnabled, true)
     val weatherEnabled: StateFlow<Boolean> = hot(settingsManager.weatherEnabled, false)
     val weatherUnits: StateFlow<String> = hot(settingsManager.weatherUnits, com.newoether.agora.data.SettingsManager.DEFAULT_WEATHER_UNITS)
     val weatherBaseUrl: StateFlow<String> = hot(settingsManager.weatherBaseUrl, com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL)
@@ -379,6 +380,7 @@ class SettingsRepository(
     fun setNotificationsReadConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsReadConfirmEnabled(enabled) }
     fun setNotificationInteractAppAllowed(packageName: String, allowed: Boolean) = scope.launch { settingsManager.saveNotificationInteractAppAllowed(packageName, allowed) }
     fun setTorchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTorchEnabled(enabled) }
+    fun setCalculatorEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalculatorEnabled(enabled) }
     fun setWeatherEnabled(enabled: Boolean) = scope.launch { settingsManager.saveWeatherEnabled(enabled) }
     fun setWeatherUnits(units: String) = scope.launch { settingsManager.saveWeatherUnits(units) }
     fun setWeatherBaseUrl(url: String) = scope.launch { settingsManager.saveWeatherBaseUrl(url) }

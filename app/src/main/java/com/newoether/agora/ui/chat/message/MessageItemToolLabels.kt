@@ -52,6 +52,7 @@ internal fun toolDisplayName(toolName: String?): String {
         "get_torch_state" -> stringResource(R.string.tool_get_torch_state)
         "set_torch" -> stringResource(R.string.tool_set_torch)
         "get_weather" -> stringResource(R.string.tool_get_weather)
+        "calculate" -> stringResource(R.string.tool_calculate)
         else -> {
             val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
             (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
@@ -349,6 +350,20 @@ internal fun toolSummary(seg: MessageSegment): String {
                     errorCode == "user_denied" -> stringResource(R.string.tool_location_denied)
                     errorCode != null -> stringResource(R.string.tool_call_failed)
                     location != null -> stringResource(R.string.tool_weather_done_for, location)
+                    else -> stringResource(R.string.tool_done)
+                }
+            }
+        }
+        "calculate" -> when {
+            isError -> stringResource(R.string.tool_call_failed)
+            content.isBlank() -> stringResource(R.string.tool_calculating)
+            else -> {
+                val obj = try { Json.parseToJsonElement(content).jsonObject } catch (_: Exception) { null }
+                val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+                val result = (obj?.get("result") as? JsonPrimitive)?.content
+                when {
+                    errorCode != null -> stringResource(R.string.tool_call_failed)
+                    result != null -> stringResource(R.string.tool_calculate_done, result)
                     else -> stringResource(R.string.tool_done)
                 }
             }

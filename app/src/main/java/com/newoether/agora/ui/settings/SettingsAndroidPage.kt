@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material3.*
@@ -39,7 +40,8 @@ import kotlinx.coroutines.delay
  * Settings for on-device Android integrations exposed to the model as tools:
  * [com.newoether.agora.tool.LocationToolProvider], [com.newoether.agora.tool.CalendarToolProvider],
  * [com.newoether.agora.tool.ContactsToolProvider], [com.newoether.agora.tool.AlarmToolProvider],
- * [com.newoether.agora.tool.MediaControlToolProvider], and [com.newoether.agora.tool.TorchToolProvider].
+ * [com.newoether.agora.tool.MediaControlToolProvider], [com.newoether.agora.tool.TorchToolProvider],
+ * and [com.newoether.agora.tool.CalculatorToolProvider].
  * (Weather has its own page, [SettingsWeatherPage] — it's a plain network tool with no Android
  * permission or system-service dependency, unlike everything else here.)
  * Each "Enable X Tool" switch calls into [com.newoether.agora.viewmodel.ChatViewModel] (not
@@ -70,6 +72,7 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val notificationsInteractAllowedApps by viewModel.notificationsInteractAllowedApps.collectAsState()
     var notificationAppsListExpanded by remember { mutableStateOf(false) }
     val torchEnabled by viewModel.settings.torchEnabled.collectAsState()
+    val calculatorEnabled by viewModel.settings.calculatorEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -137,6 +140,15 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         leadingContent = { Icon(Icons.Default.FlashOn, null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = { Switch(checked = torchEnabled, onCheckedChange = { viewModel.settings.setTorchEnabled(it) }) },
                         modifier = Modifier.clickable { viewModel.settings.setTorchEnabled(!torchEnabled) }
+                    )
+                }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.calculator_enable)) },
+                        supportingContent = { Text(stringResource(R.string.calculator_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Calculate, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = calculatorEnabled, onCheckedChange = { viewModel.settings.setCalculatorEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.settings.setCalculatorEnabled(!calculatorEnabled) }
                     )
                 }
             })

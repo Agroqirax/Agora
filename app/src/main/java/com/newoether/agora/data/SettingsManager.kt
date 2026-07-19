@@ -212,6 +212,7 @@ class SettingsManager(private val context: Context) {
         val NOTIFICATIONS_READ_CONFIRM_ENABLED = booleanPreferencesKey("notifications_read_confirm_enabled")
         val NOTIFICATIONS_INTERACT_ALLOWED_APPS = stringSetPreferencesKey("notifications_interact_allowed_apps")
         val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
+        val CALCULATOR_ENABLED = booleanPreferencesKey("calculator_enabled")
         val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
         val WEATHER_UNITS = stringPreferencesKey("weather_units")
         val WEATHER_BASE_URL = stringPreferencesKey("weather_base_url")
@@ -413,6 +414,8 @@ class SettingsManager(private val context: Context) {
     val notificationsInteractAllowedApps: Flow<Set<String>> = context.dataStore.data.map { it[NOTIFICATIONS_INTERACT_ALLOWED_APPS] ?: emptySet() }
     // Torch on/off has no dangerous permission or confirm-gate, same reasoning as media control.
     val torchEnabled: Flow<Boolean> = context.dataStore.data.map { it[TORCH_ENABLED] ?: false }
+    // Pure local arithmetic, no permission or device state touched, same reasoning as device info.
+    val calculatorEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALCULATOR_ENABLED] ?: true }
     val weatherEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEATHER_ENABLED] ?: false }
     val weatherUnits: Flow<String> = context.dataStore.data.map { it[WEATHER_UNITS] ?: DEFAULT_WEATHER_UNITS }
     val weatherBaseUrl: Flow<String> = context.dataStore.data.map {
@@ -859,6 +862,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveTorchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TORCH_ENABLED] = enabled }
+    }
+    suspend fun saveCalculatorEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CALCULATOR_ENABLED] = enabled }
     }
     suspend fun saveWeatherEnabled(enabled: Boolean) {
         context.dataStore.edit { it[WEATHER_ENABLED] = enabled }

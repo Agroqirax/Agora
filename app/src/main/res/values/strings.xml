@@ -264,6 +264,9 @@
     <string name="tool_get_weather">Get Weather</string>
     <string name="tool_getting_weather">Getting the weather…</string>
     <string name="tool_weather_done_for">Got the weather for %1$s</string>
+    <string name="tool_calculate">Calculate</string>
+    <string name="tool_calculating">Calculating…</string>
+    <string name="tool_calculate_done">= %1$s</string>
     <string name="tool_weather_no_location">Couldn\'t determine a location</string>
     <string name="img_action_save">Save to gallery</string>
     <string name="img_action_share">Share</string>
@@ -495,6 +498,8 @@
     <string name="torch_title">Torch</string>
     <string name="torch_enable">Enable Torch Tool</string>
     <string name="torch_enable_desc">Allow the model to turn the flashlight on or off</string>
+    <string name="calculator_enable">Enable Calculator Tool</string>
+    <string name="calculator_enable_desc">Allow the model to evaluate math expressions for accurate results</string>
     <string name="weather_title">Weather</string>
     <string name="weather_enable">Enable Weather Tool</string>
     <string name="weather_enable_desc">Check current conditions and forecasts via Open-Meteo</string>

@@ -15,6 +15,7 @@ Agora can securely integrate with Android — both as **tools the model can call
 | **Weather**        | Current conditions and forecast for a location                 | Runtime (location), only if auto-detecting |
 | **Device Info**    | Battery, ringer mode, network, storage, and other device state | None                                         |
 | **Installed Apps** | List apps installed on the device                              | None (fdroid/GitHub builds only — see below) |
+| **Calculator**     | Evaluate math expressions precisely                             | None                                         |
 
 The model automatically discovers enabled tools and decides when they are useful during a conversation.
 
@@ -43,6 +44,7 @@ Device Info and Installed Apps don't use runtime permissions at all: the values 
    - **Media Control**
    - **Torch**
    - **Weather**
+   - **Calculator**
 3. Grant the requested Android permissions when prompted (Location/Contacts/Calendar only).
 
 Once enabled, the model can access these tools automatically whenever they're helpful during a conversation.
@@ -113,6 +115,18 @@ Typical uses include:
 - "Toggle the flashlight" / checking whether it's currently on
 
 It doesn't require any permission — Android exposes torch control to any app — so there's no permission prompt and no confirmation gate, the same treatment as Media Control. If another app currently has the camera open, the model is told the torch can't be controlled right now rather than the request silently failing.
+
+## Calculator
+
+The Calculator tool lets the model evaluate math expressions itself instead of computing them by hand, which avoids transcription and arithmetic slips on longer or more precise calculations.
+
+Typical uses include:
+
+- "What's 18% of $284.50?"
+- "Convert 98.6°F to Celsius"
+- Any multi-step calculation embedded in a larger question
+
+It supports `+ - * / % ^`, parentheses, the constants `pi`/`e`, and common functions (`sqrt`, `abs`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `ln`, `log10`, `log2`, `exp`, `floor`, `ceil`, `round`). Expressions are evaluated by a small built-in parser — never `eval`-style code execution — so it only ever produces a number. It doesn't touch any device state or personal data, so like Device Info and Torch, there's no permission prompt and no confirmation gate.
 
 ## Weather
 

@@ -172,6 +172,7 @@ class GenerationRequestBuilder(
             mediaControlEnabled = settings.mediaControlEnabled.value,
             notificationsEnabled = settings.notificationsEnabled.value,
             torchEnabled = settings.torchEnabled.value,
+            calculatorEnabled = settings.calculatorEnabled.value,
             weatherEnabled = settings.weatherEnabled.value,
             weatherUnits = settings.weatherUnits.value,
             weatherBaseUrl = settings.weatherBaseUrl.value.ifBlank { com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL },
