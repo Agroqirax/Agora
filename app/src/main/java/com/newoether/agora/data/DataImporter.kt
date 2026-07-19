@@ -268,7 +268,7 @@ class DataImporter(
                             val videoPath = restoredVideos[msg.id]
                             if (videoPath != null && updated.attachmentMeta != null) {
                                 try {
-                                    val meta = importJson.decodeFromString<AttachmentMeta>(updated.attachmentMeta!!)
+                                    val meta = importJson.decodeFromString<AttachmentMeta>(updated.attachmentMeta)
                                     val adjustedItems = meta.items.map { item ->
                                         if (item.type == "video") item.copy(originalUri = videoPath) else item
                                     }

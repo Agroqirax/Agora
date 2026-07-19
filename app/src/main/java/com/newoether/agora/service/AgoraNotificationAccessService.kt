@@ -114,7 +114,7 @@ class AgoraNotificationAccessService : NotificationListenerService() {
             val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 android.app.ActivityOptions.makeBasic()
                     .setPendingIntentBackgroundActivityStartMode(
-                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+                        android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_ALWAYS
                     )
                     .toBundle()
             } else null

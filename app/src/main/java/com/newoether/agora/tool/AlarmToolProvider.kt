@@ -146,7 +146,7 @@ class AlarmToolProvider(private val app: Application) : ToolProvider {
         val summary = buildString {
             append("Set alarm for $timeDesc")
             if (label != null) append(" (\"$label\")")
-            if (!dayCalendarConstants.isNullOrEmpty()) append(" repeating on ${days!!.joinToString(", ")}")
+            if (!dayCalendarConstants.isNullOrEmpty()) append(" repeating on ${days.joinToString(", ")}")
         }
         if (confirmWrite?.invoke(summary) == false) {
             return err("user_denied", "The user declined to set this alarm.")

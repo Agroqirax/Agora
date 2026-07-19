@@ -32,6 +32,8 @@ import kotlinx.coroutines.flow.first
  */
 class AgoraVoiceInteractionSession(context: Context) : VoiceInteractionSession(context) {
 
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
     override fun onHandleAssist(data: Bundle?, structure: AssistStructure?, content: AssistContent?) {
         super.onHandleAssist(data, structure, content)
 
@@ -96,7 +98,7 @@ class AgoraVoiceInteractionSession(context: Context) : VoiceInteractionSession(c
             if (!text.isNullOrEmpty()) {
                 sb.append(text).append('\n')
             } else {
-                val hint = node.hint?.toString()?.trim()
+                val hint = node.hint?.trim()
                 if (!hint.isNullOrEmpty()) sb.append(hint).append('\n')
             }
         }
