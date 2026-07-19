@@ -265,9 +265,9 @@ class ChatViewModel(
                     indexMessageForRag(messageId, text)
                 }
             }
-            gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
-            gm.onConfirmMcpToolCall = { server, toolName, summary -> mcpConfirmation.confirm(server, toolName, summary) }
-            gm.onConfirmLocationRequest = { locationConfirmation.confirm() }
+            gm.onConfirmShellCommand = { serverId, serverLabel, summary -> shellConfirmation.confirm(summary, serverId, serverLabel) }
+            gm.onConfirmMcpToolCall = { serverId, serverName, toolName, summary -> mcpConfirmation.confirm(summary, serverId, serverName) }
+            gm.onConfirmLocationRequest = { locationConfirmation.confirm(appContext.getString(R.string.location_confirm_message)) }
             gm.onRequestLocationPermission = { locationPermission.request() }
             gm.onConfirmCalendarWrite = { summary -> calendarWriteConfirmation.confirm(summary) }
             gm.onRequestCalendarPermission = { calendarPermission.request() }
@@ -341,32 +341,60 @@ class ChatViewModel(
     fun loadCacheCounts() = ragManager.loadCacheCounts()
 
     // ── Remote shell command confirmation gate ───────────────────────────
-    /** Shell-command confirmation policy + pending-prompt handshake (see [ShellConfirmationController]). */
-    private val shellConfirmation = ShellConfirmationController(settings)
-    val pendingShellCommand: StateFlow<ShellConfirmationController.PendingShellCommand?>
-        get() = shellConfirmation.pendingShellCommand
+    /** Shell-command confirmation policy + pending-prompt handshake (see [ToolConfirmationController]).
+     *  Keyed by the remote server's stable ID. A server whose own
+     *  [com.newoether.agora.data.ShellDeviceConfig.confirmEnabled] is off — set either from
+     *  its row in Settings, or from "always allow this server" right here in the dialog,
+     *  they're the same field — never prompts again for that server, regardless of the
+     *  global [com.newoether.agora.data.repository.SettingsRepository.shellConfirmEnabled]
+     *  switch. */
+    private val shellConfirmation = ToolConfirmationController<String>(
+        confirmEnabled = { settings.shellConfirmEnabled.value },
+        setConfirmEnabled = { settings.setShellConfirmEnabled(it) },
+        isKeyAlwaysAllowed = { id -> settings.shellDevices.value.find { it.id == id }?.confirmEnabled == false },
+        setKeyAlwaysAllowed = { id, allowed ->
+            settings.shellDevices.value.find { it.id == id }?.let { settings.updateShellDevice(it.copy(confirmEnabled = !allowed)) }
+        }
+    )
+    val pendingShellCommand: StateFlow<ToolConfirmationController.PendingConfirmation<String>?>
+        get() = shellConfirmation.pending
 
-    private val mcpConfirmation = McpConfirmationController(settings)
-    val pendingMcpToolCall: StateFlow<McpConfirmationController.PendingMcpToolCall?>
-        get() = mcpConfirmation.pendingMcpToolCall
+    /** Destructive-MCP-tool-call confirmation policy, keyed by the MCP server's stable ID.
+     *  Same per-server override relationship as [shellConfirmation] — see there. */
+    private val mcpConfirmation = ToolConfirmationController<String>(
+        confirmEnabled = { settings.mcpConfirmEnabled.value },
+        setConfirmEnabled = { settings.setMcpConfirmEnabled(it) },
+        isKeyAlwaysAllowed = { id -> settings.mcpServers.value.find { it.id == id }?.confirmEnabled == false },
+        setKeyAlwaysAllowed = { id, allowed ->
+            settings.mcpServers.value.find { it.id == id }?.let { settings.updateMcpServer(it.copy(confirmEnabled = !allowed)) }
+        }
+    )
+    val pendingMcpToolCall: StateFlow<ToolConfirmationController.PendingConfirmation<String>?>
+        get() = mcpConfirmation.pending
 
-    /** Called by the UI to resolve a pending confirmation. */
-    fun resolveShellConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) =
-        shellConfirmation.resolve(allow, alwaysAllowServer)
+    /** Called by the UI to resolve a pending shell-command confirmation. */
+    fun resolveShellConfirmation(allow: Boolean, alwaysAllow: Boolean = false, alwaysAllowServer: Boolean = false) =
+        shellConfirmation.resolve(allow, alwaysAllow = alwaysAllow, alwaysAllowKey = alwaysAllowServer)
 
-    fun setShellConfirmEnabled(enabled: Boolean) = shellConfirmation.setEnabled(enabled)
+    fun setShellConfirmEnabled(enabled: Boolean) = settings.setShellConfirmEnabled(enabled)
 
     /** Called by the UI to resolve a pending MCP tool confirmation. */
-    fun resolveMcpConfirmation(allow: Boolean, alwaysAllowServer: Boolean = false) =
-        mcpConfirmation.resolve(allow, alwaysAllowServer)
+    fun resolveMcpConfirmation(allow: Boolean, alwaysAllow: Boolean = false, alwaysAllowServer: Boolean = false) =
+        mcpConfirmation.resolve(allow, alwaysAllow = alwaysAllow, alwaysAllowKey = alwaysAllowServer)
 
-    fun setMcpConfirmEnabled(enabled: Boolean) = mcpConfirmation.setEnabled(enabled)
+    fun setMcpConfirmEnabled(enabled: Boolean) = settings.setMcpConfirmEnabled(enabled)
 
     // ── Location tool confirmation + runtime permission gates ────────────
-    /** In-app "share your location?" prompt (see [LocationConfirmationController]). */
-    private val locationConfirmation = LocationConfirmationController(settings)
-    val pendingLocationRequest: StateFlow<LocationConfirmationController.PendingLocationRequest?>
-        get() = locationConfirmation.pendingLocationRequest
+    /** In-app "share your location?" prompt (see [ToolConfirmationController]). No
+     *  per-key trust list — there's only one location source — so "always allow"
+     *  just flips the global setting off, same as [resolveLocationConfirmation]'s
+     *  `alwaysAllow` parameter turning off confirmation entirely. */
+    private val locationConfirmation = ToolConfirmationController<Unit>(
+        confirmEnabled = { settings.locationConfirmEnabled.value },
+        setConfirmEnabled = { settings.setLocationConfirmEnabled(it) }
+    )
+    val pendingLocationRequest: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = locationConfirmation.pending
 
     /** System runtime-permission request bridge (see [RuntimePermissionController]). */
     private val locationPermission = RuntimePermissionController(
@@ -376,7 +404,8 @@ class ChatViewModel(
         get() = locationPermission.pendingRequest
 
     /** Called by the UI to resolve the pending "share your location?" confirmation. */
-    fun resolveLocationConfirmation(allow: Boolean) = locationConfirmation.resolve(allow)
+    fun resolveLocationConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        locationConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
     /** Called by the UI once the system location-permission dialog has been answered. */
     fun resolveLocationPermission(granted: Boolean) = locationPermission.resolve(granted)
@@ -402,13 +431,13 @@ class ChatViewModel(
     }
 
     // ── Calendar tool write-confirmation + runtime permission gates ──────
-    /** In-app "create/update/delete this event?" prompt (see [WriteConfirmationController]). */
-    private val calendarWriteConfirmation = WriteConfirmationController(
+    /** In-app "create/update/delete this event?" prompt (see [ToolConfirmationController]). */
+    private val calendarWriteConfirmation = ToolConfirmationController<Unit>(
         confirmEnabled = { settings.calendarConfirmEnabled.value },
         setConfirmEnabled = { settings.setCalendarConfirmEnabled(it) }
     )
-    val pendingCalendarWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
-        get() = calendarWriteConfirmation.pendingWrite
+    val pendingCalendarWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = calendarWriteConfirmation.pending
 
     private val calendarPermission = RuntimePermissionController(
         arrayOf(android.Manifest.permission.READ_CALENDAR, android.Manifest.permission.WRITE_CALENDAR)
@@ -417,7 +446,7 @@ class ChatViewModel(
         get() = calendarPermission.pendingRequest
 
     fun resolveCalendarWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        calendarWriteConfirmation.resolve(allow, alwaysAllow)
+        calendarWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
     fun resolveCalendarPermission(granted: Boolean) = calendarPermission.resolve(granted)
 
@@ -427,13 +456,13 @@ class ChatViewModel(
     }
 
     // ── Contacts tool write-confirmation + runtime permission gates ──────
-    /** In-app "create/update/delete this contact?" prompt (see [WriteConfirmationController]). */
-    private val contactsWriteConfirmation = WriteConfirmationController(
+    /** In-app "create/update/delete this contact?" prompt (see [ToolConfirmationController]). */
+    private val contactsWriteConfirmation = ToolConfirmationController<Unit>(
         confirmEnabled = { settings.contactsConfirmEnabled.value },
         setConfirmEnabled = { settings.setContactsConfirmEnabled(it) }
     )
-    val pendingContactsWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
-        get() = contactsWriteConfirmation.pendingWrite
+    val pendingContactsWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = contactsWriteConfirmation.pending
 
     private val contactsPermission = RuntimePermissionController(
         arrayOf(android.Manifest.permission.READ_CONTACTS, android.Manifest.permission.WRITE_CONTACTS)
@@ -442,7 +471,7 @@ class ChatViewModel(
         get() = contactsPermission.pendingRequest
 
     fun resolveContactsWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        contactsWriteConfirmation.resolve(allow, alwaysAllow)
+        contactsWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
     fun resolveContactsPermission(granted: Boolean) = contactsPermission.resolve(granted)
 
@@ -452,19 +481,19 @@ class ChatViewModel(
     }
 
     // ── Alarm tool write-confirmation gate ────────────────────
-    /** In-app "set/dismiss/snooze this alarm?" prompt (see [WriteConfirmationController]).
+    /** In-app "set/dismiss/snooze this alarm?" prompt (see [ToolConfirmationController]).
      *  Unlike calendar/contacts, alarms/timers don't need a dangerous runtime permission
      *  (AlarmClock intents are handled by whatever clock app is installed), so there's no
      *  matching [RuntimePermissionController] here. */
-    private val alarmWriteConfirmation = WriteConfirmationController(
+    private val alarmWriteConfirmation = ToolConfirmationController<Unit>(
         confirmEnabled = { settings.alarmConfirmEnabled.value },
         setConfirmEnabled = { settings.setAlarmConfirmEnabled(it) }
     )
-    val pendingAlarmWriteConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
-        get() = alarmWriteConfirmation.pendingWrite
+    val pendingAlarmWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = alarmWriteConfirmation.pending
 
     fun resolveAlarmWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        alarmWriteConfirmation.resolve(allow, alwaysAllow)
+        alarmWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
     fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
 
@@ -472,31 +501,32 @@ class ChatViewModel(
     /** In-app "read your notifications?" prompt for list/get — separate setting and
      *  separate prompt from interact/dismiss below, since reading notification bodies is
      *  its own trust tier and defaults to confirm-on. */
-    private val notificationReadConfirmation = WriteConfirmationController(
+    private val notificationReadConfirmation = ToolConfirmationController<Unit>(
         confirmEnabled = { settings.notificationsReadConfirmEnabled.value },
         setConfirmEnabled = { settings.setNotificationsReadConfirmEnabled(it) }
     )
-    val pendingNotificationReadConfirmation: StateFlow<WriteConfirmationController.PendingWrite?>
-        get() = notificationReadConfirmation.pendingWrite
+    val pendingNotificationReadConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
+        get() = notificationReadConfirmation.pending
 
     fun resolveNotificationReadConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        notificationReadConfirmation.resolve(allow, alwaysAllow)
+        notificationReadConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
-    /** In-app "interact with/dismiss this notification?" prompt. Unlike the read gate above,
-     *  this one also supports permanently trusting a single app (e.g. "always allow Discord")
-     *  without turning off confirmation for every other app — see
-     *  [NotificationWriteConfirmationController]. */
-    private val notificationWriteConfirmation = NotificationWriteConfirmationController(
+    /** In-app "interact with/dismiss this notification?" prompt, keyed by package name.
+     *  Unlike the read gate above, this one also supports permanently trusting a single
+     *  app (e.g. "always allow Discord") without turning off confirmation for every other
+     *  app — that's [ToolConfirmationController]'s per-key trust list, wired to the
+     *  package-name allowlist. */
+    private val notificationWriteConfirmation = ToolConfirmationController<String>(
         confirmEnabled = { settings.notificationsConfirmEnabled.value },
         setConfirmEnabled = { settings.setNotificationsConfirmEnabled(it) },
-        isAppAlwaysAllowed = { pkg -> settings.notificationsInteractAllowedApps.value.contains(pkg) },
-        setAppAlwaysAllowed = { pkg, allowed -> settings.setNotificationInteractAppAllowed(pkg, allowed) }
+        isKeyAlwaysAllowed = { pkg -> settings.notificationsInteractAllowedApps.value.contains(pkg) },
+        setKeyAlwaysAllowed = { pkg, allowed -> settings.setNotificationInteractAppAllowed(pkg, allowed) }
     )
-    val pendingNotificationWriteConfirmation: StateFlow<NotificationWriteConfirmationController.PendingWrite?>
-        get() = notificationWriteConfirmation.pendingWrite
+    val pendingNotificationWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<String>?>
+        get() = notificationWriteConfirmation.pending
 
     fun resolveNotificationWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false, alwaysAllowApp: Boolean = false) =
-        notificationWriteConfirmation.resolve(allow, alwaysAllow, alwaysAllowApp)
+        notificationWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow, alwaysAllowKey = alwaysAllowApp)
 
     /** POST_NOTIFICATIONS is an ordinary runtime permission (Android 13+; auto-granted
      *  below that), unlike the notification-*listener* access `list`/`get`/`interact`/

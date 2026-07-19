@@ -222,6 +222,7 @@ private fun DeviceEditor(
     val isNewlyAdded = device.id == newlyAddedDeviceId
     var expanded by remember(device.id) { mutableStateOf(false) }
     var enabledInput by remember(device.id) { mutableStateOf(device.enabled) }
+    var confirmEnabledInput by remember(device.id) { mutableStateOf(device.confirmEnabled) }
     var nameInput by remember(device.id) { mutableStateOf(device.name) }
     var descInput by remember(device.id) { mutableStateOf(device.description) }
     var typeInput by remember(device.id) { mutableStateOf(device.type) }
@@ -244,6 +245,7 @@ private fun DeviceEditor(
 
     LaunchedEffect(device) {
         enabledInput = device.enabled
+        confirmEnabledInput = device.confirmEnabled
         nameInput = device.name; descInput = device.description; typeInput = device.type
         urlInput = device.serverUrl; keyInput = device.apiKey
         sshHostInput = device.sshHost; sshPortInput = device.sshPort.toString()
@@ -299,6 +301,13 @@ private fun DeviceEditor(
                     Checkbox(checked = enabledInput, onCheckedChange = { enabledInput = it })
                     Text(stringResource(R.string.shell_device_enabled), style = MaterialTheme.typography.bodyMedium)
                 }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { confirmEnabledInput = !confirmEnabledInput }
+                ) {
+                    Checkbox(checked = confirmEnabledInput, onCheckedChange = { confirmEnabledInput = it })
+                    Text(stringResource(R.string.shell_device_confirm_enabled), style = MaterialTheme.typography.bodyMedium)
+                }
                 Spacer(Modifier.height(10.dp))
 
                 // Type selector
@@ -310,7 +319,7 @@ private fun DeviceEditor(
                         leadingIcon = { Icon(Icons.Default.Cable, null) },
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeMenuExpanded) },
                         shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true).fillMaxWidth()
                     )
                     ExposedDropdownMenu(
                         expanded = typeMenuExpanded,
@@ -436,6 +445,7 @@ private fun DeviceEditor(
                     Button(onClick = {
                         viewModel.updateShellDevice(device.copy(
                             enabled = enabledInput,
+                            confirmEnabled = confirmEnabledInput,
                             name = nameInput.trim(), description = descInput.trim(), type = typeInput,
                             serverUrl = if (typeInput == "conch") urlInput.trim() else "",
                             apiKey = if (typeInput == "conch") keyInput.trim() else "",

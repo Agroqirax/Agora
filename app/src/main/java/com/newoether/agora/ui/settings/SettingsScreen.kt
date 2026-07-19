@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material3.*
@@ -150,8 +151,8 @@ fun SettingsItem(
 
 private data class SettingsCategory(
     val key: String,
-    @StringRes val titleRes: Int,
-    @StringRes val descriptionRes: Int,
+    @param:StringRes val titleRes: Int,
+    @param:StringRes val descriptionRes: Int,
     val icon: ImageVector
 )
 
@@ -161,9 +162,12 @@ private data class SettingsGroupData(
 )
 
 private val settingsGroups = listOf(
+    SettingsGroupData(titleRes = R.string.settings_group_assistant, items = listOf(
+        SettingsCategory("assistant", R.string.settings_assistant, R.string.settings_assistant_desc, Icons.Default.Assistant),
+    )),
     SettingsGroupData(titleRes = R.string.settings_group_services, items = listOf(
         SettingsCategory("provider", R.string.settings_provider, R.string.settings_provider_desc, Icons.Default.Cloud),
-        SettingsCategory("models", R.string.settings_models, R.string.settings_models_desc, Icons.Default.Chat),
+        SettingsCategory("models", R.string.settings_models, R.string.settings_models_desc, Icons.AutoMirrored.Filled.Chat),
     )),
     SettingsGroupData(titleRes = R.string.settings_group_responses, items = listOf(
         SettingsCategory("prompts", R.string.settings_prompts, R.string.settings_prompts_desc, Icons.Default.Psychology),
@@ -176,6 +180,7 @@ private val settingsGroups = listOf(
     )),
     SettingsGroupData(titleRes = R.string.settings_group_tools, items = listOf(
         SettingsCategory("websearch", R.string.settings_web_search, R.string.settings_web_search_desc, Icons.Default.Language),
+        SettingsCategory("weather", R.string.weather_title, R.string.weather_enable_desc, Icons.Default.WbSunny),
         SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
         SettingsCategory("mcp", R.string.mcp_title, R.string.mcp_desc, Icons.Default.Api),
@@ -230,10 +235,12 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "models" -> SettingsModelsPage(viewModel, onBack = { selectedCategory = null })
                 "generation" -> SettingsGenerationPage(viewModel, onBack = { selectedCategory = null })
                 "websearch" -> SettingsWebSearchPage(viewModel, onBack = { selectedCategory = null })
+                "weather" -> SettingsWeatherPage(viewModel, onBack = { selectedCategory = null })
                 "imagegen" -> SettingsImageGenPage(viewModel, onBack = { selectedCategory = null })
                 "shell" -> SettingsShellPage(viewModel, onBack = { selectedCategory = null })
                 "mcp" -> SettingsMcpPage(viewModel, onBack = { selectedCategory = null })
                 "device" -> SettingsAndroidPage(viewModel, onBack = { selectedCategory = null })
+                "assistant" -> SettingsAssistantPage(viewModel, onBack = { selectedCategory = null })
                 "proxy" -> SettingsProxyPage(viewModel, onBack = { selectedCategory = null })
                 "language" -> SettingsLanguagePage(viewModel, onBack = { selectedCategory = null })
                 "titlegen" -> SettingsTitleGenPage(viewModel, onBack = { selectedCategory = null })

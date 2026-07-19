@@ -29,14 +29,17 @@ class ShellToolProvider(
      * Optional user-confirmation gate for state-changing operations on REMOTE
      * servers (SSH/Conch). Returns true to proceed, false to deny. The local
      * sandbox is proot-isolated and is never gated. Set by the owning ViewModel;
-     * null = no gate (proceed).
+     * null = no gate (proceed). [serverId] is the stable [ShellDeviceConfig.id] — use
+     * this, not [serverLabel], as the trust-list key: display names can collide or
+     * be renamed after the user has already trusted a server.
      */
-    var confirm: (suspend (server: String, summary: String) -> Boolean)? = null
+    var confirm: (suspend (serverId: String, serverLabel: String, summary: String) -> Boolean)? = null
 
     /** Run [confirm] for remote devices only; sandbox (device == null) always proceeds. */
     private suspend fun confirmRemote(device: ShellDeviceConfig?, summary: String): Boolean {
         if (device == null) return true
-        return confirm?.invoke(device.name.ifBlank { "${device.type} server" }, summary) ?: true
+        val label = device.name.ifBlank { "${device.type} server" }
+        return confirm?.invoke(device.id, label, summary) ?: true
     }
 
     // ── Helpers ────────────────────────────────────────────

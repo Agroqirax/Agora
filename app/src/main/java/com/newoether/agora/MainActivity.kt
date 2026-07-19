@@ -59,8 +59,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.zIndex
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+
+
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -75,6 +75,7 @@ import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.di.AppContainer
 import com.newoether.agora.ui.chat.ChatApp
 import com.newoether.agora.ui.chat.FullScreenMediaViewer
+import com.newoether.agora.ui.components.ToolConfirmationDialog
 import com.newoether.agora.ui.onboarding.WelcomeScreen
 import com.newoether.agora.ui.settings.SettingsScreen
 import com.newoether.agora.ui.theme.AgoraTheme
@@ -144,17 +145,17 @@ class MainActivity : ComponentActivity() {
             SettingsManager(newBase).appLanguage.first()
         }
         val locale = when (langCode) {
-            "zh" -> java.util.Locale("zh", "CN")
-            "en" -> java.util.Locale("en")
-            "es" -> java.util.Locale("es")
-            "fr" -> java.util.Locale("fr")
-            "nl" -> java.util.Locale("nl")
-            "de" -> java.util.Locale("de")
-            "ru" -> java.util.Locale("ru")
-            "pt-BR" -> java.util.Locale("pt", "BR")
-            "ja" -> java.util.Locale("ja")
-            "ko" -> java.util.Locale("ko")
-            "ar" -> java.util.Locale("ar")
+            "zh" -> java.util.Locale.Builder().setLanguage("zh").setRegion("CN").build()
+            "en" -> java.util.Locale.Builder().setLanguage("en").build()
+            "es" -> java.util.Locale.Builder().setLanguage("es").build()
+            "fr" -> java.util.Locale.Builder().setLanguage("fr").build()
+            "nl" -> java.util.Locale.Builder().setLanguage("nl").build()
+            "de" -> java.util.Locale.Builder().setLanguage("de").build()
+            "ru" -> java.util.Locale.Builder().setLanguage("ru").build()
+            "pt-BR" -> java.util.Locale.Builder().setLanguage("pt").setRegion("BR").build()
+            "ja" -> java.util.Locale.Builder().setLanguage("ja").build()
+            "ko" -> java.util.Locale.Builder().setLanguage("ko").build()
+            "ar" -> java.util.Locale.Builder().setLanguage("ar").build()
             "zh-Hant" -> java.util.Locale.forLanguageTag("zh-Hant")
             else -> null
         }
@@ -601,88 +602,34 @@ fun MainNavigation(
     // Remote shell action confirmation gate
     val pendingShellCommand by viewModel.pendingShellCommand.collectAsState()
     pendingShellCommand?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveShellConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Terminal, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.shell_confirm_title, pending.server), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.shell_confirm_always), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, alwaysAllowServer ->
+                viewModel.resolveShellConfirmation(allow = allow, alwaysAllow = alwaysAllow, alwaysAllowServer = alwaysAllowServer)
             },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveShellConfirmation(allow = true, alwaysAllowServer = alwaysAllow) }) {
-                    Text(stringResource(R.string.shell_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveShellConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.shell_confirm_deny)) }
-            }
+            icon = Icons.Default.Terminal,
+            title = stringResource(R.string.shell_confirm_title, pending.keyLabel ?: ""),
+            alwaysAllowLabel = stringResource(R.string.shell_confirm_stop_asking),
+            alwaysAllowKeyLabel = stringResource(R.string.shell_confirm_always),
+            allowLabel = stringResource(R.string.shell_confirm_allow),
+            denyLabel = stringResource(R.string.shell_confirm_deny)
         )
     }
 
     // MCP destructive tool-call confirmation gate
     val pendingMcpToolCall by viewModel.pendingMcpToolCall.collectAsState()
     pendingMcpToolCall?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveMcpConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Api, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.mcp_confirm_title, pending.toolName, pending.server), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.mcp_confirm_always), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, alwaysAllowServer ->
+                viewModel.resolveMcpConfirmation(allow = allow, alwaysAllow = alwaysAllow, alwaysAllowServer = alwaysAllowServer)
             },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveMcpConfirmation(allow = true, alwaysAllowServer = alwaysAllow) }) {
-                    Text(stringResource(R.string.mcp_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveMcpConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.mcp_confirm_deny)) }
-            }
+            icon = Icons.Default.Api,
+            title = stringResource(R.string.mcp_confirm_title, pending.keyLabel ?: ""),
+            alwaysAllowLabel = stringResource(R.string.mcp_confirm_stop_asking),
+            alwaysAllowKeyLabel = stringResource(R.string.mcp_confirm_always),
+            allowLabel = stringResource(R.string.mcp_confirm_allow),
+            denyLabel = stringResource(R.string.mcp_confirm_deny)
         )
     }
 
@@ -709,40 +656,15 @@ fun MainNavigation(
     // Location tool: in-app "share your location?" confirmation gate
     val pendingLocationRequest by viewModel.pendingLocationRequest.collectAsState()
     pendingLocationRequest?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveLocationConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.LocationOn, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.location_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Text(stringResource(R.string.location_confirm_message))
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.location_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (alwaysAllow) viewModel.settings.setLocationConfirmEnabled(false)
-                    viewModel.resolveLocationConfirmation(allow = true)
-                }) {
-                    Text(stringResource(R.string.location_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveLocationConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.location_confirm_deny)) }
-            }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveLocationConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.LocationOn,
+            title = stringResource(R.string.location_confirm_title),
+            message = stringResource(R.string.location_confirm_message),
+            alwaysAllowLabel = stringResource(R.string.location_confirm_always_allow),
+            allowLabel = stringResource(R.string.location_confirm_allow),
+            denyLabel = stringResource(R.string.location_confirm_deny)
         )
     }
 
@@ -767,43 +689,15 @@ fun MainNavigation(
     // Calendar tool: in-app "create/update/delete this event?" confirmation gate
     val pendingCalendarWrite by viewModel.pendingCalendarWriteConfirmation.collectAsState()
     pendingCalendarWrite?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveCalendarWriteConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.CalendarMonth, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.calendar_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.calendar_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveCalendarWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
-                    Text(stringResource(R.string.calendar_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveCalendarWriteConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.calendar_confirm_deny)) }
-            }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveCalendarWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.CalendarMonth,
+            title = stringResource(R.string.calendar_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.calendar_confirm_always_allow),
+            allowLabel = stringResource(R.string.calendar_confirm_allow),
+            denyLabel = stringResource(R.string.calendar_confirm_deny)
         )
     }
 
@@ -827,43 +721,15 @@ fun MainNavigation(
     // Contacts tool: in-app "create/update/delete this contact?" confirmation gate
     val pendingContactsWrite by viewModel.pendingContactsWriteConfirmation.collectAsState()
     pendingContactsWrite?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveContactsWriteConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Contacts, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.contacts_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.contacts_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveContactsWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
-                    Text(stringResource(R.string.contacts_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveContactsWriteConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.contacts_confirm_deny)) }
-            }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveContactsWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.Contacts,
+            title = stringResource(R.string.contacts_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.contacts_confirm_always_allow),
+            allowLabel = stringResource(R.string.contacts_confirm_allow),
+            denyLabel = stringResource(R.string.contacts_confirm_deny)
         )
     }
 
@@ -872,43 +738,15 @@ fun MainNavigation(
     // permission, unlike calendar/contacts/location above.
     val pendingAlarmWrite by viewModel.pendingAlarmWriteConfirmation.collectAsState()
     pendingAlarmWrite?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveAlarmWriteConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Alarm, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.alarm_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.alarm_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveAlarmWriteConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
-                    Text(stringResource(R.string.alarm_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveAlarmWriteConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.alarm_confirm_deny)) }
-            }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveAlarmWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.Alarm,
+            title = stringResource(R.string.alarm_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.alarm_confirm_always_allow),
+            allowLabel = stringResource(R.string.alarm_confirm_allow),
+            denyLabel = stringResource(R.string.alarm_confirm_deny)
         )
     }
 
@@ -933,100 +771,33 @@ fun MainNavigation(
     // Notification tool: in-app "read your notifications?" confirmation gate (list/get)
     val pendingNotificationRead by viewModel.pendingNotificationReadConfirmation.collectAsState()
     pendingNotificationRead?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveNotificationReadConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Notifications, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.notifications_read_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.notifications_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.resolveNotificationReadConfirmation(allow = true, alwaysAllow = alwaysAllow) }) {
-                    Text(stringResource(R.string.notifications_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveNotificationReadConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.notifications_confirm_deny)) }
-            }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveNotificationReadConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
+            icon = Icons.Default.Notifications,
+            title = stringResource(R.string.notifications_read_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.notifications_confirm_always_allow),
+            allowLabel = stringResource(R.string.notifications_confirm_allow),
+            denyLabel = stringResource(R.string.notifications_confirm_deny)
         )
     }
 
     // Notification tool: in-app "interact with/dismiss this notification?" confirmation gate
     val pendingNotificationWrite by viewModel.pendingNotificationWriteConfirmation.collectAsState()
     pendingNotificationWrite?.let { pending ->
-        var alwaysAllow by remember(pending) { mutableStateOf(false) }
-        var alwaysAllowApp by remember(pending) { mutableStateOf(false) }
-        AlertDialog(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { viewModel.resolveNotificationWriteConfirmation(allow = false) },
-            icon = { Icon(Icons.Default.Notifications, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary) },
-            title = { Text(stringResource(R.string.notifications_confirm_title), fontWeight = FontWeight.Bold) },
-            text = {
-                Column {
-                    Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Text(
-                            pending.summary,
-                            modifier = Modifier.fillMaxWidth().padding(12.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllow = !alwaysAllow } }
-                    ) {
-                        Checkbox(checked = alwaysAllow, onCheckedChange = { alwaysAllow = it })
-                        Text(stringResource(R.string.notifications_confirm_always_allow), style = MaterialTheme.typography.bodyMedium)
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
-                            .pointerInput(Unit) { detectTapGestures { alwaysAllowApp = !alwaysAllowApp } }
-                    ) {
-                        Checkbox(checked = alwaysAllowApp, onCheckedChange = { alwaysAllowApp = it })
-                        Text(
-                            stringResource(R.string.notifications_confirm_always_allow_app, pending.appLabel),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
-                }
+        ToolConfirmationDialog(
+            pending = pending,
+            onResolve = { allow, alwaysAllow, alwaysAllowApp ->
+                viewModel.resolveNotificationWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow, alwaysAllowApp = alwaysAllowApp)
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.resolveNotificationWriteConfirmation(allow = true, alwaysAllow = alwaysAllow, alwaysAllowApp = alwaysAllowApp)
-                }) {
-                    Text(stringResource(R.string.notifications_confirm_allow))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { viewModel.resolveNotificationWriteConfirmation(allow = false) },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                ) { Text(stringResource(R.string.notifications_confirm_deny)) }
-            }
+            icon = Icons.Default.Notifications,
+            title = stringResource(R.string.notifications_confirm_title),
+            monospaceSummary = false,
+            alwaysAllowLabel = stringResource(R.string.notifications_confirm_always_allow),
+            alwaysAllowKeyLabel = stringResource(R.string.notifications_confirm_always_allow_app, pending.keyLabel ?: ""),
+            allowLabel = stringResource(R.string.notifications_confirm_allow),
+            denyLabel = stringResource(R.string.notifications_confirm_deny)
         )
     }
 
@@ -1045,7 +816,8 @@ fun MainNavigation(
             title = { Text(stringResource(R.string.crash_title), fontWeight = FontWeight.Bold) },
             text = {
                 val trace = runCatching { org.json.JSONObject(report).optString("trace", "") }.getOrDefault("")
-                val clipboard = LocalClipboardManager.current
+                val clipboard = androidx.compose.ui.platform.LocalClipboard.current
+                val clipboardScope = rememberCoroutineScope()
                 Column {
                     Text(
                         stringResource(R.string.crash_message),
@@ -1089,7 +861,13 @@ fun MainNavigation(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             IconButton(
-                                onClick = { clipboard.setText(AnnotatedString(trace)) },
+                                onClick = {
+                                    clipboardScope.launch {
+                                        clipboard.setClipEntry(
+                                            androidx.compose.ui.platform.ClipEntry(android.content.ClipData.newPlainText("trace", trace))
+                                        )
+                                    }
+                                },
                                 modifier = Modifier.size(32.dp)
                             ) {
                                 Icon(

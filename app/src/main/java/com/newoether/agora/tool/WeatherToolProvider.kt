@@ -1,15 +1,7 @@
 package com.newoether.agora.tool
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Application
-import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Bundle
-import android.os.Looper
-import androidx.core.content.ContextCompat
 import com.newoether.agora.api.HttpClient
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
@@ -18,9 +10,7 @@ import com.newoether.agora.api.ToolProperty
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -32,7 +22,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlin.coroutines.resume
 
 /**
  * Tool that gives the model current conditions + a multi-day forecast for a location,
@@ -43,14 +32,16 @@ import kotlin.coroutines.resume
  *  1. Explicit `latitude`/`longitude` (e.g. it already has coordinates from [LocationToolProvider]).
  *  2. A free-text `location` (city, address, postcode, ...), resolved via Open-Meteo's
  *     geocoding endpoint — no device data touched at all.
- *  3. Nothing at all — auto-detect the device's location, using the exact same
- *     permission-request/confirm/fetch flow as [LocationToolProvider] (fine if granted
- *     and available, else coarse), rather than a separate no-permission fallback.
+ *  3. Nothing at all — auto-detect the device's location via [DeviceLocationSource], the
+ *     same fetch mechanics [LocationToolProvider] uses (fine if granted and available,
+ *     else coarse), rather than a separate no-permission fallback.
  *
  * [requestPermission] and [confirm] are set by the owning ViewModel and mirror
- * [LocationToolProvider]'s fields one-for-one (they're commonly wired to the very same
- * callbacks, since it's the same Android permission and the same in-app share-location
- * prompt either way); null means "proceed" for [confirm].
+ * [LocationToolProvider]'s fields one-for-one — they're commonly wired to literally the
+ * same callbacks (same Android permission, same in-app share-location prompt, and, within
+ * a single model turn, the same *answer*: see [com.newoether.agora.viewmodel.GenerationManager.confirmLocationShared]
+ * for why a turn that calls both `get_location` and `get_weather` only prompts once).
+ * `null` means "proceed" for [confirm].
  *
  * Open-Meteo happens to be self-hostable (they publish a Docker image), so — mirroring
  * [LocationToolProvider]'s Nominatim override — both endpoints are configurable via
@@ -61,6 +52,7 @@ class WeatherToolProvider(private val app: Application) : ToolProvider {
 
     var requestPermission: (suspend () -> Boolean)? = null
     var confirm: (suspend () -> Boolean)? = null
+    private val deviceLocation = DeviceLocationSource(app)
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.weatherEnabled) return emptyList()
@@ -166,11 +158,13 @@ class WeatherToolProvider(private val app: Application) : ToolProvider {
 
     /** Same permission-request → confirm → fetch flow as [LocationToolProvider.execute],
      *  returning which of permission_denied / user_denied / unavailable applies on failure
-     *  rather than a bare null, so the caller can report the specific reason. */
+     *  rather than a bare null, so the caller can report the specific reason. The fetch
+     *  mechanics themselves are shared via [DeviceLocationSource]; this method is just the
+     *  weather-tool-specific error mapping around it. */
     private suspend fun resolveDeviceLocation(): DeviceLocationResult {
-        if (!hasAnyLocationPermission()) {
+        if (!deviceLocation.hasAnyPermission()) {
             val granted = requestPermission?.invoke() ?: false
-            if (!granted || !hasAnyLocationPermission()) {
+            if (!granted || !deviceLocation.hasAnyPermission()) {
                 return DeviceLocationResult.Failed(err("permission_denied", "Location permission was not granted."))
             }
         }
@@ -180,70 +174,10 @@ class WeatherToolProvider(private val app: Application) : ToolProvider {
             return DeviceLocationResult.Failed(err("user_denied", "The user declined to share their location."))
         }
 
-        val location = fetchDeviceLocation()
+        val location = deviceLocation.fetch()
             ?: return DeviceLocationResult.Failed(err("unavailable", "Could not determine the current location."))
         return DeviceLocationResult.Found(location)
     }
-
-    private fun hasFine() =
-        ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasCoarse() =
-        ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasAnyLocationPermission() = hasFine() || hasCoarse()
-
-    /** Fine (GPS) when granted and available, else coarse (network) — identical strategy
-     *  to [LocationToolProvider.fetchLocation]. Deliberately its own copy rather than a
-     *  shared helper, small enough to duplicate rather than couple two otherwise-unrelated
-     *  tools together. */
-    @SuppressLint("MissingPermission") // permission state is checked by the caller before this runs
-    private suspend fun fetchDeviceLocation(): Location? {
-        val lm = app.getSystemService(Application.LOCATION_SERVICE) as? LocationManager ?: return null
-        val provider = when {
-            hasFine() && lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> null
-        }
-        val fresh = provider?.let { withTimeoutOrNull(15_000L) { requestSingleUpdate(lm, it) } }
-        return fresh ?: lastKnownAnyProvider(lm)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun lastKnownAnyProvider(lm: LocationManager): Location? {
-        val providers = listOfNotNull(
-            LocationManager.GPS_PROVIDER.takeIf { hasFine() },
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        )
-        return providers.mapNotNull { p ->
-            try { lm.getLastKnownLocation(p) } catch (_: Exception) { null }
-        }.maxByOrNull { it.time }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun requestSingleUpdate(lm: LocationManager, provider: String): Location? =
-        suspendCancellableCoroutine { cont ->
-            val listener = object : LocationListener {
-                override fun onLocationChanged(location: Location) {
-                    lm.removeUpdates(this)
-                    if (cont.isActive) cont.resume(location)
-                }
-                @Deprecated("Deprecated in Java, part of the LocationListener interface")
-                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-                override fun onProviderEnabled(provider: String) {}
-                override fun onProviderDisabled(provider: String) {
-                    lm.removeUpdates(this)
-                    if (cont.isActive) cont.resume(null)
-                }
-            }
-            cont.invokeOnCancellation { lm.removeUpdates(listener) }
-            try {
-                lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
-            } catch (_: Exception) {
-                if (cont.isActive) cont.resume(null)
-            }
-        }
 
     // ── Forecast fetch ─────────────────────────────────────────
 

@@ -69,7 +69,7 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
 
     /** In-app confirmation gate for interact/dismiss. Takes the source app's package name
      *  and display label so the caller can offer a per-app "always allow" alongside the
-     *  global one — see [NotificationWriteConfirmationController]. Set by the owning
+     *  global one — see [com.newoether.agora.viewmodel.ToolConfirmationController]. Set by the owning
      *  ViewModel. */
     var confirmWrite: (suspend (summary: String, packageName: String, appLabel: String) -> Boolean)? = null
 

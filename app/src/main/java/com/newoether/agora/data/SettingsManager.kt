@@ -59,6 +59,12 @@ data class ShellDeviceConfig(
     val description: String = "",
     val type: String = "conch",          // "conch" | "ssh"
     val enabled: Boolean = true,
+    // Per-server override of the global "confirm before running shell commands" setting
+    // (SettingsManager.shellConfirmEnabled). True (the default) means this server follows
+    // the global setting; false means commands on this specific server never prompt,
+    // regardless of the global toggle — the same "override" relationship [enabled] has to
+    // [SettingsManager.shellEnabled].
+    val confirmEnabled: Boolean = true,
     // Conch fields (type=conch)
     val serverUrl: String = "",
     val apiKey: String = "",
@@ -82,6 +88,10 @@ data class McpServerConfig(
     /** MCP Streamable HTTP endpoint, e.g. https://example.com/mcp */
     val url: String = "",
     val enabled: Boolean = true,
+    // Per-server override of the global "confirm before destructive MCP tool calls"
+    // setting (SettingsManager.mcpConfirmEnabled) — see ShellDeviceConfig.confirmEnabled,
+    // same relationship.
+    val confirmEnabled: Boolean = true,
     /** Convenience field — sent as `Authorization: Bearer <token>` when non-blank. */
     val bearerToken: String = "",
     /** Additional custom request headers (e.g. API keys some servers expect by name). */
@@ -186,6 +196,12 @@ class SettingsManager(private val context: Context) {
         val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
         val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
         val DEVICE_INFO_ENABLED = booleanPreferencesKey("device_info_enabled")
+        // Whether AgoraVoiceInteractionSession captures the foreground app's on-screen
+        // text (via AssistStructure) and attaches it when the assist gesture launches the
+        // app. Read synchronously (runBlocking) from that session, same pattern as
+        // MainActivity.attachBaseContext's appLanguage read — it's a single cached
+        // DataStore value, not a cold read, so this is cheap even on the main thread.
+        val ASSIST_ATTACH_SCREEN_TEXT_ENABLED = booleanPreferencesKey("assist_attach_screen_text_enabled")
         val PACKAGE_QUERY_ENABLED = booleanPreferencesKey("package_query_enabled")
         val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
@@ -379,6 +395,7 @@ class SettingsManager(private val context: Context) {
     // Battery/ringer/network/storage/build info — no dangerous permission involved, so
     // this defaults on like shell/mcp rather than off like location/calendar/contacts.
     val deviceInfoEnabled: Flow<Boolean> = context.dataStore.data.map { it[DEVICE_INFO_ENABLED] ?: true }
+    val assistAttachScreenTextEnabled: Flow<Boolean> = context.dataStore.data.map { it[ASSIST_ATTACH_SCREEN_TEXT_ENABLED] ?: true }
     // Reveals the user's installed-apps list — opt-in like location/calendar/contacts,
     // and only ever actually available on the fdroid flavor regardless of this toggle.
     val packageQueryEnabled: Flow<Boolean> = context.dataStore.data.map { it[PACKAGE_QUERY_ENABLED] ?: false }
@@ -785,6 +802,11 @@ class SettingsManager(private val context: Context) {
     suspend fun saveDeviceInfoEnabled(enabled: Boolean) {
         context.dataStore.edit { it[DEVICE_INFO_ENABLED] = enabled }
     }
+
+    suspend fun saveAssistAttachScreenTextEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[ASSIST_ATTACH_SCREEN_TEXT_ENABLED] = enabled }
+    }
+
     suspend fun savePackageQueryEnabled(enabled: Boolean) {
         context.dataStore.edit { it[PACKAGE_QUERY_ENABLED] = enabled }
     }

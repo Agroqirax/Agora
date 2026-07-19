@@ -47,8 +47,10 @@ data class McpServerInfo(val name: String, val version: String)
 class McpToolProvider : ToolProvider {
     /** User-confirmation gate for destructive MCP tool calls. Set by GenerationManager,
      *  which wires it to the ViewModel's confirmation controller. Returns true to
-     *  proceed, false to deny. Never called for non-destructive tools. */
-    var confirm: (suspend (server: String, toolName: String, summary: String) -> Boolean)? = null
+     *  proceed, false to deny. Never called for non-destructive tools. [serverId] is
+     *  the stable [McpServerConfig.id] — use this, not [serverName], as the trust-list
+     *  key: display names can collide or be renamed after being trusted. */
+    var confirm: (suspend (serverId: String, serverName: String, toolName: String, summary: String) -> Boolean)? = null
 
     companion object {
         private const val PROTOCOL_VERSION = "2025-06-18"
@@ -366,7 +368,7 @@ class McpToolProvider : ToolProvider {
 
         if (tool.destructive) {
             val summary = buildSummary(tool.name, arguments)
-            val allowed = confirm?.invoke(server.name, tool.name, summary) ?: true
+            val allowed = confirm?.invoke(server.id, server.name, tool.name, summary) ?: true
             if (!allowed) return "Error: the user declined to run \"${tool.name}\" on MCP server \"${server.name}\""
         }
 

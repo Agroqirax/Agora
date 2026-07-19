@@ -1,15 +1,7 @@
 package com.newoether.agora.tool
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.app.Application
-import android.content.pm.PackageManager
 import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Bundle
-import android.os.Looper
-import androidx.core.content.ContextCompat
 import com.newoether.agora.api.HttpClient
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
@@ -17,20 +9,18 @@ import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
-import kotlin.coroutines.resume
 
 /**
  * Tool that reports the device's current location to the model. No Google Play
- * Services dependency — uses the platform [LocationManager] directly (GPS/network
- * providers), which keeps the app usable on de-Googled / F-Droid builds.
+ * Services dependency — uses the platform [android.location.LocationManager] directly
+ * (GPS/network providers, via [DeviceLocationSource]), which keeps the app usable on
+ * de-Googled / F-Droid builds.
  *
  * Two independent gates run before any location is read:
  *  - [requestPermission]: triggers the OS runtime-permission dialog when neither
@@ -49,13 +39,14 @@ class LocationToolProvider(private val app: Application) : ToolProvider {
 
     var confirm: (suspend () -> Boolean)? = null
     var requestPermission: (suspend () -> Boolean)? = null
+    private val deviceLocation = DeviceLocationSource(app)
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.locationEnabled) return emptyList()
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = "get_location",
-                description = "Get the user's current geographic location (latitude, longitude, accuracy, and, if enabled, a best-effort street address reverse-geocoded via Nominatim/OpenStreetMap). Prefer the highest-accuracy fix the device can provide. Requires the user's permission and may prompt them.",
+                description = "Get the user's current geographic location (latitude, longitude, accuracy, and, if enabled, a best-effort street address reverse-geocoded via Nominatim/OpenStreetMap). Prefer the highest-accuracy fix the device can provide. Requires the user's permission and may prompt them. If the user is only asking about weather, prefer get_weather directly instead of calling this first — it can resolve the device's location itself.",
                 parameters = ToolParameters(properties = emptyMap(), required = emptyList())
             ))
         )
@@ -66,9 +57,9 @@ class LocationToolProvider(private val app: Application) : ToolProvider {
     override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
         if (!ctx.locationEnabled) return err("disabled", "The location tool is disabled in settings.")
 
-        if (!hasAnyLocationPermission()) {
+        if (!deviceLocation.hasAnyPermission()) {
             val granted = requestPermission?.invoke() ?: false
-            if (!granted || !hasAnyLocationPermission()) {
+            if (!granted || !deviceLocation.hasAnyPermission()) {
                 return err("permission_denied", "Location permission was not granted.")
             }
         }
@@ -77,7 +68,7 @@ class LocationToolProvider(private val app: Application) : ToolProvider {
         if (!allowed) return err("user_denied", "The user declined to share their location.")
 
         return try {
-            val location = fetchLocation() ?: return err("unavailable", "Could not determine the current location.")
+            val location = deviceLocation.fetch() ?: return err("unavailable", "Could not determine the current location.")
             buildJsonObject {
                 put("type", "location")
                 put("latitude", location.latitude)
@@ -99,66 +90,6 @@ class LocationToolProvider(private val app: Application) : ToolProvider {
             err("location_error", e.message)
         }
     }
-
-    private fun hasFine() =
-        ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasCoarse() =
-        ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasAnyLocationPermission() = hasFine() || hasCoarse()
-
-    /** Fine (GPS) when granted and available, else coarse (network). Falls back to the
-     *  freshest last-known fix if a live update times out or no provider is enabled. */
-    @SuppressLint("MissingPermission") // permission state is checked by the caller before this runs
-    private suspend fun fetchLocation(): Location? {
-        val lm = app.getSystemService(Application.LOCATION_SERVICE) as? LocationManager ?: return null
-
-        val provider = when {
-            hasFine() && lm.isProviderEnabled(LocationManager.GPS_PROVIDER) -> LocationManager.GPS_PROVIDER
-            lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) -> LocationManager.NETWORK_PROVIDER
-            else -> null
-        }
-
-        val fresh = provider?.let { withTimeoutOrNull(15_000L) { requestSingleUpdate(lm, it) } }
-        return fresh ?: lastKnownAnyProvider(lm)
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun lastKnownAnyProvider(lm: LocationManager): Location? {
-        val providers = listOfNotNull(
-            LocationManager.GPS_PROVIDER.takeIf { hasFine() },
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        )
-        return providers.mapNotNull { p ->
-            try { lm.getLastKnownLocation(p) } catch (_: Exception) { null }
-        }.maxByOrNull { it.time }
-    }
-
-    @SuppressLint("MissingPermission")
-    private suspend fun requestSingleUpdate(lm: LocationManager, provider: String): Location? =
-        suspendCancellableCoroutine { cont ->
-            val listener = object : LocationListener {
-                override fun onLocationChanged(location: Location) {
-                    lm.removeUpdates(this)
-                    if (cont.isActive) cont.resume(location)
-                }
-                @Deprecated("Deprecated in Java, part of the LocationListener interface")
-                override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
-                override fun onProviderEnabled(provider: String) {}
-                override fun onProviderDisabled(provider: String) {
-                    lm.removeUpdates(this)
-                    if (cont.isActive) cont.resume(null)
-                }
-            }
-            cont.invokeOnCancellation { lm.removeUpdates(listener) }
-            try {
-                lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
-            } catch (_: Exception) {
-                if (cont.isActive) cont.resume(null)
-            }
-        }
 
     /** Best-effort street address via Nominatim's `/reverse` endpoint. Network call, run
      *  off the main thread; failures (offline, self-hosted instance down, rate-limited,

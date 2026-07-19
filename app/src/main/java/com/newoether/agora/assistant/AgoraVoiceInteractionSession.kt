@@ -14,12 +14,17 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.flow.first
 
 /**
  * Invoked by the system on the assist gesture. Captures the on-screen text of the
  * foreground app via [AssistStructure] (no screenshot/OCR involved), writes it to a temp
  * file, and hands off to [MainActivity] exactly the way any other text-file attachment
  * would be handed to the chat composer — see [com.newoether.agora.ui.chat.bottombar.ChatComposerState.onPickFiles].
+ *
+ * Screen-text capture itself is gated by
+ * [com.newoether.agora.data.SettingsManager.assistAttachScreenTextEnabled] (Settings →
+ * Assistant) — off, and this is a pure app launcher with no context attached at all.
  *
  * No overlay UI is shown; this session is a pure trampoline. FLAG_SECURE windows and
  * password fields yield no text — the target app still opens normally, just with no
@@ -30,7 +35,14 @@ class AgoraVoiceInteractionSession(context: Context) : VoiceInteractionSession(c
     override fun onHandleAssist(data: Bundle?, structure: AssistStructure?, content: AssistContent?) {
         super.onHandleAssist(data, structure, content)
 
-        val capturedText = try {
+        // Single cached DataStore read, same synchronous pattern as
+        // MainActivity.attachBaseContext's appLanguage lookup — not a network/disk-cold
+        // read, so runBlocking here doesn't meaningfully block the assist gesture.
+        val attachEnabled = kotlinx.coroutines.runBlocking {
+            com.newoether.agora.data.SettingsManager(context).assistAttachScreenTextEnabled.first()
+        }
+
+        val capturedText = if (!attachEnabled) null else try {
             structure?.let { extractText(it) }
         } catch (e: Exception) {
             DebugLog.e("AgoraAssist", "Failed to extract assist structure text", e)

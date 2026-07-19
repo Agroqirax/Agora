@@ -169,16 +169,46 @@ class GenerationManager(
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
     /** User-confirmation gate for remote shell mutations. Set by the ViewModel.
-     *  Returns true to proceed, false to deny. */
-    var onConfirmShellCommand: (suspend (server: String, summary: String) -> Boolean)? = null
+     *  Returns true to proceed, false to deny. [serverId] ([ShellDeviceConfig.id]) is the
+     *  stable trust-list key; [serverLabel] is only for display. */
+    var onConfirmShellCommand: (suspend (serverId: String, serverLabel: String, summary: String) -> Boolean)? = null
 
     /** User-confirmation gate for destructive MCP tool calls. Set by the ViewModel.
-     *  Returns true to proceed, false to deny. Never invoked for non-destructive tools. */
-    var onConfirmMcpToolCall: (suspend (server: String, toolName: String, summary: String) -> Boolean)? = null
+     *  Returns true to proceed, false to deny. Never invoked for non-destructive tools.
+     *  [serverId] ([McpServerConfig.id]) is the stable trust-list key; [serverName] is
+     *  only for display. */
+    var onConfirmMcpToolCall: (suspend (serverId: String, serverName: String, toolName: String, summary: String) -> Boolean)? = null
 
     /** User-confirmation gate for sharing location with the model. Set by the
-     *  ViewModel. Returns true to proceed, false to deny. */
+     *  ViewModel. Returns true to proceed, false to deny.
+     *
+     *  Shared, unmodified, by both [LocationToolProvider] and [WeatherToolProvider]'s
+     *  device-location auto-detect path — they read the same underlying data, so they
+     *  go through the same trust gate. To avoid asking twice in a row when a single
+     *  model turn calls both tools, [confirmLocationShared] memoizes the first answer
+     *  for the rest of the current [generate] call; see there for details. */
     var onConfirmLocationRequest: (suspend () -> Boolean)? = null
+
+    /** Memoized answer to [onConfirmLocationRequest] for the current [generate] turn —
+     *  reset to null at the start of every turn, so a fresh turn always asks again if
+     *  location confirmation is enabled, but two tool calls within the *same* turn (e.g.
+     *  the model calls get_location, then get_weather with no explicit coordinates) only
+     *  ever show one prompt. Deliberately turn-scoped rather than session-scoped: this is
+     *  purely a same-turn double-prompt fix, not a new trust tier — a denial here doesn't
+     *  persist past the turn, and an allow here doesn't skip the confirmEnabled/settings
+     *  check on the next turn. */
+    @Volatile
+    private var locationConfirmMemoForTurn: Boolean? = null
+
+    /** Runs [onConfirmLocationRequest] at most once per [generate] turn; see
+     *  [locationConfirmMemoForTurn]. Both [locationToolProvider] and [weatherToolProvider]
+     *  call this instead of [onConfirmLocationRequest] directly. */
+    private suspend fun confirmLocationShared(): Boolean {
+        locationConfirmMemoForTurn?.let { return it }
+        val result = onConfirmLocationRequest?.invoke() ?: true
+        locationConfirmMemoForTurn = result
+        return result
+    }
 
     /** Runtime location-permission request gate. Set by the ViewModel; triggers the
      *  system permission dialog and returns whether access was granted. */
@@ -231,15 +261,15 @@ class GenerationManager(
     private val imageGenToolProvider = ImageGenToolProvider(app)
     private val shellToolProvider = ShellToolProvider(sandboxFactory).also { stp ->
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
-        stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
+        stp.confirm = { serverId, serverLabel, summary -> onConfirmShellCommand?.invoke(serverId, serverLabel, summary) ?: true }
     }
     private val mcpToolProvider = McpToolProvider().also { mp ->
-        mp.confirm = { server, toolName, summary -> onConfirmMcpToolCall?.invoke(server, toolName, summary) ?: true }
+        mp.confirm = { serverId, serverName, toolName, summary -> onConfirmMcpToolCall?.invoke(serverId, serverName, toolName, summary) ?: true }
     }
     val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
         get() = mcpToolProvider.serverInfoFlow
     private val locationToolProvider = LocationToolProvider(app).also { lp ->
-        lp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
+        lp.confirm = { confirmLocationShared() }
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
     }
     private val deviceInfoToolProvider = DeviceInfoToolProvider(app)
@@ -269,7 +299,7 @@ class GenerationManager(
         // Only consulted on the device-location auto-detect path — same permission and
         // confirm gates as LocationToolProvider, since it's the same underlying data.
         wp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
-        wp.confirm = { onConfirmLocationRequest?.invoke() ?: true }
+        wp.confirm = { confirmLocationShared() }
     }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
@@ -574,6 +604,9 @@ class GenerationManager(
         // Destructure into locals so the body below reads exactly as before.
         val (onStreamUpdate, onLoadingChange, onGeneratingIdChange, onStreamClear, isLatestPersist) = callbacks
         val provider = getProviderInstance(config.providerName)
+        // Fresh turn: forget any memoized location-confirm answer from a previous turn
+        // (see confirmLocationShared/locationConfirmMemoForTurn).
+        locationConfirmMemoForTurn = null
 
         onLoadingChange(true)
         onGeneratingIdChange(conversationId)

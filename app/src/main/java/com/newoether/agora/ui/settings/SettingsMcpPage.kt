@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Label
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -151,6 +152,7 @@ private fun ServerEditor(
     val isNewlyAdded = server.id == newlyAddedServerId
     var expanded by remember(server.id) { mutableStateOf(false) }
     var enabledInput by remember(server.id) { mutableStateOf(server.enabled) }
+    var confirmEnabledInput by remember(server.id) { mutableStateOf(server.confirmEnabled) }
     var nameInput by remember(server.id) { mutableStateOf(server.name) }
     var descInput by remember(server.id) { mutableStateOf(server.description) }
     var urlInput by remember(server.id) { mutableStateOf(server.url) }
@@ -164,7 +166,7 @@ private fun ServerEditor(
     val mcpServerInfoMap by viewModel.mcpServerInfo.collectAsState()
 
     LaunchedEffect(server) {
-        enabledInput = server.enabled; nameInput = server.name; descInput = server.description
+        enabledInput = server.enabled; confirmEnabledInput = server.confirmEnabled; nameInput = server.name; descInput = server.description
         urlInput = server.url; tokenInput = server.bearerToken
         headersInput = headersToText(server.headers); timeoutInput = server.timeout
     }
@@ -234,6 +236,13 @@ private fun ServerEditor(
                     Checkbox(checked = enabledInput, onCheckedChange = { enabledInput = it })
                     Text(stringResource(R.string.mcp_server_enabled), style = MaterialTheme.typography.bodyMedium)
                 }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { confirmEnabledInput = !confirmEnabledInput }
+                ) {
+                    Checkbox(checked = confirmEnabledInput, onCheckedChange = { confirmEnabledInput = it })
+                    Text(stringResource(R.string.mcp_server_confirm_enabled), style = MaterialTheme.typography.bodyMedium)
+                }
 
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = nameInput, onValueChange = { nameInput = it }, label = { Text(stringResource(R.string.mcp_server_name)) },
@@ -254,7 +263,7 @@ private fun ServerEditor(
                     shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(10.dp))
                 OutlinedTextField(value = headersInput, onValueChange = { headersInput = it }, label = { Text(stringResource(R.string.mcp_server_headers)) },
-                    placeholder = { Text(stringResource(R.string.mcp_server_headers_hint)) }, leadingIcon = { Icon(Icons.Default.List, null) },
+                    placeholder = { Text(stringResource(R.string.mcp_server_headers_hint)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
                     supportingText = { Text(stringResource(R.string.mcp_server_headers_desc)) },
                     minLines = 2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
 
@@ -324,7 +333,7 @@ private fun ServerEditor(
                     }
                     Button(onClick = {
                         viewModel.updateMcpServer(server.copy(
-                            enabled = enabledInput, name = nameInput.trim(), description = descInput.trim(),
+                            enabled = enabledInput, confirmEnabled = confirmEnabledInput, name = nameInput.trim(), description = descInput.trim(),
                             url = urlInput.trim(), bearerToken = tokenInput.trim(),
                             headers = textToHeaders(headersInput), timeout = timeoutInput
                         )); expanded = false
