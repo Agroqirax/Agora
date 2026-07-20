@@ -134,9 +134,9 @@ The Weather tool gives the model current conditions and a multi-day forecast, vi
 
 The model can pick a location three ways:
 
+- Nothing at all — for "the weather" or anywhere the user means their current location, it automatically uses your device's location, without needing a separate location lookup first
 - A free-text place name it names itself (e.g. "weather in Lisbon")
-- Coordinates it already has (e.g. from the Location tool)
-- Nothing at all — it automatically uses your device's current location
+- Coordinates it already has (e.g. from the Location tool), for a specific place other than where the user is now
 
 For automatic location, it uses the exact same permission request and "confirm before sharing location" flow as the Location tool (fine location if granted and available, else coarse) — it does not have a separate no-permission fallback, so the first time it needs to auto-detect, expect the same permission prompt the Location tool would show.
 

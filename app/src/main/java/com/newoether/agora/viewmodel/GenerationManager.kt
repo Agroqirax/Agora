@@ -228,7 +228,6 @@ class GenerationManager(
     /** User-confirmation gate for setting/dismissing/snoozing alarms and timers.
      *  Set by the ViewModel. Returns true to proceed, false to deny. */
     var onConfirmAlarmWrite: (suspend (summary: String) -> Boolean)? = null
-    var onConfirmAppLaunchWrite: (suspend (summary: String) -> Boolean)? = null
 
     /** Opens the notification-access settings screen when the media control tool
      *  needs it. Set by the ViewModel. Returns the post-open permission state. */
@@ -242,15 +241,8 @@ class GenerationManager(
     var onRequestContactsPermission: (suspend () -> Boolean)? = null
 
     /** User-confirmation gate for interacting with/dismissing another app's notification.
-     *  Set by the ViewModel. Returns true to proceed, false to deny. Carries the source
-     *  app's package name and display label so the ViewModel can offer a per-app
-     *  "always allow" alongside the usual global one. */
-    var onConfirmNotificationWrite: (suspend (summary: String, packageName: String, appLabel: String) -> Boolean)? = null
-
-    /** User-confirmation gate for reading notification content (list/get) — separate from
-     *  [onConfirmNotificationWrite] since reading is its own trust tier. Set by the
-     *  ViewModel. */
-    var onConfirmNotificationRead: (suspend (summary: String) -> Boolean)? = null
+     *  Set by the ViewModel. Returns true to proceed, false to deny. */
+    var onConfirmNotificationWrite: (suspend (summary: String) -> Boolean)? = null
 
     /** Opens the notification-access settings screen when list/get/interact/dismiss-by-key
      *  need it. Set by the ViewModel. Returns the post-open permission state. */
@@ -278,7 +270,7 @@ class GenerationManager(
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }
     }
     private val deviceInfoToolProvider = DeviceInfoToolProvider(app)
-    private val packageQueryToolProvider = PackageQueryToolProvider(packageQueryProvider, app)
+    private val packageQueryToolProvider = PackageQueryToolProvider(packageQueryProvider)
     private val calendarToolProvider = CalendarToolProvider(app).also { cp ->
         cp.confirmWrite = { summary -> onConfirmCalendarWrite?.invoke(summary) ?: true }
         cp.requestPermission = { onRequestCalendarPermission?.invoke() ?: false }
@@ -290,15 +282,12 @@ class GenerationManager(
     private val alarmToolProvider = AlarmToolProvider(app).also { ap ->
         ap.confirmWrite = { summary -> onConfirmAlarmWrite?.invoke(summary) ?: true }
     }
-    private val appLaunchToolProvider = AppLaunchToolProvider(app).also { alp ->
-        alp.confirmWrite = { summary -> onConfirmAppLaunchWrite?.invoke(summary) ?: true }
-    }
+    private val appLaunchToolProvider = AppLaunchToolProvider(app)
     private val mediaControlToolProvider = MediaControlToolProvider(app).also { mp ->
         mp.requestPermission = { onRequestMediaControlPermission?.invoke() ?: false }
     }
     private val notificationToolProvider = NotificationToolProvider(app).also { np ->
-        np.confirmWrite = { summary, pkg, label -> onConfirmNotificationWrite?.invoke(summary, pkg, label) ?: true }
-        np.confirmRead = { summary -> onConfirmNotificationRead?.invoke(summary) ?: true }
+        np.confirmWrite = { summary -> onConfirmNotificationWrite?.invoke(summary) ?: true }
         np.requestAccessPermission = { onRequestNotificationAccessPermission?.invoke() ?: false }
         np.requestPostPermission = { onRequestNotificationPostPermission?.invoke() ?: false }
     }

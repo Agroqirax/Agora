@@ -9,7 +9,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
@@ -20,13 +19,10 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Calculate
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -64,13 +60,9 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
     val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
     val appLaunchEnabled by viewModel.settings.appLaunchEnabled.collectAsState()
-    val appLaunchConfirmEnabled by viewModel.settings.appLaunchConfirmEnabled.collectAsState()
     val mediaControlEnabled by viewModel.settings.mediaControlEnabled.collectAsState()
     val notificationsEnabled by viewModel.settings.notificationsEnabled.collectAsState()
     val notificationsConfirmEnabled by viewModel.settings.notificationsConfirmEnabled.collectAsState()
-    val notificationsReadConfirmEnabled by viewModel.settings.notificationsReadConfirmEnabled.collectAsState()
-    val notificationsInteractAllowedApps by viewModel.notificationsInteractAllowedApps.collectAsState()
-    var notificationAppsListExpanded by remember { mutableStateOf(false) }
     val torchEnabled by viewModel.settings.torchEnabled.collectAsState()
     val calculatorEnabled by viewModel.settings.calculatorEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
@@ -121,17 +113,6 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         trailingContent = { Switch(checked = appLaunchEnabled, onCheckedChange = { viewModel.setAppLaunchEnabled(it) }) },
                         modifier = Modifier.clickable { viewModel.setAppLaunchEnabled(!appLaunchEnabled) }
                     )
-                }
-                if (appLaunchEnabled) {
-                    add {
-                        SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.app_launch_confirm_setting)) },
-                            supportingContent = { Text(stringResource(R.string.app_launch_confirm_setting_desc)) },
-                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
-                            trailingContent = { Switch(checked = appLaunchConfirmEnabled, onCheckedChange = { viewModel.settings.setAppLaunchConfirmEnabled(it) }) },
-                            modifier = Modifier.clickable { viewModel.settings.setAppLaunchConfirmEnabled(!appLaunchConfirmEnabled) }
-                        )
-                    }
                 }
                 add {
                     SettingsItem(
@@ -323,63 +304,12 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 if (notificationsEnabled) {
                     add {
                         SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.notifications_read_confirm_setting)) },
-                            supportingContent = { Text(stringResource(R.string.notifications_read_confirm_setting_desc)) },
-                            leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
-                            trailingContent = { Switch(checked = notificationsReadConfirmEnabled, onCheckedChange = { viewModel.settings.setNotificationsReadConfirmEnabled(it) }) },
-                            modifier = Modifier.clickable { viewModel.settings.setNotificationsReadConfirmEnabled(!notificationsReadConfirmEnabled) }
-                        )
-                    }
-                    add {
-                        SettingsItem(
                             headlineContent = { Text(stringResource(R.string.notifications_confirm_setting)) },
                             supportingContent = { Text(stringResource(R.string.notifications_confirm_setting_desc)) },
                             leadingContent = { Icon(Icons.Default.Shield, null, tint = MaterialTheme.colorScheme.primary) },
                             trailingContent = { Switch(checked = notificationsConfirmEnabled, onCheckedChange = { viewModel.settings.setNotificationsConfirmEnabled(it) }) },
                             modifier = Modifier.clickable { viewModel.settings.setNotificationsConfirmEnabled(!notificationsConfirmEnabled) }
                         )
-                    }
-                    if (notificationsInteractAllowedApps.isNotEmpty()) {
-                        val context = LocalContext.current
-                        val sortedApps = notificationsInteractAllowedApps.sorted()
-                        val (visibleApps, hiddenCount) = collapsibleTrustList(sortedApps, notificationAppsListExpanded, collapseThreshold = 0)
-                        visibleApps.forEach { pkg ->
-                            val label = remember(pkg) {
-                                try {
-                                    val pm = context.packageManager
-                                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                                } catch (e: Exception) { pkg }
-                            }
-                            add {
-                                SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.notifications_allowed_app_row, label)) },
-                                    supportingContent = { Text(stringResource(R.string.notifications_allowed_app_row_desc)) },
-                                    leadingContent = { Icon(Icons.Default.CheckCircle, null, tint = MaterialTheme.colorScheme.primary) },
-                                    trailingContent = {
-                                        TextButton(onClick = { viewModel.revokeNotificationInteractAppAllowed(pkg) }) {
-                                            Text(stringResource(R.string.notifications_allowed_app_revoke))
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                        if (hiddenCount > 0) {
-                            add {
-                                SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.trust_list_show_more, hiddenCount)) },
-                                    leadingContent = { Icon(Icons.Default.ExpandMore, null, tint = MaterialTheme.colorScheme.primary) },
-                                    modifier = Modifier.clickable { notificationAppsListExpanded = true }
-                                )
-                            }
-                        } else if (notificationAppsListExpanded && sortedApps.isNotEmpty()) {
-                            add {
-                                SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.trust_list_show_less)) },
-                                    leadingContent = { Icon(Icons.Default.ExpandLess, null, tint = MaterialTheme.colorScheme.primary) },
-                                    modifier = Modifier.clickable { notificationAppsListExpanded = false }
-                                )
-                            }
-                        }
                     }
                 }
             })

@@ -36,6 +36,13 @@ import kotlinx.serialization.json.put
  *     same fetch mechanics [LocationToolProvider] uses (fine if granted and available,
  *     else coarse), rather than a separate no-permission fallback.
  *
+ * For "current location" requests the tool description steers the model straight to (3):
+ * calling [LocationToolProvider] first and feeding its result into `location`/`latitude`/
+ * `longitude` here is redundant (this tool already does its own auto-detect) and failure-
+ * prone (a reverse-geocoded street address is often too specific for the geocoding
+ * endpoint to resolve, unlike a plain city name) — worst case that turns one weather
+ * question into three tool calls. (1)/(2) exist for *other* locations the user names.
+ *
  * [requestPermission] and [confirm] are set by the owning ViewModel and mirror
  * [LocationToolProvider]'s fields one-for-one — they're commonly wired to literally the
  * same callbacks (same Android permission, same in-app share-location prompt, and, within
@@ -59,25 +66,32 @@ class WeatherToolProvider(private val app: Application) : ToolProvider {
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = GET_WEATHER,
-                description = "Get current conditions and a multi-day forecast for a location. Pass either " +
-                    "`location` (a free-text place name, address, or postcode) or explicit `latitude`/" +
-                    "`longitude`. If none of these are given, it uses the device's current location " +
-                    "instead — this requires the user's location permission and may prompt them.",
+                description = "Get current conditions and a multi-day forecast for a location. For \"the " +
+                    "weather\"/\"the weather here\"/any request about the user's current location, omit " +
+                    "location/latitude/longitude entirely — this tool auto-detects the device's location " +
+                    "itself, so there's no need to call get_location first or pass its result in. Only pass " +
+                    "`location` (a free-text place name, city, or postcode — not a precise street address) " +
+                    "when the user is asking about somewhere other than where they are right now.",
                 parameters = ToolParameters(
                     properties = mapOf(
                         "location" to ToolProperty(
                             type = "string",
                             description = "Free-text place to look up, e.g. \"Paris, France\", \"Tokyo\", " +
-                                "\"90210\". Omit to auto-detect the device's location, or pass latitude/" +
-                                "longitude directly instead."
+                                "\"90210\" — a city/region/postcode, not a full street address (those are " +
+                                "often too specific to resolve). Omit this and latitude/longitude for the " +
+                                "user's current location; the tool auto-detects it."
                         ),
                         "latitude" to ToolProperty(
                             type = "number",
-                            description = "Latitude, if already known. Must be given together with longitude."
+                            description = "Latitude, only if you already have exact coordinates for a specific " +
+                                "non-current location. Must be given together with longitude. For the user's " +
+                                "current location, omit this — the tool auto-detects it, no need to fetch it yourself."
                         ),
                         "longitude" to ToolProperty(
                             type = "number",
-                            description = "Longitude, if already known. Must be given together with latitude."
+                            description = "Longitude, only if you already have exact coordinates for a specific " +
+                                "non-current location. Must be given together with latitude. For the user's " +
+                                "current location, omit this — the tool auto-detects it, no need to fetch it yourself."
                         ),
                         "forecast_days" to ToolProperty(
                             type = "integer",

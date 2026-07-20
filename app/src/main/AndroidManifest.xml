@@ -32,7 +32,8 @@
              MAIN/LAUNCHER makes every app with a launcher icon visible to
              queryIntentActivities()/getLaunchIntentForPackage(), on every flavor,
              with no permission review and no QUERY_ALL_PACKAGES declaration. Backs
-             AppLaunchToolProvider's list_launchable_apps/open_app/*_shortcut tools.
+             PackageQueryToolProvider's list_installed_apps and AppLaunchToolProvider's
+             open_app tools.
              See: https://developer.android.com/training/package-visibility -->
         <intent>
             <action android:name="android.intent.action.MAIN" />

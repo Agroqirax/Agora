@@ -274,13 +274,11 @@ class ChatViewModel(
             gm.onConfirmContactsWrite = { summary -> contactsWriteConfirmation.confirm(summary) }
             gm.onRequestContactsPermission = { contactsPermission.request() }
             gm.onConfirmAlarmWrite = { summary -> alarmWriteConfirmation.confirm(summary) }
-            gm.onConfirmAppLaunchWrite = { summary -> appLaunchWriteConfirmation.confirm(summary) }
             gm.onRequestMediaControlPermission = {
                 com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(getApplication())
                 com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(getApplication())
             }
-            gm.onConfirmNotificationWrite = { summary, pkg, label -> notificationWriteConfirmation.confirm(summary, pkg, label) }
-            gm.onConfirmNotificationRead = { summary -> notificationReadConfirmation.confirm(summary) }
+            gm.onConfirmNotificationWrite = { summary -> notificationWriteConfirmation.confirm(summary) }
             gm.onRequestNotificationAccessPermission = {
                 com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(getApplication())
                 com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(getApplication())
@@ -496,52 +494,21 @@ class ChatViewModel(
     fun resolveAlarmWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
         alarmWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
-    /** In-app "open this app/shortcut?" prompt (see [ToolConfirmationController]). Like
-     *  alarms, opening an app doesn't need a dangerous runtime permission, so there's no
-     *  matching [RuntimePermissionController] here either. */
-    private val appLaunchWriteConfirmation = ToolConfirmationController<Unit>(
-        confirmEnabled = { settings.appLaunchConfirmEnabled.value },
-        setConfirmEnabled = { settings.setAppLaunchConfirmEnabled(it) }
-    )
-    val pendingAppLaunchWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
-        get() = appLaunchWriteConfirmation.pending
-
-    fun resolveAppLaunchWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        appLaunchWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
-
     fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
     fun setAppLaunchEnabled(enabled: Boolean) = settings.setAppLaunchEnabled(enabled)
 
-    // ── Notification tool read/write-confirmation + runtime permission gates ──
-    /** In-app "read your notifications?" prompt for list/get — separate setting and
-     *  separate prompt from interact/dismiss below, since reading notification bodies is
-     *  its own trust tier and defaults to confirm-on. */
-    private val notificationReadConfirmation = ToolConfirmationController<Unit>(
-        confirmEnabled = { settings.notificationsReadConfirmEnabled.value },
-        setConfirmEnabled = { settings.setNotificationsReadConfirmEnabled(it) }
-    )
-    val pendingNotificationReadConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
-        get() = notificationReadConfirmation.pending
-
-    fun resolveNotificationReadConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
-        notificationReadConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
-
-    /** In-app "interact with/dismiss this notification?" prompt, keyed by package name.
-     *  Unlike the read gate above, this one also supports permanently trusting a single
-     *  app (e.g. "always allow Discord") without turning off confirmation for every other
-     *  app — that's [ToolConfirmationController]'s per-key trust list, wired to the
-     *  package-name allowlist. */
-    private val notificationWriteConfirmation = ToolConfirmationController<String>(
+    // ── Notification tool write-confirmation + runtime permission gates ──
+    // list/get (reading notifications) aren't gated, same as every other read-only tool.
+    /** In-app "interact with/dismiss this notification?" prompt. */
+    private val notificationWriteConfirmation = ToolConfirmationController<Unit>(
         confirmEnabled = { settings.notificationsConfirmEnabled.value },
-        setConfirmEnabled = { settings.setNotificationsConfirmEnabled(it) },
-        isKeyAlwaysAllowed = { pkg -> settings.notificationsInteractAllowedApps.value.contains(pkg) },
-        setKeyAlwaysAllowed = { pkg, allowed -> settings.setNotificationInteractAppAllowed(pkg, allowed) }
+        setConfirmEnabled = { settings.setNotificationsConfirmEnabled(it) }
     )
-    val pendingNotificationWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<String>?>
+    val pendingNotificationWriteConfirmation: StateFlow<ToolConfirmationController.PendingConfirmation<Unit>?>
         get() = notificationWriteConfirmation.pending
 
-    fun resolveNotificationWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false, alwaysAllowApp: Boolean = false) =
-        notificationWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow, alwaysAllowKey = alwaysAllowApp)
+    fun resolveNotificationWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
+        notificationWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
 
     /** POST_NOTIFICATIONS is an ordinary runtime permission (Android 13+; auto-granted
      *  below that), unlike the notification-*listener* access `list`/`get`/`interact`/
@@ -554,12 +521,6 @@ class ChatViewModel(
         get() = notificationPostPermission.pendingRequest
 
     fun resolveNotificationPostPermission(granted: Boolean) = notificationPostPermission.resolve(granted)
-
-    /** Currently always-allowed app packages for notification interact/dismiss, and a way
-     *  to revoke one — surfaced in Settings so this isn't a one-way ratchet. */
-    val notificationsInteractAllowedApps: StateFlow<Set<String>> get() = settings.notificationsInteractAllowedApps
-    fun revokeNotificationInteractAppAllowed(packageName: String) =
-        settings.setNotificationInteractAppAllowed(packageName, false)
 
     /** Enables/disables the notification-reading tools. Turning it on opens the
      *  notification-access settings screen right away (if not already granted) — same

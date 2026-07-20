@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Terminal
@@ -751,24 +750,6 @@ fun MainNavigation(
         )
     }
 
-    // App-launch tool: in-app "open this app/shortcut?" confirmation gate for open_app's
-    // launch/open_shortcut actions (list_shortcuts is a pure read and never reaches this).
-    // No runtime permission bridge needed — launching another app's activity doesn't
-    // require a dangerous permission.
-    val pendingAppLaunchWrite by viewModel.pendingAppLaunchWriteConfirmation.collectAsState()
-    pendingAppLaunchWrite?.let { pending ->
-        ToolConfirmationDialog(
-            pending = pending,
-            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveAppLaunchWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
-            icon = Icons.Default.Apps,
-            title = stringResource(R.string.app_launch_confirm_title),
-            monospaceSummary = false,
-            alwaysAllowLabel = stringResource(R.string.app_launch_confirm_always_allow),
-            allowLabel = stringResource(R.string.app_launch_confirm_allow),
-            denyLabel = stringResource(R.string.app_launch_confirm_deny)
-        )
-    }
-
     // Notification tool: POST_NOTIFICATIONS runtime-permission bridge, for create_notification
     // on API 33+ (auto-granted below that — RequestMultiplePermissions still works fine with
     // a single-entry array). The listener-access grant list/get/interact/dismiss need is a
@@ -787,34 +768,17 @@ fun MainNavigation(
         }
     }
 
-    // Notification tool: in-app "read your notifications?" confirmation gate (list/get)
-    val pendingNotificationRead by viewModel.pendingNotificationReadConfirmation.collectAsState()
-    pendingNotificationRead?.let { pending ->
-        ToolConfirmationDialog(
-            pending = pending,
-            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveNotificationReadConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
-            icon = Icons.Default.Notifications,
-            title = stringResource(R.string.notifications_read_confirm_title),
-            monospaceSummary = false,
-            alwaysAllowLabel = stringResource(R.string.notifications_confirm_always_allow),
-            allowLabel = stringResource(R.string.notifications_confirm_allow),
-            denyLabel = stringResource(R.string.notifications_confirm_deny)
-        )
-    }
-
     // Notification tool: in-app "interact with/dismiss this notification?" confirmation gate
+    // (list/get aren't gated, same as every other read-only tool)
     val pendingNotificationWrite by viewModel.pendingNotificationWriteConfirmation.collectAsState()
     pendingNotificationWrite?.let { pending ->
         ToolConfirmationDialog(
             pending = pending,
-            onResolve = { allow, alwaysAllow, alwaysAllowApp ->
-                viewModel.resolveNotificationWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow, alwaysAllowApp = alwaysAllowApp)
-            },
+            onResolve = { allow, alwaysAllow, _ -> viewModel.resolveNotificationWriteConfirmation(allow = allow, alwaysAllow = alwaysAllow) },
             icon = Icons.Default.Notifications,
             title = stringResource(R.string.notifications_confirm_title),
             monospaceSummary = false,
             alwaysAllowLabel = stringResource(R.string.notifications_confirm_always_allow),
-            alwaysAllowKeyLabel = stringResource(R.string.notifications_confirm_always_allow_app, pending.keyLabel ?: ""),
             allowLabel = stringResource(R.string.notifications_confirm_allow),
             denyLabel = stringResource(R.string.notifications_confirm_deny)
         )

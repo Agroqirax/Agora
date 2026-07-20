@@ -55,28 +55,17 @@ import java.util.concurrent.atomic.AtomicInteger
  * something Agora itself created never requires the heavier listener grant.
  *
  * [INTERACT_NOTIFICATION] and [DISMISS_NOTIFICATION] go through [confirmWrite] first (a
- * no-op when notifications_confirm_enabled is off, or when the source app has been
- * always-allowed — see [confirmWrite]'s doc) since both act on another app's notification
- * on the user's behalf — tapping a reply action or clearing something the user hasn't seen
- * yet is the same trust tier as creating a calendar event. [LIST_NOTIFICATIONS]/
- * [GET_NOTIFICATION] go through the separate, simpler [confirmRead] gate instead — reading
- * notification bodies is its own trust tier (they routinely carry OTPs, message previews,
- * etc.), so it defaults on independently of the interact/dismiss gate. [CREATE_NOTIFICATION]
- * (Agora's own notification, not someone else's) is never gated beyond the platform
- * permission check.
+ * no-op when notifications_confirm_enabled is off) since both act on another app's
+ * notification on the user's behalf — tapping a reply action or clearing something the
+ * user hasn't seen yet is the same trust tier as creating a calendar event.
+ * [LIST_NOTIFICATIONS]/[GET_NOTIFICATION] aren't gated at all, the same as every other
+ * read-only tool (calendar, contacts, device info). [CREATE_NOTIFICATION] (Agora's own
+ * notification, not someone else's) is never gated beyond the platform permission check.
  */
 class NotificationToolProvider(private val app: Application) : ToolProvider {
 
-    /** In-app confirmation gate for interact/dismiss. Takes the source app's package name
-     *  and display label so the caller can offer a per-app "always allow" alongside the
-     *  global one — see [com.newoether.agora.viewmodel.ToolConfirmationController]. Set by the owning
-     *  ViewModel. */
-    var confirmWrite: (suspend (summary: String, packageName: String, appLabel: String) -> Boolean)? = null
-
-    /** In-app confirmation gate for list/get (reading notification content). Separate from
-     *  [confirmWrite] and its own setting, defaulting to *on* since notification bodies are
-     *  routinely sensitive. Set by the owning ViewModel. */
-    var confirmRead: (suspend (summary: String) -> Boolean)? = null
+    /** In-app confirmation gate for interact/dismiss. Set by the owning ViewModel. */
+    var confirmWrite: (suspend (summary: String) -> Boolean)? = null
 
     /** Opens notification-access settings (for list/get/interact/dismiss-by-key). Set by
      *  the owning ViewModel. Returns the post-open access state, same caveat as
@@ -237,12 +226,6 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
         val filterPackage = arg(args, "app_package").ifBlank { null }
         val limit = intArg(args, "limit") ?: 20
 
-        val summary = if (filterPackage != null) "Read active notifications from ${appLabel(filterPackage)}"
-            else "Read your currently active notifications (all apps)"
-        if (confirmRead?.invoke(summary) == false) {
-            return err("user_denied", "The user declined to let the assistant read notifications.")
-        }
-
         val sbns = AgoraNotificationAccessService.getActiveNotifications() ?: emptyArray()
         val filtered = sbns
             .filter { filterPackage == null || it.packageName == filterPackage }
@@ -279,14 +262,6 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
 
         val sbn = AgoraNotificationAccessService.findByKey(key)
             ?: return err("not_found", "No active notification with that key was found (it may have been dismissed already).")
-
-        val summary = buildString {
-            append("Read the full content of a notification from ${appLabel(sbn.packageName)}")
-            extraTitle(sbn.notification)?.let { append(" (\"$it\")") }
-        }
-        if (confirmRead?.invoke(summary) == false) {
-            return err("user_denied", "The user declined to let the assistant read this notification.")
-        }
 
         val notification = sbn.notification
         return buildJsonObject {
@@ -330,7 +305,7 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
             if (actionIndex != null) append(", action #$actionIndex")
             if (replyText != null) append(", replying \"${truncate(replyText, 50)}\"")
         }
-        if (confirmWrite?.invoke(summary, sbn.packageName, appLabel(sbn.packageName)) == false) {
+        if (confirmWrite?.invoke(summary) == false) {
             return err("user_denied", "The user declined this action.")
         }
 
@@ -366,7 +341,7 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
             val intId = ownNotificationIds[ownId]
                 ?: return err("not_found", "No notification with that notification_id (or it was already dismissed).")
             val summary = "Dismiss the notification Agora posted (\"$ownId\")"
-            if (confirmWrite?.invoke(summary, app.packageName, appLabel(app.packageName)) == false) return err("user_denied", "The user declined to dismiss this.")
+            if (confirmWrite?.invoke(summary) == false) return err("user_denied", "The user declined to dismiss this.")
             withContext(Dispatchers.IO) { NotificationManagerCompat.from(app).cancel(intId) }
             ownNotificationIds.remove(ownId)
             buildJsonObject { put("type", DISMISS_NOTIFICATION); put("notification_id", ownId); put("ok", true) }.toString()
@@ -378,7 +353,7 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
                     append("Dismiss notification from ${appLabel(sbn.packageName)}")
                     extraTitle(sbn.notification)?.let { append(" (\"$it\")") }
                 }
-                if (confirmWrite?.invoke(summary, sbn.packageName, appLabel(sbn.packageName)) == false) return@withAccess err("user_denied", "The user declined to dismiss this.")
+                if (confirmWrite?.invoke(summary) == false) return@withAccess err("user_denied", "The user declined to dismiss this.")
                 val ok = withContext(Dispatchers.IO) { AgoraNotificationAccessService.cancelNotificationByKey(key) }
                 buildJsonObject { put("type", DISMISS_NOTIFICATION); put("key", key); put("ok", ok) }.toString()
             }
@@ -400,7 +375,7 @@ class NotificationToolProvider(private val app: Application) : ToolProvider {
             append("Snooze notification from ${appLabel(sbn.packageName)} for $durationMinutes minutes")
             extraTitle(sbn.notification)?.let { append(" (\"$it\")") }
         }
-        if (confirmWrite?.invoke(summary, sbn.packageName, appLabel(sbn.packageName)) == false) {
+        if (confirmWrite?.invoke(summary) == false) {
             return err("user_denied", "The user declined to snooze this.")
         }
 

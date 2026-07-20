@@ -209,8 +209,6 @@ class SettingsManager(private val context: Context) {
         val APP_LAUNCH_ENABLED = booleanPreferencesKey("app_launch_enabled")
         val MEDIA_CONTROL_ENABLED = booleanPreferencesKey("media_control_enabled")
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
-        val NOTIFICATIONS_READ_CONFIRM_ENABLED = booleanPreferencesKey("notifications_read_confirm_enabled")
-        val NOTIFICATIONS_INTERACT_ALLOWED_APPS = stringSetPreferencesKey("notifications_interact_allowed_apps")
         val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
         val CALCULATOR_ENABLED = booleanPreferencesKey("calculator_enabled")
         val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
@@ -221,7 +219,6 @@ class SettingsManager(private val context: Context) {
         val LOCATION_ENABLED = booleanPreferencesKey("location_enabled")
         val CALENDAR_CONFIRM_ENABLED = booleanPreferencesKey("calendar_confirm_enabled")
         val ALARM_CONFIRM_ENABLED = booleanPreferencesKey("alarm_confirm_enabled")
-        val APP_LAUNCH_CONFIRM_ENABLED = booleanPreferencesKey("app_launch_confirm_enabled")
         val CONTACTS_CONFIRM_ENABLED = booleanPreferencesKey("contacts_confirm_enabled")
         val NOTIFICATIONS_CONFIRM_ENABLED = booleanPreferencesKey("notifications_confirm_enabled")
         val LOCATION_CONFIRM_ENABLED = booleanPreferencesKey("location_confirm_enabled")
@@ -408,10 +405,6 @@ class SettingsManager(private val context: Context) {
     val appLaunchEnabled: Flow<Boolean> = context.dataStore.data.map { it[APP_LAUNCH_ENABLED] ?: false }
     val mediaControlEnabled: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL_ENABLED] ?: false }
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: false }
-    // Reading notification content defaults to confirm-gated (true), unlike other read
-    // tools, since notification bodies routinely carry OTPs, message previews, etc.
-    val notificationsReadConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_READ_CONFIRM_ENABLED] ?: true }
-    val notificationsInteractAllowedApps: Flow<Set<String>> = context.dataStore.data.map { it[NOTIFICATIONS_INTERACT_ALLOWED_APPS] ?: emptySet() }
     // Torch on/off has no dangerous permission or confirm-gate, same reasoning as media control.
     val torchEnabled: Flow<Boolean> = context.dataStore.data.map { it[TORCH_ENABLED] ?: false }
     // Pure local arithmetic, no permission or device state touched, same reasoning as device info.
@@ -427,7 +420,6 @@ class SettingsManager(private val context: Context) {
     val locationEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_ENABLED] ?: false }
     val calendarConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALENDAR_CONFIRM_ENABLED] ?: true }
     val alarmConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_CONFIRM_ENABLED] ?: true }
-    val appLaunchConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[APP_LAUNCH_CONFIRM_ENABLED] ?: true }
     val contactsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_CONFIRM_ENABLED] ?: true }
     val notificationsConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_CONFIRM_ENABLED] ?: true }
     val locationConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[LOCATION_CONFIRM_ENABLED] ?: true }
@@ -832,9 +824,6 @@ class SettingsManager(private val context: Context) {
     suspend fun saveAlarmConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[ALARM_CONFIRM_ENABLED] = enabled }
     }
-    suspend fun saveAppLaunchConfirmEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[APP_LAUNCH_CONFIRM_ENABLED] = enabled }
-    }
     suspend fun saveAppLaunchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[APP_LAUNCH_ENABLED] = enabled }
     }
@@ -846,19 +835,6 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveNotificationsConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[NOTIFICATIONS_CONFIRM_ENABLED] = enabled }
-    }
-    suspend fun saveNotificationsReadConfirmEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[NOTIFICATIONS_READ_CONFIRM_ENABLED] = enabled }
-    }
-    /** Adds or removes a single app package from the "always allow interacting with this
-     *  app's notifications" list — used to bypass the per-call confirm prompt for a
-     *  specifically-trusted app (e.g. Discord) while leaving the confirm gate on for
-     *  everything else. */
-    suspend fun saveNotificationInteractAppAllowed(packageName: String, allowed: Boolean) {
-        context.dataStore.edit { prefs ->
-            val current = prefs[NOTIFICATIONS_INTERACT_ALLOWED_APPS] ?: emptySet()
-            prefs[NOTIFICATIONS_INTERACT_ALLOWED_APPS] = if (allowed) current + packageName else current - packageName
-        }
     }
     suspend fun saveTorchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TORCH_ENABLED] = enabled }

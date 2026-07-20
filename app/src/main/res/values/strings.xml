@@ -477,9 +477,7 @@
     <string name="alarm_confirm_setting">Confirm alarm changes</string>
     <string name="alarm_confirm_setting_desc">Ask before the assistant can set, dismiss, or snooze an alarm or timer</string>
     <string name="app_launch_enable">Enable App-Launch Tool</string>
-    <string name="app_launch_enable_desc">Open apps and fire their static shortcuts</string>
-    <string name="app_launch_confirm_setting">Confirm before firing a shortcut</string>
-    <string name="app_launch_confirm_setting_desc">Ask before the assistant fires one of an app\'s shortcuts. Opening an app plainly is never gated.</string>
+    <string name="app_launch_enable_desc">Open apps, the same as tapping their home-screen icon</string>
     <string name="media_control_title">Media Control</string>
     <string name="media_control_enable">Enable Media Control Tool</string>
     <string name="media_control_enable_desc">See and control what\'s playing in media apps</string>
@@ -488,11 +486,6 @@
     <string name="notifications_enable_desc">Read, reply to, dismiss, and create notifications</string>
     <string name="notifications_confirm_setting">Confirm notification actions</string>
     <string name="notifications_confirm_setting_desc">Ask before interacting with another app\'s notification</string>
-    <string name="notifications_read_confirm_setting">Confirm reading notifications</string>
-    <string name="notifications_read_confirm_setting_desc">Ask before reading your active notifications</string>
-    <string name="notifications_allowed_app_row">%1$s always allowed</string>
-    <string name="notifications_allowed_app_row_desc">Can interact with this app\'s notifications without asking</string>
-    <string name="notifications_allowed_app_revoke">Revoke</string>
     <string name="trust_list_show_more">Show %1$d more</string>
     <string name="trust_list_show_less">Show less</string>
     <string name="torch_title">Torch</string>
@@ -512,7 +505,7 @@
     <string name="device_info_enable">Device Info Tool</string>
     <string name="device_info_enable_desc">Check battery, network, storage, and other device state</string>
     <string name="package_query_enable">Installed Apps Tool</string>
-    <string name="package_query_enable_desc">List installed apps and look up details (version, shortcuts) for a specific one</string>
+    <string name="package_query_enable_desc">List installed apps and look up details (version, system-app status) for a specific one</string>
     <string name="package_query_not_supported">Installed Apps Tool Not Supported</string>
     <string name="package_query_not_supported_desc">This feature failed to initialize on this build</string>
     <string name="location_title">Location</string>
@@ -1127,16 +1120,10 @@
     <string name="alarm_confirm_allow">Allow</string>
     <string name="alarm_confirm_deny">Deny</string>
     <string name="alarm_confirm_always_allow">Always allow (don\'t ask again)</string>
-    <string name="app_launch_confirm_title">Allow opening this shortcut?</string>
-    <string name="app_launch_confirm_allow">Allow</string>
-    <string name="app_launch_confirm_deny">Deny</string>
-    <string name="app_launch_confirm_always_allow">Always allow (don\'t ask again)</string>
     <string name="notifications_confirm_title">Allow this notification action?</string>
-    <string name="notifications_read_confirm_title">Allow reading notifications?</string>
     <string name="notifications_confirm_allow">Allow</string>
     <string name="notifications_confirm_deny">Deny</string>
     <string name="notifications_confirm_always_allow">Always allow (don\'t ask again)</string>
-    <string name="notifications_confirm_always_allow_app">Always allow interacting with %1$s notifications</string>
 
     <!-- Crash reporting -->
     <string name="crash_title">Agora quit unexpectedly</string>
