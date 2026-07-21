@@ -476,8 +476,6 @@
     <string name="alarm_enable_desc">Set, dismiss, and snooze alarms and timers</string>
     <string name="alarm_confirm_setting">Confirm alarm changes</string>
     <string name="alarm_confirm_setting_desc">Ask before the assistant can set, dismiss, or snooze an alarm or timer</string>
-    <string name="app_launch_enable">Enable App-Launch Tool</string>
-    <string name="app_launch_enable_desc">Open apps, the same as tapping their home-screen icon</string>
     <string name="media_control_title">Media Control</string>
     <string name="media_control_enable">Enable Media Control Tool</string>
     <string name="media_control_enable_desc">See and control what\'s playing in media apps</string>
@@ -504,8 +502,8 @@
     <string name="device_info_title">Device</string>
     <string name="device_info_enable">Device Info Tool</string>
     <string name="device_info_enable_desc">Check battery, network, storage, and other device state</string>
-    <string name="package_query_enable">Installed Apps Tool</string>
-    <string name="package_query_enable_desc">List installed apps and look up details (version, system-app status) for a specific one</string>
+    <string name="apps_enable">Apps Tool</string>
+    <string name="apps_enable_desc">List and open installed apps</string>
     <string name="package_query_not_supported">Installed Apps Tool Not Supported</string>
     <string name="package_query_not_supported_desc">This feature failed to initialize on this build</string>
     <string name="location_title">Location</string>
@@ -1056,9 +1054,9 @@
     <!-- Remote shell confirmation gate -->
     <string name="shell_confirm_title">Allow action on \"%1$s\"?</string>
     <string name="shell_confirm_allow">Allow once</string>
-    <string name="shell_confirm_stop_asking">Stop confirming shell actions</string>
-    <string name="shell_confirm_always">Always allow this server</string>
-    <string name="shell_device_confirm_enabled">Confirm before running commands on this server</string>
+    <string name="shell_confirm_stop_asking">Always allow</string>
+    <string name="shell_confirm_always">Allow this instance</string>
+    <string name="shell_device_confirm_enabled">Confirm shell actions</string>
     <string name="shell_confirm_deny">Deny</string>
     <string name="shell_confirm_setting">Confirm remote shell actions</string>
     <string name="shell_confirm_setting_desc">Ask before running commands on remote servers</string>
@@ -1094,9 +1092,9 @@
     <string name="mcp_test_connection_failure">Failed: %1$s</string>
     <string name="mcp_confirm_title">Allow this MCP tool call on \"%1$s\"?</string>
     <string name="mcp_confirm_allow">Allow once</string>
-    <string name="mcp_confirm_stop_asking">Stop confirming MCP tool calls</string>
-    <string name="mcp_confirm_always">Always allow this server</string>
-    <string name="mcp_server_confirm_enabled">Confirm before destructive tool calls on this server</string>
+    <string name="mcp_confirm_stop_asking">Always allow</string>
+    <string name="mcp_confirm_always">Allow this instance</string>
+    <string name="mcp_server_confirm_enabled">Confirm destructive tool calls</string>
     <string name="mcp_confirm_deny">Deny</string>
     <string name="mcp_confirm_setting">Confirm destructive MCP tool calls</string>
     <string name="mcp_confirm_setting_desc">Ask before running a destructive MCP tool call</string>

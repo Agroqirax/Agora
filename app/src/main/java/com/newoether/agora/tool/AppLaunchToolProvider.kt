@@ -19,8 +19,8 @@ import kotlinx.serialization.json.put
 /**
  * `open_app`: open an app, the same as tapping its home-screen icon. Discovery — finding
  * a package_name in the first place — lives entirely in [PackageQueryToolProvider]
- * (`list_installed_apps`/`get_app_info`), since that's a different scope (what exists)
- * from this provider's (act on something already identified); both tools share the same
+ * (`list_installed_apps`), since that's a different scope (what exists) from this
+ * provider's (act on something already identified); both tools share the same
  * [GenerationContext.packageQueryEnabled] vs [GenerationContext.appLaunchEnabled] split
  * for read vs. act.
  *

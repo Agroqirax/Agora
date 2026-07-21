@@ -1,8 +1,8 @@
 package com.newoether.agora.tool
 
 /**
- * Lists (and looks up individual) installed packages on the device. Flavor-split exactly
- * like [com.newoether.agora.sandbox.SandboxManagerFactory]:
+ * Lists installed packages on the device. Flavor-split exactly like
+ * [com.newoether.agora.sandbox.SandboxManagerFactory]:
  * - fdroid → FdroidPackageQueryProvider (full device inventory; QUERY_ALL_PACKAGES is
  *   declared only in the fdroid flavor's manifest)
  * - play   → PlayPackageQueryProvider (launcher-icon apps only, via a permission-review-free
@@ -12,11 +12,13 @@ interface PackageQueryProvider {
     /** Whether this build/flavor can list installed packages at all. */
     fun isAvailable(): Boolean
 
+    /**
+     * All (optionally filtered) installed packages, each already carrying every field
+     * `list_installed_apps` reports — version name and system-app status are computed
+     * per-package during the scan, since there's no separate per-package lookup tool
+     * anymore.
+     */
     fun listInstalledPackages(includeSystemApps: Boolean): List<InstalledPackageInfo>
-
-    /** Details for one already-known package, or null if it's not installed or not
-     *  visible to Agora on this flavor. Backs `get_app_info`. */
-    fun getPackageInfo(packageName: String): InstalledPackageInfo?
 }
 
 data class InstalledPackageInfo(

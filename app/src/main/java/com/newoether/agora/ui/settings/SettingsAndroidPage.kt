@@ -11,7 +11,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
@@ -88,12 +87,25 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 // happen on a normal build of either flavor. See tool/PackageQueryProvider.kt.
                 add {
                     if (viewModel.isPackageQueryAvailable) {
+                        // One switch for both list_installed_apps and open_app — they're
+                        // the discovery/act halves of the same "apps" capability, so they
+                        // share a single settings row even though each is still gated by
+                        // its own GenerationContext flag under the hood.
+                        val appsEnabled = packageQueryEnabled && appLaunchEnabled
                         SettingsItem(
-                            headlineContent = { Text(stringResource(R.string.package_query_enable)) },
-                            supportingContent = { Text(stringResource(R.string.package_query_enable_desc)) },
+                            headlineContent = { Text(stringResource(R.string.apps_enable)) },
+                            supportingContent = { Text(stringResource(R.string.apps_enable_desc)) },
                             leadingContent = { Icon(Icons.Default.Apps, null, tint = MaterialTheme.colorScheme.primary) },
-                            trailingContent = { Switch(checked = packageQueryEnabled, onCheckedChange = { viewModel.settings.setPackageQueryEnabled(it) }) },
-                            modifier = Modifier.clickable { viewModel.settings.setPackageQueryEnabled(!packageQueryEnabled) }
+                            trailingContent = {
+                                Switch(checked = appsEnabled, onCheckedChange = {
+                                    viewModel.settings.setPackageQueryEnabled(it)
+                                    viewModel.setAppLaunchEnabled(it)
+                                })
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setPackageQueryEnabled(!appsEnabled)
+                                viewModel.setAppLaunchEnabled(!appsEnabled)
+                            }
                         )
                     } else {
                         SettingsItem(
@@ -104,15 +116,6 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             }
                         )
                     }
-                }
-                add {
-                    SettingsItem(
-                        headlineContent = { Text(stringResource(R.string.app_launch_enable)) },
-                        supportingContent = { Text(stringResource(R.string.app_launch_enable_desc)) },
-                        leadingContent = { Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingContent = { Switch(checked = appLaunchEnabled, onCheckedChange = { viewModel.setAppLaunchEnabled(it) }) },
-                        modifier = Modifier.clickable { viewModel.setAppLaunchEnabled(!appLaunchEnabled) }
-                    )
                 }
                 add {
                     SettingsItem(
