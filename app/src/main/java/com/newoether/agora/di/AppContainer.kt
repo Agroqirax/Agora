@@ -76,32 +76,10 @@ class AppContainer(private val appContext: Context) {
         }
     }
 
-    // ── Installed-package listing (flavor-specific) ───────────
+    // ── Installed-package listing ──────────────────────────────
 
-    val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? by lazy {
-        try {
-            // fdroid flavor provides FdroidPackageQueryProvider (needs QUERY_ALL_PACKAGES,
-            // only declared in that flavor's manifest)
-            Class.forName("com.newoether.agora.tool.FdroidPackageQueryProvider")
-                .getDeclaredConstructor(Context::class.java)
-                .newInstance(appContext) as com.newoether.agora.tool.PackageQueryProvider
-        } catch (_: ClassNotFoundException) {
-            // play flavor provides PlayPackageQueryProvider (LAUNCHER-visible apps only,
-            // no QUERY_ALL_PACKAGES — see that class's doc comment)
-            try {
-                Class.forName("com.newoether.agora.tool.PlayPackageQueryProvider")
-                    .getDeclaredConstructor(Context::class.java)
-                    .newInstance(appContext) as com.newoether.agora.tool.PackageQueryProvider
-            } catch (_: ClassNotFoundException) {
-                null
-            } catch (e: Exception) {
-                com.newoether.agora.util.DebugLog.e("AppContainer", "PlayPackageQueryProvider init failed", e)
-                null
-            }
-        } catch (e: Exception) {
-            com.newoether.agora.util.DebugLog.e("AppContainer", "FdroidPackageQueryProvider init failed", e)
-            null
-        }
+    val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider by lazy {
+        com.newoether.agora.tool.PackageQueryProvider(appContext)
     }
 
     // ── Auto Backup ───────────────────────────────────────────

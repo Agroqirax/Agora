@@ -19,28 +19,25 @@ import kotlinx.serialization.json.put
  * One tool, backed by one [PackageQueryProvider]: `list_installed_apps` for device-wide
  * discovery. It reports every field on [InstalledPackageInfo] — package name, app label,
  * version name, and system-app status — for each result, plus an optional `query` to
- * search by label/package name, so there's no separate per-package lookup tool anymore.
+ * search by label/package name.
  *
- * [provider] is null (or reports unavailable) only if flavor detection itself failed, in
- * which case this contributes no tool definitions at all. On a normal build, one of the
- * two flavor implementations is always present: fdroid returns every installed package,
- * Play returns apps with a launcher icon (see [PackageQueryProvider]'s doc comment for why
- * that split exists).
+ * [provider] is the same, non-flavor-specific implementation on every build (see its doc
+ * comment), so unlike before there's no "unavailable on this flavor" case to gate on here.
  */
 class PackageQueryToolProvider(
-    private val provider: PackageQueryProvider?
+    private val provider: PackageQueryProvider
 ) : ToolProvider {
 
     private val toolNames = setOf(LIST_INSTALLED_APPS)
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
-        if (!ctx.packageQueryEnabled || provider?.isAvailable() != true) return emptyList()
+        if (!ctx.packageQueryEnabled) return emptyList()
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = LIST_INSTALLED_APPS,
                 description = "List apps installed on the user's device, each with its package name, app " +
-                    "label, version name, and whether it's a system app. On some builds of Agora this only " +
-                    "includes apps with a home-screen icon, not every background/system package.",
+                    "label, version name, and whether it's a system app. Only includes apps with a " +
+                    "home-screen icon, not every background/system package.",
                 parameters = ToolParameters(
                     properties = mapOf(
                         "include_system_apps" to ToolProperty(
@@ -62,18 +59,14 @@ class PackageQueryToolProvider(
 
     override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
         if (!ctx.packageQueryEnabled) return err(name, "disabled", "The installed-apps tool is disabled in settings.")
-        val p = provider
-        if (p == null || !p.isAvailable()) {
-            return err(name, "unavailable", "The installed-apps tool isn't available on this build of Agora.")
-        }
 
         return when (name) {
-            LIST_INSTALLED_APPS -> listInstalledApps(p, arguments)
+            LIST_INSTALLED_APPS -> listInstalledApps(arguments)
             else -> err(name, "unknown_tool", "Unknown tool: $name")
         }
     }
 
-    private fun listInstalledApps(p: PackageQueryProvider, arguments: String): String {
+    private fun listInstalledApps(arguments: String): String {
         val argsObj = try {
             Json.parseToJsonElement(arguments).jsonObject
         } catch (_: Exception) { null }
@@ -81,7 +74,7 @@ class PackageQueryToolProvider(
         val query = argsObj?.get("query")?.jsonPrimitive?.content?.trim()?.takeIf { it.isNotEmpty() }
 
         return try {
-            var apps = p.listInstalledPackages(includeSystem)
+            var apps = provider.listInstalledPackages(includeSystem)
             if (query != null) {
                 val needle = query.lowercase()
                 apps = apps.filter {

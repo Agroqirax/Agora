@@ -168,7 +168,7 @@ class GenerationManager(
     private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
-    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider? = null
+    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
