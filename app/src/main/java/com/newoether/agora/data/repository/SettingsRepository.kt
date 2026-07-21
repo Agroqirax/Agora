@@ -90,6 +90,8 @@ class SettingsRepository(
     val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
     val deviceInfoEnabled: StateFlow<Boolean> = hot(settingsManager.deviceInfoEnabled, false)
     val assistAttachScreenTextEnabled: StateFlow<Boolean> = hot(settingsManager.assistAttachScreenTextEnabled, true)
+    val assistantModelId: StateFlow<String?> = hot(settingsManager.assistantModelId, null)
+    val assistantSystemPromptId: StateFlow<String?> = hot(settingsManager.assistantSystemPromptId, null)
     val packageQueryEnabled: StateFlow<Boolean> = hot(settingsManager.packageQueryEnabled, false)
     val calendarEnabled: StateFlow<Boolean> = hot(settingsManager.calendarEnabled, false)
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
@@ -362,6 +364,8 @@ class SettingsRepository(
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
     fun setDeviceInfoEnabled(enabled: Boolean) = scope.launch { settingsManager.saveDeviceInfoEnabled(enabled) }
     fun setAssistAttachScreenTextEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAssistAttachScreenTextEnabled(enabled) }
+    fun setAssistantModelId(model: String?) = scope.launch { settingsManager.saveAssistantModelId(model) }
+    fun setAssistantSystemPromptId(id: String?) = scope.launch { settingsManager.saveAssistantSystemPromptId(id) }
     fun setPackageQueryEnabled(enabled: Boolean) = scope.launch { settingsManager.savePackageQueryEnabled(enabled) }
     fun setCalendarEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalendarEnabled(enabled) }
     fun setCalendarConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveCalendarConfirmEnabled(enabled) }

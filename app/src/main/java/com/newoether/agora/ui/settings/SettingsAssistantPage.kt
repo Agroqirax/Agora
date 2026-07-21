@@ -4,19 +4,27 @@ import android.app.role.RoleManager
 import android.content.Intent
 import android.os.Build
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assistant
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.newoether.agora.R
+import com.newoether.agora.model.ModelId
+import com.newoether.agora.model.apiModelName
 import com.newoether.agora.viewmodel.ChatViewModel
 
 /**
@@ -31,6 +39,27 @@ import com.newoether.agora.viewmodel.ChatViewModel
 fun SettingsAssistantPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val attachScreenTextEnabled by viewModel.settings.assistAttachScreenTextEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
+    val assistantModelId by viewModel.settings.assistantModelId.collectAsState()
+    val assistantSystemPromptId by viewModel.settings.assistantSystemPromptId.collectAsState()
+    val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val enabledModels by viewModel.settings.enabledModels.collectAsState()
+    val systemPrompts by viewModel.settings.systemPrompts.collectAsState()
+    val selectedModel by viewModel.settings.selectedModel.collectAsState()
+    val activeSystemPromptId by viewModel.settings.activeSystemPromptId.collectAsState()
+    var showModelDialog by remember { mutableStateOf(false) }
+    var showPromptDialog by remember { mutableStateOf(false) }
+
+    // Same "Global Default (name)" phrasing ChatSystemPromptDialog uses for the
+    // per-conversation prompt override, so the two null-means-follow-the-global-setting
+    // pickers in the app read the same way.
+    val globalDefaultModelTitle = stringResource(
+        R.string.global_default_format,
+        modelAliases[selectedModel] ?: ModelId.parse(selectedModel).apiModelName
+    )
+    val globalDefaultPromptTitle = stringResource(
+        R.string.global_default_format,
+        systemPrompts.find { it.id == activeSystemPromptId }?.title ?: stringResource(R.string.no_system_prompt)
+    )
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.settings_assistant),
@@ -54,8 +83,126 @@ fun SettingsAssistantPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         modifier = Modifier.clickable { viewModel.settings.setAssistAttachScreenTextEnabled(!attachScreenTextEnabled) }
                     )
                 }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.assistant_model)) },
+                        supportingContent = {
+                            val displayName = if (assistantModelId == null) globalDefaultModelTitle else {
+                                val alias = modelAliases[assistantModelId!!]
+                                alias ?: ModelId.parse(assistantModelId!!).apiModelName
+                            }
+                            Text(displayName)
+                        },
+                        leadingContent = { Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable { showModelDialog = true }
+                    )
+                }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.assistant_system_prompt)) },
+                        supportingContent = {
+                            val title = if (assistantSystemPromptId == null) globalDefaultPromptTitle
+                            else systemPrompts.find { it.id == assistantSystemPromptId }?.title
+                                ?: globalDefaultPromptTitle
+                            Text(title)
+                        },
+                        leadingContent = { Icon(Icons.Default.Psychology, null, tint = MaterialTheme.colorScheme.primary) },
+                        modifier = Modifier.clickable { showPromptDialog = true }
+                    )
+                }
             })
         }
+    }
+
+    if (showModelDialog) {
+        val enabledModelsList = enabledModels.toList()
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { showModelDialog = false },
+            title = { Text(stringResource(R.string.assistant_select_model), fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    item {
+                        SettingsItem(
+                            headlineContent = { Text(globalDefaultModelTitle, fontWeight = if (assistantModelId == null) FontWeight.Bold else FontWeight.Normal) },
+                            leadingContent = {
+                                RadioButton(selected = assistantModelId == null, onClick = {
+                                    viewModel.settings.setAssistantModelId(null)
+                                    showModelDialog = false
+                                })
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setAssistantModelId(null)
+                                showModelDialog = false
+                            }
+                        )
+                    }
+                    items(enabledModelsList) { model ->
+                        val alias = modelAliases[model]
+                        val parsed = ModelId.parse(model)
+                        val displayName = alias ?: parsed.apiModelName
+                        SettingsItem(
+                            headlineContent = { Text(displayName, fontWeight = if (assistantModelId == model) FontWeight.Bold else FontWeight.Normal) },
+                            supportingContent = { Text(parsed.providerName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)) },
+                            leadingContent = {
+                                RadioButton(selected = assistantModelId == model, onClick = {
+                                    viewModel.settings.setAssistantModelId(model)
+                                    showModelDialog = false
+                                })
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setAssistantModelId(model)
+                                showModelDialog = false
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showModelDialog = false }) { Text(stringResource(R.string.provider_cancel)) } }
+        )
+    }
+
+    if (showPromptDialog) {
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { showPromptDialog = false },
+            title = { Text(stringResource(R.string.assistant_select_system_prompt), fontWeight = FontWeight.Bold) },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    item {
+                        SettingsItem(
+                            headlineContent = { Text(globalDefaultPromptTitle, fontWeight = if (assistantSystemPromptId == null) FontWeight.Bold else FontWeight.Normal) },
+                            leadingContent = {
+                                RadioButton(selected = assistantSystemPromptId == null, onClick = {
+                                    viewModel.settings.setAssistantSystemPromptId(null)
+                                    showPromptDialog = false
+                                })
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setAssistantSystemPromptId(null)
+                                showPromptDialog = false
+                            }
+                        )
+                    }
+                    items(systemPrompts) { entry ->
+                        SettingsItem(
+                            headlineContent = { Text(entry.title, fontWeight = if (assistantSystemPromptId == entry.id) FontWeight.Bold else FontWeight.Normal) },
+                            leadingContent = {
+                                RadioButton(selected = assistantSystemPromptId == entry.id, onClick = {
+                                    viewModel.settings.setAssistantSystemPromptId(entry.id)
+                                    showPromptDialog = false
+                                })
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setAssistantSystemPromptId(entry.id)
+                                showPromptDialog = false
+                            }
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showPromptDialog = false }) { Text(stringResource(R.string.provider_cancel)) } }
+        )
     }
 }
 

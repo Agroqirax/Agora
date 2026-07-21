@@ -202,6 +202,14 @@ class SettingsManager(private val context: Context) {
         // MainActivity.attachBaseContext's appLanguage read — it's a single cached
         // DataStore value, not a cold read, so this is cheap even on the main thread.
         val ASSIST_ATTACH_SCREEN_TEXT_ENABLED = booleanPreferencesKey("assist_attach_screen_text_enabled")
+        // Model/system-prompt pre-filled into a new chat when launched via the assist
+        // gesture (AgoraVoiceInteractionSession). Null = fall back to the same default
+        // a normal new chat uses (selectedModel / activeSystemPromptId) — these only
+        // diverge once the user explicitly picks an assistant-specific override in
+        // Settings → Assistant. Either way it's just a pre-fill: MessageGenerationController
+        // still lets the user change the model/prompt before the first message is sent.
+        val ASSISTANT_MODEL_ID = stringPreferencesKey("assistant_model_id")
+        val ASSISTANT_SYSTEM_PROMPT_ID = stringPreferencesKey("assistant_system_prompt_id")
         val PACKAGE_QUERY_ENABLED = booleanPreferencesKey("package_query_enabled")
         val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
@@ -396,6 +404,8 @@ class SettingsManager(private val context: Context) {
     // this defaults on like shell/mcp rather than off like location/calendar/contacts.
     val deviceInfoEnabled: Flow<Boolean> = context.dataStore.data.map { it[DEVICE_INFO_ENABLED] ?: true }
     val assistAttachScreenTextEnabled: Flow<Boolean> = context.dataStore.data.map { it[ASSIST_ATTACH_SCREEN_TEXT_ENABLED] ?: true }
+    val assistantModelId: Flow<String?> = context.dataStore.data.map { it[ASSISTANT_MODEL_ID] }
+    val assistantSystemPromptId: Flow<String?> = context.dataStore.data.map { it[ASSISTANT_SYSTEM_PROMPT_ID] }
     // Reveals the user's installed-apps list — opt-in like location/calendar/contacts,
     // and only ever actually available on the fdroid flavor regardless of this toggle.
     val packageQueryEnabled: Flow<Boolean> = context.dataStore.data.map { it[PACKAGE_QUERY_ENABLED] ?: false }
@@ -804,6 +814,18 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveAssistAttachScreenTextEnabled(enabled: Boolean) {
         context.dataStore.edit { it[ASSIST_ATTACH_SCREEN_TEXT_ENABLED] = enabled }
+    }
+
+    suspend fun saveAssistantModelId(model: String?) {
+        context.dataStore.edit {
+            if (model == null) it.remove(ASSISTANT_MODEL_ID) else it[ASSISTANT_MODEL_ID] = model
+        }
+    }
+
+    suspend fun saveAssistantSystemPromptId(id: String?) {
+        context.dataStore.edit {
+            if (id == null) it.remove(ASSISTANT_SYSTEM_PROMPT_ID) else it[ASSISTANT_SYSTEM_PROMPT_ID] = id
+        }
     }
 
     suspend fun savePackageQueryEnabled(enabled: Boolean) {

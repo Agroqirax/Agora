@@ -484,11 +484,7 @@ fun MainNavigation(
     LaunchedEffect(assistLaunchTrigger) {
         if (assistLaunchTrigger > 0) {
             showSettings = false
-            if (pendingAssistContextUri != null) {
-                viewModel.handleAssistLaunch(pendingAssistContextUri)
-            } else {
-                viewModel.createNewChat()
-            }
+            viewModel.handleAssistLaunch(pendingAssistContextUri)
         }
     }
     LaunchedEffect(shareLaunchTrigger) {

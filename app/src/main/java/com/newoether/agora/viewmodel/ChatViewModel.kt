@@ -626,11 +626,28 @@ class ChatViewModel(
     private val _pendingAssistAttachmentUri = MutableStateFlow<Uri?>(null)
     val pendingAssistAttachmentUri: StateFlow<Uri?> = _pendingAssistAttachmentUri.asStateFlow()
 
-    /** Called by MainActivity on an assist-launch intent: starts a fresh chat with the
-     *  captured screen text queued as a pending file attachment. */
-    fun handleAssistLaunch(contextUri: Uri) {
+    /** Called by MainActivity on an assist-launch intent: starts a fresh chat pre-filled
+     *  with the assistant-specific model/system-prompt (Settings → Assistant) if the user
+     *  has set one — otherwise this is identical to any other new chat. [contextUri], the
+     *  captured screen text, is queued as a pending file attachment when present (absent
+     *  e.g. if capture is disabled or the foreground window was FLAG_SECURE); either way
+     *  the pre-fill still applies. Both are only a pre-fill: [setActiveModel] and
+     *  [setPendingSystemPrompt] set the same per-conversation-draft state the model picker
+     *  / system-prompt dialog use, so the user can still change either before the first
+     *  message is sent. */
+    fun handleAssistLaunch(contextUri: Uri?) {
         createNewChat()
-        _pendingAssistAttachmentUri.value = contextUri
+        // createNewChat's own reset of _currentActiveModel to null happens inside its
+        // delayed switchingJob (after the switch-overlay fade), which would otherwise run
+        // *after* setActiveModel below and stomp our pre-fill back to the default model.
+        // The pending-system-prompt reset, by contrast, happens synchronously inside
+        // createNewChat itself, so it doesn't race here.
+        viewModelScope.launch {
+            switchingJob?.join()
+            settings.assistantModelId.value?.let { setActiveModel(it) }
+            setPendingSystemPrompt(settings.assistantSystemPromptId.value)
+            if (contextUri != null) _pendingAssistAttachmentUri.value = contextUri
+        }
     }
 
     fun consumePendingAssistAttachment() {

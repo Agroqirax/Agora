@@ -461,6 +461,12 @@
     <string name="settings_assistant_desc">Set Agora as your digital assistant</string>
     <string name="assist_attach_screen_text">Attach on-screen text</string>
     <string name="assist_attach_screen_text_desc">Include the foreground app\'s visible text when launched via the assist gesture</string>
+    <string name="assistant_model">Assistant Model</string>
+    <string name="assistant_model_desc">Model pre-filled when Agora is launched via the assist gesture</string>
+    <string name="assistant_select_model">Select Assistant Model</string>
+    <string name="assistant_system_prompt">Assistant System Prompt</string>
+    <string name="assistant_system_prompt_desc">System prompt pre-filled when Agora is launched via the assist gesture</string>
+    <string name="assistant_select_system_prompt">Select Assistant System Prompt</string>
     <string name="calendar_title">Calendar</string>
     <string name="calendar_enable">Enable Calendar Tool</string>
     <string name="calendar_enable_desc">Allow the model to view your calendar</string>
