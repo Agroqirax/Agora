@@ -265,6 +265,14 @@ class GenerationManager(
     }
     val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
         get() = mcpToolProvider.serverInfoFlow
+    /** Per-server "sign in again" flag — see [com.newoether.agora.tool.McpToolProvider.reauthNeededFlow]. */
+    val mcpReauthNeeded: kotlinx.coroutines.flow.StateFlow<Map<String, Boolean>>
+        get() = mcpToolProvider.reauthNeededFlow
+    /** Set once by the ViewModel after construction — wired straight into
+     *  [McpToolProvider.oauthManager], which uses it to refresh expired OAuth tokens. */
+    var mcpOAuthManager: com.newoether.agora.tool.McpOAuthManager?
+        get() = mcpToolProvider.oauthManager
+        set(value) { mcpToolProvider.oauthManager = value }
     private val locationToolProvider = LocationToolProvider(app).also { lp ->
         lp.confirm = { confirmLocationShared() }
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }

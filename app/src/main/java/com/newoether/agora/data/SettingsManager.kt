@@ -96,7 +96,37 @@ data class McpServerConfig(
     val bearerToken: String = "",
     /** Additional custom request headers (e.g. API keys some servers expect by name). */
     val headers: Map<String, String> = emptyMap(),
-    val timeout: Int = 30
+    val timeout: Int = 30,
+
+    // ── OAuth (see tool/McpOAuthManager.kt) ──
+    /** "none" | "bearer" | "oauth". Default "none" so pre-existing configs (which only
+     *  ever had a bearerToken) keep working exactly as before. */
+    val authType: String = "none",
+    // Authorization-server metadata, discovered (RFC 8414/9728) or manually entered.
+    val oauthIssuer: String = "",
+    val oauthAuthorizationEndpoint: String = "",
+    val oauthTokenEndpoint: String = "",
+    val oauthRegistrationEndpoint: String = "",
+    /** Canonical resource identifier (RFC 8707/9728) sent as the `resource` param on every
+     *  authorize/token/refresh request. Discovered from protected-resource metadata's own
+     *  `resource` claim when available; blank falls back to [url] at call time. */
+    val oauthResource: String = "",
+    val oauthScope: String = "",
+    // Client identity — dynamically registered (RFC 7591) or manually entered.
+    val oauthClientId: String = "",
+    val oauthClientSecret: String = "",
+    val oauthDynamicallyRegistered: Boolean = false,
+    /** How the client authenticates to the token endpoint: "post" (client_secret in the
+     *  POST body, AppAuth's ClientSecretPost), "basic" (HTTP Basic auth header,
+     *  ClientSecretBasic), or "none" (public/PKCE-only client, NoClientAuthentication).
+     *  Defaults to "post" to preserve behavior for existing configs (e.g. GitHub). */
+    val oauthClientAuthMethod: String = "post",
+    /** Token/expiry state — an AppAuth `AuthState.jsonSerializeString()` blob, rides the
+     *  same whole-blob SecretCrypto encryption as bearerToken. Empty until first sign-in. */
+    val oauthAuthStateJson: String = "",
+    /** Set when a refresh attempt fails (refresh token expired/revoked) — distinguishes
+     *  "needs re-auth" from a generic connection failure in the settings UI. */
+    val oauthNeedsReauth: Boolean = false
 )
 
 @Serializable

@@ -120,6 +120,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Set when the Activity is (re)started by AppAuth's managed OAuth flow finishing
+    // (success, error, or user cancellation) — see tool/McpOAuthManager.kt. Each increment
+    // tells Compose to hand the result to ChatViewModel.handleMcpOAuthCallback().
+    private var pendingMcpOAuthServerId by mutableStateOf<String?>(null)
+    private var pendingMcpOAuthResponse by mutableStateOf<net.openid.appauth.AuthorizationResponse?>(null)
+    private var pendingMcpOAuthException by mutableStateOf<net.openid.appauth.AuthorizationException?>(null)
+    private var mcpOAuthCallbackTrigger by mutableIntStateOf(0)
+
+    private fun Intent?.registerIfMcpOAuthResult() {
+        if (this?.action != com.newoether.agora.tool.MCP_OAUTH_RESULT_ACTION) return
+        val serverId = getStringExtra(com.newoether.agora.tool.MCP_OAUTH_EXTRA_SERVER_ID) ?: return
+        pendingMcpOAuthServerId = serverId
+        pendingMcpOAuthResponse = net.openid.appauth.AuthorizationResponse.fromIntent(this)
+        pendingMcpOAuthException = net.openid.appauth.AuthorizationException.fromIntent(this)
+        mcpOAuthCallbackTrigger++
+    }
+
     private fun Intent?.registerIfShareRequest() {
         val action = this?.action
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
@@ -176,6 +193,7 @@ class MainActivity : ComponentActivity() {
         intent.registerIfSettingsRequest()
         intent.registerIfAssistLaunch()
         intent.registerIfShareRequest()
+        intent.registerIfMcpOAuthResult()
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -287,7 +305,11 @@ class MainActivity : ComponentActivity() {
                                 pendingAssistContextUri = pendingAssistContextUri,
                                 shareLaunchTrigger = shareLaunchTrigger,
                                 pendingShareText = pendingShareText,
-                                pendingShareUris = pendingShareUris
+                                pendingShareUris = pendingShareUris,
+                                mcpOAuthCallbackTrigger = mcpOAuthCallbackTrigger,
+                                pendingMcpOAuthServerId = pendingMcpOAuthServerId,
+                                pendingMcpOAuthResponse = pendingMcpOAuthResponse,
+                                pendingMcpOAuthException = pendingMcpOAuthException
                             )
                         }
                     }
@@ -302,6 +324,7 @@ class MainActivity : ComponentActivity() {
         intent.registerIfSettingsRequest()
         intent.registerIfAssistLaunch()
         intent.registerIfShareRequest()
+        intent.registerIfMcpOAuthResult()
     }
 
     override fun onResume() {
@@ -475,7 +498,14 @@ fun MainNavigation(
     // as attachments, routed by mime type in ChatBottomBar.
     shareLaunchTrigger: Int = 0,
     pendingShareText: String? = null,
-    pendingShareUris: List<Uri> = emptyList()
+    pendingShareUris: List<Uri> = emptyList(),
+    // > 0 means the Activity was (re)started by AppAuth's managed OAuth flow finishing
+    // (see tool/McpOAuthManager.kt) — pendingMcpOAuthServerId identifies which
+    // McpServerConfig it was for; pendingMcpOAuthResponse/-Exception carry the outcome.
+    mcpOAuthCallbackTrigger: Int = 0,
+    pendingMcpOAuthServerId: String? = null,
+    pendingMcpOAuthResponse: net.openid.appauth.AuthorizationResponse? = null,
+    pendingMcpOAuthException: net.openid.appauth.AuthorizationException? = null
 ) {
     var showSettings by rememberSaveable { mutableStateOf(openSettingsTrigger > 0) }
     LaunchedEffect(openSettingsTrigger) {
@@ -491,6 +521,11 @@ fun MainNavigation(
         if (shareLaunchTrigger > 0) {
             showSettings = false
             viewModel.handleShareLaunch(pendingShareText, pendingShareUris)
+        }
+    }
+    LaunchedEffect(mcpOAuthCallbackTrigger) {
+        if (mcpOAuthCallbackTrigger > 0 && pendingMcpOAuthServerId != null) {
+            viewModel.handleMcpOAuthCallback(pendingMcpOAuthServerId, pendingMcpOAuthResponse, pendingMcpOAuthException)
         }
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }

@@ -95,6 +95,8 @@ class ChatViewModel(
 
     val settings: SettingsRepository = settingsRepository
 
+    private val mcpOAuthManager = com.newoether.agora.tool.McpOAuthManager(appContext, settings)
+
     /**
      * Conversation/message persistence behind the repository layer. CRUD, cascade-delete,
      * branch-selection and stuck-message logic live in [ConversationRepository]; managers
@@ -284,6 +286,7 @@ class ChatViewModel(
                 com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(getApplication())
             }
             gm.onRequestNotificationPostPermission = { notificationPostPermission.request() }
+            gm.mcpOAuthManager = mcpOAuthManager
         }
     }
 
@@ -997,6 +1000,72 @@ class ChatViewModel(
 
     suspend fun testMcpServer(server: com.newoether.agora.data.McpServerConfig): Result<List<String>> =
         generationManager.testMcpConnection(server)
+
+    /** Per-server "sign in again" flag — true once an OAuth refresh attempt has failed
+     *  (refresh token expired/revoked), until the user completes sign-in again. */
+    val mcpReauthNeeded: kotlinx.coroutines.flow.StateFlow<Map<String, Boolean>>
+        get() = generationManager.mcpReauthNeeded
+
+    /** Discovers OAuth metadata for [server]'s URL (RFC 9728/8414), falling back to null
+     *  (manual endpoint entry in the UI) if either step fails. */
+    suspend fun discoverMcpOAuthMetadata(server: com.newoether.agora.data.McpServerConfig) =
+        mcpOAuthManager.discover(server.url)
+
+    /** Registers Agora as an OAuth client with [registrationEndpoint] (RFC 7591). Null on
+     *  failure/unsupported — the UI falls back to manual client_id/secret entry. */
+    suspend fun registerMcpOAuthClient(registrationEndpoint: String) =
+        mcpOAuthManager.registerClient(registrationEndpoint, com.newoether.agora.tool.MCP_OAUTH_REDIRECT_URI)
+
+    private val _pendingMcpOAuthLaunch = kotlinx.coroutines.flow.MutableStateFlow<com.newoether.agora.tool.McpOAuthAuthorizationRequest?>(null)
+    /** Set once [com.newoether.agora.tool.McpOAuthManager.buildAuthorizationRequest] has built
+     *  the authorization request; the Compose layer observes this and calls
+     *  [com.newoether.agora.tool.launchMcpOAuthAuthorization] with an *Activity* context
+     *  (`LocalContext.current`), then [consumeMcpOAuthLaunch] — launching from here with only
+     *  `getApplication()` would crash, since AppAuth's Custom Tab launch isn't given
+     *  `FLAG_ACTIVITY_NEW_TASK`. */
+    val pendingMcpOAuthLaunch: kotlinx.coroutines.flow.StateFlow<com.newoether.agora.tool.McpOAuthAuthorizationRequest?> = _pendingMcpOAuthLaunch.asStateFlow()
+
+    fun consumeMcpOAuthLaunch() {
+        _pendingMcpOAuthLaunch.value = null
+    }
+
+    /** Builds the AppAuth authorization request for [server] and hands it to
+     *  [pendingMcpOAuthLaunch] for the Compose layer to launch. */
+    fun launchMcpOAuthSignIn(server: com.newoether.agora.data.McpServerConfig) {
+        _pendingMcpOAuthLaunch.value = mcpOAuthManager.buildAuthorizationRequest(server)
+    }
+
+    fun signOutMcpOAuth(server: com.newoether.agora.data.McpServerConfig) {
+        mcpOAuthManager.signOut(server)
+    }
+
+    /** True once a sign-in has produced a still-known access/refresh token for [server]. */
+    fun isMcpOAuthConnected(server: com.newoether.agora.data.McpServerConfig): Boolean =
+        mcpOAuthManager.isConnected(server)
+
+    /** Handles AppAuth's managed OAuth flow finishing (see MainActivity.
+     *  registerIfMcpOAuthResult()): [serverId] identifies which [com.newoether.agora.data.
+     *  McpServerConfig] the sign-in was for; [response] is present on success (and already
+     *  carries AppAuth's own state-validated original request), [exception] on error or user
+     *  cancellation. */
+    fun handleMcpOAuthCallback(
+        serverId: String,
+        response: net.openid.appauth.AuthorizationResponse?,
+        exception: net.openid.appauth.AuthorizationException?
+    ) {
+        viewModelScope.launch {
+            val server = settings.mcpServers.value.find { it.id == serverId } ?: return@launch
+            if (response == null) {
+                val message = listOfNotNull(exception?.error, exception?.errorDescription).joinToString(": ").ifBlank { "cancelled" }
+                emitSnackbar(appContext.getString(R.string.mcp_oauth_sign_in_failed, message))
+                return@launch
+            }
+            val result = mcpOAuthManager.exchangeCodeForTokens(server, response)
+            if (result.isFailure) {
+                emitSnackbar(appContext.getString(R.string.mcp_oauth_sign_in_failed, result.exceptionOrNull()?.message ?: ""))
+            }
+        }
+    }
 
     /**
      * Connects to an SSH host in capture mode and returns the server host key

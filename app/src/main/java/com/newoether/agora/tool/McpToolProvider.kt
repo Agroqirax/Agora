@@ -52,10 +52,19 @@ class McpToolProvider : ToolProvider {
      *  key: display names can collide or be renamed after being trusted. */
     var confirm: (suspend (serverId: String, serverName: String, toolName: String, summary: String) -> Boolean)? = null
 
+    /** Set by GenerationManager, wired to a single shared [McpOAuthManager] instance.
+     *  Used to refresh an OAuth server's access token on a 401, and to mark
+     *  [ServerState.needsReauth]/[reauthNeededFlow] when a refresh itself fails. */
+    var oauthManager: McpOAuthManager? = null
+
     companion object {
         private const val PROTOCOL_VERSION = "2025-06-18"
         private const val TOOL_CACHE_TTL_MS = 30_000L
         const val PREFIX = "mcp__"
+        // Internal-only RpcResult.error marker: an OAuth server returned 401 and the
+        // refresh attempt also failed. Never shown to the model/user directly — callers
+        // translate it into a user-facing "sign in again" message.
+        private const val REAUTH_REQUIRED_SENTINEL = "MCP_OAUTH_REAUTH_REQUIRED"
     }
 
     private data class RemoteTool(
@@ -71,10 +80,13 @@ class McpToolProvider : ToolProvider {
         val sessionId: String?,
         val fetchedAt: Long,
         val error: String?,
-        val serverInfo: McpServerInfo? = null
+        val serverInfo: McpServerInfo? = null,
+        // True when an OAuth refresh attempt failed (refresh token expired/revoked) —
+        // distinct from a generic connection failure, surfaced via [reauthNeededFlow].
+        val needsReauth: Boolean = false
     )
 
-    private data class RpcResult(val obj: JsonObject?, val sessionId: String?, val error: String?)
+    private data class RpcResult(val obj: JsonObject?, val sessionId: String?, val error: String?, val statusCode: Int? = null)
 
     private val cache = ConcurrentHashMap<String, ServerState>()
     private val json = Json { ignoreUnknownKeys = true }
@@ -89,6 +101,16 @@ class McpToolProvider : ToolProvider {
     private fun recordServerInfo(id: String, info: McpServerInfo?) {
         if (info == null) return
         _serverInfo.value = _serverInfo.value + (id to info)
+    }
+
+    // Per-server "an OAuth refresh attempt failed, sign-in is needed again" flag —
+    // consulted by the settings page to show a distinct "Sign in again" state instead of
+    // a generic connection-failure message.
+    private val _reauthNeeded = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val reauthNeededFlow: StateFlow<Map<String, Boolean>> = _reauthNeeded.asStateFlow()
+
+    private fun recordReauth(id: String, needsReauth: Boolean) {
+        _reauthNeeded.value = _reauthNeeded.value + (id to needsReauth)
     }
 
     private fun slug(name: String, id: String): String {
@@ -151,10 +173,12 @@ class McpToolProvider : ToolProvider {
                 val (server, state) = deferred.await()
                 cache[server.id] = state
                 recordServerInfo(server.id, state.serverInfo)
+                recordReauth(server.id, state.needsReauth)
             }
         val validIds = ctx.mcpServers.map { it.id }.toSet()
         cache.keys.retainAll(validIds)
         _serverInfo.value = _serverInfo.value.filterKeys { it in validIds }
+        _reauthNeeded.value = _reauthNeeded.value.filterKeys { it in validIds }
     }
 
     /** Connects to [server] and lists its tools. Used both by [refresh] and by the
@@ -170,7 +194,10 @@ class McpToolProvider : ToolProvider {
             put("capabilities", buildJsonObject {})
             put("clientInfo", buildJsonObject { put("name", "Agora"); put("version", "1.0") })
         }
-        val initResult = sendRpc(server, rpcRequest("initialize", initParams), null)
+        val initResult = sendRpcWithAuthRetry(server, { rpcRequest("initialize", initParams) }, null)
+        if (initResult.error == REAUTH_REQUIRED_SENTINEL) {
+            return@withContext ServerState(server, emptyList(), null, System.currentTimeMillis(), "Sign in again to use this server", needsReauth = true)
+        }
         if (initResult.obj == null) {
             return@withContext ServerState(server, emptyList(), null, System.currentTimeMillis(), initResult.error ?: "connection failed")
         }
@@ -182,9 +209,13 @@ class McpToolProvider : ToolProvider {
             }
         } catch (_: Exception) { null }
         // Best-effort — servers may not require or acknowledge this notification.
-        sendRpc(server, rpcNotification("notifications/initialized"), sessionId)
+        val notifyToken = if (server.authType == "oauth") oauthManager?.accessToken(server) else null
+        sendRpc(server, rpcNotification("notifications/initialized"), sessionId, notifyToken)
 
-        val listResult = sendRpc(server, rpcRequest("tools/list", buildJsonObject {}), sessionId)
+        val listResult = sendRpcWithAuthRetry(server, { rpcRequest("tools/list", buildJsonObject {}) }, sessionId)
+        if (listResult.error == REAUTH_REQUIRED_SENTINEL) {
+            return@withContext ServerState(server, emptyList(), sessionId, System.currentTimeMillis(), "Sign in again to use this server", serverInfo, needsReauth = true)
+        }
         if (listResult.error != null) {
             return@withContext ServerState(server, emptyList(), sessionId, System.currentTimeMillis(), listResult.error, serverInfo)
         }
@@ -220,17 +251,24 @@ class McpToolProvider : ToolProvider {
     suspend fun testConnection(server: McpServerConfig): Result<List<String>> {
         val state = fetchServerState(server)
         recordServerInfo(server.id, state.serverInfo)
+        recordReauth(server.id, state.needsReauth)
         return if (state.error != null) Result.failure(Exception(state.error))
         else Result.success(state.tools.map { it.name })
     }
 
     // ── JSON-RPC transport ──────────────────────────────────────
 
-    private fun buildHeaders(server: McpServerConfig, sessionId: String?): Map<String, String> = buildMap {
+    private fun buildHeaders(server: McpServerConfig, sessionId: String?, oauthAccessToken: String?): Map<String, String> = buildMap {
         put("Content-Type", "application/json")
         put("Accept", "application/json, text/event-stream")
         put("MCP-Protocol-Version", PROTOCOL_VERSION)
-        if (server.bearerToken.isNotBlank()) put("Authorization", "Bearer ${server.bearerToken}")
+        when (server.authType) {
+            // Always emit the canonical "Bearer" scheme (capital B) regardless of the
+            // token_type casing the authorization server returned (e.g. "bearer") — some
+            // resource servers parse the Authorization header case-sensitively.
+            "oauth" -> if (!oauthAccessToken.isNullOrBlank()) put("Authorization", "Bearer $oauthAccessToken")
+            else -> if (server.bearerToken.isNotBlank()) put("Authorization", "Bearer ${server.bearerToken}")
+        }
         server.headers.forEach { (k, v) -> if (k.isNotBlank()) put(k, v) }
         if (sessionId != null) put("Mcp-Session-Id", sessionId)
     }
@@ -251,10 +289,10 @@ class McpToolProvider : ToolProvider {
     /** Sends one JSON-RPC message over Streamable HTTP. Handles both a plain JSON
      *  response and a `text/event-stream` response (reads the whole body — MCP tool
      *  responses are small — and takes the last `data:` payload). */
-    private fun sendRpc(server: McpServerConfig, body: String, sessionId: String?): RpcResult {
+    private fun sendRpc(server: McpServerConfig, body: String, sessionId: String?, oauthAccessToken: String?): RpcResult {
         val handle = try {
             HttpClient.streamPost(
-                server.url, body, buildHeaders(server, sessionId),
+                server.url, body, buildHeaders(server, sessionId, oauthAccessToken),
                 timeoutMs = server.timeout.coerceIn(5, 120) * 1000L,
                 trackAsActive = false
             )
@@ -266,7 +304,7 @@ class McpToolProvider : ToolProvider {
             if (handle.code !in 200..299) {
                 val errBody = try { handle.source?.readUtf8() } catch (_: Exception) { null }
                 val suffix = if (!errBody.isNullOrBlank()) ": ${errBody.take(300)}" else ""
-                return RpcResult(null, newSessionId, "HTTP ${handle.code}$suffix")
+                return RpcResult(null, newSessionId, "HTTP ${handle.code}$suffix", handle.code)
             }
             val contentType = handle.headers["Content-Type"] ?: ""
             val raw = try { handle.source?.readUtf8() ?: "" } catch (e: Exception) {
@@ -292,6 +330,34 @@ class McpToolProvider : ToolProvider {
         } finally {
             handle.close()
         }
+    }
+
+    /** Sends [bodyFactory]'s JSON-RPC message. For an `"oauth"` server, proactively ensures
+     *  a non-expired access token via [oauthManager] before the first attempt (AppAuth only
+     *  hits the network if actually near/past expiry); if the resource server still returns
+     *  a 401 (e.g. out-of-band revocation a proactive expiry check can't know about), forces
+     *  one reactive refresh and retries exactly once with the fresh token. If the refresh
+     *  itself fails (refresh token expired/revoked), returns [REAUTH_REQUIRED_SENTINEL] as
+     *  the error instead of the raw 401, so callers can surface a distinct "sign in again"
+     *  state. [bodyFactory] is re-invoked on retry so the JSON-RPC request id is regenerated,
+     *  not reused. */
+    private suspend fun sendRpcWithAuthRetry(server: McpServerConfig, bodyFactory: () -> String, sessionId: String?): RpcResult {
+        val manager = oauthManager
+        val isOAuth = server.authType == "oauth" && manager != null
+        if (isOAuth) manager!!.ensureFreshAccessToken(server)
+        var accessToken = if (isOAuth) manager!!.accessToken(server) else null
+
+        var result = sendRpc(server, bodyFactory(), sessionId, accessToken)
+        if (result.statusCode == 401 && isOAuth) {
+            val refreshed = manager!!.refreshAccessToken(server)
+            if (refreshed.isSuccess) {
+                accessToken = manager.accessToken(server)
+                result = sendRpc(server, bodyFactory(), sessionId, accessToken)
+            } else {
+                return RpcResult(null, result.sessionId, REAUTH_REQUIRED_SENTINEL)
+            }
+        }
+        return result
     }
 
     // ── JSON-Schema ⇄ ToolProperty (best-effort; drops keywords ToolProperty
@@ -382,16 +448,27 @@ class McpToolProvider : ToolProvider {
             put("arguments", argsObj)
         }
 
+        // Re-resolve the live config by id rather than trusting the (possibly stale, e.g.
+        // OAuth-token-bearing) copy cached inside ServerState — a token refreshed since
+        // the last fetch must be used here, not the one baked into the cache entry.
+        val currentServer = ctx.mcpServers.find { it.id == server.id } ?: server
+
         var state = cache[server.id]
-        var result = sendRpc(server, rpcRequest("tools/call", callParams), state?.sessionId)
+        var result = sendRpcWithAuthRetry(currentServer, { rpcRequest("tools/call", callParams) }, state?.sessionId)
 
         // Session likely expired — reconnect once and retry.
         if (result.obj == null && result.error?.contains("404") == true) {
-            val fresh = fetchServerState(server)
+            val fresh = fetchServerState(currentServer)
             cache[server.id] = fresh
             recordServerInfo(server.id, fresh.serverInfo)
+            recordReauth(server.id, fresh.needsReauth)
             state = fresh
-            result = sendRpc(server, rpcRequest("tools/call", callParams), fresh.sessionId)
+            result = sendRpcWithAuthRetry(currentServer, { rpcRequest("tools/call", callParams) }, fresh.sessionId)
+        }
+
+        if (result.error == REAUTH_REQUIRED_SENTINEL) {
+            recordReauth(server.id, true)
+            return "Error: sign in again to MCP server \"${currentServer.name}\" to continue using its tools"
         }
 
         if (result.sessionId != null && result.sessionId != state?.sessionId) {
@@ -399,6 +476,7 @@ class McpToolProvider : ToolProvider {
         }
 
         if (result.obj == null) return "Error: MCP call failed — ${result.error ?: "no response"}"
+        recordReauth(server.id, false)
         val resultObj = try { result.obj["result"]?.jsonObject } catch (_: Exception) { null }
             ?: return "Error: MCP call failed — ${result.error ?: "empty response"}"
 

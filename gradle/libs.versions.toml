@@ -21,6 +21,8 @@ lottie = "6.6.2"
 work = "2.10.0"
 jsch = "0.2.23"
 commonsCompress = "1.27.1"
+browser = "1.9.0"
+appauth = "0.11.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -54,6 +56,8 @@ lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", versio
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
 jsch = { group = "com.github.mwiede", name = "jsch", version.ref = "jsch" }
 commons-compress = { group = "org.apache.commons", name = "commons-compress", version.ref = "commonsCompress" }
+androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+appauth = { group = "net.openid", name = "appauth", version.ref = "appauth" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

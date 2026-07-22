@@ -1102,6 +1102,31 @@
     <string name="mcp_confirm_deny">Deny</string>
     <string name="mcp_confirm_setting">Confirm destructive MCP tool calls</string>
     <string name="mcp_confirm_setting_desc">Ask before running a destructive MCP tool call</string>
+    <!-- MCP OAuth -->
+    <string name="mcp_server_auth_type">Authentication</string>
+    <string name="mcp_server_auth_type_none">None</string>
+    <string name="mcp_server_auth_type_bearer">Bearer Token</string>
+    <string name="mcp_server_auth_type_oauth">OAuth</string>
+    <string name="mcp_oauth_discover">Discover</string>
+    <string name="mcp_oauth_discovering">Discovering…</string>
+    <string name="mcp_oauth_discover_failed">Couldn\'t auto-discover — enter the endpoints manually below</string>
+    <string name="mcp_oauth_authorization_endpoint">Authorization Endpoint</string>
+    <string name="mcp_oauth_token_endpoint">Token Endpoint</string>
+    <string name="mcp_oauth_registration_endpoint">Registration Endpoint (optional)</string>
+    <string name="mcp_oauth_resource">Resource Indicator (optional)</string>
+    <string name="mcp_oauth_resource_desc">Sent as the OAuth `resource` parameter — defaults to the server URL above if left blank</string>
+    <string name="mcp_oauth_client_id">Client ID</string>
+    <string name="mcp_oauth_client_secret">Client Secret (optional)</string>
+    <string name="mcp_oauth_scope">Scope (optional)</string>
+    <string name="mcp_oauth_register_client">Register Client</string>
+    <string name="mcp_oauth_registering">Registering…</string>
+    <string name="mcp_oauth_sign_in">Sign in</string>
+    <string name="mcp_oauth_sign_in_again">Sign in again</string>
+    <string name="mcp_oauth_sign_out">Sign out</string>
+    <string name="mcp_oauth_connected">Connected</string>
+    <string name="mcp_oauth_needs_reauth">Sign-in expired — reconnect to use this server</string>
+    <string name="mcp_oauth_sign_in_failed">Sign-in failed: %1$s</string>
+    <string name="mcp_oauth_test_connection_sign_in_first">Sign in to test this connection</string>
     <!-- Location confirmation gate -->
     <string name="location_confirm_title">Share your location?</string>
     <string name="location_confirm_message">The assistant wants to read your device\'s current location and share it with the model.</string>

@@ -30,6 +30,11 @@ android {
         versionCode = 26
         versionName = "1.4.0"
 
+        // Consumed by AppAuth-Android's own AAR manifest to declare its
+        // RedirectUriReceiverActivity, which forwards the `agora://oauth/callback`
+        // browser redirect into AuthorizationManagementActivity — see McpOAuthManager.kt,
+        // which drives AppAuth's "managed" PendingIntent-based authorization flow.
+        manifestPlaceholders["appAuthRedirectScheme"] = "agora"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -176,6 +181,8 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.jsch)
     implementation(libs.commons.compress)
+    implementation(libs.androidx.browser)
+    implementation(libs.appauth)
     debugImplementation(libs.androidx.compose.ui.tooling)
 
     // Unit tests
