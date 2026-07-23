@@ -114,10 +114,34 @@ android {
     }
 }
 
-// Proot binaries (libproot_exec.so, libproot_loader.so, libtalloc.so) are
-// built via GNUmakefile (see .build-proot/) and placed directly in jniLibs.
-// No CMake target is needed — the binaries are manually managed prebuilts.
-// talloc is built with SONAME=libtalloc.so (no version) so AGP packaging works.
+// Proot binaries (libproot_exec.so, libproot_loader.so, libtalloc.so) are built
+// by ../build-proot.sh (GNUmakefile under the hood, see .build-proot/) and placed
+// directly in jniLibs — no CMake target, the binaries are manually managed
+// prebuilts. talloc is built with SONAME=libtalloc.so (no version) so AGP
+// packaging works. The script is idempotent (hash-checks its own sources and
+// skips work when unchanged), so it's safe to run on every build.
+val buildProotBinaries = tasks.register<Exec>("buildProotBinaries") {
+    description = "Builds the proot sandbox native binaries via build-proot.sh so a plain `./gradlew` build works without the old build.ps1/build_fdroid.ps1 wrapper scripts."
+    workingDir = rootProject.projectDir
+    // build-proot.sh auto-detects the NDK from ANDROID_NDK_HOME (inherited from this
+    // process's environment automatically), then falls back to scanning
+    // $ANDROID_HOME/ndk/* — when ANDROID_NDK_HOME isn't already set, pass through
+    // local.properties' sdk.dir (same file keystoreProperties above already loads) as
+    // ANDROID_HOME so that fallback works from a plain `./gradlew` invocation with no
+    // extra env setup.
+    if (System.getenv("ANDROID_NDK_HOME") == null) {
+        keystoreProperties.getProperty("sdk.dir")?.let { environment("ANDROID_HOME", it) }
+    }
+    commandLine("bash", "build-proot.sh")
+    inputs.dir("$rootDir/thirdparty/talloc")
+    inputs.dir("$rootDir/thirdparty/proot/src")
+    outputs.dir("$projectDir/src/main/jniLibs/arm64-v8a")
+    outputs.dir("$projectDir/src/fdroid/jniLibs/arm64-v8a")
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildProotBinaries)
+}
 
 tasks.register<Copy>("copyPlayApk") {
     from("build/outputs/apk/play/release")

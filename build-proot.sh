@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 # build-proot.sh - Build proot native binaries for the Agora Android app.
-# Invoked from build.ps1 / build-googleplay.ps1 / build_fdroid.ps1.
+# Invoked automatically by `./gradlew` (see app/build.gradle.kts's
+# buildProotBinaries task, wired into preBuild) — no manual step needed.
 # Must run inside WSL Arch (or any Linux with NDK 28.2.13676358).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

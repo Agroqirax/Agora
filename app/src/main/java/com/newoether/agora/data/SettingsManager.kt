@@ -87,6 +87,16 @@ data class McpServerConfig(
     val description: String = "",
     /** MCP Streamable HTTP endpoint, e.g. https://example.com/mcp */
     val url: String = "",
+    /** "http" (Streamable HTTP, [url]) | "stdio" (local subprocess, [stdioCommand]).
+     *  Default "http" so pre-existing configs (which only ever had a url) keep working
+     *  unchanged. Stdio servers only run on the F-Droid flavor's on-device Alpine
+     *  sandbox — see McpToolProvider/ProotSandboxManager.startProcess. */
+    val transport: String = "http",
+    /** Shell command line run inside the sandbox for a stdio server, e.g.
+     *  "npx -y @modelcontextprotocol/server-filesystem /home/agora". */
+    val stdioCommand: String = "",
+    /** Extra environment variables passed to the stdio subprocess. */
+    val stdioEnv: Map<String, String> = emptyMap(),
     val enabled: Boolean = true,
     // Per-server override of the global "confirm before destructive MCP tool calls"
     // setting (SettingsManager.mcpConfirmEnabled) — see ShellDeviceConfig.confirmEnabled,

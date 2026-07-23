@@ -262,7 +262,7 @@ class GenerationManager(
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { serverId, serverLabel, summary -> onConfirmShellCommand?.invoke(serverId, serverLabel, summary) ?: true }
     }
-    private val mcpToolProvider = McpToolProvider().also { mp ->
+    private val mcpToolProvider = McpToolProvider(sandboxFactory).also { mp ->
         mp.confirm = { serverId, serverName, toolName, summary -> onConfirmMcpToolCall?.invoke(serverId, serverName, toolName, summary) ?: true }
     }
     val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
@@ -275,6 +275,9 @@ class GenerationManager(
     var mcpOAuthManager: com.newoether.agora.tool.McpOAuthManager?
         get() = mcpToolProvider.oauthManager
         set(value) { mcpToolProvider.oauthManager = value }
+    /** Call when the sandbox is reset/uninstalled — kills any live stdio MCP server
+     *  processes rather than leaving them running against a now-deleted rootfs. */
+    fun closeMcpStdioConnections() = mcpToolProvider.closeAllStdioConnections()
     private val locationToolProvider = LocationToolProvider(app).also { lp ->
         lp.confirm = { confirmLocationShared() }
         lp.requestPermission = { onRequestLocationPermission?.invoke() ?: false }

@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">Wofür dieser Server gedacht ist</string>
     <string name="mcp_server_url">Server-URL</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">Transport</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">Stdio</string>
+    <string name="mcp_server_command">Befehl</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">Umgebungsvariablen</string>
+    <string name="mcp_server_env_hint">API_KEY=geheim</string>
+    <string name="mcp_server_sandbox_not_installed">Installieren Sie zuerst die Sandbox unter Einstellungen → Shell → Sandbox, um stdio-Server auszuführen.</string>
+    <string name="mcp_server_runtime_missing">Erfordert: %1$s</string>
+    <string name="mcp_server_install_runtime">Installieren</string>
     <string name="mcp_server_bearer_token">Bearer-Token</string>
     <string name="mcp_server_bearer_token_hint">Wird als Authorization: Bearer … gesendet</string>
     <string name="mcp_server_headers">Zusätzliche Header</string>

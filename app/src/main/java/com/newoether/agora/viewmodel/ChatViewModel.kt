@@ -381,6 +381,9 @@ class ChatViewModel(
 
     fun setMcpConfirmEnabled(enabled: Boolean) = settings.setMcpConfirmEnabled(enabled)
 
+    /** Call when the sandbox is reset/uninstalled — see [GenerationManager.closeMcpStdioConnections]. */
+    fun closeMcpStdioConnections() = generationManager.closeMcpStdioConnections()
+
     // ── Location tool confirmation + runtime permission gates ────────────
     /** In-app "share your location?" prompt (see [ToolConfirmationController]). No
      *  per-key trust list — there's only one location source — so "always allow"

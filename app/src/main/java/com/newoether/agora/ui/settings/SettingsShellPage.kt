@@ -61,7 +61,8 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsSandboxPage(
                     sandboxManager = viewModel.sandboxManager!!,
                     onBack = { showSandboxMgmt = false },
-                    showDocFab = showDocFab
+                    showDocFab = showDocFab,
+                    onSandboxReset = { viewModel.closeMcpStdioConnections() }
                 )
             }
         } else {

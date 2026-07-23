@@ -70,6 +70,15 @@ interface SandboxManager {
         timeoutMs: Int = 30000
     ): SandboxResult
 
+    /** Starts a long-lived subprocess inside the sandbox (proot) for stdio-based
+     *  protocols like MCP. Caller owns the returned handle's lifecycle — call
+     *  [SandboxProcess.destroy] when done with it. */
+    suspend fun startProcess(
+        command: String,
+        env: Map<String, String> = emptyMap(),
+        workdir: String = ""
+    ): SandboxProcess
+
     /** Read a file from the sandbox filesystem. */
     suspend fun fileRead(path: String, offset: Long = 0, limit: Long = 0): String
 
@@ -147,4 +156,25 @@ interface SandboxManager {
         val sizeBytes: Long = 0,
         val description: String = ""
     )
+
+    /** A live subprocess started via [startProcess], for line-oriented stdio protocols. */
+    interface SandboxProcess {
+        /** Writes [line] followed by a newline to the process's stdin, then flushes. */
+        suspend fun writeLine(line: String)
+
+        /** Suspends until the next full line arrives on stdout, or returns null once
+         *  the stream has closed (process exited or was destroyed). */
+        suspend fun readLine(): String?
+
+        /** Whether the underlying process is still running. */
+        val isAlive: Boolean
+
+        /** Last few lines the process wrote to stderr, most recent last — surfaced so a
+         *  crashed process (e.g. a stdio MCP server exiting over a missing config/env
+         *  var) can report *why* instead of just "no response". */
+        val stderrTail: String
+
+        /** Forcibly terminates the process and releases its reader resources. */
+        fun destroy()
+    }
 }

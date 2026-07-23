@@ -6,15 +6,23 @@ import com.newoether.agora.api.ToolFunction
 import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
 import com.newoether.agora.data.McpServerConfig
+import com.newoether.agora.sandbox.SandboxManager
+import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -44,7 +52,7 @@ data class McpServerInfo(val name: String, val version: String)
  * setting is off, the confirmation controller itself always returns true, so every
  * call is allowed — this class only decides *whether to ask*, not the answer.
  */
-class McpToolProvider : ToolProvider {
+class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null) : ToolProvider {
     /** User-confirmation gate for destructive MCP tool calls. Set by GenerationManager,
      *  which wires it to the ViewModel's confirmation controller. Returns true to
      *  proceed, false to deny. Never called for non-destructive tools. [serverId] is
@@ -65,6 +73,10 @@ class McpToolProvider : ToolProvider {
         // refresh attempt also failed. Never shown to the model/user directly — callers
         // translate it into a user-facing "sign in again" message.
         private const val REAUTH_REQUIRED_SENTINEL = "MCP_OAUTH_REAUTH_REQUIRED"
+        // sendRpcStdio's error text when the process is still alive but simply hasn't
+        // answered in time — distinct from the process having actually died, so callers
+        // know whether reconnecting (killing and relaunching the process) is warranted.
+        private const val STDIO_TIMEOUT_MESSAGE = "stdio server timed out"
     }
 
     private data class RemoteTool(
@@ -91,6 +103,40 @@ class McpToolProvider : ToolProvider {
     private val cache = ConcurrentHashMap<String, ServerState>()
     private val json = Json { ignoreUnknownKeys = true }
     private val reqId = java.util.concurrent.atomic.AtomicInteger(1)
+
+    // ── Stdio transport (F-Droid sandbox only) ──────────────────
+
+    /** One live subprocess + its in-flight request table, keyed by [McpServerConfig.id].
+     *  The reader job runs on [ioScope] so it outlives any single RPC call — a stdio
+     *  server's process is a long-lived connection, not a per-request one. */
+    private class StdioConnection(
+        val process: SandboxManager.SandboxProcess,
+        // Snapshot of what launched this process — if the server's config no longer
+        // matches, the connection is stale and must be restarted, not reused.
+        val command: String,
+        val env: Map<String, String>
+    ) {
+        val pending = ConcurrentHashMap<String, CompletableDeferred<JsonObject>>()
+        var readerJob: Job? = null
+    }
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val stdioConnections = ConcurrentHashMap<String, StdioConnection>()
+
+    private fun closeStdioConnection(id: String) {
+        stdioConnections.remove(id)?.let { conn ->
+            conn.readerJob?.cancel()
+            conn.process.destroy()
+        }
+    }
+
+    /** Kills every live stdio subprocess. Call this when the sandbox they're running in
+     *  gets reset/uninstalled — a deleted rootfs doesn't stop an already-running process
+     *  (Linux keeps deleted-but-open files mapped), so without this the orphaned process
+     *  keeps limping along on stale state until something it needs (e.g. DNS) breaks. */
+    fun closeAllStdioConnections() {
+        stdioConnections.keys.toList().forEach { closeStdioConnection(it) }
+    }
 
     // Last-known serverInfo (name/version) per server id, from any successful
     // `initialize` handshake — populated by both refresh() and testConnection().
@@ -155,8 +201,10 @@ class McpToolProvider : ToolProvider {
         val now = System.currentTimeMillis()
         val stale = mutableListOf<McpServerConfig>()
         for (server in ctx.mcpServers) {
-            if (!server.enabled || server.url.isBlank()) {
+            val unconfigured = if (server.transport == "stdio") server.stdioCommand.isBlank() else server.url.isBlank()
+            if (!server.enabled || unconfigured) {
                 cache.remove(server.id)
+                closeStdioConnection(server.id)
                 continue
             }
             val existing = cache[server.id]
@@ -179,6 +227,7 @@ class McpToolProvider : ToolProvider {
         cache.keys.retainAll(validIds)
         _serverInfo.value = _serverInfo.value.filterKeys { it in validIds }
         _reauthNeeded.value = _reauthNeeded.value.filterKeys { it in validIds }
+        stdioConnections.keys.filter { it !in validIds }.forEach { closeStdioConnection(it) }
     }
 
     /** Connects to [server] and lists its tools. Used both by [refresh] and by the
@@ -194,7 +243,7 @@ class McpToolProvider : ToolProvider {
             put("capabilities", buildJsonObject {})
             put("clientInfo", buildJsonObject { put("name", "Agora"); put("version", "1.0") })
         }
-        val initResult = sendRpcWithAuthRetry(server, { rpcRequest("initialize", initParams) }, null)
+        val initResult = rpcCall(server, { rpcRequest("initialize", initParams) }, null)
         if (initResult.error == REAUTH_REQUIRED_SENTINEL) {
             return@withContext ServerState(server, emptyList(), null, System.currentTimeMillis(), "Sign in again to use this server", needsReauth = true)
         }
@@ -209,10 +258,14 @@ class McpToolProvider : ToolProvider {
             }
         } catch (_: Exception) { null }
         // Best-effort — servers may not require or acknowledge this notification.
-        val notifyToken = if (server.authType == "oauth") oauthManager?.accessToken(server) else null
-        sendRpc(server, rpcNotification("notifications/initialized"), sessionId, notifyToken)
+        if (server.transport == "stdio") {
+            sendRpcStdio(server, rpcNotification("notifications/initialized"))
+        } else {
+            val notifyToken = if (server.authType == "oauth") oauthManager?.accessToken(server) else null
+            sendRpc(server, rpcNotification("notifications/initialized"), sessionId, notifyToken)
+        }
 
-        val listResult = sendRpcWithAuthRetry(server, { rpcRequest("tools/list", buildJsonObject {}) }, sessionId)
+        val listResult = rpcCall(server, { rpcRequest("tools/list", buildJsonObject {}) }, sessionId)
         if (listResult.error == REAUTH_REQUIRED_SENTINEL) {
             return@withContext ServerState(server, emptyList(), sessionId, System.currentTimeMillis(), "Sign in again to use this server", serverInfo, needsReauth = true)
         }
@@ -360,6 +413,90 @@ class McpToolProvider : ToolProvider {
         return result
     }
 
+    /** Dispatches [bodyFactory]'s JSON-RPC message over whichever transport [server] is
+     *  configured for. Stdio has no sessions/OAuth/401s, so it bypasses
+     *  [sendRpcWithAuthRetry] entirely and goes straight to [sendRpcStdio]. */
+    private suspend fun rpcCall(server: McpServerConfig, bodyFactory: () -> String, sessionId: String?): RpcResult =
+        if (server.transport == "stdio") sendRpcStdio(server, bodyFactory())
+        else sendRpcWithAuthRetry(server, bodyFactory, sessionId)
+
+    /** Gets the live subprocess connection for [server], starting one if none exists
+     *  (or the previous one died). Returns null if the sandbox isn't available or the
+     *  server has no command configured — callers translate that into a connection
+     *  error, same as an unreachable HTTP endpoint. */
+    private suspend fun getOrCreateStdioConnection(server: McpServerConfig): StdioConnection? {
+        stdioConnections[server.id]?.let { existing ->
+            val stale = existing.command != server.stdioCommand || existing.env != server.stdioEnv
+            if (existing.process.isAlive && !stale) return existing
+            closeStdioConnection(server.id)
+        }
+        if (server.stdioCommand.isBlank()) return null
+        val manager = sandboxFactory?.create() ?: return null
+        if (!manager.isAvailable()) return null
+        val process = try { manager.startProcess(server.stdioCommand, server.stdioEnv) } catch (e: Exception) {
+            DebugLog.e("McpToolProvider", "Failed to start stdio server ${server.name}: ${e.message}")
+            return null
+        }
+        val conn = StdioConnection(process, server.stdioCommand, server.stdioEnv)
+        conn.readerJob = ioScope.launch {
+            while (true) {
+                val line = process.readLine() ?: break
+                if (line.isBlank()) continue
+                try {
+                    val obj = json.parseToJsonElement(line).jsonObject
+                    val id = obj["id"]?.toString() ?: continue // notifications from the server aren't correlated
+                    conn.pending.remove(id)?.complete(obj)
+                } catch (_: Exception) {
+                    // Some servers print plain-text startup banners to stdout before
+                    // speaking JSON-RPC — ignore anything that doesn't parse.
+                }
+            }
+            // stdout closed — the process exited (crash, missing config/env var, etc.).
+            // Fail any in-flight request immediately instead of leaving it to time out.
+            val reason = "MCP server process exited" + process.stderrTail.trim().let { if (it.isNotBlank()) ": ${it.take(500)}" else "" }
+            conn.pending.keys.toList().forEach { key -> conn.pending.remove(key)?.completeExceptionally(IllegalStateException(reason)) }
+        }
+        stdioConnections[server.id] = conn
+        return conn
+    }
+
+    /** Sends one JSON-RPC message to [server]'s stdio subprocess and, for a request
+     *  (has an "id"), suspends for the matching response line on stdout, bounded by
+     *  [McpServerConfig.timeout]. Notifications (no "id") are fire-and-forget. */
+    private suspend fun sendRpcStdio(server: McpServerConfig, body: String): RpcResult {
+        val conn = getOrCreateStdioConnection(server) ?: return RpcResult(null, null, "stdio sandbox unavailable")
+        val requestObj = try { json.parseToJsonElement(body).jsonObject } catch (e: Exception) {
+            return RpcResult(null, null, "invalid request")
+        }
+        val id = requestObj["id"]?.toString()
+        if (id == null) {
+            try { conn.process.writeLine(body) } catch (e: Exception) { return RpcResult(null, null, e.message ?: "write failed") }
+            return RpcResult(null, null, null)
+        }
+        val deferred = CompletableDeferred<JsonObject>()
+        conn.pending[id] = deferred
+        try {
+            conn.process.writeLine(body)
+        } catch (e: Exception) {
+            conn.pending.remove(id)
+            return RpcResult(null, null, e.message ?: "write failed")
+        }
+        val response = try {
+            withTimeoutOrNull(server.timeout.coerceIn(5, 120) * 1000L) { deferred.await() }
+        } catch (e: Exception) {
+            return RpcResult(null, null, e.message ?: "stdio server exited")
+        } finally {
+            conn.pending.remove(id)
+        }
+        if (response == null) return RpcResult(null, null, STDIO_TIMEOUT_MESSAGE)
+        val rpcError = response["error"]?.jsonObject
+        if (rpcError != null) {
+            val msg = (rpcError["message"] as? JsonPrimitive)?.content ?: "MCP server returned an error"
+            return RpcResult(response, null, msg)
+        }
+        return RpcResult(response, null, null)
+    }
+
     // ── JSON-Schema ⇄ ToolProperty (best-effort; drops keywords ToolProperty
     //    can't represent, like oneOf/const/format/additionalProperties) ──
 
@@ -454,16 +591,23 @@ class McpToolProvider : ToolProvider {
         val currentServer = ctx.mcpServers.find { it.id == server.id } ?: server
 
         var state = cache[server.id]
-        var result = sendRpcWithAuthRetry(currentServer, { rpcRequest("tools/call", callParams) }, state?.sessionId)
+        var result = rpcCall(currentServer, { rpcRequest("tools/call", callParams) }, state?.sessionId)
 
-        // Session likely expired — reconnect once and retry.
-        if (result.obj == null && result.error?.contains("404") == true) {
+        // Session likely expired — reconnect once and retry. (Stdio has no session
+        // concept, but a dead subprocess surfaces as this same "connection failed" shape,
+        // so reconnecting once here also covers a stdio server that crashed mid-session.
+        // A plain timeout is deliberately excluded — the process is still alive, just
+        // slow, and killing/relaunching it there would abort real in-flight work, e.g. a
+        // cold `npx` start that's simply taking a while.)
+        val stdioDied = currentServer.transport == "stdio" && result.error != STDIO_TIMEOUT_MESSAGE
+        if (result.obj == null && (result.error?.contains("404") == true || stdioDied)) {
+            closeStdioConnection(currentServer.id)
             val fresh = fetchServerState(currentServer)
             cache[server.id] = fresh
             recordServerInfo(server.id, fresh.serverInfo)
             recordReauth(server.id, fresh.needsReauth)
             state = fresh
-            result = sendRpcWithAuthRetry(currentServer, { rpcRequest("tools/call", callParams) }, fresh.sessionId)
+            result = rpcCall(currentServer, { rpcRequest("tools/call", callParams) }, fresh.sessionId)
         }
 
         if (result.error == REAUTH_REQUIRED_SENTINEL) {

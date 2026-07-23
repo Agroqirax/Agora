@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">このサーバーの目的</string>
     <string name="mcp_server_url">サーバーURL</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">輸送</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">スタジオ</string>
+    <string name="mcp_server_command">指示</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">環境変数</string>
+    <string name="mcp_server_env_hint">API_KEY=シークレット</string>
+    <string name="mcp_server_sandbox_not_installed">標準入出力サーバーを実行するには、まず [設定] → [シェル] → [サンドボックス] でサンドボックスをインストールします。</string>
+    <string name="mcp_server_runtime_missing">必要なもの: %1$s</string>
+    <string name="mcp_server_install_runtime">インストール</string>
     <string name="mcp_server_bearer_token">無記名トークン</string>
     <string name="mcp_server_bearer_token_hint">承認として送信: ベアラー…</string>
     <string name="mcp_server_headers">追加のヘッダー</string>

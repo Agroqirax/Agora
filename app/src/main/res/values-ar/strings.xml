@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">ما هو هذا الخادم ل</string>
     <string name="mcp_server_url">عنوان URL للخادم</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">ينقل</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">ستديو</string>
+    <string name="mcp_server_command">يأمر</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">متغيرات البيئة</string>
+    <string name="mcp_server_env_hint">API_KEY=سر</string>
+    <string name="mcp_server_sandbox_not_installed">قم بتثبيت وضع الحماية في الإعدادات → Shell → Sandbox أولاً لتشغيل خوادم stdio.</string>
+    <string name="mcp_server_runtime_missing">يتطلب: %1$s</string>
+    <string name="mcp_server_install_runtime">ثَبَّتَ</string>
     <string name="mcp_server_bearer_token">رمز حامل</string>
     <string name="mcp_server_bearer_token_hint">تم الإرسال كتفويض: حامل…</string>
     <string name="mcp_server_headers">رؤوس إضافية</string>

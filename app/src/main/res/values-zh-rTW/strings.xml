@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">這個伺服器的用途是什麼</string>
     <string name="mcp_server_url">伺服器位址</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">運輸</string>
+    <string name="mcp_server_transport_http">HTTP協定</string>
+    <string name="mcp_server_transport_stdio">工作室</string>
+    <string name="mcp_server_command">命令</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">環境變數</string>
+    <string name="mcp_server_env_hint">API_KEY=秘密</string>
+    <string name="mcp_server_sandbox_not_installed">首先在設定 → Shell → 沙箱中安裝沙箱以運行 stdio 伺服器。</string>
+    <string name="mcp_server_runtime_missing">需要：%1$s</string>
+    <string name="mcp_server_install_runtime">安裝</string>
     <string name="mcp_server_bearer_token">不記名令牌</string>
     <string name="mcp_server_bearer_token_hint">作為授權發送：持票人...</string>
     <string name="mcp_server_headers">附加標頭</string>

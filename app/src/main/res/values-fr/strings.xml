@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">A quoi sert ce serveur</string>
     <string name="mcp_server_url">URL du serveur</string>
     <string name="mcp_server_url_hint">https://exemple.com/mcp</string>
+    <string name="mcp_server_transport">Transport</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">Stdio</string>
+    <string name="mcp_server_command">Commande</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">Variables d\'environnement</string>
+    <string name="mcp_server_env_hint">API_KEY=secret</string>
+    <string name="mcp_server_sandbox_not_installed">Installez d\'abord le bac à sable dans Paramètres → Shell → Sandbox pour exécuter les serveurs stdio.</string>
+    <string name="mcp_server_runtime_missing">Nécessite : %1$s</string>
+    <string name="mcp_server_install_runtime">Installer</string>
     <string name="mcp_server_bearer_token">Jeton du porteur</string>
     <string name="mcp_server_bearer_token_hint">Envoyé en Authorization: Bearer …</string>
     <string name="mcp_server_headers">En-têtes supplémentaires</string>

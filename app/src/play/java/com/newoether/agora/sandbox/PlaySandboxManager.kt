@@ -45,6 +45,12 @@ class PlaySandboxManager : SandboxManager {
         exitCode = -1
     )
 
+    override suspend fun startProcess(
+        command: String,
+        env: Map<String, String>,
+        workdir: String
+    ): SandboxManager.SandboxProcess = throw UnsupportedOperationException("Sandbox not available in this build")
+
     override suspend fun fileRead(
         path: String,
         offset: Long,

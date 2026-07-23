@@ -49,7 +49,12 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, showDocFab: Boolean = false) {
+fun SettingsSandboxPage(
+    sandboxManager: SandboxManager,
+    onBack: () -> Unit,
+    showDocFab: Boolean = false,
+    onSandboxReset: () -> Unit = {}
+) {
     val scope = rememberCoroutineScope()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -556,6 +561,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                             sandboxManager.reset(); available = false
                             clearAllState()
                         }
+                        onSandboxReset()
                         resetConfirm = false
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)

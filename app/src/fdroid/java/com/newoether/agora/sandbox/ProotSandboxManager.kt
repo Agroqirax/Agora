@@ -3,14 +3,18 @@ package com.newoether.agora.sandbox
 import android.content.Context
 import android.util.Log
 import com.newoether.agora.R
+import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -22,6 +26,10 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     // caused `apk upgrade` to pull divergent packages (e.g. yash-binsh vs busybox-binsh /bin/sh
     // conflict) and rotates signing keys; the stable branch avoids both.
     private val alpineMirror = "https://dl-cdn.alpinelinux.org/alpine/v3.21/main"
+    // community carries most non-base packages (uv, py3-pip, htop, etc.) — main alone
+    // is missing a lot of what users actually want to install.
+    private val alpineCommunityMirror = "https://dl-cdn.alpinelinux.org/alpine/v3.21/community"
+    private val alpineRepos = listOf(alpineMirror, alpineCommunityMirror)
     // Base rootfs is fetched on-device at install time (not bundled in the APK), then verified
     // against this pinned SHA-256 before extraction. Stable v3.21 release URL.
     private val rootfsUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz"
@@ -142,7 +150,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             rc.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
             // Alpine repository config
             val repos = File(rootfsDir, "etc/apk/repositories"); repos.parentFile?.mkdirs()
-            repos.writeText("$alpineMirror\n")
+            repos.writeText(alpineRepos.joinToString("\n", postfix = "\n"))
             // Ensure all binaries are executable recursively
             listOf("bin", "usr/bin", "sbin", "usr/sbin", "usr/libexec").forEach { dir ->
                 val d = File(rootfsDir, dir)
@@ -212,10 +220,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     override fun installPackage(name: String) {
-        if (_isBusy.value) return
+        // compareAndSet, not a plain check-then-launch: the check and the flip to `true`
+        // must be atomic, otherwise two near-simultaneous calls (e.g. two quick-install
+        // taps) can both pass the check before either coroutine actually runs, racing the
+        // same shared download/tmp dir and corrupting one of the installs.
+        if (!_isBusy.compareAndSet(false, true)) return
         sandboxScope.launch {
             _terminalOutput.value = ""
-            _isBusy.value = true
             lastError = null
             try {
                 val ok = apkInstall(name) { _terminalOutput.value += it + "\n" }
@@ -232,10 +243,9 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     override fun removePackage(name: String) {
-        if (_isBusy.value) return
+        if (!_isBusy.compareAndSet(false, true)) return
         sandboxScope.launch {
             _terminalOutput.value = ""
-            _isBusy.value = true
             lastError = null
             try {
                 val ok = apkDelete(name)
@@ -249,10 +259,9 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     override fun upgradePackages() {
-        if (_isBusy.value) return
+        if (!_isBusy.compareAndSet(false, true)) return
         sandboxScope.launch {
             _terminalOutput.value = ""
-            _isBusy.value = true
             lastError = null
             try {
                 val upgraded = apkUpgrade { _terminalOutput.value += it + "\n" }
@@ -321,7 +330,12 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         return tallocDir.absolutePath
     }
 
-    private fun executeRaw(command: String, workdir: String = homeMountPath, timeoutMs: Int = 30000): SandboxManager.SandboxResult {
+    /** Builds the `proot`-wrapped `ProcessBuilder` shared by [executeRaw] (one-shot,
+     *  output fully consumed) and [startProcess] (long-lived, streamed). [command] is
+     *  run via `/bin/sh -c` so PATH lookup and shell scripts (e.g. `npx`) resolve the
+     *  same way a real shell would. [extraEnv] is layered on top of the base proot env
+     *  (e.g. stdio MCP servers configuring their own environment variables). */
+    private fun buildProotProcessBuilder(command: String, workdir: String, extraEnv: Map<String, String> = emptyMap()): ProcessBuilder {
         ensureShell()
         ensureSandboxMountTargets()
         val tmpDir = File(rootfsDir, "tmp").apply { mkdirs() }.absolutePath
@@ -335,16 +349,22 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             "-0", "--link2symlink", "--kill-on-exit", "-L",
             "/bin/sh", "-c", command
         )
+        val libDir = context.applicationInfo.nativeLibraryDir
+        val tallocLibDir = ensureTalloc()
+        val ldPath = "$tallocLibDir:$libDir"
+        val pb = ProcessBuilder(args)
+        pb.environment()["LD_LIBRARY_PATH"] = ldPath
+        pb.environment()["PROOT_LOADER"] = "$libDir/libproot_loader.so"
+        pb.environment()["PROOT_TMP_DIR"] = tmpDir
+        pb.environment()["HOME"] = homeMountPath
+        pb.environment()["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        extraEnv.forEach { (k, v) -> if (k.isNotBlank()) pb.environment()[k] = v }
+        return pb
+    }
+
+    private fun executeRaw(command: String, workdir: String = homeMountPath, timeoutMs: Int = 30000): SandboxManager.SandboxResult {
         return try {
-            val libDir = context.applicationInfo.nativeLibraryDir
-            val tallocLibDir = ensureTalloc()
-            val ldPath = "$tallocLibDir:$libDir"
-            val pb = ProcessBuilder(args).redirectErrorStream(true)
-            pb.environment()["LD_LIBRARY_PATH"] = ldPath
-            pb.environment()["PROOT_LOADER"] = "$libDir/libproot_loader.so"
-            pb.environment()["PROOT_TMP_DIR"] = tmpDir
-            pb.environment()["HOME"] = homeMountPath
-            pb.environment()["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            val pb = buildProotProcessBuilder(command, workdir).redirectErrorStream(true)
             val p = pb.start()
             val out = p.inputStream.bufferedReader().readText()
             val ok = p.waitFor(timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -356,6 +376,64 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     override suspend fun executeCommand(cmd: String, wd: String, to: Int): SandboxManager.SandboxResult {
         if (!isAvailable()) return SandboxManager.SandboxResult("", "Sandbox not installed", -1)
         return executeRaw(cmd, wd.ifBlank { homeMountPath }, to)
+    }
+
+    /** A [Process] wrapped for line-oriented stdio protocols (e.g. MCP). stdout is read
+     *  incrementally on a background thread into an unbounded [Channel]; stderr is
+     *  drained separately into [DebugLog] so it never fills the pipe and blocks the
+     *  child, and so it never corrupts the stdout JSON-RPC stream. */
+    private class ProotSandboxProcess(private val process: Process) : SandboxManager.SandboxProcess {
+        private val readerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private val lines = Channel<String>(Channel.UNLIMITED)
+        private val writeMutex = Mutex()
+        private val stderrLines = ArrayDeque<String>()
+
+        init {
+            readerScope.launch {
+                try {
+                    process.inputStream.bufferedReader().forEachLine { lines.trySend(it) }
+                } catch (_: Throwable) {
+                } finally {
+                    lines.close()
+                }
+            }
+            readerScope.launch {
+                try {
+                    process.errorStream.bufferedReader().forEachLine { line ->
+                        DebugLog.e("ProotSandboxProcess", "stderr: ${line.take(500)}")
+                        synchronized(stderrLines) {
+                            stderrLines.addLast(line)
+                            if (stderrLines.size > 20) stderrLines.removeFirst()
+                        }
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+        }
+
+        override suspend fun writeLine(line: String) = writeMutex.withLock {
+            withContext(Dispatchers.IO) {
+                process.outputStream.write((line + "\n").toByteArray())
+                process.outputStream.flush()
+            }
+        }
+
+        override suspend fun readLine(): String? = lines.receiveCatching().getOrNull()
+
+        override val isAlive: Boolean get() = process.isAlive
+
+        override val stderrTail: String get() = synchronized(stderrLines) { stderrLines.joinToString("\n") }
+
+        override fun destroy() {
+            readerScope.cancel()
+            lines.close()
+            process.destroyForcibly()
+        }
+    }
+
+    override suspend fun startProcess(command: String, env: Map<String, String>, workdir: String): SandboxManager.SandboxProcess = withContext(Dispatchers.IO) {
+        val pb = buildProotProcessBuilder(command, workdir, env).redirectErrorStream(false)
+        ProotSandboxProcess(pb.start())
     }
 
     // ── File Operations ────────────────────────────────
@@ -442,29 +520,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         lastError = null
         ensurePackageMetadata()
 
-        // 1. Download + parse repo index
+        // 1. Download + parse repo indices (main + community)
         onProgress("Fetching package index...")
-        val indexUrl = "$alpineMirror/aarch64/APKINDEX.tar.gz"
-        val indexFile = File(context.filesDir, "APKINDEX.tar.gz")
-        try {
-            val conn = URL(indexUrl).openConnection() as HttpURLConnection
-            onProgress("Connecting to ${conn.url.host}...")
-            val code = conn.responseCode
-            onProgress("HTTP $code (${conn.contentLength} bytes)")
-            if (code != 200) { onProgress("FAIL: HTTP $code"); lastError = "HTTP $code from $indexUrl"; return@withContext false }
-            conn.inputStream.use { i -> indexFile.outputStream().use { o -> i.copyTo(o) } }
+        val (repoPkgs, soToPkg) = fetchMergedIndex(onProgress) ?: run {
+            onProgress("FAIL: could not fetch any repo index")
+            lastError = "Failed to fetch package index"
+            return@withContext false
         }
-        catch (e: Throwable) { onProgress("FAIL: ${e.javaClass.simpleName}: ${e.message}"); lastError = "${e.javaClass.simpleName}: ${e.message}"; return@withContext false }
-
-        val repoPkgs: Map<String, FullPkgEntry>
-        val soToPkg: Map<String, String>
-        try {
-            val (r, s) = parseFullApkIndex(indexFile)
-            repoPkgs = r; soToPkg = s
-        } catch (e: Throwable) {
-            onProgress("FAIL: parse index — ${e.javaClass.simpleName}: ${e.message}")
-            lastError = "Parse index: ${e.message}"; indexFile.delete(); return@withContext false
-        } finally { indexFile.delete() }
 
         if (requested !in repoPkgs) {
             onProgress("FAIL: package '$requested' not found in index")
@@ -489,7 +551,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
                 val dn = dep.takeWhile { it != '=' && it != '>' && it != '<' && it != '~' }
                 if (dn.isNotEmpty()) {
                     if (dn in repoPkgs) resolve(dn, visited)
-                    else soToPkg[dn]?.let { resolve(it, visited) }
+                    else soToPkg[dn]?.let { pickProvider(it, installed) }?.let { resolve(it, visited) }
                 }
             }
         }
@@ -506,12 +568,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         val tmpDir = File(rootfsDir, "tmp"); tmpDir.listFiles()?.forEach { it.delete() }; tmpDir.mkdirs()
         val paths = mutableListOf<String>()
         for (name in toInstall) {
-            val ver = repoPkgs[name]?.version ?: continue
+            val entry = repoPkgs[name] ?: continue
+            val ver = entry.version
             val fn = "$name-$ver.apk"; val f = File(context.filesDir, fn)
             if (!f.exists() || f.length() == 0L) {
                 onProgress("Downloading $fn...")
                 try {
-                    val conn = URL("$alpineMirror/aarch64/$fn").openConnection() as HttpURLConnection
+                    val conn = URL("${entry.repoUrl}/aarch64/$fn").openConnection() as HttpURLConnection
                     if (conn.responseCode != 200) { onProgress("HTTP ${conn.responseCode}"); lastError = "HTTP ${conn.responseCode}: $fn"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
                     conn.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
                 } catch (ex: Throwable) { onProgress("FAIL: ${ex.message}"); lastError = "Download: ${ex.message}"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
@@ -519,20 +582,11 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             val dst = File(tmpDir, fn); f.copyTo(dst, true); f.delete(); paths.add("/tmp/$fn")
         }
 
-        // 5. Pre-install: if we're replacing /bin/sh provider, install that first
-        // to avoid post-install scripts failing when busybox-binsh is purged.
-        val shPkgs = toInstall.filter { "binsh" in it || it == "yash" }.toList()
-        if (shPkgs.isNotEmpty()) {
-            val shPaths = paths.filter { p -> shPkgs.any { p.contains(it) } }
-            if (shPaths.isNotEmpty()) {
-                onProgress("Installing shell provider first...")
-                val r = executeRaw("apk add --allow-untrusted --no-network ${shPaths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 60000)
-                onProgress(r.stdout)
-                paths.removeAll(shPaths)
-            }
-        }
-
-        // 6. Main install
+        // 5. Main install — everything in one atomic `apk add`. A shell-provider package
+        // (busybox-binsh/yash-binsh) is version-locked to its counterpart (busybox/yash:
+        // busybox-binsh-X requires busybox=X exactly), so splitting it into an earlier,
+        // separate transaction breaks that lockstep constraint whenever both are being
+        // upgraded together — apk's own solver handles the combined transaction correctly.
         onProgress("Installing ${paths.size} packages...")
         val result = if (paths.isNotEmpty()) {
             executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 120000)
@@ -619,24 +673,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         lastError = null
         ensurePackageMetadata()
 
-        // 1. Download + parse APKINDEX
+        // 1. Download + parse APKINDEX (main + community)
         onProgress("Fetching package index...")
-        val indexUrl = "$alpineMirror/aarch64/APKINDEX.tar.gz"
-        val indexFile = File(context.filesDir, "APKINDEX_UPGRADE.tar.gz")
-        try {
-            val conn = URL(indexUrl).openConnection() as HttpURLConnection
-            if (conn.responseCode != 200) { onProgress("HTTP ${conn.responseCode}"); lastError = "HTTP ${conn.responseCode} from $indexUrl"; return@withContext 0 }
-            conn.inputStream.use { i -> indexFile.outputStream().use { o -> i.copyTo(o) } }
-        } catch (e: Throwable) { onProgress("FAIL: ${e.message}"); lastError = e.message; return@withContext 0 }
-
-        val repoPkgs: Map<String, FullPkgEntry>
-        val soToPkg: Map<String, String>
-        try {
-            val (r, s) = parseFullApkIndex(indexFile)
-            repoPkgs = r; soToPkg = s
-        } catch (e: Throwable) {
-            onProgress("FAIL: parse index — ${e.javaClass.simpleName}: ${e.message}"); lastError = "Parse index: ${e.message}"; indexFile.delete(); return@withContext 0
-        } finally { indexFile.delete() }
+        val (repoPkgs, soToPkg) = fetchMergedIndex(onProgress) ?: run {
+            onProgress("FAIL: could not fetch any repo index")
+            lastError = "Failed to fetch package index"
+            return@withContext 0
+        }
 
         // 2. Read installed DB
         val installed = readInstalledVersions()
@@ -661,7 +704,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
                 val dn = dep.takeWhile { it != '=' && it != '>' && it != '<' && it != '~' }
                 if (dn.isNotEmpty()) {
                     if (dn in repoPkgs) collect(dn)
-                    else soToPkg[dn]?.let { collect(it) }
+                    else soToPkg[dn]?.let { pickProvider(it, installed) }?.let { collect(it) }
                 }
             }
         }
@@ -672,12 +715,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         val tmpDir = File(rootfsDir, "tmp"); tmpDir.listFiles()?.forEach { it.delete() }; tmpDir.mkdirs()
         val paths = mutableListOf<String>()
         for (name in toInstall) {
-            val ver = repoPkgs[name]?.version ?: continue
+            val entry = repoPkgs[name] ?: continue
+            val ver = entry.version
             val fn = "$name-$ver.apk"; val f = File(context.filesDir, fn)
             if (!f.exists() || f.length() == 0L) {
                 onProgress("Downloading $fn...")
                 try {
-                    val conn = URL("$alpineMirror/aarch64/$fn").openConnection() as HttpURLConnection
+                    val conn = URL("${entry.repoUrl}/aarch64/$fn").openConnection() as HttpURLConnection
                     if (conn.responseCode != 200) {
                         onProgress("HTTP ${conn.responseCode}")
                         lastError = "HTTP ${conn.responseCode}: $fn"
@@ -748,7 +792,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
 
     // ── APKINDEX Parsing ────────────────────────────────
 
-    private data class FullPkgEntry(val name: String, val version: String, val deps: List<String>)
+    private data class FullPkgEntry(val name: String, val version: String, val deps: List<String>, val repoUrl: String)
 
     /** Compare two Alpine-style package versions. Returns >0 if a > b, 0 if equal, <0 if a < b.
      *  Alpine version format: {version}-r{revision}  (e.g. "3.5.2-r1", "1.2.3_pre1-r0").
@@ -816,9 +860,61 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         return revA.compareTo(revB)
     }
 
-    private fun parseFullApkIndex(indexFile: File): Pair<Map<String, FullPkgEntry>, Map<String, String>> {
+    /** Fetches + parses the APKINDEX from every repo in [alpineRepos] (main, community)
+     *  and merges them into one lookup, so dependency resolution can pull a package
+     *  from whichever repo actually has it. A name present in more than one repo keeps
+     *  the higher version's entry (and thus that repo's download URL). A single repo
+     *  being unreachable is non-fatal — it's skipped via [onProgress] rather than
+     *  failing the whole operation, as long as at least one repo came back. */
+    private fun fetchMergedIndex(onProgress: (String) -> Unit): Pair<Map<String, FullPkgEntry>, Map<String, List<String>>>? {
+        val repoPkgs = mutableMapOf<String, FullPkgEntry>()
+        val soToPkg = mutableMapOf<String, MutableList<String>>()
+        var anySucceeded = false
+        for (repo in alpineRepos) {
+            val indexUrl = "$repo/aarch64/APKINDEX.tar.gz"
+            val indexFile = File(context.filesDir, "APKINDEX-${repo.substringAfterLast('/')}.tar.gz")
+            try {
+                val conn = URL(indexUrl).openConnection() as HttpURLConnection
+                val code = conn.responseCode
+                if (code != 200) { onProgress("Skipping $repo (HTTP $code)"); continue }
+                conn.inputStream.use { i -> indexFile.outputStream().use { o -> i.copyTo(o) } }
+                val (r, s) = parseFullApkIndex(indexFile, repo)
+                for ((name, entry) in r) {
+                    val existing = repoPkgs[name]
+                    if (existing == null || compareAlpineVersions(entry.version, existing.version) > 0) repoPkgs[name] = entry
+                }
+                for ((provide, providers) in s) {
+                    val merged = soToPkg.getOrPut(provide) { mutableListOf() }
+                    providers.forEach { if (it !in merged) merged.add(it) }
+                }
+                anySucceeded = true
+            } catch (e: Throwable) {
+                onProgress("Skipping $repo: ${e.javaClass.simpleName}: ${e.message}")
+            } finally {
+                indexFile.delete()
+            }
+        }
+        return if (anySucceeded) repoPkgs to soToPkg else null
+    }
+
+    /** [candidates] is every package providing some virtual dependency (e.g. `/bin/sh`,
+     *  `cmd:sh`) that isn't itself a real package name — several unrelated packages can
+     *  provide the same one (famously `busybox-binsh` and `yash-binsh` both provide
+     *  `/bin/sh`/`cmd:sh`). Picking the wrong one when resolving a transitive dependency
+     *  during a routine upgrade tries to *switch* shell providers, which conflicts with
+     *  whichever one is already installed. Always prefer the already-installed provider;
+     *  only fall back to an arbitrary candidate when installing fresh (nothing installed
+     *  yet) so a first-time install still resolves to *something*. */
+    private fun pickProvider(candidates: List<String>, installed: Map<String, String>): String? =
+        candidates.firstOrNull { it in installed } ?: candidates.firstOrNull()
+
+    private fun parseFullApkIndex(indexFile: File, repoUrl: String): Pair<Map<String, FullPkgEntry>, Map<String, List<String>>> {
         val result = mutableMapOf<String, FullPkgEntry>()
-        val soToPkg = mutableMapOf<String, String>()
+        val soToPkg = mutableMapOf<String, MutableList<String>>()
+        fun addProvider(provide: String, pkgName: String) {
+            val list = soToPkg.getOrPut(provide) { mutableListOf() }
+            if (pkgName !in list) list.add(pkgName)
+        }
         java.util.zip.GZIPInputStream(indexFile.inputStream()).use { gz ->
             org.apache.commons.compress.archivers.tar.TarArchiveInputStream(gz).use { tar ->
                 var entry = tar.nextEntry
@@ -842,14 +938,14 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
                                         // p: lists all provides (so:libfoo.so.1=1.0 so:libbar.so.1=1.0)
                                         for (prov in provider.split(Regex("\\s+"))) {
                                             val pn = prov.takeWhile { it != '=' }
-                                            if (pn.isNotEmpty()) soToPkg[pn] = name
+                                            if (pn.isNotEmpty()) addProvider(pn, name)
                                         }
                                     }
                                 }
                                 if (n.startsWith("D:")) deps.addAll(n.substring(2).trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
                             }
-                            if (isSoEntry && provider.isNotEmpty()) soToPkg[name] = provider
-                            else if (!isSoEntry && name.isNotEmpty() && version.isNotEmpty()) result[name] = FullPkgEntry(name, version, deps)
+                            if (isSoEntry && provider.isNotEmpty()) addProvider(name, provider)
+                            else if (!isSoEntry && name.isNotEmpty() && version.isNotEmpty()) result[name] = FullPkgEntry(name, version, deps, repoUrl)
                         }
                     }
                     entry = tar.nextEntry
@@ -955,6 +1051,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     private fun ensurePackageMetadata() {
         if (!rootfsDir.isDirectory) return
         metadataDir.mkdirs()
+        // Self-heals rootfs installs created before the community repo was added —
+        // otherwise those sandboxes would be stuck with only "main" in this file forever.
+        val repos = File(rootfsDir, "etc/apk/repositories")
+        val wantRepos = alpineRepos.joinToString("\n", postfix = "\n")
+        if (!repos.exists() || repos.readText() != wantRepos) {
+            repos.parentFile?.mkdirs(); repos.writeText(wantRepos)
+        }
         captureBaseWorld()
         if (!explicitPackagesFile.exists()) {
             val baseNames = readBaseWorld().map { worldPackageName(it) }.toSet()

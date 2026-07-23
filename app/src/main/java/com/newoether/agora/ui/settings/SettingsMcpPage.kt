@@ -25,9 +25,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.McpServerConfig
+import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import java.util.UUID
 
@@ -167,6 +170,9 @@ private fun ServerEditor(
     var nameInput by remember(server.id) { mutableStateOf(server.name) }
     var descInput by remember(server.id) { mutableStateOf(server.description) }
     var urlInput by remember(server.id) { mutableStateOf(server.url) }
+    var transportInput by remember(server.id) { mutableStateOf(server.transport) }
+    var commandInput by remember(server.id) { mutableStateOf(server.stdioCommand) }
+    var stdioEnvInput by remember(server.id) { mutableStateOf(envToText(server.stdioEnv)) }
     var tokenInput by remember(server.id) { mutableStateOf(server.bearerToken) }
     var headersInput by remember(server.id) { mutableStateOf(headersToText(server.headers)) }
     var timeoutInput by remember(server.id) { mutableStateOf(server.timeout) }
@@ -197,6 +203,7 @@ private fun ServerEditor(
     LaunchedEffect(server) {
         enabledInput = server.enabled; confirmEnabledInput = server.confirmEnabled; nameInput = server.name; descInput = server.description
         urlInput = server.url; tokenInput = server.bearerToken
+        transportInput = server.transport; commandInput = server.stdioCommand; stdioEnvInput = envToText(server.stdioEnv)
         headersInput = headersToText(server.headers); timeoutInput = server.timeout
         authTypeInput = if (server.authType == "none" && server.bearerToken.isNotBlank()) "bearer" else server.authType
         oauthAuthEndpointInput = server.oauthAuthorizationEndpoint
@@ -246,7 +253,9 @@ private fun ServerEditor(
                 }
             },
             supportingContent = {
-                val text = server.description.ifBlank { hostLabel(server.url) }
+                val text = server.description.ifBlank {
+                    if (server.transport == "stdio") server.stdioCommand else hostLabel(server.url)
+                }
                 if (text.isNotBlank()) Text(text)
             },
             leadingContent = {
@@ -290,68 +299,100 @@ private fun ServerEditor(
                 OutlinedTextField(value = descInput, onValueChange = { descInput = it }, label = { Text(stringResource(R.string.mcp_server_desc)) },
                     placeholder = { Text(stringResource(R.string.mcp_server_desc_hint)) }, leadingIcon = { Icon(Icons.Default.Description, null) },
                     singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = urlInput, onValueChange = { urlInput = it; testResult = null }, label = { Text(stringResource(R.string.mcp_server_url)) },
-                    placeholder = { Text(stringResource(R.string.mcp_server_url_hint)) }, leadingIcon = { Icon(Icons.Default.Link, null) },
-                    singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester))
-                Spacer(Modifier.height(10.dp))
-                Text(stringResource(R.string.mcp_server_auth_type), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
-                Spacer(Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        "none" to stringResource(R.string.mcp_server_auth_type_none),
-                        "bearer" to stringResource(R.string.mcp_server_auth_type_bearer),
-                        "oauth" to stringResource(R.string.mcp_server_auth_type_oauth)
-                    ).forEach { (value, label) ->
-                        FilterChip(selected = authTypeInput == value, onClick = { authTypeInput = value }, label = { Text(label) })
+                if (viewModel.isSandboxFlavor) {
+                    Spacer(Modifier.height(10.dp))
+                    Text(stringResource(R.string.mcp_server_transport), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "http" to stringResource(R.string.mcp_server_transport_http),
+                            "stdio" to stringResource(R.string.mcp_server_transport_stdio)
+                        ).forEach { (value, label) ->
+                            FilterChip(selected = transportInput == value, onClick = { transportInput = value; testResult = null }, label = { Text(label) })
+                        }
                     }
                 }
 
-                if (authTypeInput == "bearer") {
+                // Play has no sandbox to run a stdio server in, so it always falls back to
+                // the HTTP fields even if a synced config's `transport` says "stdio" —
+                // `commandInput`/`stdioEnvInput` still round-trip untouched on Save.
+                val showStdioFields = transportInput == "stdio" && viewModel.isSandboxFlavor
+                if (showStdioFields) {
                     Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, label = { Text(stringResource(R.string.mcp_server_bearer_token)) },
-                        placeholder = { Text(stringResource(R.string.mcp_server_bearer_token_hint)) }, leadingIcon = { Icon(Icons.Default.Key, null) },
-                        singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                        shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
-                }
+                    OutlinedTextField(value = commandInput, onValueChange = { commandInput = it; testResult = null }, label = { Text(stringResource(R.string.mcp_server_command)) },
+                        placeholder = { Text(stringResource(R.string.mcp_server_command_hint)) }, leadingIcon = { Icon(Icons.Default.Terminal, null) },
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester))
 
-                if (authTypeInput == "oauth") {
-                    McpOAuthSection(
-                        viewModel = viewModel,
-                        server = server,
-                        urlInput = urlInput,
-                        authEndpointInput = oauthAuthEndpointInput,
-                        onAuthEndpointChange = { oauthAuthEndpointInput = it },
-                        tokenEndpointInput = oauthTokenEndpointInput,
-                        onTokenEndpointChange = { oauthTokenEndpointInput = it },
-                        registrationEndpointInput = oauthRegistrationEndpointInput,
-                        onRegistrationEndpointChange = { oauthRegistrationEndpointInput = it },
-                        resourceInput = oauthResourceInput,
-                        onResourceChange = { oauthResourceInput = it },
-                        clientIdInput = oauthClientIdInput,
-                        onClientIdChange = { oauthClientIdInput = it },
-                        clientSecretInput = oauthClientSecretInput,
-                        onClientSecretChange = { oauthClientSecretInput = it },
-                        scopeInput = oauthScopeInput,
-                        onScopeChange = { oauthScopeInput = it },
-                        clientAuthMethodInput = oauthClientAuthMethodInput,
-                        onClientAuthMethodChange = { oauthClientAuthMethodInput = it },
-                        discovering = oauthDiscovering,
-                        onDiscoveringChange = { oauthDiscovering = it },
-                        discoverFailed = oauthDiscoverFailed,
-                        onDiscoverFailedChange = { oauthDiscoverFailed = it },
-                        registering = oauthRegistering,
-                        onRegisteringChange = { oauthRegistering = it },
-                        needsReauth = mcpReauthNeededMap[server.id] == true,
-                        scope = scope
-                    )
-                }
+                    StdioRuntimeHelper(viewModel = viewModel, command = commandInput)
 
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(value = headersInput, onValueChange = { headersInput = it }, label = { Text(stringResource(R.string.mcp_server_headers)) },
-                    placeholder = { Text(stringResource(R.string.mcp_server_headers_hint)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
-                    supportingText = { Text(stringResource(R.string.mcp_server_headers_desc)) },
-                    minLines = 2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(value = stdioEnvInput, onValueChange = { stdioEnvInput = it }, label = { Text(stringResource(R.string.mcp_server_env)) },
+                        placeholder = { Text(stringResource(R.string.mcp_server_env_hint)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+                        minLines = 2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(value = urlInput, onValueChange = { urlInput = it; testResult = null }, label = { Text(stringResource(R.string.mcp_server_url)) },
+                        placeholder = { Text(stringResource(R.string.mcp_server_url_hint)) }, leadingIcon = { Icon(Icons.Default.Link, null) },
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().focusRequester(urlFocusRequester))
+                    Spacer(Modifier.height(10.dp))
+                    Text(stringResource(R.string.mcp_server_auth_type), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(Modifier.height(4.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "none" to stringResource(R.string.mcp_server_auth_type_none),
+                            "bearer" to stringResource(R.string.mcp_server_auth_type_bearer),
+                            "oauth" to stringResource(R.string.mcp_server_auth_type_oauth)
+                        ).forEach { (value, label) ->
+                            FilterChip(selected = authTypeInput == value, onClick = { authTypeInput = value }, label = { Text(label) })
+                        }
+                    }
+
+                    if (authTypeInput == "bearer") {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, label = { Text(stringResource(R.string.mcp_server_bearer_token)) },
+                            placeholder = { Text(stringResource(R.string.mcp_server_bearer_token_hint)) }, leadingIcon = { Icon(Icons.Default.Key, null) },
+                            singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                            shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                    }
+
+                    if (authTypeInput == "oauth") {
+                        McpOAuthSection(
+                            viewModel = viewModel,
+                            server = server,
+                            urlInput = urlInput,
+                            authEndpointInput = oauthAuthEndpointInput,
+                            onAuthEndpointChange = { oauthAuthEndpointInput = it },
+                            tokenEndpointInput = oauthTokenEndpointInput,
+                            onTokenEndpointChange = { oauthTokenEndpointInput = it },
+                            registrationEndpointInput = oauthRegistrationEndpointInput,
+                            onRegistrationEndpointChange = { oauthRegistrationEndpointInput = it },
+                            resourceInput = oauthResourceInput,
+                            onResourceChange = { oauthResourceInput = it },
+                            clientIdInput = oauthClientIdInput,
+                            onClientIdChange = { oauthClientIdInput = it },
+                            clientSecretInput = oauthClientSecretInput,
+                            onClientSecretChange = { oauthClientSecretInput = it },
+                            scopeInput = oauthScopeInput,
+                            onScopeChange = { oauthScopeInput = it },
+                            clientAuthMethodInput = oauthClientAuthMethodInput,
+                            onClientAuthMethodChange = { oauthClientAuthMethodInput = it },
+                            discovering = oauthDiscovering,
+                            onDiscoveringChange = { oauthDiscovering = it },
+                            discoverFailed = oauthDiscoverFailed,
+                            onDiscoverFailedChange = { oauthDiscoverFailed = it },
+                            registering = oauthRegistering,
+                            onRegisteringChange = { oauthRegistering = it },
+                            needsReauth = mcpReauthNeededMap[server.id] == true,
+                            scope = scope
+                        )
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(value = headersInput, onValueChange = { headersInput = it }, label = { Text(stringResource(R.string.mcp_server_headers)) },
+                        placeholder = { Text(stringResource(R.string.mcp_server_headers_hint)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.List, null) },
+                        supportingText = { Text(stringResource(R.string.mcp_server_headers_desc)) },
+                        minLines = 2, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                }
 
                 // Timeout
                 Spacer(Modifier.height(10.dp))
@@ -372,6 +413,7 @@ private fun ServerEditor(
                             val probe = McpServerConfig(
                                 id = server.id, name = nameInput.trim().ifBlank { server.name }, description = descInput.trim(),
                                 url = urlInput.trim(), enabled = true, bearerToken = tokenInput.trim(),
+                                transport = transportInput, stdioCommand = commandInput.trim(), stdioEnv = textToEnv(stdioEnvInput),
                                 headers = textToHeaders(headersInput), timeout = timeoutInput,
                                 authType = authTypeInput,
                                 oauthAuthorizationEndpoint = oauthAuthEndpointInput.trim(),
@@ -398,7 +440,7 @@ private fun ServerEditor(
                             }
                         }
                     },
-                    enabled = !testing && urlInput.isNotBlank() && (authTypeInput != "oauth" || viewModel.isMcpOAuthConnected(server)),
+                    enabled = !testing && (if (showStdioFields) commandInput.isNotBlank() else urlInput.isNotBlank() && (authTypeInput != "oauth" || viewModel.isMcpOAuthConnected(server))),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (testing) {
@@ -450,6 +492,7 @@ private fun ServerEditor(
                         viewModel.updateMcpServer(server.copy(
                             enabled = enabledInput, confirmEnabled = confirmEnabledInput, name = nameInput.trim(), description = descInput.trim(),
                             url = urlInput.trim(), bearerToken = tokenInput.trim(),
+                            transport = transportInput, stdioCommand = commandInput.trim(), stdioEnv = textToEnv(stdioEnvInput),
                             headers = textToHeaders(headersInput), timeout = timeoutInput,
                             authType = authTypeInput,
                             oauthAuthorizationEndpoint = oauthAuthEndpointInput.trim(),
@@ -469,6 +512,81 @@ private fun ServerEditor(
                 }
             }
         }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Stdio runtime install helper — offers to `apk add` whatever interpreter a
+// stdio command needs (npx/node → nodejs+npm, etc.) instead of making the
+// user hunt through Settings > Shell > Sandbox > Packages themselves.
+// ═══════════════════════════════════════════════════════════════
+
+/** Maps a stdio command's launcher binary (first whitespace token) to the Alpine
+ *  packages that provide it. Unrecognized binaries return an empty list — the
+ *  fallback quick-install chips in [StdioRuntimeHelper] cover that case. */
+private fun detectRuntimePackages(command: String): List<String> {
+    val bin = command.trim().substringBefore(' ')
+    return when (bin) {
+        "npx", "npm", "node" -> listOf("nodejs", "npm")
+        "uvx", "uv" -> listOf("uv")
+        "python", "python3" -> listOf("python3")
+        "pip", "pip3" -> listOf("python3", "py3-pip")
+        else -> emptyList()
+    }
+}
+
+@Composable
+private fun StdioRuntimeHelper(viewModel: ChatViewModel, command: String) {
+    val sandbox = viewModel.sandboxManager ?: return
+    if (!sandbox.isAvailableSync()) {
+        Spacer(Modifier.height(6.dp))
+        Text(
+            stringResource(R.string.mcp_server_sandbox_not_installed),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        return
+    }
+    val installedPackages by sandbox.packageList.collectAsState()
+    val isBusy by sandbox.isBusy.collectAsState()
+    val installedNames = installedPackages.map { it.name }.toSet()
+    val detected = detectRuntimePackages(command).filter { it !in installedNames }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+
+    // packageList only reflects what's actually installed once something has called
+    // refreshPackageList() — normally done by the Sandbox management page's own init,
+    // which this composable can't rely on having run this session (e.g. straight after
+    // an app restart, before ever visiting that page). Without this, already-installed
+    // packages would wrongly show up as "missing" here.
+    LaunchedEffect(sandbox) { sandbox.refreshPackageList() }
+
+    if (detected.isNotEmpty()) {
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text(
+                stringResource(R.string.mcp_server_runtime_missing, detected.joinToString(", ")),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            TextButton(onClick = { scope.launch { installPackagesSequentially(sandbox, detected) } }, enabled = !isBusy) {
+                if (isBusy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                else Text(stringResource(R.string.mcp_server_install_runtime))
+            }
+        }
+    }
+}
+
+/** [SandboxManager.installPackage] is fire-and-forget (launches on the manager's own
+ *  internal scope and flips [SandboxManager.isBusy] asynchronously) — calling it twice
+ *  back-to-back races the same shared download/tmp dir, corrupting one of the installs
+ *  (observed: installing nodejs+npm together silently dropped nodejs's files). Waiting
+ *  for [SandboxManager.isBusy] to actually flip true then false serializes them. */
+private suspend fun installPackagesSequentially(sandbox: SandboxManager, names: List<String>) {
+    for (name in names) {
+        sandbox.installPackage(name)
+        kotlinx.coroutines.withTimeoutOrNull(3000) { sandbox.isBusy.first { it } }
+        sandbox.isBusy.first { !it }
     }
 }
 
@@ -684,6 +802,18 @@ private fun headersToText(headers: Map<String, String>): String =
 private fun textToHeaders(text: String): Map<String, String> =
     text.lines().mapNotNull { line ->
         val idx = line.indexOf(':')
+        if (idx <= 0) return@mapNotNull null
+        val k = line.substring(0, idx).trim()
+        val v = line.substring(idx + 1).trim()
+        if (k.isBlank()) null else k to v
+    }.toMap()
+
+private fun envToText(env: Map<String, String>): String =
+    env.entries.joinToString("\n") { "${it.key}=${it.value}" }
+
+private fun textToEnv(text: String): Map<String, String> =
+    text.lines().mapNotNull { line ->
+        val idx = line.indexOf('=')
         if (idx <= 0) return@mapNotNull null
         val k = line.substring(0, idx).trim()
         val v = line.substring(idx + 1).trim()

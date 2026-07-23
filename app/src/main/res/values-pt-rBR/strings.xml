@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">Para que serve este servidor</string>
     <string name="mcp_server_url">URL do servidor</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">Transporte</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">Estúdio</string>
+    <string name="mcp_server_command">Comando</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">Variáveis ​​de ambiente</string>
+    <string name="mcp_server_env_hint">API_KEY = segredo</string>
+    <string name="mcp_server_sandbox_not_installed">Instale o sandbox em Configurações → Shell → Sandbox primeiro para executar servidores stdio.</string>
+    <string name="mcp_server_runtime_missing">Requer: %1$s</string>
+    <string name="mcp_server_install_runtime">Instalar</string>
     <string name="mcp_server_bearer_token">Token do portador</string>
     <string name="mcp_server_bearer_token_hint">Enviado como Authorization: Bearer …</string>
     <string name="mcp_server_headers">Cabeçalhos adicionais</string>

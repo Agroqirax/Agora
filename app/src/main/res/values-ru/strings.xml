@@ -1082,6 +1082,16 @@
     <string name="mcp_server_desc_hint">Для чего нужен этот сервер</string>
     <string name="mcp_server_url">URL-адрес сервера</string>
     <string name="mcp_server_url_hint">https://example.com/mcp</string>
+    <string name="mcp_server_transport">Транспорт</string>
+    <string name="mcp_server_transport_http">HTTP</string>
+    <string name="mcp_server_transport_stdio">студия</string>
+    <string name="mcp_server_command">Команда</string>
+    <string name="mcp_server_command_hint">npx -y @modelcontextprotocol/server-filesystem /home/agora</string>
+    <string name="mcp_server_env">Переменные среды</string>
+    <string name="mcp_server_env_hint">API_KEY=секрет</string>
+    <string name="mcp_server_sandbox_not_installed">Сначала установите песочницу в «Настройки» → «Оболочка» → «Песочница», чтобы запускать серверы stdio.</string>
+    <string name="mcp_server_runtime_missing">Требуется: %1$s</string>
+    <string name="mcp_server_install_runtime">Установить</string>
     <string name="mcp_server_bearer_token">Токен на предъявителя</string>
     <string name="mcp_server_bearer_token_hint">Отправлено как Authorization: Bearer …</string>
     <string name="mcp_server_headers">Дополнительные заголовки</string>
