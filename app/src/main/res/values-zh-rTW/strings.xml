@@ -42,9 +42,9 @@
     <string name="tool_web_search_error">搜尋 \'%1$s\' 時發生錯誤</string>
     <string name="tool_conversation_search_no_result">未找到 \'%1$s\' 的對話匹配</string>
     <string name="tool_conversation_search_error">搜尋對話 \'%1$s\' 時發生錯誤</string>
-    <string name="tool_web_search_done">搜尋 \"%2$s\" 找到 %1$d 筆結果</string>
+    <string name="tool_web_search_done">找出「%2$s」的 %1$d 個結果</string>
     <string name="tool_web_search_done_default">已搜尋網頁</string>
-    <string name="tool_conversation_search_done_for">搜尋 \"%2$s\" 找到 %1$d 則對話</string>
+    <string name="tool_conversation_search_done_for">找出「%2$s」的 %1$d 個對話</string>
     <string name="tool_list_shells">列出終端機</string>
     <string name="tool_shell_listing">正在列出可用終端機</string>
     <string name="tool_shell_list_done">終端機列表完成</string>
@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">已連線 — 找到 %1$d 個工具</string>
     <string name="mcp_test_connection_success_none">已連線 — 未找到工具</string>
     <string name="mcp_test_connection_failure">失敗：%1$s</string>
-    <string name="mcp_confirm_title">允許“%2$s”上的“%1$s”嗎？</string>
+    <string name="mcp_confirm_title">允許此 MCP 工具呼叫“%1$s”嗎？</string>
     <string name="mcp_confirm_allow">允許一次</string>
     <string name="mcp_confirm_stop_asking">始終允許</string>
     <string name="mcp_confirm_always">始終允許該伺服器</string>

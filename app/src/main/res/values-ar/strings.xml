@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">متصلة — تم العثور على %1$d من الأدوات</string>
     <string name="mcp_test_connection_success_none">متصل - لم يتم العثور على أدوات</string>
     <string name="mcp_test_connection_failure">فشل: %1$s</string>
-    <string name="mcp_confirm_title">هل تريد السماح بـ \"%1$s\" على \"%2$s\"؟</string>
+    <string name="mcp_confirm_title">هل تسمح باستدعاء أداة MCP هذه على \"%1$s\"؟</string>
     <string name="mcp_confirm_allow">السماح مرة واحدة</string>
     <string name="mcp_confirm_stop_asking">السماح دائما</string>
     <string name="mcp_confirm_always">السماح لهذا الخادم دائمًا</string>

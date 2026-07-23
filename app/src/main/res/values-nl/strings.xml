@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">Verbonden — %1$d tool(s) gevonden</string>
     <string name="mcp_test_connection_success_none">Verbonden — geen tools gevonden</string>
     <string name="mcp_test_connection_failure">Mislukt: %1$s</string>
-    <string name="mcp_confirm_title">\"%1$s\" toestaan op \"%2$s\"?</string>
+    <string name="mcp_confirm_title">Deze MCP-toolaanroep op \"%1$s\" toestaan?</string>
     <string name="mcp_confirm_allow">Eenmalig toestaan</string>
     <string name="mcp_confirm_stop_asking">Altijd toestaan</string>
     <string name="mcp_confirm_always">Deze server altijd toestaan</string>

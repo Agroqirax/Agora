@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">Подключено — найдено %1$d инструментов</string>
     <string name="mcp_test_connection_success_none">Подключено — инструменты не найдены</string>
     <string name="mcp_test_connection_failure">Ошибка: %1$s</string>
-    <string name="mcp_confirm_title">Разрешить \"%1$s\" на \"%2$s\"?</string>
+    <string name="mcp_confirm_title">Разрешить этому инструменту MCP вызов \"%1$s\"?</string>
     <string name="mcp_confirm_allow">Разрешить один раз</string>
     <string name="mcp_confirm_stop_asking">Всегда разрешать</string>
     <string name="mcp_confirm_always">Всегда разрешать этот сервер</string>

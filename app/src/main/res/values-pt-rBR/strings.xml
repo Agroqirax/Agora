@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">Conectado — %1$d ferramenta(s) encontrada(s)</string>
     <string name="mcp_test_connection_success_none">Conectado – nenhuma ferramenta encontrada</string>
     <string name="mcp_test_connection_failure">Falha: %1$s</string>
-    <string name="mcp_confirm_title">Permitir \"%1$s\" em \"%2$s\"?</string>
+    <string name="mcp_confirm_title">Permitir que esta ferramenta MCP seja chamada em \"%1$s\"?</string>
     <string name="mcp_confirm_allow">Permitir uma vez</string>
     <string name="mcp_confirm_stop_asking">Sempre permitir</string>
     <string name="mcp_confirm_always">Sempre permitir este servidor</string>

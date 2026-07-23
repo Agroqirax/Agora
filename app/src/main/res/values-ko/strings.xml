@@ -42,9 +42,9 @@
     <string name="tool_web_search_error">\'%1$s\' 검색 중 오류 발생</string>
     <string name="tool_conversation_search_no_result">\'%1$s\'에 대한 일치 항목을 찾을 수 없습니다</string>
     <string name="tool_conversation_search_error">대화에서 \'%1$s\' 검색 중 오류 발생</string>
-    <string name="tool_web_search_done">\"%2$s\"에 대해 %1$d개의 결과를 찾았습니다</string>
+    <string name="tool_web_search_done">\"%2$s\"에 대한 %1$d개의 결과를 찾았습니다.</string>
     <string name="tool_web_search_done_default">웹을 검색했습니다</string>
-    <string name="tool_conversation_search_done_for">\"%2$s\"에 대해 %1$d개의 대화를 찾았습니다</string>
+    <string name="tool_conversation_search_done_for">\"%2$s\"에 대한 %1$d개의 대화를 찾았습니다.</string>
     <string name="tool_list_shells">셸 목록</string>
     <string name="tool_shell_listing">사용 가능한 셸 목록 표시 중</string>
     <string name="tool_shell_list_done">셸 목록 완료</string>
@@ -744,8 +744,8 @@
     <string name="delete_model_confirm">이 모델의 캐시된 모든 임베딩도 삭제됩니다.</string>
 
     <!-- Errors -->
-    <string name="search_found_matches">\'%2$s\'에 대해 %1$d개의 일치 항목을 찾았습니다.</string>
-    <string name="search_found_results">\'%2$s\'에 대해 %1$d개의 결과를 찾았습니다.</string>
+    <string name="search_found_matches">\'%2$s\'에 대한 %1$d개의 일치 항목을 찾았습니다.</string>
+    <string name="search_found_results">\'%2$s\'에 대한 %1$d개의 결과를 찾았습니다.</string>
     <string name="search_found_results_no_query">%1$d개의 결과를 찾았습니다.</string>
     <string name="search_no_matches">\'%1$s\'에 대해 0개의 일치 항목을 찾았습니다.</string>
 
@@ -958,7 +958,7 @@
 
     <!-- Caching & Sync -->
     <string name="embedding_model_caching">임베딩 모델 \"%1$s\"을(를) 캐시하는 중…</string>
-    <string name="messages_not_cached">%2$d개 중 %1$d개의 메시지가 캐시되지 않았습니다.</string>
+    <string name="messages_not_cached">메시지 %2$d개 중 %1$d개가 캐시되지 않았습니다.</string>
     <string name="cache_now">지금 캐시</string>
     <string name="no_messages_to_cache">캐시할 메시지가 없습니다.</string>
     <string name="all_messages_already_cached">%1$d개의 메시지가 모두 이미 캐시되었습니다.</string>
@@ -967,7 +967,7 @@
     <string name="local_model_not_found">로컬 모델 파일을 찾을 수 없습니다. 모델을 다시 가져오세요.</string>
     <string name="local_context_exceeded">이 호출에는 %1$d 프롬프트 토큰이 필요하지만 로컬 모델은 %2$d 컨텍스트 토큰만 지원합니다. 컨텍스트 창을 줄이거나 모델의 컨텍스트 크기를 늘리십시오.</string>
     <string name="all_messages_cached">%1$d개의 메시지를 모두 캐시했습니다.</string>
-    <string name="cached_partial_failed">%2$d개 중 %1$d개를 캐시했습니다. %3$d개 실패.</string>
+    <string name="cached_partial_failed">%2$d 중 %1$d를 캐시했습니다. %3$d 실패했습니다.</string>
     <string name="retry">다시 시도</string>
     <string name="parse_error">구문 분석 오류</string>
     <string name="unknown_error">알 수 없는 오류</string>
@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">연결됨 — %1$d개의 도구를 찾았습니다.</string>
     <string name="mcp_test_connection_success_none">연결됨 — 도구를 찾을 수 없음</string>
     <string name="mcp_test_connection_failure">실패: %1$s</string>
-    <string name="mcp_confirm_title">\"%2$s\"에서 \"%1$s\"을(를) 허용하시겠습니까?</string>
+    <string name="mcp_confirm_title">\"%1$s\"에서 이 MCP 도구 호출을 허용하시겠습니까?</string>
     <string name="mcp_confirm_allow">한 번만 허용</string>
     <string name="mcp_confirm_stop_asking">항상 허용</string>
     <string name="mcp_confirm_always">이 서버를 항상 허용</string>

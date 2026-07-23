@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">Connecté — %1$d outil(s) trouvé(s)</string>
     <string name="mcp_test_connection_success_none">Connecté — aucun outil trouvé</string>
     <string name="mcp_test_connection_failure">Échec : %1$s</string>
-    <string name="mcp_confirm_title">Autoriser \"%1$s\" sur \"%2$s\" ?</string>
+    <string name="mcp_confirm_title">Autoriser cet appel à l\'outil MCP sur \"%1$s\" ?</string>
     <string name="mcp_confirm_allow">Autoriser une fois</string>
     <string name="mcp_confirm_stop_asking">Toujours autoriser</string>
     <string name="mcp_confirm_always">Toujours autoriser ce serveur</string>

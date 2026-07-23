@@ -42,9 +42,9 @@
     <string name="tool_web_search_error">\'%1$s\' の検索でエラーが発生しました</string>
     <string name="tool_conversation_search_no_result">\'%1$s\' に一致するものが見つかりませんでした</string>
     <string name="tool_conversation_search_error">会話での \'%1$s\' の検索でエラーが発生しました</string>
-    <string name="tool_web_search_done">\"%2$s\" の結果が %1$d 件見つかりました</string>
+    <string name="tool_web_search_done">「%2$s」で %1$d 件の結果が見つかりました</string>
     <string name="tool_web_search_done_default">ウェブを検索しました</string>
-    <string name="tool_conversation_search_done_for">\"%2$s\" の会話が %1$d 件見つかりました</string>
+    <string name="tool_conversation_search_done_for">「%2$s」に関する %1$d 件の会話が見つかりました</string>
     <string name="tool_list_shells">シェル一覧</string>
     <string name="tool_shell_listing">利用可能なシェルを一覧表示中</string>
     <string name="tool_shell_list_done">シェル一覧が完了しました</string>
@@ -744,8 +744,8 @@
     <string name="delete_model_confirm">これにより、このモデルのキャッシュされたすべての埋め込みも削除されます。</string>
 
     <!-- Errors -->
-    <string name="search_found_matches">\'%2$s\' に一致する %1$d 件が見つかりました。</string>
-    <string name="search_found_results">\'%2$s\' の結果が %1$d 件見つかりました。</string>
+    <string name="search_found_matches">\'%2$s\' に一致する %1$d が見つかりました。</string>
+    <string name="search_found_results">「%2$s」に対して %1$d 件の結果が見つかりました。</string>
     <string name="search_found_results_no_query">%1$d 件の結果が見つかりました。</string>
     <string name="search_no_matches">\'%1$s\' に一致するものは 0 件でした。</string>
 
@@ -958,7 +958,7 @@
 
     <!-- Caching & Sync -->
     <string name="embedding_model_caching">埋め込みモデル \"%1$s\" をキャッシュ中…</string>
-    <string name="messages_not_cached">%2$d 件中 %1$d 件のメッセージが未キャッシュです。</string>
+    <string name="messages_not_cached">%2$d 件中 %1$d 件のメッセージがキャッシュされませんでした。</string>
     <string name="cache_now">今すぐキャッシュ</string>
     <string name="no_messages_to_cache">キャッシュするメッセージがありません。</string>
     <string name="all_messages_already_cached">%1$d 件すべてのメッセージは既にキャッシュ済みです。</string>
@@ -967,7 +967,7 @@
     <string name="local_model_not_found">ローカルモデルファイルが見つかりません。モデルを再インポートしてください。</string>
     <string name="local_context_exceeded">この呼び出しには %1$d プロンプト トークンが必要ですが、ローカル モデルは %2$d コンテキスト トークンのみをサポートします。コンテキスト ウィンドウを縮小するか、モデルのコンテキスト サイズを増やします。</string>
     <string name="all_messages_cached">%1$d 件すべてのメッセージをキャッシュしました。</string>
-    <string name="cached_partial_failed">%2$d 件中 %1$d 件をキャッシュしました。%3$d 件失敗しました。</string>
+    <string name="cached_partial_failed">%2$d中%1$dがキャッシュされました。 %3$d が失敗しました。</string>
     <string name="retry">再試行</string>
     <string name="parse_error">解析エラー</string>
     <string name="unknown_error">不明なエラー</string>
@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">接続されました — %1$d 個のツールが見つかりました</string>
     <string name="mcp_test_connection_success_none">接続済み — ツールが見つかりません</string>
     <string name="mcp_test_connection_failure">失敗しました: %1$s</string>
-    <string name="mcp_confirm_title">「%2$s」で「%1$s」を許可しますか?</string>
+    <string name="mcp_confirm_title">「%1$s」でのこの MCP ツール呼び出しを許可しますか?</string>
     <string name="mcp_confirm_allow">一度許可する</string>
     <string name="mcp_confirm_stop_asking">常に許可する</string>
     <string name="mcp_confirm_always">このサーバーを常に許可する</string>

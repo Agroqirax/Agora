@@ -1106,7 +1106,7 @@
     <string name="mcp_test_connection_success">Verbunden — %1$d Werkzeug(e) gefunden</string>
     <string name="mcp_test_connection_success_none">Verbunden — keine Werkzeuge gefunden</string>
     <string name="mcp_test_connection_failure">Fehlgeschlagen: %1$s</string>
-    <string name="mcp_confirm_title">„%1$s“ auf „%2$s“ zulassen?</string>
+    <string name="mcp_confirm_title">Diesen MCP-Tool-Aufruf auf „%1$s“ zulassen?</string>
     <string name="mcp_confirm_allow">Einmal zulassen</string>
     <string name="mcp_confirm_stop_asking">Immer zulassen</string>
     <string name="mcp_confirm_always">Diesen Server immer zulassen</string>
