@@ -42,8 +42,11 @@ interface SandboxManager {
     /** Last typed package name — persisted across navigation. */
     var pendingPkgName: String
 
-    /** Fire-and-forget package install. Runs on internal scope, survives navigation. */
-    fun installPackage(name: String)
+    /** Fire-and-forget package install for one or more packages, installed together in
+     *  a single apk transaction — a runtime + its package manager (e.g. nodejs + npm)
+     *  either both land or neither does, instead of racing two separate installs.
+     *  Runs on internal scope, survives navigation. */
+    fun installPackages(names: List<String>)
 
     /** Fire-and-forget package removal. */
     fun removePackage(name: String)
@@ -107,8 +110,8 @@ interface SandboxManager {
         replaceAll: Boolean = false
     ): FileEditResult
 
-    /** Install a package via Alpine apk. */
-    suspend fun apkInstall(packageName: String, onProgress: (String) -> Unit = {}): Boolean
+    /** Install one or more packages via Alpine apk, as a single atomic transaction. */
+    suspend fun apkInstall(packageNames: List<String>, onProgress: (String) -> Unit = {}): Boolean
 
     /** Upgrade all installed packages to latest repo versions. Returns upgrade count. */
     suspend fun apkUpgrade(onProgress: (String) -> Unit = {}): Int

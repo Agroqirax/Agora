@@ -83,7 +83,7 @@ fun SettingsSandboxPage(
 
     fun installPackage(name: String) {
         if (isBusy) return
-        installPkg = name; lastInstallResult = null; sandboxManager.installPackage(name)
+        installPkg = name; lastInstallResult = null; sandboxManager.installPackages(listOf(name))
     }
 
     fun upgradePackages() {

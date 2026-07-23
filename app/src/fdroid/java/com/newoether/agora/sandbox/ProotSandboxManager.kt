@@ -1,6 +1,7 @@
 package com.newoether.agora.sandbox
 
 import android.content.Context
+import android.net.ConnectivityManager
 import android.util.Log
 import com.newoether.agora.R
 import com.newoether.agora.util.DebugLog
@@ -91,6 +92,26 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         }
     }
 
+    /**
+     * proot is ptrace-based and doesn't create a network namespace, so Alpine's processes
+     * share the host app's UID and routing/VPN rules — but musl's resolver still reads its
+     * own /etc/resolv.conf instead of asking Android's ConnectivityManager for DNS. Under a
+     * VPN/proxy that redirects DNS per-app, a hardcoded public resolver gets blocked while
+     * Android's own HTTP stack (which uses the active network's DNS) succeeds. Mirror
+     * Android's actual active DNS servers into the rootfs so Alpine sees the same resolver
+     * Android does.
+     */
+    private fun writeResolvConf() {
+        val rc = File(rootfsDir, "etc/resolv.conf")
+        rc.parentFile?.mkdirs()
+        val nameservers = try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val dns = cm?.getLinkProperties(cm.activeNetwork)?.dnsServers.orEmpty()
+            dns.joinToString("\n") { "nameserver ${it.hostAddress}" }
+        } catch (_: Throwable) { "" }
+        rc.writeText(nameservers.ifBlank { "nameserver 1.1.1.1" } + "\n")
+    }
+
     private fun ensureShell(): Boolean {
         val sh = File(rootfsDir, "bin/sh")
         if (sh.exists()) return true
@@ -146,8 +167,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             File(rootfsDir, "run").mkdirs()
             ensureSandboxMountTargets()
             listOf("var/cache/apk", "etc/apk/cache", "var/lock").forEach { File(rootfsDir, it).mkdirs() }
-            val rc = File(rootfsDir, "etc/resolv.conf"); rc.parentFile?.mkdirs()
-            rc.writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+            writeResolvConf()
             // Alpine repository config
             val repos = File(rootfsDir, "etc/apk/repositories"); repos.parentFile?.mkdirs()
             repos.writeText(alpineRepos.joinToString("\n", postfix = "\n"))
@@ -219,21 +239,23 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         } finally { conn.disconnect() }
     }
 
-    override fun installPackage(name: String) {
+    override fun installPackages(names: List<String>) {
+        if (names.isEmpty()) return
         // compareAndSet, not a plain check-then-launch: the check and the flip to `true`
         // must be atomic, otherwise two near-simultaneous calls (e.g. two quick-install
         // taps) can both pass the check before either coroutine actually runs, racing the
         // same shared download/tmp dir and corrupting one of the installs.
         if (!_isBusy.compareAndSet(false, true)) return
+        val label = names.joinToString(", ")
         sandboxScope.launch {
             _terminalOutput.value = ""
             lastError = null
             try {
-                val ok = apkInstall(name) { _terminalOutput.value += it + "\n" }
+                val ok = apkInstall(names) { _terminalOutput.value += it + "\n" }
                 ensureShell()
                 _packageList.value = apkList()
-                _terminalOutput.value += if (ok) "✓ Installed $name\n" else "✗ Failed\n"
-                _snackbarMessage.value = if (ok) context.getString(R.string.sandbox_snackbar_installed, name) else context.getString(R.string.sandbox_snackbar_install_failed, name)
+                _terminalOutput.value += if (ok) "✓ Installed $label\n" else "✗ Failed\n"
+                _snackbarMessage.value = if (ok) context.getString(R.string.sandbox_snackbar_installed, label) else context.getString(R.string.sandbox_snackbar_install_failed, label)
             } catch (e: Throwable) { ensureShell()
                 _packageList.value = apkList()
                 _terminalOutput.value += "✗ Error: ${e.message}\n"
@@ -338,6 +360,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     private fun buildProotProcessBuilder(command: String, workdir: String, extraEnv: Map<String, String> = emptyMap()): ProcessBuilder {
         ensureShell()
         ensureSandboxMountTargets()
+        writeResolvConf()
         val tmpDir = File(rootfsDir, "tmp").apply { mkdirs() }.absolutePath
         val resolvedWorkdir = workdir.ifBlank { homeMountPath }
         val args = listOf(prootPath,
@@ -505,13 +528,16 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     // ── Package Management ──────────────────────────────
-    // Downloads target + all transitive deps + stale base-package upgrades via
-    // Android HTTP (works with VPN/Clash), then single apk add --no-network.
+    // Real `apk` does its own network I/O, dependency resolution, and signature
+    // verification. proot shares the host app's UID/routing (see writeResolvConf),
+    // so as long as resolv.conf reflects Android's actual DNS, `apk` works exactly
+    // like it would in a normal Alpine install.
 
-    override suspend fun apkInstall(packageName: String, onProgress: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
+    override suspend fun apkInstall(packageNames: List<String>, onProgress: (String) -> Unit): Boolean = withContext(Dispatchers.IO) {
+        if (packageNames.isEmpty()) return@withContext false
         if (!isAvailable()) { onProgress("Sandbox not installed"); return@withContext false }
         val requested = try {
-            sanitizePackageName(packageName)
+            packageNames.map { sanitizePackageName(it) }
         } catch (e: IllegalArgumentException) {
             onProgress("FAIL: ${e.message}")
             lastError = e.message
@@ -520,104 +546,43 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         lastError = null
         ensurePackageMetadata()
 
-        // 1. Download + parse repo indices (main + community)
-        onProgress("Fetching package index...")
-        val (repoPkgs, soToPkg) = fetchMergedIndex(onProgress) ?: run {
-            onProgress("FAIL: could not fetch any repo index")
-            lastError = "Failed to fetch package index"
-            return@withContext false
-        }
+        onProgress("apk update...")
+        val updateResult = executeRaw("apk update", timeoutMs = 60000)
+        onProgress(updateResult.stdout)
 
-        if (requested !in repoPkgs) {
-            onProgress("FAIL: package '$requested' not found in index")
-            lastError = "Not found: $requested"; return@withContext false
-        }
-
-        // 2. Read installed DB — don't reinstall/downgrade existing packages
-        val installed = readInstalledVersions()
-
-        // 3. Recursively resolve target + transitive deps.
-        // Install if missing; upgrade if repo is newer; NEVER downgrade.
-        // Downgrading breaks version constraints of packages that were
-        // compiled against a newer version in the rootfs.
-        val toInstall = linkedSetOf<String>()
-        fun resolve(name: String, visited: MutableSet<String> = mutableSetOf()) {
-            if (name in visited || name !in repoPkgs) return
-            visited.add(name)
-            val instVer = installed[name]
-            val repoVer = repoPkgs[name]!!.version
-            if (instVer == null || compareAlpineVersions(repoVer, instVer) > 0) toInstall.add(name)
-            for (dep in repoPkgs[name]!!.deps) {
-                val dn = dep.takeWhile { it != '=' && it != '>' && it != '<' && it != '~' }
-                if (dn.isNotEmpty()) {
-                    if (dn in repoPkgs) resolve(dn, visited)
-                    else soToPkg[dn]?.let { pickProvider(it, installed) }?.let { resolve(it, visited) }
-                }
-            }
-        }
-        resolve(requested)
-        onProgress("${toInstall.size} packages to install")
-
-        if (toInstall.isEmpty()) {
-            addExplicitPackage(requested)
-            onProgress("$requested is already installed and up to date.")
-            return@withContext true
-        }
-
-        // 4. Download all .apk files
-        val tmpDir = File(rootfsDir, "tmp"); tmpDir.listFiles()?.forEach { it.delete() }; tmpDir.mkdirs()
-        val paths = mutableListOf<String>()
-        for (name in toInstall) {
-            val entry = repoPkgs[name] ?: continue
-            val ver = entry.version
-            val fn = "$name-$ver.apk"; val f = File(context.filesDir, fn)
-            if (!f.exists() || f.length() == 0L) {
-                onProgress("Downloading $fn...")
-                try {
-                    val conn = URL("${entry.repoUrl}/aarch64/$fn").openConnection() as HttpURLConnection
-                    if (conn.responseCode != 200) { onProgress("HTTP ${conn.responseCode}"); lastError = "HTTP ${conn.responseCode}: $fn"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
-                    conn.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
-                } catch (ex: Throwable) { onProgress("FAIL: ${ex.message}"); lastError = "Download: ${ex.message}"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext false }
-            }
-            val dst = File(tmpDir, fn); f.copyTo(dst, true); f.delete(); paths.add("/tmp/$fn")
-        }
-
-        // 5. Main install — everything in one atomic `apk add`. A shell-provider package
-        // (busybox-binsh/yash-binsh) is version-locked to its counterpart (busybox/yash:
-        // busybox-binsh-X requires busybox=X exactly), so splitting it into an earlier,
-        // separate transaction breaks that lockstep constraint whenever both are being
-        // upgraded together — apk's own solver handles the combined transaction correctly.
-        onProgress("Installing ${paths.size} packages...")
-        val result = if (paths.isNotEmpty()) {
-            executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 120000)
-        } else {
-            SandboxManager.SandboxResult("", "", 0)
-        }
-        onProgress(result.stdout); tmpDir.listFiles()?.forEach { it.delete() }
-        // Verify install — apk may return non-zero on minor post-install script errors
-        val installedOk = requested in readInstalledVersions()
-        if (!installedOk) { lastError = result.stderr.ifBlank { result.stdout }; return@withContext false }
-        addExplicitPackage(requested)
+        // One `apk add` transaction for every requested package — apk's own solver
+        // resolves them together, so a runtime + its package manager (e.g. nodejs +
+        // npm) either both land or neither does, instead of two separate `apk add`
+        // calls racing/half-completing independently.
+        onProgress("apk add ${requested.joinToString(" ")}...")
+        val result = executeRaw("apk add --no-cache ${requested.joinToString(" ") { shellQuote(it) }}", timeoutMs = 180000)
+        onProgress(result.stdout)
+        if (result.exitCode != 0) { lastError = result.stderr.ifBlank { result.stdout }; return@withContext false }
+        requested.forEach { addExplicitPackage(it) }
         true
     }
+
+    // apk's own verbosity counter (not our sanitized "-v" flag) gates what a plain,
+    // argument-less `apk info` prints: name only at verbosity<=1, "name-version" at
+    // verbosity==2, "name-version - description" at verbosity>=3. Passing -vvv forces
+    // full output no matter what apk's baseline verbosity defaults to.
+    private val packageNameVersionRegex = Regex("^(.+)-([0-9][^-\\s]*(?:-r[0-9]+)?)$")
 
     override suspend fun apkList(): List<SandboxManager.PackageInfo> = withContext(Dispatchers.IO) {
         if (!isAvailable()) { _terminalOutput.value += "[apkList: isAvailable=false]\n"; return@withContext emptyList() }
         try {
-            val db = File(rootfsDir, "lib/apk/db/installed")
-            if (!db.exists()) { _terminalOutput.value += "[apkList: DB not found at ${db.absolutePath}]\n"; return@withContext emptyList() }
-            val content = db.readText(Charsets.UTF_8)
-            val pkgs = mutableListOf<SandboxManager.PackageInfo>()
-            var n = ""; var v = ""; var d = ""
-            content.lines().forEach { line ->
-                if (line.startsWith("P:")) n = line.substring(2).trim()
-                else if (line.startsWith("V:")) v = line.substring(2).trim()
-                else if (line.startsWith("T:")) d = line.substring(2).trim()
-                else if (line.isBlank()) { if (n.isNotBlank()) { pkgs.add(SandboxManager.PackageInfo(name = n, version = v, description = d)); n = ""; v = ""; d = "" } }
+            val result = executeRaw("apk info -vvv", timeoutMs = 15000)
+            if (result.exitCode != 0) { _terminalOutput.value += "[apkList: apk info failed: ${result.stderr.ifBlank { result.stdout }}]\n"; return@withContext emptyList() }
+            result.stdout.lines().mapNotNull { line ->
+                // Format: "python3-3.12.8-r0 - description text"
+                val trimmed = line.trim()
+                if (trimmed.isEmpty()) return@mapNotNull null
+                val sepIdx = trimmed.indexOf(" - ")
+                val pv = if (sepIdx >= 0) trimmed.substring(0, sepIdx) else trimmed
+                val desc = if (sepIdx >= 0) trimmed.substring(sepIdx + 3).trim() else ""
+                val m = packageNameVersionRegex.matchEntire(pv) ?: return@mapNotNull null
+                SandboxManager.PackageInfo(name = m.groupValues[1], version = m.groupValues[2], description = desc)
             }
-            if (n.isNotBlank()) pkgs.add(SandboxManager.PackageInfo(name = n, version = v, description = d))
-            if (pkgs.isEmpty()) _terminalOutput.value += "[apkList: parsed 0 from ${content.length}B]\n"
-            pkgs
         } catch (e: Throwable) { _terminalOutput.value += "[apkList: ${e.message}]\n"; emptyList() }
     }
 
@@ -632,14 +597,6 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         }
         lastError = null
         ensurePackageMetadata()
-        val installedBefore = readInstalledVersions()
-        _terminalOutput.value += "DB has package: ${requested in installedBefore}\n"
-        if (requested !in installedBefore) {
-            val explicit = readExplicitPackages().apply { remove(requested) }
-            writeExplicitPackages(explicit)
-            normalizeWorld(explicit)
-            return@withContext true
-        }
 
         val baseNames = readBaseWorld().map { worldPackageName(it) }.toSet()
         if (requested in baseNames) {
@@ -657,93 +614,33 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         val result = executeRaw("apk del ${shellQuote(requested)}", timeoutMs = 60000)
         _terminalOutput.value += result.stdout
         _terminalOutput.value += if (result.exitCode == 0) "Exit: 0\n" else "Exit: ${result.exitCode}\n"
-        val removed = requested !in readInstalledVersions()
-        if (!removed) {
+        if (result.exitCode != 0) {
             writeExplicitPackages(previousExplicit)
             normalizeWorld(previousExplicit)
-            lastError = result.stderr.ifBlank { result.stdout }.ifBlank { "Package was not removed: $requested" }
+            lastError = result.stderr.ifBlank { result.stdout }
             return@withContext false
         }
         normalizeWorld()
-        result.exitCode == 0 || removed
+        true
     }
 
     override suspend fun apkUpgrade(onProgress: (String) -> Unit): Int = withContext(Dispatchers.IO) {
         if (!isAvailable()) return@withContext 0
         lastError = null
         ensurePackageMetadata()
+        val before = readInstalledVersions()
 
-        // 1. Download + parse APKINDEX (main + community)
-        onProgress("Fetching package index...")
-        val (repoPkgs, soToPkg) = fetchMergedIndex(onProgress) ?: run {
-            onProgress("FAIL: could not fetch any repo index")
-            lastError = "Failed to fetch package index"
-            return@withContext 0
-        }
+        onProgress("apk update...")
+        val updateResult = executeRaw("apk update", timeoutMs = 60000)
+        onProgress(updateResult.stdout)
 
-        // 2. Read installed DB
-        val installed = readInstalledVersions()
-
-        // 3. Collect installed packages where repo has a newer version
-        val toUpgrade = linkedSetOf<String>()
-        for ((name, instVer) in installed) {
-            val repoEntry = repoPkgs[name] ?: continue
-            if (compareAlpineVersions(repoEntry.version, instVer) > 0) toUpgrade.add(name)
-        }
-        if (toUpgrade.isEmpty()) { onProgress("All packages up to date."); return@withContext 0 }
-
-        // 4. Recursively add transitive deps of upgradable packages
-        val visited = mutableSetOf<String>()
-        val toInstall = linkedSetOf<String>()
-        fun collect(name: String) {
-            if (name in visited || name !in repoPkgs) return
-            visited.add(name)
-            val instVer = installed[name]
-            if (instVer == null || compareAlpineVersions(repoPkgs[name]!!.version, instVer) > 0) toInstall.add(name)
-            for (dep in repoPkgs[name]!!.deps) {
-                val dn = dep.takeWhile { it != '=' && it != '>' && it != '<' && it != '~' }
-                if (dn.isNotEmpty()) {
-                    if (dn in repoPkgs) collect(dn)
-                    else soToPkg[dn]?.let { pickProvider(it, installed) }?.let { collect(it) }
-                }
-            }
-        }
-        for (name in toUpgrade) collect(name)
-        onProgress("${toInstall.size} packages to upgrade")
-
-        // 5. Download + install (same pattern as apkInstall)
-        val tmpDir = File(rootfsDir, "tmp"); tmpDir.listFiles()?.forEach { it.delete() }; tmpDir.mkdirs()
-        val paths = mutableListOf<String>()
-        for (name in toInstall) {
-            val entry = repoPkgs[name] ?: continue
-            val ver = entry.version
-            val fn = "$name-$ver.apk"; val f = File(context.filesDir, fn)
-            if (!f.exists() || f.length() == 0L) {
-                onProgress("Downloading $fn...")
-                try {
-                    val conn = URL("${entry.repoUrl}/aarch64/$fn").openConnection() as HttpURLConnection
-                    if (conn.responseCode != 200) {
-                        onProgress("HTTP ${conn.responseCode}")
-                        lastError = "HTTP ${conn.responseCode}: $fn"
-                        tmpDir.listFiles()?.forEach { it.delete() }
-                        return@withContext 0
-                    }
-                    conn.inputStream.use { i -> f.outputStream().use { o -> i.copyTo(o) } }
-                } catch (ex: Throwable) { onProgress("FAIL: ${ex.message}"); lastError = "Download: ${ex.message}"; tmpDir.listFiles()?.forEach { it.delete() }; return@withContext 0 }
-            }
-            val dst = File(tmpDir, fn); f.copyTo(dst, true); f.delete(); paths.add("/tmp/$fn")
-        }
-
-        onProgress("Installing ${paths.size} packages...")
-        val result = executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 300000)
-        onProgress(result.stdout); tmpDir.listFiles()?.forEach { it.delete() }
+        onProgress("apk upgrade...")
+        val result = executeRaw("apk upgrade --no-cache", timeoutMs = 300000)
+        onProgress(result.stdout)
         normalizeWorld()
+
         val after = readInstalledVersions()
-        val upgradedCount = toUpgrade.count { name ->
-            val beforeVersion = installed[name]
-            val afterVersion = after[name]
-            beforeVersion != null && afterVersion != null && compareAlpineVersions(afterVersion, beforeVersion) > 0
-        }
+        val upgradedCount = after.count { (name, version) -> before[name] != null && before[name] != version }
         if (result.exitCode != 0 && upgradedCount == 0) {
             lastError = result.stderr.ifBlank { result.stdout }.ifBlank { "Upgrade failed" }
             return@withContext 0
@@ -788,171 +685,6 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
                 else { outFile.parentFile?.mkdirs(); src.copyTo(outFile, true) }
             } catch (_: Throwable) {}
         }
-    }
-
-    // ── APKINDEX Parsing ────────────────────────────────
-
-    private data class FullPkgEntry(val name: String, val version: String, val deps: List<String>, val repoUrl: String)
-
-    /** Compare two Alpine-style package versions. Returns >0 if a > b, 0 if equal, <0 if a < b.
-     *  Alpine version format: {version}-r{revision}  (e.g. "3.5.2-r1", "1.2.3_pre1-r0").
-     *  -r{revision} is the package revision; if omitted, revision=0.
-     *  The version part is split into tokens: digit runs vs non-digit runs.
-     *  Tokens are compared numerically for digits, lexicographically for letters.
-     *  '_' (underscore) acts as a separator with lower priority than '.'. */
-    private fun compareAlpineVersions(a: String, b: String): Int {
-        fun splitVersion(v: String): Pair<String, Int> {
-            val ri = v.lastIndexOf("-r")
-            val base = if (ri >= 0) v.substring(0, ri) else v
-            val rev  = if (ri >= 0) v.substring(ri + 2).toIntOrNull() ?: 0 else 0
-            return base to rev
-        }
-        fun tokenise(ver: String): List<String> {
-            val tokens = mutableListOf<String>()
-            var i = 0
-            while (i < ver.length) {
-                if (ver[i] == '.' || ver[i] == '_' || ver[i] == '-') {
-                    tokens.add(ver[i].toString()); i++
-                } else if (ver[i].isDigit()) {
-                    val start = i; while (i < ver.length && ver[i].isDigit()) i++
-                    tokens.add(ver.substring(start, i))
-                } else {
-                    val start = i; while (i < ver.length && !ver[i].isDigit() && ver[i] != '.' && ver[i] != '_' && ver[i] != '-') i++
-                    tokens.add(ver.substring(start, i))
-                }
-            }
-            return tokens
-        }
-        fun tokenWeight(token: String): Int = when {
-            token == "~" -> -1
-            token.startsWith("alpha") -> -4
-            token.startsWith("beta")  -> -3
-            token.startsWith("pre")   -> -2
-            token.startsWith("rc")    -> -1
-            else -> 0
-        }
-        fun compareToken(ta: String, tb: String): Int? {
-            val aDig = ta.toIntOrNull()
-            val bDig = tb.toIntOrNull()
-            if (aDig != null && bDig != null) return aDig.compareTo(bDig)
-            // letter tokens: compare pre-release suffixes first, then lexicographically
-            val wa = tokenWeight(ta); val wb = tokenWeight(tb)
-            if (wa != 0 || wb != 0) return wa.compareTo(wb)
-            return ta.compareTo(tb)
-        }
-
-        val (baseA, revA) = splitVersion(a)
-        val (baseB, revB) = splitVersion(b)
-
-        val tokensA = tokenise(baseA)
-        val tokensB = tokenise(baseB)
-        val n = maxOf(tokensA.size, tokensB.size)
-        for (idx in 0 until n) {
-            val ta = tokensA.getOrElse(idx) { "" }
-            val tb = tokensB.getOrElse(idx) { "" }
-            if (ta == "_" && tb == "_") continue
-            if (ta == "_") return -1   // _ has lower priority than anything except another _
-            if (tb == "_") return 1
-            if (ta == tb) continue
-            val cmp = compareToken(ta, tb) ?: ta.compareTo(tb)
-            if (cmp != 0) return cmp
-        }
-        return revA.compareTo(revB)
-    }
-
-    /** Fetches + parses the APKINDEX from every repo in [alpineRepos] (main, community)
-     *  and merges them into one lookup, so dependency resolution can pull a package
-     *  from whichever repo actually has it. A name present in more than one repo keeps
-     *  the higher version's entry (and thus that repo's download URL). A single repo
-     *  being unreachable is non-fatal — it's skipped via [onProgress] rather than
-     *  failing the whole operation, as long as at least one repo came back. */
-    private fun fetchMergedIndex(onProgress: (String) -> Unit): Pair<Map<String, FullPkgEntry>, Map<String, List<String>>>? {
-        val repoPkgs = mutableMapOf<String, FullPkgEntry>()
-        val soToPkg = mutableMapOf<String, MutableList<String>>()
-        var anySucceeded = false
-        for (repo in alpineRepos) {
-            val indexUrl = "$repo/aarch64/APKINDEX.tar.gz"
-            val indexFile = File(context.filesDir, "APKINDEX-${repo.substringAfterLast('/')}.tar.gz")
-            try {
-                val conn = URL(indexUrl).openConnection() as HttpURLConnection
-                val code = conn.responseCode
-                if (code != 200) { onProgress("Skipping $repo (HTTP $code)"); continue }
-                conn.inputStream.use { i -> indexFile.outputStream().use { o -> i.copyTo(o) } }
-                val (r, s) = parseFullApkIndex(indexFile, repo)
-                for ((name, entry) in r) {
-                    val existing = repoPkgs[name]
-                    if (existing == null || compareAlpineVersions(entry.version, existing.version) > 0) repoPkgs[name] = entry
-                }
-                for ((provide, providers) in s) {
-                    val merged = soToPkg.getOrPut(provide) { mutableListOf() }
-                    providers.forEach { if (it !in merged) merged.add(it) }
-                }
-                anySucceeded = true
-            } catch (e: Throwable) {
-                onProgress("Skipping $repo: ${e.javaClass.simpleName}: ${e.message}")
-            } finally {
-                indexFile.delete()
-            }
-        }
-        return if (anySucceeded) repoPkgs to soToPkg else null
-    }
-
-    /** [candidates] is every package providing some virtual dependency (e.g. `/bin/sh`,
-     *  `cmd:sh`) that isn't itself a real package name — several unrelated packages can
-     *  provide the same one (famously `busybox-binsh` and `yash-binsh` both provide
-     *  `/bin/sh`/`cmd:sh`). Picking the wrong one when resolving a transitive dependency
-     *  during a routine upgrade tries to *switch* shell providers, which conflicts with
-     *  whichever one is already installed. Always prefer the already-installed provider;
-     *  only fall back to an arbitrary candidate when installing fresh (nothing installed
-     *  yet) so a first-time install still resolves to *something*. */
-    private fun pickProvider(candidates: List<String>, installed: Map<String, String>): String? =
-        candidates.firstOrNull { it in installed } ?: candidates.firstOrNull()
-
-    private fun parseFullApkIndex(indexFile: File, repoUrl: String): Pair<Map<String, FullPkgEntry>, Map<String, List<String>>> {
-        val result = mutableMapOf<String, FullPkgEntry>()
-        val soToPkg = mutableMapOf<String, MutableList<String>>()
-        fun addProvider(provide: String, pkgName: String) {
-            val list = soToPkg.getOrPut(provide) { mutableListOf() }
-            if (pkgName !in list) list.add(pkgName)
-        }
-        java.util.zip.GZIPInputStream(indexFile.inputStream()).use { gz ->
-            org.apache.commons.compress.archivers.tar.TarArchiveInputStream(gz).use { tar ->
-                var entry = tar.nextEntry
-                while (entry != null) {
-                    if (entry.name == "APKINDEX") {
-                        val lines = tar.readBytes().toString(Charsets.UTF_8).lines()
-                        for (i in lines.indices) {
-                            val line = lines[i].trim()
-                            if (!line.startsWith("P:")) continue
-                            val name = line.substring(2).trim()
-                            var version = ""; var provider = ""
-                            val deps = mutableListOf<String>()
-                            val isSoEntry = name.startsWith("so:")
-                            for (j in i + 1 until minOf(i + 30, lines.size)) {
-                                val n = lines[j].trim()
-                                if (n.startsWith("C:")) break
-                                if (n.startsWith("V:")) version = n.substring(2).trim()
-                                if (n.startsWith("p:")) {
-                                    provider = n.substring(2).trim()
-                                    if (!isSoEntry) {
-                                        // p: lists all provides (so:libfoo.so.1=1.0 so:libbar.so.1=1.0)
-                                        for (prov in provider.split(Regex("\\s+"))) {
-                                            val pn = prov.takeWhile { it != '=' }
-                                            if (pn.isNotEmpty()) addProvider(pn, name)
-                                        }
-                                    }
-                                }
-                                if (n.startsWith("D:")) deps.addAll(n.substring(2).trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
-                            }
-                            if (isSoEntry && provider.isNotEmpty()) addProvider(name, provider)
-                            else if (!isSoEntry && name.isNotEmpty() && version.isNotEmpty()) result[name] = FullPkgEntry(name, version, deps, repoUrl)
-                        }
-                    }
-                    entry = tar.nextEntry
-                }
-            }
-        }
-        return Pair(result, soToPkg)
     }
 
     // ── Helpers ────────────────────────────────────────

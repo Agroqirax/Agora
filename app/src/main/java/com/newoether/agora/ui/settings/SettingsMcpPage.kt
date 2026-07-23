@@ -25,12 +25,9 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.McpServerConfig
-import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 import java.util.UUID
 
@@ -551,7 +548,6 @@ private fun StdioRuntimeHelper(viewModel: ChatViewModel, command: String) {
     val isBusy by sandbox.isBusy.collectAsState()
     val installedNames = installedPackages.map { it.name }.toSet()
     val detected = detectRuntimePackages(command).filter { it !in installedNames }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // packageList only reflects what's actually installed once something has called
     // refreshPackageList() — normally done by the Sandbox management page's own init,
@@ -569,24 +565,17 @@ private fun StdioRuntimeHelper(viewModel: ChatViewModel, command: String) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f)
             )
-            TextButton(onClick = { scope.launch { installPackagesSequentially(sandbox, detected) } }, enabled = !isBusy) {
+            // One installPackages() call for the whole detected list — a single `apk add`
+            // transaction, so a runtime + its package manager (e.g. nodejs + npm) either
+            // both land or neither does. Two separate installPackage() calls here used to
+            // race each other and needed a manual isBusy-polling loop to serialize (see
+            // git history) — that's gone now that apk itself resolves the multi-package
+            // set atomically in one shot.
+            TextButton(onClick = { sandbox.installPackages(detected) }, enabled = !isBusy) {
                 if (isBusy) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
                 else Text(stringResource(R.string.mcp_server_install_runtime))
             }
         }
-    }
-}
-
-/** [SandboxManager.installPackage] is fire-and-forget (launches on the manager's own
- *  internal scope and flips [SandboxManager.isBusy] asynchronously) — calling it twice
- *  back-to-back races the same shared download/tmp dir, corrupting one of the installs
- *  (observed: installing nodejs+npm together silently dropped nodejs's files). Waiting
- *  for [SandboxManager.isBusy] to actually flip true then false serializes them. */
-private suspend fun installPackagesSequentially(sandbox: SandboxManager, names: List<String>) {
-    for (name in names) {
-        sandbox.installPackage(name)
-        kotlinx.coroutines.withTimeoutOrNull(3000) { sandbox.isBusy.first { it } }
-        sandbox.isBusy.first { !it }
     }
 }
 

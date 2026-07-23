@@ -25,7 +25,7 @@ class PlaySandboxManager : SandboxManager {
     override suspend fun refreshPackageList() {}
     private val _snackbarMessage = MutableStateFlow<String?>(null)
     override val snackbarMessage: StateFlow<String?> = _snackbarMessage
-    override fun installPackage(name: String) {}
+    override fun installPackages(names: List<String>) {}
     override fun removePackage(name: String) {}
     override fun upgradePackages() {}
 
@@ -80,7 +80,7 @@ class PlaySandboxManager : SandboxManager {
         error = "Sandbox not available in this build"
     )
 
-    override suspend fun apkInstall(packageName: String, onProgress: (String) -> Unit): Boolean { onProgress("Sandbox not available"); return false }
+    override suspend fun apkInstall(packageNames: List<String>, onProgress: (String) -> Unit): Boolean { onProgress("Sandbox not available"); return false }
 
     override suspend fun apkList(): List<SandboxManager.PackageInfo> = emptyList()
 
