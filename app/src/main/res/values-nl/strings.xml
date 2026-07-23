@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Hiermee kan de assistent de batterij, belmodus, netwerk, opslag en andere huidige apparaatstatus controleren</string>
     <string name="apps_enable">Apps-tool</string>
     <string name="apps_enable_desc">Lijst en open geïnstalleerde apps</string>
+    <string name="url_open_enable">Open URL-tool</string>
+    <string name="url_open_enable_desc">Open een URL in de browser</string>
     <string name="location_title">Locatie</string>
     <string name="location_enable">Locatie-hulpmiddel inschakelen</string>
     <string name="location_enable_desc">Sta het model toe je locatie te bekijken</string>

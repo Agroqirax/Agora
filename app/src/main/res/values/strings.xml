@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Check battery, network, storage, and other device state</string>
     <string name="apps_enable">Apps Tool</string>
     <string name="apps_enable_desc">List and open installed apps</string>
+    <string name="url_open_enable">Open URL Tool</string>
+    <string name="url_open_enable_desc">Open a URL in the browser</string>
     <string name="location_title">Location</string>
     <string name="location_enable">Enable Location Tool</string>
     <string name="location_enable_desc">Allow the model to view your location</string>

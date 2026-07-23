@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Permite que o assistente verifique a bateria, o modo de campainha, a rede, o armazenamento e outros estados atuais do dispositivo</string>
     <string name="apps_enable">Ferramenta de aplicativos</string>
     <string name="apps_enable_desc">Listar e abrir aplicativos instalados</string>
+    <string name="url_open_enable">Ferramenta de URL aberta</string>
+    <string name="url_open_enable_desc">Abra um URL no navegador</string>
     <string name="location_title">Localização</string>
     <string name="location_enable">Ativar ferramenta de localização</string>
     <string name="location_enable_desc">Permitir que o modelo visualize sua localização</string>

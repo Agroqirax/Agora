@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">어시스턴트가 배터리, 벨소리 모드, 네트워크, 저장소 및 기타 현재 기기 상태를 확인할 수 있습니다.</string>
     <string name="apps_enable">앱 도구</string>
     <string name="apps_enable_desc">설치된 앱 나열 및 열기</string>
+    <string name="url_open_enable">URL 도구 열기</string>
+    <string name="url_open_enable_desc">브라우저에서 URL 열기</string>
     <string name="location_title">위치</string>
     <string name="location_enable">위치 도구 활성화</string>
     <string name="location_enable_desc">모델이 내 위치를 볼 수 있도록 허용</string>

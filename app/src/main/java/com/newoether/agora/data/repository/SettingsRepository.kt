@@ -97,6 +97,7 @@ class SettingsRepository(
     val contactsEnabled: StateFlow<Boolean> = hot(settingsManager.contactsEnabled, false)
     val alarmEnabled: StateFlow<Boolean> = hot(settingsManager.alarmEnabled, false)
     val appLaunchEnabled: StateFlow<Boolean> = hot(settingsManager.appLaunchEnabled, false)
+    val urlOpenEnabled: StateFlow<Boolean> = hot(settingsManager.urlOpenEnabled, false)
     val mediaControlEnabled: StateFlow<Boolean> = hot(settingsManager.mediaControlEnabled, false)
     val notificationsEnabled: StateFlow<Boolean> = hot(settingsManager.notificationsEnabled, false)
     val torchEnabled: StateFlow<Boolean> = hot(settingsManager.torchEnabled, false)
@@ -373,6 +374,7 @@ class SettingsRepository(
     fun setContactsConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContactsConfirmEnabled(enabled) }
     fun setAlarmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmEnabled(enabled) }
     fun setAppLaunchEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAppLaunchEnabled(enabled) }
+    fun setUrlOpenEnabled(enabled: Boolean) = scope.launch { settingsManager.saveUrlOpenEnabled(enabled) }
     fun setAlarmConfirmEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAlarmConfirmEnabled(enabled) }
     fun setMediaControlEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMediaControlEnabled(enabled) }
     fun setNotificationsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveNotificationsEnabled(enabled) }

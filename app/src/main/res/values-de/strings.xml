@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Ermöglicht dem Assistenten, den Akku, den Ruftonmodus, das Netzwerk, den Speicher und andere aktuelle Gerätezustände zu überprüfen</string>
     <string name="apps_enable">Apps-Tool</string>
     <string name="apps_enable_desc">Installierte Apps auflisten und öffnen</string>
+    <string name="url_open_enable">Öffnen Sie das URL-Tool</string>
+    <string name="url_open_enable_desc">Öffnen Sie eine URL im Browser</string>
     <string name="location_title">Standort</string>
     <string name="location_enable">Standortwerkzeug aktivieren</string>
     <string name="location_enable_desc">Dem Modell Zugriff auf Ihren Standort erlauben</string>

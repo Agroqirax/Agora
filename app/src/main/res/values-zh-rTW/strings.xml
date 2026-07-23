@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">請助手檢查電池、鈴聲模式、網路、儲存和其他目前設備狀態</string>
     <string name="apps_enable">應用程式工具</string>
     <string name="apps_enable_desc">列出並開啟已安裝的應用程式</string>
+    <string name="url_open_enable">開啟網址工具</string>
+    <string name="url_open_enable_desc">在瀏覽器中開啟一個 URL</string>
     <string name="location_title">地點</string>
     <string name="location_enable">啟用定位工具</string>
     <string name="location_enable_desc">允許模特兒查看您的位置</string>

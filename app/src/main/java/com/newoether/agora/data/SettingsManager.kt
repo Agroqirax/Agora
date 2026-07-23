@@ -244,6 +244,7 @@ class SettingsManager(private val context: Context) {
         val CONTACTS_ENABLED = booleanPreferencesKey("contacts_enabled")
         val ALARM_ENABLED = booleanPreferencesKey("alarm_enabled")
         val APP_LAUNCH_ENABLED = booleanPreferencesKey("app_launch_enabled")
+        val URL_OPEN_ENABLED = booleanPreferencesKey("url_open_enabled")
         val MEDIA_CONTROL_ENABLED = booleanPreferencesKey("media_control_enabled")
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
@@ -442,6 +443,7 @@ class SettingsManager(private val context: Context) {
     val contactsEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTACTS_ENABLED] ?: false }
     val alarmEnabled: Flow<Boolean> = context.dataStore.data.map { it[ALARM_ENABLED] ?: false }
     val appLaunchEnabled: Flow<Boolean> = context.dataStore.data.map { it[APP_LAUNCH_ENABLED] ?: false }
+    val urlOpenEnabled: Flow<Boolean> = context.dataStore.data.map { it[URL_OPEN_ENABLED] ?: false }
     val mediaControlEnabled: Flow<Boolean> = context.dataStore.data.map { it[MEDIA_CONTROL_ENABLED] ?: false }
     val notificationsEnabled: Flow<Boolean> = context.dataStore.data.map { it[NOTIFICATIONS_ENABLED] ?: false }
     // Torch on/off has no dangerous permission or confirm-gate, same reasoning as media control.
@@ -877,6 +879,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveAppLaunchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[APP_LAUNCH_ENABLED] = enabled }
+    }
+    suspend fun saveUrlOpenEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[URL_OPEN_ENABLED] = enabled }
     }
     suspend fun saveMediaControlEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MEDIA_CONTROL_ENABLED] = enabled }

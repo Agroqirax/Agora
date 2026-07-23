@@ -494,6 +494,7 @@ class ChatViewModel(
 
     fun setAlarmEnabled(enabled: Boolean) = settings.setAlarmEnabled(enabled)
     fun setAppLaunchEnabled(enabled: Boolean) = settings.setAppLaunchEnabled(enabled)
+    fun setUrlOpenEnabled(enabled: Boolean) = settings.setUrlOpenEnabled(enabled)
 
     // ── Notification tool write-confirmation + runtime permission gates ──
     // list/get (reading notifications) aren't gated, same as every other read-only tool.

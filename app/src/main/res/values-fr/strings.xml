@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Permet à l\'assistant de vérifier la batterie, le mode de sonnerie, le réseau, le stockage et tout autre état actuel de l\'appareil</string>
     <string name="apps_enable">Outil d\'applications</string>
     <string name="apps_enable_desc">Répertorier et ouvrir les applications installées</string>
+    <string name="url_open_enable">Outil d'ouverture d'URL</string>
+    <string name="url_open_enable_desc">Ouvrir une URL dans le navigateur</string>
     <string name="location_title">Emplacement</string>
     <string name="location_enable">Activer l\'outil de localisation</string>
     <string name="location_enable_desc">Autoriser le modèle à voir votre position</string>

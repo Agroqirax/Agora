@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">Позволяет помощнику проверять аккумулятор, режим звонка, сеть, хранилище и другое текущее состояние устройства.</string>
     <string name="apps_enable">Инструмент приложений</string>
     <string name="apps_enable_desc">Список и открытие установленных приложений</string>
+    <string name="url_open_enable">Открыть URL-инструмент</string>
+    <string name="url_open_enable_desc">Откройте URL-адрес в браузере</string>
     <string name="location_title">Расположение</string>
     <string name="location_enable">Включить инструмент определения местоположения</string>
     <string name="location_enable_desc">Разрешите модели видеть ваше местоположение</string>

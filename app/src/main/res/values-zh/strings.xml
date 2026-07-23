@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">让助手检查电池、铃声模式、网络、存储和其他当前设备状态</string>
     <string name="apps_enable">应用程序工具</string>
     <string name="apps_enable_desc">列出并打开已安装的应用程序</string>
+    <string name="url_open_enable">打开网址工具</string>
+    <string name="url_open_enable_desc">在浏览器中打开一个 URL</string>
     <string name="location_title">地点</string>
     <string name="location_enable">启用定位工具</string>
     <string name="location_enable_desc">允许模特查看您的位置</string>

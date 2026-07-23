@@ -22,6 +22,7 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.tool.AlarmToolProvider
 import com.newoether.agora.tool.AppLaunchToolProvider
+import com.newoether.agora.tool.UrlOpenToolProvider
 import com.newoether.agora.tool.CalculatorToolProvider
 import com.newoether.agora.tool.CalendarToolProvider
 import com.newoether.agora.tool.ContactsToolProvider
@@ -108,6 +109,7 @@ data class GenerationContext(
     val contactsEnabled: Boolean = false,
     val alarmEnabled: Boolean = false,
     val appLaunchEnabled: Boolean = false,
+    val urlOpenEnabled: Boolean = false,
     val mediaControlEnabled: Boolean = false,
     val notificationsEnabled: Boolean = false,
     val torchEnabled: Boolean = false,
@@ -291,6 +293,7 @@ class GenerationManager(
         ap.confirmWrite = { summary -> onConfirmAlarmWrite?.invoke(summary) ?: true }
     }
     private val appLaunchToolProvider = AppLaunchToolProvider(app)
+    private val urlOpenToolProvider = UrlOpenToolProvider(app)
     private val mediaControlToolProvider = MediaControlToolProvider(app).also { mp ->
         mp.requestPermission = { onRequestMediaControlPermission?.invoke() ?: false }
     }
@@ -310,7 +313,7 @@ class GenerationManager(
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
-        contactsToolProvider, alarmToolProvider, appLaunchToolProvider, mediaControlToolProvider, notificationToolProvider,
+        contactsToolProvider, alarmToolProvider, appLaunchToolProvider, urlOpenToolProvider, mediaControlToolProvider, notificationToolProvider,
         torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider
     )
 
@@ -337,6 +340,9 @@ class GenerationManager(
 
     fun buildAppLaunchTool(ctx: GenerationContext): List<ToolDefinition> =
         appLaunchToolProvider.definitions(ctx)
+
+    fun buildUrlOpenTool(ctx: GenerationContext): List<ToolDefinition> =
+        urlOpenToolProvider.definitions(ctx)
 
     fun buildAlarmTool(ctx: GenerationContext): List<ToolDefinition> =
         alarmToolProvider.definitions(ctx)
@@ -572,13 +578,14 @@ class GenerationManager(
         val contactsTool = buildContactsTool(ctx)
         val alarmTool = buildAlarmTool(ctx)
         val appLaunchTool = buildAppLaunchTool(ctx)
+        val urlOpenTool = buildUrlOpenTool(ctx)
         val mediaControlTool = buildMediaControlTool(ctx)
         val notificationTool = buildNotificationTool(ctx)
         val torchTool = buildTorchTool(ctx)
         val weatherTool = buildWeatherTool(ctx)
         val calculatorTool = buildCalculatorTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

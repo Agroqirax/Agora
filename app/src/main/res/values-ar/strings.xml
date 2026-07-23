@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">يتيح للمساعد التحقق من البطارية ووضع الرنين والشبكة والتخزين وحالة الجهاز الحالية الأخرى</string>
     <string name="apps_enable">أداة التطبيقات</string>
     <string name="apps_enable_desc">قائمة وفتح التطبيقات المثبتة</string>
+    <string name="url_open_enable">افتح أداة URL</string>
+    <string name="url_open_enable_desc">افتح عنوان URL في المتصفح</string>
     <string name="location_title">موقع</string>
     <string name="location_enable">تمكين أداة تحديد الموقع</string>
     <string name="location_enable_desc">السماح للنموذج بعرض موقعك</string>

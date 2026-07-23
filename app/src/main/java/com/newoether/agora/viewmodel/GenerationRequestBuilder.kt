@@ -169,6 +169,7 @@ class GenerationRequestBuilder(
             contactsEnabled = settings.contactsEnabled.value,
             alarmEnabled = settings.alarmEnabled.value,
             appLaunchEnabled = settings.appLaunchEnabled.value,
+            urlOpenEnabled = settings.urlOpenEnabled.value,
             mediaControlEnabled = settings.mediaControlEnabled.value,
             notificationsEnabled = settings.notificationsEnabled.value,
             torchEnabled = settings.torchEnabled.value,

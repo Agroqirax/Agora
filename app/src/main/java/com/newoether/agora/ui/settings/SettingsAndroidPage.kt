@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Alarm
@@ -59,6 +60,7 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val alarmEnabled by viewModel.settings.alarmEnabled.collectAsState()
     val alarmConfirmEnabled by viewModel.settings.alarmConfirmEnabled.collectAsState()
     val appLaunchEnabled by viewModel.settings.appLaunchEnabled.collectAsState()
+    val urlOpenEnabled by viewModel.settings.urlOpenEnabled.collectAsState()
     val mediaControlEnabled by viewModel.settings.mediaControlEnabled.collectAsState()
     val notificationsEnabled by viewModel.settings.notificationsEnabled.collectAsState()
     val notificationsConfirmEnabled by viewModel.settings.notificationsConfirmEnabled.collectAsState()
@@ -102,6 +104,15 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             viewModel.settings.setPackageQueryEnabled(!appsEnabled)
                             viewModel.setAppLaunchEnabled(!appsEnabled)
                         }
+                    )
+                }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.url_open_enable)) },
+                        supportingContent = { Text(stringResource(R.string.url_open_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Language, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = urlOpenEnabled, onCheckedChange = { viewModel.setUrlOpenEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.setUrlOpenEnabled(!urlOpenEnabled) }
                     )
                 }
                 add {

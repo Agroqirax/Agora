@@ -510,6 +510,8 @@
     <string name="device_info_enable_desc">アシスタントはバッテリー、着信音モード、ネットワーク、ストレージ、その他の現在のデバイスの状態を確認できます</string>
     <string name="apps_enable">アプリツール</string>
     <string name="apps_enable_desc">インストールされているアプリを一覧表示して開く</string>
+    <string name="url_open_enable">URLツールを開く</string>
+    <string name="url_open_enable_desc">ブラウザで URL を開きます</string>
     <string name="location_title">位置</string>
     <string name="location_enable">位置情報ツールを有効にする</string>
     <string name="location_enable_desc">モデルにあなたの位置情報を表示できるようにする</string>
