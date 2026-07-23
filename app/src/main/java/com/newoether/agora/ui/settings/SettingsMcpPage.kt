@@ -389,6 +389,13 @@ private fun ServerEditor(
                             val result = viewModel.testMcpServer(probe)
                             testing = false
                             testResult = result
+                            if (result.isSuccess && nameInput.isBlank()) {
+                                val reportedName = viewModel.mcpServerInfo.value[server.id]?.name?.trim().orEmpty()
+                                if (reportedName.isNotBlank()) {
+                                    nameInput = reportedName
+                                    viewModel.updateMcpServer(server.copy(name = reportedName))
+                                }
+                            }
                         }
                     },
                     enabled = !testing && urlInput.isNotBlank() && (authTypeInput != "oauth" || viewModel.isMcpOAuthConnected(server)),
