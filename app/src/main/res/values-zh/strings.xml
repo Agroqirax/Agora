@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">令牌端点</string>
     <string name="mcp_oauth_registration_endpoint">注册端点（可选）</string>
     <string name="mcp_oauth_resource">资源指示器（可选）</string>
-    <string name="mcp_oauth_resource_desc">作为 OAuth `resource` 参数发送 — 如果留空则默认为上面的服务器 URL</string>
     <string name="mcp_oauth_client_id">客户ID</string>
     <string name="mcp_oauth_client_secret">客户端密码（可选）</string>
     <string name="mcp_oauth_scope">范围（可选）</string>
+    <string name="mcp_oauth_advanced">先进的</string>
+    <string name="mcp_oauth_client_auth_method">客户端认证</string>
+    <string name="mcp_oauth_client_auth_method_post">发送正文</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP 基础</string>
     <string name="mcp_oauth_register_client">注册客户</string>
     <string name="mcp_oauth_registering">注册…</string>
     <string name="mcp_oauth_sign_in">登入</string>

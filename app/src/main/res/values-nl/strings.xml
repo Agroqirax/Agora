@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">Token-eindpunt</string>
     <string name="mcp_oauth_registration_endpoint">Registratie-eindpunt (optioneel)</string>
     <string name="mcp_oauth_resource">Bronindicator (optioneel)</string>
-    <string name="mcp_oauth_resource_desc">Verzonden als de OAuth `resource` parameter — standaard ingesteld op de bovenstaande server-URL als deze leeg wordt gelaten</string>
     <string name="mcp_oauth_client_id">Klant-ID</string>
     <string name="mcp_oauth_client_secret">Klantgeheim (optioneel)</string>
     <string name="mcp_oauth_scope">Reikwijdte (optioneel)</string>
+    <string name="mcp_oauth_advanced">Geavanceerd</string>
+    <string name="mcp_oauth_client_auth_method">Clientverificatie</string>
+    <string name="mcp_oauth_client_auth_method_post">Lichaam insturen</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP-basis</string>
     <string name="mcp_oauth_register_client">Klant registreren</string>
     <string name="mcp_oauth_registering">Registreren…</string>
     <string name="mcp_oauth_sign_in">Log in</string>

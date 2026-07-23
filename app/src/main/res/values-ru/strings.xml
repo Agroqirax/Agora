@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">Конечная точка токена</string>
     <string name="mcp_oauth_registration_endpoint">Конечная точка регистрации (необязательно)</string>
     <string name="mcp_oauth_resource">Индикатор ресурса (необязательно)</string>
-    <string name="mcp_oauth_resource_desc">Отправляется как параметр OAuth `resource` — по умолчанию используется указанный выше URL-адрес сервера, если оставить пустым.</string>
     <string name="mcp_oauth_client_id">Идентификатор клиента</string>
     <string name="mcp_oauth_client_secret">Секрет клиента (необязательно)</string>
     <string name="mcp_oauth_scope">Область действия (необязательно)</string>
+    <string name="mcp_oauth_advanced">Передовой</string>
+    <string name="mcp_oauth_client_auth_method">Аутентификация клиента</string>
+    <string name="mcp_oauth_client_auth_method_post">Отправить в теле</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP базовый</string>
     <string name="mcp_oauth_register_client">Зарегистрировать клиента</string>
     <string name="mcp_oauth_registering">Регистрация…</string>
     <string name="mcp_oauth_sign_in">Войти</string>

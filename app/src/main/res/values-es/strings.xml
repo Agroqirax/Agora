@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">Punto final del token</string>
     <string name="mcp_oauth_registration_endpoint">Punto final de registro (opcional)</string>
     <string name="mcp_oauth_resource">Indicador de recursos (opcional)</string>
-    <string name="mcp_oauth_resource_desc">Enviado como parámetro "recurso" de OAuth: por defecto es la URL del servidor anterior si se deja en blanco.</string>
     <string name="mcp_oauth_client_id">ID de cliente</string>
     <string name="mcp_oauth_client_secret">Secreto del cliente (opcional)</string>
     <string name="mcp_oauth_scope">Alcance (opcional)</string>
+    <string name="mcp_oauth_advanced">Avanzado</string>
+    <string name="mcp_oauth_client_auth_method">Autenticación del cliente</string>
+    <string name="mcp_oauth_client_auth_method_post">enviar en cuerpo</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP Básico</string>
     <string name="mcp_oauth_register_client">Registrar Cliente</string>
     <string name="mcp_oauth_registering">Registrándose…</string>
     <string name="mcp_oauth_sign_in">Iniciar sesión</string>

@@ -26,7 +26,15 @@ MCP servers you add are arbitrary code you're choosing to trust with tool access
 - **Read-only tools run without asking.** If a server marks a tool with `readOnlyHint`, Agora calls it automatically.
 - **Everything else asks for confirmation.** If a tool isn't marked read-only, Agora treats it as potentially destructive — including tools that simply don't declare a `destructiveHint` at all — and shows a confirmation dialog with the tool name and arguments before running it.
 - **"Always allow this server"** lets you skip the prompt for the rest of the session. This resets when Agora restarts.
-- **Authentication is sent only to the server you configured.** A Bearer token or custom header you add is sent solely to that server's URL.
+- **Authentication is sent only to the server you configured.** A Bearer token, OAuth access token, or custom header you add is sent solely to that server's URL.
+
+Agora supports different authentication methods.
+
+| Type             | Best for                                                       |
+| ---------------- | --------------------------------------------------------------- |
+| **None**         | Public MCP servers that don't require authentication           |
+| **Bearer Token** | API keys or personal access tokens                              |
+| **OAuth 2.0**    | Servers that support OAuth, including automatic token refresh  |
 
 !!! warning
     If a server's URL uses plain `http://` instead of `https://`, any Bearer token or header you configure travels unencrypted. Prefer `https://` endpoints, especially over untrusted networks.
@@ -36,6 +44,21 @@ MCP servers you add are arbitrary code you're choosing to trust with tool access
 ### Step 1: Get an MCP server
 
 This can be a public MCP server, one your organization runs internally, or one you host yourself. It must expose the **Streamable HTTP** transport at a single URL (commonly ending in `/mcp`).
+
+Some common mcp servers include:
+
+| Provider                                                                                                 | URL                                            | Auth method                                                                                                                |
+| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| [GitHub MCP](https://github.com/github/github-mcp-server)                                                | https://api.githubcopilot.com/mcp              | [PAT](https://github.com/settings/personal-access-tokens) as bearer or [OAuth app](https://github.com/settings/developers) |
+| [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp#connect-through-your-ai-tool) | https://mcp.notion.com/mcp                     | [OAuth](https://developers.notion.com/guides/mcp/build-mcp-client) with DCR                                                |
+| [Homeassistant](https://www.home-assistant.io/integrations/mcp_server)                                   | http://homeassistant.local/mcp                 | [profile](https://my.home-assistant.io/redirect/profile/) → Security → Long-lived access tokens as bearer                  |
+| [Ha-mcp](https://github.com/homeassistant-ai/ha-mcp)                                                     | http://homeassistant.local/api/webhook/mcp_... | Secret URL instead of auth                                                                                                 |
+| [Gmail MCP](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server)               | https://gmailmcp.googleapis.com/mcp/v1         | OAuth                                                                                                                      |
+| [Google Drive MCP](https://developers.google.com/workspace/drive/api/guides/configure-mcp-server)        | https://drivemcp.googleapis.com/mcp/v1         | OAuth                                                                                                                      |
+| [Google Calendar MCP](https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server)  | https://calendarmcp.googleapis.com/mcp/v1      | OAuth. Note: you can use Android → Calendar instead.                                                                       |
+
+!!! note
+    DCR stands for dynamic client registration. DCR works identical to OAuth but instead of having to register an app yourself Agora can do that for you, meaning you do not need to provide a client id/client secret.
 
 ### Step 2: Add It in Agora
 
@@ -49,9 +72,17 @@ This can be a public MCP server, one your organization runs internally, or one y
 | **Name**          | Display name for this server                                                                          | `Home Assistant`                  |
 | **Description**   | Optional note about what it's for. If left blank, the server's host is shown instead.                 | `Controls lights and thermostats` |
 | **Server URL**    | The MCP Streamable HTTP endpoint                                                                      | `https://example.com/mcp`         |
-| **Bearer Token**  | Optional — sent as `Authorization: Bearer <token>`                                                    | Your server's API token           |
 | **Extra Headers** | Optional — one per line, as `Name: value`, for servers that expect auth or routing by a custom header | `X-Api-Key: secret`               |
 | **Timeout**       | Per-request timeout, 5–120 seconds                                                                    | `30`                              |
+
+Depending on the auth method you may need to provide additional details.
+
+When using a bearer token simply enter it in the appropriate field. You do not need to include `Authorization: Bearer`.
+
+When using OAuth servers you can press **Discover** to automatically populate the authorization/token endpoints, the registration endpoint (if the server supports DCR), and the resource indicator.
+If a provider supports DCR, press **Register Client** to register and populate the Client ID. Otherwise you'll need to look up how to create an OAuth app with that provider and populate the Client ID, Client Secret & optionally scopes yourself. If discovery didn't find a **Registration Endpoint**, you can also enter one manually to enable DCR.
+The **Resource Indicator** field is normally left blank — it's only needed if discovery didn't already resolve it and the server requires a specific `resource` value that differs from the Server URL.
+Press **Sign in**, once you've signed in you'll be redirected back to Agora and it should show **Connected**.
 
 5. Tap **Test Connection** to verify Agora can reach the server and see how many tools it exposes, before saving.
 6. Tap **Save**.
@@ -95,3 +126,11 @@ You can turn confirmation prompts off entirely with **Confirm destructive MCP to
 ### Confirmation prompt shows unexpected arguments
 
 The confirmation dialog shows the exact arguments the model is about to send. If they look wrong, deny the call — the model will usually see the denial and adjust its next attempt.
+
+### OAuth sign-in issues
+
+- **Discover fails or leaves endpoints blank** — not every server publishes the discovery metadata Agora looks for. Enter the **Authorization Endpoint**, **Token Endpoint**, and (if the provider supports DCR) **Registration Endpoint** manually — check the provider's own OAuth/developer docs for these URLs.
+- **Register Client fails** — the server may not actually support DCR despite exposing a registration endpoint. Create an OAuth app manually with the provider instead and fill in the **Client ID** and **Client Secret** yourself.
+- **Sign in doesn't return to Agora, or shows an error** — this happens in the browser tab AppAuth opens for sign-in, before control returns to Agora; check that you completed the provider's login/consent screen without cancelling, and that the account you signed in with has access to the resource.
+- **"Sign-in expired — reconnect to use this server"** — the server's refresh token was rejected (expired, revoked, or the app's access was removed on the provider's side). Press **Sign in again** to redo the OAuth flow.
+- **Connected, but tool calls still fail with a 401/authorization error** — the token the server issued may not be scoped to this MCP server. If you entered the **Resource Indicator** manually, double-check it matches what the server expects (or leave it blank so Agora falls back to the Server URL).

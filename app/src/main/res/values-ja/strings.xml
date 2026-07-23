@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">トークンエンドポイント</string>
     <string name="mcp_oauth_registration_endpoint">登録エンドポイント (オプション)</string>
     <string name="mcp_oauth_resource">リソースインジケーター (オプション)</string>
-    <string name="mcp_oauth_resource_desc">OAuth の「resource」パラメータとして送信されます。空白のままにした場合、デフォルトで上記のサーバー URL になります。</string>
     <string name="mcp_oauth_client_id">クライアントID</string>
     <string name="mcp_oauth_client_secret">クライアント シークレット (オプション)</string>
     <string name="mcp_oauth_scope">スコープ (オプション)</string>
+    <string name="mcp_oauth_advanced">高度な</string>
+    <string name="mcp_oauth_client_auth_method">クライアント認証</string>
+    <string name="mcp_oauth_client_auth_method_post">本文を送信する</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTPベーシック</string>
     <string name="mcp_oauth_register_client">クライアントの登録</string>
     <string name="mcp_oauth_registering">登録中…</string>
     <string name="mcp_oauth_sign_in">サインイン</string>

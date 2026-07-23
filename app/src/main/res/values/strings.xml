@@ -1113,11 +1113,14 @@
     <string name="mcp_oauth_authorization_endpoint">Authorization Endpoint</string>
     <string name="mcp_oauth_token_endpoint">Token Endpoint</string>
     <string name="mcp_oauth_registration_endpoint">Registration Endpoint (optional)</string>
-    <string name="mcp_oauth_resource">Resource Indicator (optional)</string>
-    <string name="mcp_oauth_resource_desc">Sent as the OAuth `resource` parameter — defaults to the server URL above if left blank</string>
+    <string name="mcp_oauth_resource">Resource (optional)</string>
     <string name="mcp_oauth_client_id">Client ID</string>
     <string name="mcp_oauth_client_secret">Client Secret (optional)</string>
     <string name="mcp_oauth_scope">Scope (optional)</string>
+    <string name="mcp_oauth_advanced">Advanced</string>
+    <string name="mcp_oauth_client_auth_method">Client Authentication</string>
+    <string name="mcp_oauth_client_auth_method_post">Send in body</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP Basic</string>
     <string name="mcp_oauth_register_client">Register Client</string>
     <string name="mcp_oauth_registering">Registering…</string>
     <string name="mcp_oauth_sign_in">Sign in</string>

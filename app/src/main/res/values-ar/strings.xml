@@ -477,7 +477,7 @@
     <string name="contacts_enable_desc">اسمح للنموذج بعرض جهات الاتصال الخاصة بك</string>
     <string name="contacts_confirm_setting">تأكيد تغييرات جهة الاتصال</string>
     <string name="contacts_confirm_setting_desc">اطلب التأكيد قبل أن يتمكن المساعد من تغيير جهات الاتصال أو حذفها</string>
-    <string name="alarm_title">أجهزة الإنذار & أمبير؛ الموقتات</string>
+    <string name="alarm_title">أجهزة الإنذار &amp; أمبير؛ الموقتات</string>
     <string name="alarm_enable">تمكين أداة التنبيه</string>
     <string name="alarm_enable_desc">ضبط المنبهات والمؤقتات ورفضها وتأجيلها</string>
     <string name="alarm_confirm_setting">تأكيد تغييرات التنبيه</string>
@@ -1114,10 +1114,13 @@
     <string name="mcp_oauth_token_endpoint">نقطة نهاية الرمز المميز</string>
     <string name="mcp_oauth_registration_endpoint">نقطة نهاية التسجيل (اختياري)</string>
     <string name="mcp_oauth_resource">مؤشر الموارد (اختياري)</string>
-    <string name="mcp_oauth_resource_desc">تم إرساله كمعلمة "مورد" OAuth - يتم تعيينه افتراضيًا على عنوان URL للخادم أعلاه إذا ترك فارغًا</string>
     <string name="mcp_oauth_client_id">معرف العميل</string>
     <string name="mcp_oauth_client_secret">سر العميل (اختياري)</string>
     <string name="mcp_oauth_scope">النطاق (اختياري)</string>
+    <string name="mcp_oauth_advanced">متقدم</string>
+    <string name="mcp_oauth_client_auth_method">مصادقة العميل</string>
+    <string name="mcp_oauth_client_auth_method_post">إرسال في الجسم</string>
+    <string name="mcp_oauth_client_auth_method_basic">HTTP الأساسي</string>
     <string name="mcp_oauth_register_client">تسجيل العميل</string>
     <string name="mcp_oauth_registering">جارٍ التسجيل…</string>
     <string name="mcp_oauth_sign_in">تسجيل الدخول</string>

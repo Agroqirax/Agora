@@ -183,6 +183,7 @@ private fun ServerEditor(
     var oauthClientIdInput by remember(server.id) { mutableStateOf(server.oauthClientId) }
     var oauthClientSecretInput by remember(server.id) { mutableStateOf(server.oauthClientSecret) }
     var oauthScopeInput by remember(server.id) { mutableStateOf(server.oauthScope) }
+    var oauthClientAuthMethodInput by remember(server.id) { mutableStateOf(server.oauthClientAuthMethod) }
     var oauthDiscovering by remember(server.id) { mutableStateOf(false) }
     var oauthDiscoverFailed by remember(server.id) { mutableStateOf(false) }
     var oauthRegistering by remember(server.id) { mutableStateOf(false) }
@@ -205,6 +206,7 @@ private fun ServerEditor(
         oauthClientIdInput = server.oauthClientId
         oauthClientSecretInput = server.oauthClientSecret
         oauthScopeInput = server.oauthScope
+        oauthClientAuthMethodInput = server.oauthClientAuthMethod
     }
 
     LaunchedEffect(isNewlyAdded) {
@@ -332,6 +334,8 @@ private fun ServerEditor(
                         onClientSecretChange = { oauthClientSecretInput = it },
                         scopeInput = oauthScopeInput,
                         onScopeChange = { oauthScopeInput = it },
+                        clientAuthMethodInput = oauthClientAuthMethodInput,
+                        onClientAuthMethodChange = { oauthClientAuthMethodInput = it },
                         discovering = oauthDiscovering,
                         onDiscoveringChange = { oauthDiscovering = it },
                         discoverFailed = oauthDiscoverFailed,
@@ -377,6 +381,7 @@ private fun ServerEditor(
                                 oauthClientId = oauthClientIdInput.trim(),
                                 oauthClientSecret = oauthClientSecretInput.trim(),
                                 oauthScope = oauthScopeInput.trim(),
+                                oauthClientAuthMethod = oauthClientAuthMethodInput,
                                 // Token state isn't a user-editable field — carry over the
                                 // actually persisted AuthState from `server`, not blank.
                                 oauthAuthStateJson = server.oauthAuthStateJson
@@ -446,7 +451,12 @@ private fun ServerEditor(
                             oauthResource = oauthResourceInput.trim(),
                             oauthClientId = oauthClientIdInput.trim(),
                             oauthClientSecret = oauthClientSecretInput.trim(),
-                            oauthScope = oauthScopeInput.trim()
+                            oauthScope = oauthScopeInput.trim(),
+                            oauthClientAuthMethod = oauthClientAuthMethodInput,
+                            // Stale once the server isn't OAuth anymore — otherwise switching
+                            // away and back would resurface a reauth banner from a previous
+                            // failed refresh that's no longer relevant.
+                            oauthNeedsReauth = authTypeInput == "oauth" && server.oauthNeedsReauth
                         )); expanded = false
                     }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.save)) }
                 }
@@ -471,6 +481,7 @@ private fun McpOAuthSection(
     clientIdInput: String, onClientIdChange: (String) -> Unit,
     clientSecretInput: String, onClientSecretChange: (String) -> Unit,
     scopeInput: String, onScopeChange: (String) -> Unit,
+    clientAuthMethodInput: String, onClientAuthMethodChange: (String) -> Unit,
     discovering: Boolean, onDiscoveringChange: (Boolean) -> Unit,
     discoverFailed: Boolean, onDiscoverFailedChange: (Boolean) -> Unit,
     registering: Boolean, onRegisteringChange: (Boolean) -> Unit,
@@ -491,7 +502,8 @@ private fun McpOAuthSection(
                 oauthAuthorizationEndpoint = authEndpointInput.trim(), oauthTokenEndpoint = tokenEndpointInput.trim(),
                 oauthRegistrationEndpoint = registrationEndpointInput.trim(), oauthResource = resourceInput.trim(),
                 oauthClientId = clientIdInput.trim(),
-                oauthClientSecret = clientSecretInput.trim(), oauthScope = scopeInput.trim()
+                oauthClientSecret = clientSecretInput.trim(), oauthScope = scopeInput.trim(),
+                oauthClientAuthMethod = clientAuthMethodInput
             )
             viewModel.updateMcpServer(updated)
             viewModel.launchMcpOAuthSignIn(updated)
@@ -513,6 +525,7 @@ private fun McpOAuthSection(
                         onRegistrationEndpointChange(result.registrationEndpoint)
                         onResourceChange(result.resource)
                         onScopeChange(result.scope)
+                        onClientAuthMethodChange(result.clientAuthMethod)
                     } else {
                         onDiscoverFailedChange(true)
                     }
@@ -540,21 +553,53 @@ private fun McpOAuthSection(
         Spacer(Modifier.height(10.dp))
     }
 
-    OutlinedTextField(value = authEndpointInput, onValueChange = onAuthEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_authorization_endpoint)) },
-        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
-    Spacer(Modifier.height(10.dp))
-    OutlinedTextField(value = tokenEndpointInput, onValueChange = onTokenEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_token_endpoint)) },
-        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
-    Spacer(Modifier.height(10.dp))
-    OutlinedTextField(value = registrationEndpointInput, onValueChange = onRegistrationEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_registration_endpoint)) },
-        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
-    Spacer(Modifier.height(10.dp))
-    OutlinedTextField(
-        value = resourceInput, onValueChange = onResourceChange, label = { Text(stringResource(R.string.mcp_oauth_resource)) },
-        placeholder = { Text(urlInput) }, supportingText = { Text(stringResource(R.string.mcp_oauth_resource_desc)) },
-        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
-    )
-    Spacer(Modifier.height(10.dp))
+    // Auto-discovered (or DCR-registered) most of the time — tucked away by default so the
+    // common path only shows Client ID/Secret/Scope and the sign-in button.
+    var advancedExpanded by remember(server.id) { mutableStateOf(false) }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).clickable { advancedExpanded = !advancedExpanded }.padding(vertical = 10.dp)
+    ) {
+        Text(stringResource(R.string.mcp_oauth_advanced), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Icon(if (advancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+    }
+    AnimatedVisibility(visible = advancedExpanded, enter = expandVertically(), exit = shrinkVertically()) {
+        Column {
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(value = authEndpointInput, onValueChange = onAuthEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_authorization_endpoint)) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(value = tokenEndpointInput, onValueChange = onTokenEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_token_endpoint)) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(value = registrationEndpointInput, onValueChange = onRegistrationEndpointChange, label = { Text(stringResource(R.string.mcp_oauth_registration_endpoint)) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(10.dp))
+            OutlinedTextField(
+                value = resourceInput, onValueChange = onResourceChange, label = { Text(stringResource(R.string.mcp_oauth_resource)) },
+                placeholder = { Text(urlInput) },
+                singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+            )
+            // Only relevant for a manually-entered client secret — a dynamically registered
+            // client (see the "Register Client" button below) always registers as "none"
+            // (public/PKCE-only), so it never has a secret whose auth method matters here.
+            if (clientSecretInput.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(stringResource(R.string.mcp_oauth_client_auth_method), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "post" to stringResource(R.string.mcp_oauth_client_auth_method_post),
+                        "basic" to stringResource(R.string.mcp_oauth_client_auth_method_basic)
+                    ).forEach { (value, label) ->
+                        FilterChip(selected = clientAuthMethodInput == value, onClick = { onClientAuthMethodChange(value) }, label = { Text(label) })
+                    }
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+    }
+
     OutlinedTextField(value = clientIdInput, onValueChange = onClientIdChange, label = { Text(stringResource(R.string.mcp_oauth_client_id)) },
         singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
     Spacer(Modifier.height(10.dp))

@@ -65,7 +65,12 @@ data class McpOAuthDiscoveryResult(
      *  every authorize/token/refresh request, since it may not be byte-identical to the
      *  MCP server URL the user typed (trailing slash, path normalization, etc.). Falls
      *  back to the MCP server URL when no protected-resource metadata was found. */
-    val resource: String
+    val resource: String,
+    /** Best guess at [McpServerConfig.oauthClientAuthMethod] from the AS metadata's
+     *  `token_endpoint_auth_methods_supported` (RFC 8414) — "post" unless the server
+     *  advertises `client_secret_basic` but not `client_secret_post`. Only matters once a
+     *  client secret is actually entered (manual, non-DCR setup); ignored otherwise. */
+    val clientAuthMethod: String = "post"
 )
 
 data class McpDcrResult(val clientId: String, val clientSecret: String)
@@ -222,7 +227,10 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
             val scope = try {
                 obj["scopes_supported"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.content }?.joinToString(" ")
             } catch (_: Exception) { null } ?: ""
-            return McpOAuthDiscoveryResult(trimmed, authEndpoint, tokenEndpoint, registrationEndpoint, scope, resource)
+            val authMethods = try {
+                obj["token_endpoint_auth_methods_supported"]?.jsonArray?.mapNotNull { (it as? JsonPrimitive)?.content }
+            } catch (_: Exception) { null }
+            return McpOAuthDiscoveryResult(trimmed, authEndpoint, tokenEndpoint, registrationEndpoint, scope, resource, preferredClientAuthMethod(authMethods))
         }
         val config = try {
             suspendCancellableCoroutine<AuthorizationServiceConfiguration?> { cont ->
@@ -238,8 +246,21 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
             config.tokenEndpoint.toString(),
             config.registrationEndpoint?.toString() ?: "",
             "",
-            resource
+            resource,
+            preferredClientAuthMethod(config.discoveryDoc?.tokenEndpointAuthMethodsSupported)
         )
+    }
+
+    /** RFC 8414 lets a server advertise which `token_endpoint_auth_methods` it accepts.
+     *  "post" (`client_secret_post`) is preferred since it's what the more common/informally
+     *  implemented MCP servers this feature targets tend to expect; only switches to "basic"
+     *  (`client_secret_basic`) when the metadata advertises that but not `client_secret_post`.
+     *  Defaults to "post" when the server doesn't publish the list at all. */
+    private fun preferredClientAuthMethod(methods: List<String>?): String = when {
+        methods.isNullOrEmpty() -> "post"
+        methods.contains("client_secret_post") -> "post"
+        methods.contains("client_secret_basic") -> "basic"
+        else -> "post"
     }
 
     private fun serviceConfiguration(server: McpServerConfig): AuthorizationServiceConfiguration = AuthorizationServiceConfiguration(

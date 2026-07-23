@@ -115,7 +115,6 @@ data class McpServerConfig(
     // Client identity — dynamically registered (RFC 7591) or manually entered.
     val oauthClientId: String = "",
     val oauthClientSecret: String = "",
-    val oauthDynamicallyRegistered: Boolean = false,
     /** How the client authenticates to the token endpoint: "post" (client_secret in the
      *  POST body, AppAuth's ClientSecretPost), "basic" (HTTP Basic auth header,
      *  ClientSecretBasic), or "none" (public/PKCE-only client, NoClientAuthentication).
