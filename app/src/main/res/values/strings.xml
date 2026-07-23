@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">Installed Packages (%d)</string>
     <string name="sandbox_browse_files">Browse Files</string>
     <string name="sandbox_browse_files_desc">Open sandbox directory in system file manager</string>
+    <string name="sandbox_run_command">Run Command</string>
+    <string name="sandbox_command_placeholder">ls -la, uname -a...</string>
+    <string name="sandbox_run">Run</string>
+    <string name="sandbox_exit_code_fmt">\nExit code: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Auto-Generate Title</string>

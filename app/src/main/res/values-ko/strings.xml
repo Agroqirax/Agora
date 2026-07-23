@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">설치된 패키지(%d)</string>
     <string name="sandbox_browse_files">파일 찾아보기</string>
     <string name="sandbox_browse_files_desc">시스템 파일 관리자에서 샌드박스 디렉토리 열기</string>
+    <string name="sandbox_run_command">명령 실행</string>
+    <string name="sandbox_command_placeholder">ls -la, uname -a...</string>
+    <string name="sandbox_run">달리다</string>
+    <string name="sandbox_exit_code_fmt">\n종료 코드: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">제목 자동 생성</string>

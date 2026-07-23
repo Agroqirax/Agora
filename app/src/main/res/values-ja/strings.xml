@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">インストール済みパッケージ（%d）</string>
     <string name="sandbox_browse_files">ファイルを閲覧</string>
     <string name="sandbox_browse_files_desc">システムのファイルマネージャーでサンドボックスディレクトリを開く</string>
+    <string name="sandbox_run_command">コマンドの実行</string>
+    <string name="sandbox_command_placeholder">ls -la、uname -a...</string>
+    <string name="sandbox_run">走る</string>
+    <string name="sandbox_exit_code_fmt">\n終了コード: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">タイトルを自動生成</string>

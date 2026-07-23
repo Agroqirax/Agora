@@ -68,6 +68,9 @@ fun SettingsSandboxPage(
     var lastInstallResult by remember { mutableStateOf<Boolean?>(null) } // local: success/fail for button state
     var deleteConfirm by remember { mutableStateOf<String?>(null) }
     var resetConfirm by remember { mutableStateOf(false) }
+    var cmdInput by rememberSaveable { mutableStateOf("") }
+    var cmdOutput by remember { mutableStateOf("") }
+    var cmdRunning by remember { mutableStateOf(false) }
     // Sync persisted text field back to sandbox manager
     LaunchedEffect(installPkg) { sandboxManager.pendingPkgName = installPkg }
 
@@ -79,7 +82,7 @@ fun SettingsSandboxPage(
     val downloadProgress by sandboxManager.downloadProgress.collectAsState()
     val showTerminal = terminalOutput.isNotBlank()
 
-    fun clearAllState() { installPkg = ""; installError = null; deleteConfirm = null; lastInstallResult = null }
+    fun clearAllState() { installPkg = ""; installError = null; deleteConfirm = null; lastInstallResult = null; cmdInput = ""; cmdOutput = "" }
 
     fun installPackage(name: String) {
         if (isBusy) return
@@ -90,6 +93,27 @@ fun SettingsSandboxPage(
         if (isBusy) return
         lastInstallResult = null
         sandboxManager.upgradePackages()
+    }
+
+    fun runCommand(command: String) {
+        if (cmdRunning || command.isBlank()) return
+        cmdRunning = true
+        scope.launch {
+            val result = try {
+                sandboxManager.executeCommand(command)
+            } catch (e: Exception) {
+                SandboxManager.SandboxResult("", e.message ?: "Command failed", -1)
+            }
+            cmdOutput = buildString {
+                append(result.stdout)
+                if (result.stderr.isNotBlank()) {
+                    if (isNotEmpty()) append('\n')
+                    append(result.stderr)
+                }
+                append(ctx.getString(R.string.sandbox_exit_code_fmt, result.exitCode))
+            }
+            cmdRunning = false
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -482,6 +506,73 @@ fun SettingsSandboxPage(
                                 )
                             }
                         }
+                    }
+
+                    // ═══ Run Command ═══
+                    item {
+                        Spacer(Modifier.height(24.dp))
+                        SettingsGroup(title = stringResource(R.string.sandbox_run_command), items = listOf({
+                            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedTextField(
+                                        value = cmdInput,
+                                        onValueChange = { cmdInput = it },
+                                        placeholder = { Text(stringResource(R.string.sandbox_command_placeholder)) },
+                                        singleLine = true,
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(
+                                        onClick = { runCommand(cmdInput.trim()) },
+                                        enabled = cmdInput.isNotBlank() && !cmdRunning,
+                                        shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp, topEnd = 28.dp, bottomEnd = 28.dp),
+                                        modifier = Modifier.height(56.dp).widthIn(min = 90.dp).offset(y = 4.dp)
+                                    ) {
+                                        if (cmdRunning) {
+                                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp, color = MaterialTheme.colorScheme.onPrimary)
+                                        } else {
+                                            Text(stringResource(R.string.sandbox_run))
+                                        }
+                                    }
+                                }
+
+                                AnimatedVisibility(
+                                    visible = cmdOutput.isNotBlank(),
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    val cmdScroll = rememberScrollState()
+                                    LaunchedEffect(cmdOutput) { cmdScroll.animateScrollTo(cmdScroll.maxValue) }
+                                    val terminalFg = MaterialTheme.colorScheme.onSurface
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surface,
+                                        tonalElevation = 4.dp,
+                                        modifier = Modifier.padding(top = 16.dp).fillMaxWidth().height(260.dp)
+                                    ) {
+                                        SelectionContainer {
+                                            Text(
+                                                cmdOutput,
+                                                modifier = Modifier.padding(12.dp).fillMaxWidth()
+                                                    .verticalScroll(cmdScroll)
+                                                    .nestedScroll(object : NestedScrollConnection {
+                                                        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset = available
+                                                        override suspend fun onPreFling(available: Velocity): Velocity = available
+                                                        override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity = available
+                                                    }),
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    fontFamily = FontFamily(Font(R.font.jetbrains_mono_regular)),
+                                                    lineHeight = 18.sp
+                                                ),
+                                                color = terminalFg
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }))
+                        Spacer(Modifier.height(8.dp))
                     }
 
                     // ═══ Danger Zone ═══

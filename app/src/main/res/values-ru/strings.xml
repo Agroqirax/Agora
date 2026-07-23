@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">Установленные пакеты (%d)</string>
     <string name="sandbox_browse_files">Обзор файлов</string>
     <string name="sandbox_browse_files_desc">Открыть каталог песочницы в системном файловом менеджере</string>
+    <string name="sandbox_run_command">Выполнить команду</string>
+    <string name="sandbox_command_placeholder">лс -ла, uname -а...</string>
+    <string name="sandbox_run">Бегать</string>
+    <string name="sandbox_exit_code_fmt">\nКод выхода: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Автоматически генерировать заголовок</string>

@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">الحزم المثبتة (%d)</string>
     <string name="sandbox_browse_files">استعراض الملفات</string>
     <string name="sandbox_browse_files_desc">فتح دليل الصندوق الرملي في مدير ملفات النظام</string>
+    <string name="sandbox_run_command">تشغيل الأمر</string>
+    <string name="sandbox_command_placeholder">ليرة سورية -la، uname -a...</string>
+    <string name="sandbox_run">يجري</string>
+    <string name="sandbox_exit_code_fmt">\nرمز الخروج: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">توليد العنوان تلقائيًا</string>

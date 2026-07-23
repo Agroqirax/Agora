@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">Pacotes instalados (%d)</string>
     <string name="sandbox_browse_files">Explorar arquivos</string>
     <string name="sandbox_browse_files_desc">Abrir diretório sandbox no gerenciador de arquivos</string>
+    <string name="sandbox_run_command">Executar comando</string>
+    <string name="sandbox_command_placeholder">ls -la, uname -a...</string>
+    <string name="sandbox_run">Correr</string>
+    <string name="sandbox_exit_code_fmt">\nCódigo de saída: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Gerar título automaticamente</string>

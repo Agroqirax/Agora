@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">Geïnstalleerde pakketten (%d)</string>
     <string name="sandbox_browse_files">Bestanden bekijken</string>
     <string name="sandbox_browse_files_desc">Open de sandboxmap in de systeembestandsbeheerder</string>
+    <string name="sandbox_run_command">Voer opdracht uit</string>
+    <string name="sandbox_command_placeholder">ls -la, uname -a...</string>
+    <string name="sandbox_run">Loop</string>
+    <string name="sandbox_exit_code_fmt">\nAfsluitcode: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Titel automatisch genereren</string>

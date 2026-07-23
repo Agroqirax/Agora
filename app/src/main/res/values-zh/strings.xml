@@ -580,6 +580,10 @@
     <string name="sandbox_installed_fmt">已安装包 (%d)</string>
     <string name="sandbox_browse_files">浏览文件</string>
     <string name="sandbox_browse_files_desc">在系统文件管理器中打开沙箱目录</string>
+    <string name="sandbox_run_command">运行命令</string>
+    <string name="sandbox_command_placeholder">ls -la、uname -a...</string>
+    <string name="sandbox_run">跑步</string>
+    <string name="sandbox_exit_code_fmt">\n退出代码: %d</string>
 
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">自动生成标题</string>
