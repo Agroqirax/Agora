@@ -163,19 +163,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
                 }
             } finally { tmpTar.delete() }
 
-            File(rootfsDir, "tmp").mkdirs()
-            File(rootfsDir, "run").mkdirs()
+            // Everything below fills in what the pinned minirootfs tarball itself doesn't
+            // ship (verified against the exact tarball behind rootfsSha256): no resolv.conf,
+            // no /home/agora mount point, root's passwd entry still says /root. tmp/, run/,
+            // var/cache/apk/, /etc/apk/repositories, and every binary's executable bit are
+            // already correct straight out of the tarball — don't rewrite what's already right.
             ensureSandboxMountTargets()
-            listOf("var/cache/apk", "etc/apk/cache", "var/lock").forEach { File(rootfsDir, it).mkdirs() }
             writeResolvConf()
-            // Alpine repository config
-            val repos = File(rootfsDir, "etc/apk/repositories"); repos.parentFile?.mkdirs()
-            repos.writeText(alpineRepos.joinToString("\n", postfix = "\n"))
-            // Ensure all binaries are executable recursively
-            listOf("bin", "usr/bin", "sbin", "usr/sbin", "usr/libexec").forEach { dir ->
-                val d = File(rootfsDir, dir)
-                if (d.isDirectory) d.walkTopDown().filter { it.isFile }.forEach { it.setExecutable(true) }
-            }
             // No auto `apk upgrade` here: the freshly-downloaded minirootfs is already a coherent
             // pinned release. Running upgrade immediately makes apk re-resolve /bin/sh and dead-locks
             // on the busybox-binsh vs yash-binsh `cmd:sh` conflict. Packages upgrade on demand.
