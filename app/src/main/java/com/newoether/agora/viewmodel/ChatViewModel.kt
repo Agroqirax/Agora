@@ -278,8 +278,8 @@ class ChatViewModel(
             gm.onRequestContactsPermission = { contactsPermission.request() }
             gm.onConfirmAlarmWrite = { summary -> alarmWriteConfirmation.confirm(summary) }
             gm.onRequestMediaControlPermission = {
-                com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(getApplication())
-                com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(getApplication())
+                com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(getApplication())
+                com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(getApplication())
             }
             gm.onConfirmNotificationWrite = { summary -> notificationWriteConfirmation.confirm(summary) }
             gm.onRequestNotificationAccessPermission = {
@@ -426,8 +426,8 @@ class ChatViewModel(
     fun setMediaControlEnabled(enabled: Boolean) {
         settings.setMediaControlEnabled(enabled)
         val app: Application = getApplication()
-        if (enabled && !com.newoether.agora.tool.MediaControlToolProvider.hasNotificationAccess(app)) {
-            com.newoether.agora.tool.MediaControlToolProvider.openNotificationAccessSettings(app)
+        if (enabled && !com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(app)) {
+            com.newoether.agora.service.AgoraNotificationAccessService.openNotificationAccessSettings(app)
         }
     }
 

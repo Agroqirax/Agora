@@ -2,18 +2,14 @@ package com.newoether.agora.tool
 
 import android.app.Application
 import android.content.ComponentName
-import android.content.Intent
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
-import android.os.Build
-import android.provider.Settings
-import androidx.core.app.NotificationManagerCompat
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
 import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
-import com.newoether.agora.service.MediaNotificationListenerService
+import com.newoether.agora.service.AgoraNotificationAccessService
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +35,8 @@ import kotlinx.serialization.json.put
  * Unlike [AlarmToolProvider], this needs "notification access" (a special access
  * grant toggled in system Settings, not a runtime permission dialog) because
  * [MediaSessionManager.getActiveSessions] requires the calling app to be an enabled
- * notification listener — see [MediaNotificationListenerService]. [requestPermission]
+ * notification listener — see [AgoraNotificationAccessService], which this tool shares
+ * with [NotificationToolProvider] so there's only one grant to make. [requestPermission]
  * is set by the owning ViewModel to open that settings screen; since Android gives no
  * callback for when the user finishes there, a request always returns whatever the
  * live status is immediately after opening (usually still ungranted) — the *next*
@@ -237,10 +234,9 @@ class MediaControlToolProvider(private val app: Application) : ToolProvider {
     private fun mediaSessionManager() =
         app.getSystemService(Application.MEDIA_SESSION_SERVICE) as MediaSessionManager
 
-    private fun listenerComponent() = ComponentName(app, MediaNotificationListenerService::class.java)
+    private fun listenerComponent() = ComponentName(app, AgoraNotificationAccessService::class.java)
 
-    private fun hasNotificationAccess(): Boolean =
-        NotificationManagerCompat.getEnabledListenerPackages(app).contains(app.packageName)
+    private fun hasNotificationAccess(): Boolean = AgoraNotificationAccessService.hasAccessGranted(app)
 
     private fun appLabel(packageName: String): String = try {
         val pm = app.packageManager
@@ -269,33 +265,5 @@ class MediaControlToolProvider(private val app: Application) : ToolProvider {
     companion object {
         const val GET_PLAYBACK_STATE = "get_playback_state"
         const val CONTROL_MEDIA_PLAYBACK = "control_media_playback"
-
-        /** Opens the system "notification access" settings screen, where the user must
-         *  manually enable this app — there is no runtime-permission dialog for this
-         *  special access, unlike READ_CALENDAR/READ_CONTACTS/location. */
-        fun openNotificationAccessSettings(app: Application) {
-            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                // Deep-links straight to this app's row when the OS supports it.
-                Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).apply {
-                    putExtra(
-                        "android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME",
-                        ComponentName(app, MediaNotificationListenerService::class.java).flattenToString()
-                    )
-                }
-            } else {
-                Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-            }
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try {
-                app.startActivity(intent)
-            } catch (e: Exception) {
-                // Fall back to the general list if the direct-detail intent isn't handled.
-                app.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
-        }
-
-        /** True if this app is currently an enabled notification listener. */
-        fun hasNotificationAccess(app: Application): Boolean =
-            NotificationManagerCompat.getEnabledListenerPackages(app).contains(app.packageName)
     }
 }

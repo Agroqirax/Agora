@@ -194,29 +194,13 @@
         </service>
 
         <!--
-            Notification-listener stub required by MediaSessionManager.getActiveSessions()
-            in MediaControlToolProvider. Never inspects notification content — see
-            service/MediaNotificationListenerService.kt. The user must separately grant
-            this in Settings > Apps > Special app access > Notification access, since
-            this is a special access grant, not a runtime-permission dialog.
-        -->
-        <service
-            android:name=".service.MediaNotificationListenerService"
-            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.service.notification.NotificationListenerService" />
-            </intent-filter>
-        </service>
-
-        <!--
-            Notification-listener for NotificationToolProvider's list_notifications/
-            get_notification/interact_notification/dismiss_notification tools. Unlike
-            MediaNotificationListenerService above, this one does read notification content
-            on demand — see service/AgoraNotificationAccessService.kt for what it does and
-            doesn't do with it. A separate listener component (and separate grant) from
-            MediaNotificationListenerService, so a user can grant media-session access
-            without granting notification-content access, or vice versa.
+            Single notification-listener backing both NotificationToolProvider's
+            list_notifications/get_notification/interact_notification/dismiss_notification
+            tools and MediaControlToolProvider's MediaSessionManager.getActiveSessions() call
+            (which requires the caller to be an enabled notification listener) — see
+            service/AgoraNotificationAccessService.kt. One special-access grant in
+            Settings > Apps > Special app access > Notification access covers both tools;
+            there is no runtime-permission dialog for this.
         -->
         <service
             android:name=".service.AgoraNotificationAccessService"

@@ -16,9 +16,12 @@ import com.newoether.agora.util.DebugLog
 /**
  * Notification-listener that backs [com.newoether.agora.tool.NotificationToolProvider]'s
  * `list_notifications`/`get_notification`/`interact_notification`/`dismiss_notification`
- * tools. Unlike [MediaNotificationListenerService] — which is a deliberate no-op stub —
- * this service exists specifically to let the model read notification content on demand,
- * so it must actually be trusted with it.
+ * tools, and also serves as the listener component
+ * [com.newoether.agora.tool.MediaControlToolProvider] passes to
+ * [android.media.session.MediaSessionManager.getActiveSessions] (which requires the
+ * caller to be an enabled notification listener, even though that tool never reads
+ * notification content). One service, one "notification access" grant, shared by both
+ * tools — a user who enables either tool is prompted for the same single grant.
  *
  * Design choices that keep this from becoming a persistent surveillance surface:
  * - No `onNotificationPosted`/`onNotificationRemoved` override does anything with the
@@ -28,9 +31,7 @@ import com.newoether.agora.util.DebugLog
  * - The instance handle is only used for [getActiveNotifications]/[cancelNotificationByKey]/
  *   [performAction]; there is no field anywhere that accumulates notification history.
  * - This is a special access grant (Settings > Apps > Special app access > Notification
- *   access), separate from [MediaNotificationListenerService]'s grant, so a user who wants
- *   media control but not notification reading (or vice versa) can grant one without the
- *   other.
+ *   access).
  */
 class AgoraNotificationAccessService : NotificationListenerService() {
 
