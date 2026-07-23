@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">알림 읽기, 답장, 해제, 생성</string>
     <string name="notifications_confirm_setting">알림 작업 확인</string>
     <string name="notifications_confirm_setting_desc">다른 앱의 알림과 상호작용하기 전에 확인하세요.</string>
+    <string name="generation_complete_notification">응답이 준비되면 알림</string>
+    <string name="generation_complete_notification_desc">백그라운드에서 답글 생성이 완료되면 알림 표시</string>
     <string name="trust_list_show_more">%1$d개 더 표시</string>
     <string name="trust_list_show_less">간략히 보기</string>
     <string name="torch_title">토치</string>

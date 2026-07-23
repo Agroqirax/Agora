@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">通知の閲覧、返信、却下、作成</string>
     <string name="notifications_confirm_setting">通知アクションを確認する</string>
     <string name="notifications_confirm_setting_desc">別のアプリの通知を操作する前に質問する</string>
+    <string name="generation_complete_notification">応答の準備ができたら通知する</string>
+    <string name="generation_complete_notification_desc">バックグラウンドでの返信の生成が完了したら通知を表示する</string>
     <string name="trust_list_show_more">%1$d 件をさらに表示</string>
     <string name="trust_list_show_less">表示を少なくする</string>
     <string name="torch_title">トーチ</string>

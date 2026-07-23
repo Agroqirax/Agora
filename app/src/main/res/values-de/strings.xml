@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Benachrichtigungen lesen, beantworten, verwerfen und erstellen</string>
     <string name="notifications_confirm_setting">Bestätigen Sie Benachrichtigungsaktionen</string>
     <string name="notifications_confirm_setting_desc">Fragen Sie nach, bevor Sie mit der Benachrichtigung einer anderen App interagieren</string>
+    <string name="generation_complete_notification">Benachrichtigen, wenn die Antwort bereit ist</string>
+    <string name="generation_complete_notification_desc">Zeigen Sie eine Benachrichtigung an, wenn die Generierung einer Antwort im Hintergrund abgeschlossen ist</string>
     <string name="trust_list_show_more">Zeige %1$d mehr</string>
     <string name="trust_list_show_less">Weniger anzeigen</string>
     <string name="torch_title">Fackel</string>

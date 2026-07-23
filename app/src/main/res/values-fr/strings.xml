@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Lire, répondre, ignorer et créer des notifications</string>
     <string name="notifications_confirm_setting">Confirmer les actions de notification</string>
     <string name="notifications_confirm_setting_desc">Demander avant d\'interagir avec la notification d\'une autre application</string>
+    <string name="generation_complete_notification">Avertir lorsque la réponse est prête</string>
+    <string name="generation_complete_notification_desc">Afficher une notification lorsqu\'une réponse termine sa génération en arrière-plan</string>
     <string name="trust_list_show_more">Afficher %1$d de plus</string>
     <string name="trust_list_show_less">Afficher moins</string>
     <string name="torch_title">Torche</string>

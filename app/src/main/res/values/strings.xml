@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Read, reply to, dismiss, and create notifications</string>
     <string name="notifications_confirm_setting">Confirm notification actions</string>
     <string name="notifications_confirm_setting_desc">Ask before interacting with another app\'s notification</string>
+    <string name="generation_complete_notification">Notify when response is ready</string>
+    <string name="generation_complete_notification_desc">Show a notification when a reply finishes generating in the background</string>
     <string name="trust_list_show_more">Show %1$d more</string>
     <string name="trust_list_show_less">Show less</string>
     <string name="torch_title">Torch</string>

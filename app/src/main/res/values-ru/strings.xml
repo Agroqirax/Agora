@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Читайте, отвечайте, закрывайте и создавайте уведомления</string>
     <string name="notifications_confirm_setting">Подтвердите действия по уведомлению</string>
     <string name="notifications_confirm_setting_desc">Спросите, прежде чем взаимодействовать с уведомлением другого приложения.</string>
+    <string name="generation_complete_notification">Уведомить о готовности ответа</string>
+    <string name="generation_complete_notification_desc">Показывать уведомление, когда ответ завершается в фоновом режиме</string>
     <string name="trust_list_show_more">Показать ещё %1$d</string>
     <string name="trust_list_show_less">Показать меньше</string>
     <string name="torch_title">Факел</string>

@@ -48,6 +48,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val reducedMotionEnabled by viewModel.settings.reducedMotionEnabled.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
+    val generationCompleteNotificationEnabled by viewModel.settings.generationCompleteNotificationEnabled.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
     val fontPreference by viewModel.settings.fontPreference.collectAsState()
     val customFontPath by viewModel.settings.customFontPath.collectAsState()
@@ -300,6 +301,19 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                 },
                                 modifier = Modifier.clickable { viewModel.settings.setHapticsEnabled(!hapticsEnabled) }
+                            )
+                        }
+                        add {
+                            SettingsItem(
+                                headlineContent = { Text(stringResource(R.string.generation_complete_notification)) },
+                                supportingContent = { Text(stringResource(R.string.generation_complete_notification_desc)) },
+                                trailingContent = {
+                                    Switch(
+                                        checked = generationCompleteNotificationEnabled,
+                                        onCheckedChange = { viewModel.settings.setGenerationCompleteNotificationEnabled(it) }
+                                    )
+                                },
+                                modifier = Modifier.clickable { viewModel.settings.setGenerationCompleteNotificationEnabled(!generationCompleteNotificationEnabled) }
                             )
                         }
                     }

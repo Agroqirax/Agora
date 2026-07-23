@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Meldingen lezen, beantwoorden, sluiten en maken</string>
     <string name="notifications_confirm_setting">Bevestig meldingsacties</string>
     <string name="notifications_confirm_setting_desc">Vraag dit voordat u interactie heeft met de melding van een andere app</string>
+    <string name="generation_complete_notification">Laat weten wanneer het antwoord gereed is</string>
+    <string name="generation_complete_notification_desc">Toon een melding wanneer het genereren van een antwoord op de achtergrond is voltooid</string>
     <string name="trust_list_show_more">Laat %1$d meer zien</string>
     <string name="trust_list_show_less">Laat minder zien</string>
     <string name="torch_title">Fakkel</string>

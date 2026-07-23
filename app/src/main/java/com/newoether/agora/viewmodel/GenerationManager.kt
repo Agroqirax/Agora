@@ -170,7 +170,8 @@ class GenerationManager(
     private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
-    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider
+    private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider,
+    private val settings: com.newoether.agora.data.repository.SettingsRepository
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
@@ -1021,7 +1022,7 @@ class GenerationManager(
                 onLoadingChange(false)
                 onGeneratingIdChange(null)
                 AgoraForegroundService.stop(app)
-                if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
+                if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank() && settings.generationCompleteNotificationEnabled.value) {
                     AgoraForegroundService.showCompletionNotification(app, totalText)
                 }
             }

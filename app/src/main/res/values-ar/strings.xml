@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">قراءة الإشعارات والرد عليها ورفضها وإنشائها</string>
     <string name="notifications_confirm_setting">تأكيد إجراءات الإخطار</string>
     <string name="notifications_confirm_setting_desc">اسأل قبل التفاعل مع إشعارات التطبيقات الأخرى</string>
+    <string name="generation_complete_notification">إعلام عندما يكون الرد جاهزا</string>
+    <string name="generation_complete_notification_desc">إظهار إشعار عند انتهاء إنشاء الرد في الخلفية</string>
     <string name="trust_list_show_more">عرض %1$d أكثر</string>
     <string name="trust_list_show_less">عرض أقل</string>
     <string name="torch_title">الشعلة</string>

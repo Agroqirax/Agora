@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">Ler, responder, dispensar e criar notificações</string>
     <string name="notifications_confirm_setting">Confirmar ações de notificação</string>
     <string name="notifications_confirm_setting_desc">Pergunte antes de interagir com a notificação de outro aplicativo</string>
+    <string name="generation_complete_notification">Notificar quando a resposta estiver pronta</string>
+    <string name="generation_complete_notification_desc">Mostrar uma notificação quando uma resposta terminar de ser gerada em segundo plano</string>
     <string name="trust_list_show_more">Mostrar mais %1$d</string>
     <string name="trust_list_show_less">Mostrar menos</string>
     <string name="torch_title">Tocha</string>

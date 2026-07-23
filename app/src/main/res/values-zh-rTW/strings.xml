@@ -490,6 +490,8 @@
     <string name="notifications_enable_desc">閱讀、回覆、忽略和建立通知</string>
     <string name="notifications_confirm_setting">確認通知操作</string>
     <string name="notifications_confirm_setting_desc">在與其他應用程式的通知互動之前詢問</string>
+    <string name="generation_complete_notification">回應準備就緒時通知</string>
+    <string name="generation_complete_notification_desc">當後台產生回應完成時顯示通知</string>
     <string name="trust_list_show_more">顯示更多%1$d</string>
     <string name="trust_list_show_less">顯示較少</string>
     <string name="torch_title">火炬</string>
