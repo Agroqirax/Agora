@@ -53,6 +53,7 @@ class MessageGenerationController(
     private val providerRegistry: ProviderRegistry,
     private val localProvider: LocalProvider,
     private val executionCoordinator: ConversationExecutionCoordinator,
+    private val generationQueue: com.newoether.agora.automation.GenerationQueue,
     // ── 共享 UI 状态:必须是 ChatViewModel 里的同一个实例 ──
     private val allMessages: MutableStateFlow<List<ChatMessage>>,          // = _allMessages
     private val selectedChildren: MutableStateFlow<Map<String?, String>>,  // = _selectedChildren
@@ -316,18 +317,22 @@ class MessageGenerationController(
             effectiveSettings, currentId
         )
         try {
-            generationManager.generate(
-                conversationId = currentId,
-                modelMessageId = modelMessageId,
-                startTime = startTime,
-                isRegenerate = isRegenerate,
-                replaceMessageId = replaceMessageId,
-                modelName = currentActiveModel.value,
-                config = config,
-                ctx = genCtx,
-                generationJob = session.generationJob,
-                callbacks = session.callbacksFor(uiToken, persistId)
-            )
+            // Global single-slot queue: only one generation streams at a time across the whole
+            // process. Held INSIDE the conversation lock (conversation → queue ordering).
+            generationQueue.withLock {
+                generationManager.generate(
+                    conversationId = currentId,
+                    modelMessageId = modelMessageId,
+                    startTime = startTime,
+                    isRegenerate = isRegenerate,
+                    replaceMessageId = replaceMessageId,
+                    modelName = currentActiveModel.value,
+                    config = config,
+                    ctx = genCtx,
+                    generationJob = session.generationJob,
+                    callbacks = session.callbacksFor(uiToken, persistId)
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -583,21 +588,27 @@ class MessageGenerationController(
 
             var title = ""
             try {
-                // Serialize with embedding to avoid dual model load OOM
-                if (providerName == Constants.PROVIDER_LOCAL) {
-                    LlamaEngine.modelMutex.withLock {
-                        withContext(Dispatchers.IO) {
-                            provider.generateResponse(titlePrompt, config).collect { event ->
-                                if (event is StreamEvent.TextChunk) title += event.text
-                                else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
+                // Title generation is a real provider call, so it must take the same global slot
+                // as message generation — otherwise it would stream in parallel with the reply it
+                // is summarizing (remote) or fight for the model (local). The queue is fair, so it
+                // simply runs after the message generation that triggered it releases the slot.
+                generationQueue.withLock {
+                    // Serialize with embedding to avoid dual model load OOM
+                    if (providerName == Constants.PROVIDER_LOCAL) {
+                        LlamaEngine.modelMutex.withLock {
+                            withContext(Dispatchers.IO) {
+                                provider.generateResponse(titlePrompt, config).collect { event ->
+                                    if (event is StreamEvent.TextChunk) title += event.text
+                                    else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
+                                }
                             }
+                            localProvider.releaseEngine()
                         }
-                        localProvider.releaseEngine()
-                    }
-                } else {
-                    provider.generateResponse(titlePrompt, config).collect { event ->
-                        if (event is StreamEvent.TextChunk) title += event.text
-                        else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
+                    } else {
+                        provider.generateResponse(titlePrompt, config).collect { event ->
+                            if (event is StreamEvent.TextChunk) title += event.text
+                            else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
+                        }
                     }
                 }
             } catch (e: Exception) {

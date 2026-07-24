@@ -92,6 +92,7 @@ class ChatViewModel(
     private val automationToolProvider: com.newoether.agora.tool.AutomationToolProvider,
     private val conversationExecutionCoordinator: com.newoether.agora.automation.ConversationExecutionCoordinator,
     private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
+    private val generationQueue: com.newoether.agora.automation.GenerationQueue,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -521,6 +522,7 @@ class ChatViewModel(
             providerRegistry = providerRegistry,
             localProvider = localProvider,
             executionCoordinator = conversationExecutionCoordinator,
+            generationQueue = generationQueue,
             allMessages = _allMessages,
             selectedChildren = _selectedChildren,
             streamingMessage = _streamingMessage,

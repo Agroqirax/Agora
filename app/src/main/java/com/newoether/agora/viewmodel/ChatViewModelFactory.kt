@@ -12,6 +12,7 @@ import com.newoether.agora.automation.TaskManager
 import com.newoether.agora.automation.LoopManager
 import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.automation.AutomationExecutionGate
+import com.newoether.agora.automation.GenerationQueue
 import com.newoether.agora.tool.AutomationToolProvider
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.repository.ConversationRepository
@@ -35,6 +36,7 @@ class ChatViewModelFactory(
     private val automationToolProvider: AutomationToolProvider,
     private val conversationExecutionCoordinator: ConversationExecutionCoordinator,
     private val automationExecutionGate: AutomationExecutionGate,
+    private val generationQueue: GenerationQueue,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
@@ -43,7 +45,7 @@ class ChatViewModelFactory(
                 application, chatDao, settingsManager, memoryManager, context, sandboxFactory,
                 autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
                 taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-                automationExecutionGate
+                automationExecutionGate, generationQueue
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

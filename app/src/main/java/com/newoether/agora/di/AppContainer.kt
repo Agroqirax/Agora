@@ -14,6 +14,7 @@ import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.automation.AutomationScheduler
 import com.newoether.agora.automation.AutomationExecutionGate
 import com.newoether.agora.automation.ConversationExecutionCoordinator
+import com.newoether.agora.automation.GenerationQueue
 import com.newoether.agora.automation.LoopManager
 import com.newoether.agora.automation.TaskExecutionEngine
 import com.newoether.agora.automation.TaskManager
@@ -80,6 +81,9 @@ class AppContainer(private val appContext: Context) {
         ConversationExecutionCoordinator()
     }
 
+    /** Global single-slot queue: at most one generation runs at a time across the whole process. */
+    val generationQueue: GenerationQueue by lazy { GenerationQueue() }
+
     /** Lets native import quiesce Task/Loop generation without serializing ordinary executions. */
     val automationExecutionGate: AutomationExecutionGate by lazy { AutomationExecutionGate() }
 
@@ -128,6 +132,7 @@ class AppContainer(private val appContext: Context) {
             appScope = appScope,
             executionCoordinator = conversationExecutionCoordinator,
             automationExecutionGate = automationExecutionGate,
+            generationQueue = generationQueue,
         )
     }
 
@@ -185,6 +190,6 @@ class AppContainer(private val appContext: Context) {
             application, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory,
             autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
             taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-            automationExecutionGate
+            automationExecutionGate, generationQueue
         )
 }

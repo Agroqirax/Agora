@@ -16,6 +16,7 @@ local.properties
 # Build artifacts
 app/release/
 build_output.txt
+build_*.log
 
 # Personal tooling
 /.gemini/
