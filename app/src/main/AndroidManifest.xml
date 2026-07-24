@@ -124,6 +124,51 @@
                 <data android:mimeType="application/xml" />
                 <data android:mimeType="application/yaml" />
             </intent-filter>
+
+            <!--
+                Quick-launch deep link: lets a launcher (e.g. Kvaesitso quick actions) or
+                shortcut open Agora straight into a new chat with a prefilled/auto-sent
+                prompt and an optional model override, e.g.:
+                agora://send?prompt=Summarize+this&model=OpenAI%3Agpt-5&autoSend=true
+                See MainActivity.registerIfQuickLaunch() / ChatViewModel.handleQuickLaunch().
+                Shares the "agora" scheme with AppAuth's OAuth redirect
+                (agora://oauth/callback, see McpOAuthManager.kt) — the host is what keeps
+                them apart; see the RedirectUriReceiverActivity override below, which is
+                what makes that host actually matter instead of being ignored.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="agora" android:host="send" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            AppAuth's own RedirectUriReceiverActivity (net.openid.appauth, merged in from the
+            oauth-appauth AAR) declares its intent-filter with only android:scheme, no host —
+            Android's <data> matching treats a host-less filter as matching every host for
+            that scheme, so it would otherwise also claim MainActivity's agora://send filter
+            above and produce a disambiguation chooser. This override (matched by
+            android:name, standard manifest-merger technique) replaces that filter with an
+            equivalent one scoped to the actual OAuth callback host/path
+            (MCP_OAUTH_REDIRECT_URI = "agora://oauth/callback" in McpOAuthManager.kt), so the
+            host genuinely separates the two instead of both resolving to "agora://*".
+        -->
+        <activity
+            android:name="net.openid.appauth.RedirectUriReceiverActivity"
+            android:exported="true"
+            tools:node="replace">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="agora" android:host="oauth" android:path="/callback" />
+            </intent-filter>
         </activity>
 
         <provider

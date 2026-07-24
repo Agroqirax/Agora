@@ -18,6 +18,10 @@ class DefaultSystemPromptTest {
 
     @Test
     fun create_includesRuntimeContextActiveMemoryAndToolPolicy() {
+        // Per-tool-category paragraphs (Shell, Location, Mcp, ...) were removed in favor of
+        // one generic instruction — each tool already carries its own name/description, so
+        // restating them here was both redundant and, if left unconditional, could make the
+        // model reference a tool the user had since disabled.
         val entry = DefaultSystemPrompt.create(Locale.ENGLISH)
         val systemPrompt = PredefinedVariables.compile(
             entry.systemItems,
@@ -31,8 +35,10 @@ class DefaultSystemPromptTest {
         assertTrue(systemPrompt.contains("<current_date>2026-06-17</current_date>"))
         assertTrue(systemPrompt.contains("<current_time>21:35:10</current_time>"))
         assertTrue(systemPrompt.contains("<active_memory_context>\nUser prefers concise answers.\n</active_memory_context>"))
-        assertTrue(systemPrompt.contains("Shell and device files:"))
-        assertTrue(systemPrompt.contains("configured shell server or the Local Sandbox"))
+        assertTrue(systemPrompt.contains("Tool use:"))
+        assertFalse(systemPrompt.contains("Shell and device files:"))
+        assertFalse(systemPrompt.contains("Location:"))
+        assertFalse(systemPrompt.contains("Mcp servers:"))
         assertFalse(systemPrompt.contains("generate_image"))
     }
 

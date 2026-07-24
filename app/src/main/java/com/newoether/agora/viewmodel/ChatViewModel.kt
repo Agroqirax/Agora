@@ -691,6 +691,23 @@ class ChatViewModel(
         _pendingShareAttachmentUris.value = emptyList()
     }
 
+    // ── Quick-launch (agora://send deep link) hand-off ─────────
+    /** Called by MainActivity for an `agora://send` deep link (see QuickLaunch): starts a
+     *  fresh chat, optionally overriding the model for it, and either prefills [prompt] into
+     *  the composer or sends it immediately when [autoSend] is set. Mirrors
+     *  [handleAssistLaunch]'s switchingJob join so the model override isn't stomped by
+     *  createNewChat's own delayed reset. */
+    fun handleQuickLaunch(prompt: String?, modelId: String?, autoSend: Boolean) {
+        createNewChat()
+        viewModelScope.launch {
+            switchingJob?.join()
+            modelId?.let { setActiveModel(it) }
+            if (!prompt.isNullOrBlank()) {
+                if (autoSend) sendMessage(prompt) else _pendingShareText.value = prompt
+            }
+        }
+    }
+
     private val _pendingSystemPromptId = MutableStateFlow<String?>(null)
     val pendingSystemPromptId: StateFlow<String?> = _pendingSystemPromptId.asStateFlow()
 

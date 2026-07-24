@@ -595,7 +595,10 @@ class SettingsManager(private val context: Context) {
             } catch (_: Exception) {
                 emptyList()
             }
-            val migratedPrompts = migrateLegacyDefaultPromptTitle(currentPrompts, locale)
+            val migratedPrompts = migrateLegacyDefaultPromptTitle(
+                migrateLegacyDefaultPromptTemplate(currentPrompts, locale),
+                locale
+            )
             if (migratedPrompts != currentPrompts) {
                 prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(migratedPrompts)
             }
@@ -607,6 +610,28 @@ class SettingsManager(private val context: Context) {
                         prefs[ACTIVE_SYSTEM_PROMPT_ID] = defaultPrompt.id
                     }
                 }
+            }
+        }
+    }
+
+    /** An unedited default prompt from before the tool-use section was collapsed spells out
+     *  every tool category (Location, Mcp servers, ...) individually and unconditionally,
+     *  which is both redundant with each tool's own name/description and can make the model
+     *  reference tools the user has since disabled. Swap its system items for the current
+     *  template in place, leaving title/id/pre/postpend untouched. Edited prompts (including
+     *  ones the user renamed) never match and are left alone. */
+    private fun migrateLegacyDefaultPromptTemplate(
+        prompts: List<SystemPromptEntry>,
+        locale: Locale
+    ): List<SystemPromptEntry> {
+        if (prompts.isEmpty()) return prompts
+        val legacyItems = DefaultSystemPrompt.legacyStaticSystemItems()
+        val newDefault = DefaultSystemPrompt.create(locale)
+        return prompts.map { entry ->
+            if (entry.resolvedSystemItems.sameTemplateItems(legacyItems)) {
+                entry.copy(systemItems = newDefault.systemItems)
+            } else {
+                entry
             }
         }
     }

@@ -137,6 +137,23 @@ class MainActivity : ComponentActivity() {
         mcpOAuthCallbackTrigger++
     }
 
+    // Set when the Activity is (re)started via the agora://send deep link (see QuickLaunch).
+    private var pendingQuickLaunchPrompt by mutableStateOf<String?>(null)
+    private var pendingQuickLaunchModel by mutableStateOf<String?>(null)
+    private var pendingQuickLaunchAutoSend by mutableStateOf(false)
+    private var quickLaunchTrigger by mutableIntStateOf(0)
+
+    private fun Intent?.registerIfQuickLaunch() {
+        val data = this?.data ?: return
+        if (this.action != Intent.ACTION_VIEW || data.scheme != QuickLaunch.SCHEME || data.host != QuickLaunch.HOST) return
+        val prompt = data.getQueryParameter(QuickLaunch.PARAM_PROMPT)
+        if (prompt.isNullOrBlank()) return
+        pendingQuickLaunchPrompt = prompt
+        pendingQuickLaunchModel = data.getQueryParameter(QuickLaunch.PARAM_MODEL)?.takeIf { it.isNotBlank() }
+        pendingQuickLaunchAutoSend = data.getQueryParameter(QuickLaunch.PARAM_AUTO_SEND)?.toBoolean() == true
+        quickLaunchTrigger++
+    }
+
     private fun Intent?.registerIfShareRequest() {
         val action = this?.action
         if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
@@ -194,6 +211,7 @@ class MainActivity : ComponentActivity() {
         intent.registerIfAssistLaunch()
         intent.registerIfShareRequest()
         intent.registerIfMcpOAuthResult()
+        intent.registerIfQuickLaunch()
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)
@@ -306,6 +324,10 @@ class MainActivity : ComponentActivity() {
                                 shareLaunchTrigger = shareLaunchTrigger,
                                 pendingShareText = pendingShareText,
                                 pendingShareUris = pendingShareUris,
+                                quickLaunchTrigger = quickLaunchTrigger,
+                                pendingQuickLaunchPrompt = pendingQuickLaunchPrompt,
+                                pendingQuickLaunchModel = pendingQuickLaunchModel,
+                                pendingQuickLaunchAutoSend = pendingQuickLaunchAutoSend,
                                 mcpOAuthCallbackTrigger = mcpOAuthCallbackTrigger,
                                 pendingMcpOAuthServerId = pendingMcpOAuthServerId,
                                 pendingMcpOAuthResponse = pendingMcpOAuthResponse,
@@ -325,6 +347,7 @@ class MainActivity : ComponentActivity() {
         intent.registerIfAssistLaunch()
         intent.registerIfShareRequest()
         intent.registerIfMcpOAuthResult()
+        intent.registerIfQuickLaunch()
     }
 
     override fun onResume() {
@@ -499,6 +522,13 @@ fun MainNavigation(
     shareLaunchTrigger: Int = 0,
     pendingShareText: String? = null,
     pendingShareUris: List<Uri> = emptyList(),
+    // > 0 means the Activity was (re)started via the agora://send deep link (see
+    // QuickLaunch) — an external launcher/shortcut prefilling or auto-sending a prompt,
+    // optionally with a model override for this chat only.
+    quickLaunchTrigger: Int = 0,
+    pendingQuickLaunchPrompt: String? = null,
+    pendingQuickLaunchModel: String? = null,
+    pendingQuickLaunchAutoSend: Boolean = false,
     // > 0 means the Activity was (re)started by AppAuth's managed OAuth flow finishing
     // (see tool/McpOAuthManager.kt) — pendingMcpOAuthServerId identifies which
     // McpServerConfig it was for; pendingMcpOAuthResponse/-Exception carry the outcome.
@@ -521,6 +551,12 @@ fun MainNavigation(
         if (shareLaunchTrigger > 0) {
             showSettings = false
             viewModel.handleShareLaunch(pendingShareText, pendingShareUris)
+        }
+    }
+    LaunchedEffect(quickLaunchTrigger) {
+        if (quickLaunchTrigger > 0) {
+            showSettings = false
+            viewModel.handleQuickLaunch(pendingQuickLaunchPrompt, pendingQuickLaunchModel, pendingQuickLaunchAutoSend)
         }
     }
     LaunchedEffect(mcpOAuthCallbackTrigger) {

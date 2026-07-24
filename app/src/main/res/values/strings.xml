@@ -1112,6 +1112,8 @@
     <string name="mcp_test_connection_success">Connected — %1$d tool(s) found</string>
     <string name="mcp_test_connection_success_none">Connected — no tools found</string>
     <string name="mcp_test_connection_failure">Failed: %1$s</string>
+    <string name="mcp_test_connection_missing_command">Enter a command to test this connection</string>
+    <string name="mcp_test_connection_missing_url">Enter a URL to test this connection</string>
     <string name="mcp_confirm_title">Allow this MCP tool call on \"%1$s\"?</string>
     <string name="mcp_confirm_allow">Allow once</string>
     <string name="mcp_confirm_stop_asking">Always allow</string>

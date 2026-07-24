@@ -305,7 +305,13 @@ private fun ServerEditor(
                             "http" to stringResource(R.string.mcp_server_transport_http),
                             "stdio" to stringResource(R.string.mcp_server_transport_stdio)
                         ).forEach { (value, label) ->
-                            FilterChip(selected = transportInput == value, onClick = { transportInput = value; testResult = null }, label = { Text(label) })
+                            FilterChip(selected = transportInput == value, onClick = {
+                                transportInput = value; testResult = null
+                                // Auth type/OAuth fields are only editable in the http branch below;
+                                // clear them on switching to stdio so stale state (e.g. "oauth") can't
+                                // leak into the test-button status text once that branch is hidden.
+                                if (value == "stdio") authTypeInput = "none"
+                            }, label = { Text(label) })
                         }
                     }
                 }
@@ -448,10 +454,17 @@ private fun ServerEditor(
                         Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.mcp_test_connection))
                     }
                 }
-                if (authTypeInput == "oauth" && !viewModel.isMcpOAuthConnected(server)) {
+                val testBlockedReason = when {
+                    showStdioFields && commandInput.isBlank() -> stringResource(R.string.mcp_test_connection_missing_command)
+                    !showStdioFields && urlInput.isBlank() -> stringResource(R.string.mcp_test_connection_missing_url)
+                    !showStdioFields && authTypeInput == "oauth" && !viewModel.isMcpOAuthConnected(server) ->
+                        stringResource(R.string.mcp_oauth_test_connection_sign_in_first)
+                    else -> null
+                }
+                if (testBlockedReason != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        stringResource(R.string.mcp_oauth_test_connection_sign_in_first),
+                        testBlockedReason,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
