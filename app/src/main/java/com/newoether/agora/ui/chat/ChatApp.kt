@@ -448,8 +448,12 @@ fun ChatApp(
         messages.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
             message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
         } == true
-    DisposableEffect(answeringHapticActive, hapticsEnabled) {
-        if (answeringHapticActive && hapticsEnabled) {
+    // Re-key on foreground: the tracker cancels the waveform when the app backgrounds, so on
+    // return this effect must re-run to restart it — otherwise the answering texture stays dead
+    // for the rest of the generation after a single background/foreground round-trip.
+    val appInForeground by com.newoether.agora.service.AppForegroundTracker.foreground.collectAsState()
+    DisposableEffect(answeringHapticActive, hapticsEnabled, appInForeground) {
+        if (answeringHapticActive && hapticsEnabled && appInForeground) {
             haptics.startAnsweringTexture()
         }
         onDispose {
