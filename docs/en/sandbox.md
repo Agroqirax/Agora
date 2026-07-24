@@ -107,6 +107,14 @@ Use this to:
 
 ---
 
+## Run Command
+
+Below the package manager, **Run Command** lets you run an ad-hoc shell command directly inside the sandbox and see its stdout/stderr (plus exit code) in a scrollable output panel — handy for verifying a stdio [MCP server](mcp.md)'s command actually works, checking whether a runtime like `node`/`python` is installed, or general poking around without leaving Settings.
+
+This runs entirely on-device, independent of any model conversation.
+
+---
+
 ## Reset Sandbox
 
 The **Danger Zone** at the bottom contains a **Reset Sandbox** option. This completely removes the root filesystem and all installed packages.

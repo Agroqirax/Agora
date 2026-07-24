@@ -1,8 +1,8 @@
-* Added location, calendar, contacts & device info tools
-* Added MCP server support
-* Added device assistant integration
-* Added share target support
-* Fix render images in chat
+* Added MCP server support, with OAuth 2.0/DCR sign-in, stdio servers (F-Droid/GitHub), and resources
+* Added Android tools: location, calendar, contacts, device info, alarms & timers, media control, notifications, torch, weather, calculator, apps, and open URL
+* Added device assistant and share target integration
 * Added Dutch language
-* Improved app info & settings pages
+* Added reduce-motion and response-ready notification toggles
+* Improved app info & settings pages, including a sandbox Run Command
+* Fixed image rendering in chat
 * Fixed attachments when editing messages

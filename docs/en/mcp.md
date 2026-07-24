@@ -13,9 +13,20 @@ Agora (Android)  ──HTTPS (Streamable HTTP transport)──▶  MCP Server
                                                           ├── initialize
                                                           ├── tools/list
                                                           └── tools/call
+
+Agora (Android)  ──stdin/stdout (sandbox subprocess)───▶  MCP Server
+                                                          │
+                                                          ├── initialize
+                                                          ├── tools/list
+                                                          └── tools/call
 ```
 
-Agora speaks the MCP **Streamable HTTP** transport (a single HTTP endpoint, not stdio or the older HTTP+SSE transport). On first use it opens a session with `initialize`, lists the server's tools with `tools/list`, and lets the model invoke them with `tools/call`. The tool list is cached for about 30 seconds per server so repeated messages don't re-handshake every time; if the server ends the session, Agora reconnects automatically on the next call.
+Agora speaks two MCP transports:
+
+- **Streamable HTTP** — a single HTTP endpoint (not the older HTTP+SSE transport). This is the default and works on every build.
+- **Stdio** — a local command (e.g. `npx -y @modelcontextprotocol/server-filesystem /home/agora`) launched as a subprocess inside Agora's on-device Alpine sandbox, communicating over stdin/stdout. This only works on **F-Droid and GitHub-release builds** (it needs the [Local Sandbox](sandbox.md), which Google Play doesn't ship); the Play build always falls back to the HTTP fields for that server. Command output/env vars are process-local and never leave the sandbox except over whatever network calls the command itself makes.
+
+Either way, on first use Agora opens a session with `initialize`, lists the server's tools with `tools/list`, and lets the model invoke them with `tools/call`. The tool list is cached for about 30 seconds per server so repeated messages don't re-handshake every time; if an HTTP server ends the session (or a stdio subprocess dies), Agora reconnects automatically on the next call.
 
 The model decides when to use an MCP tool on its own, the same way it decides to use web search or the shell — there's no manual trigger.
 
@@ -47,7 +58,7 @@ Agora supports different authentication methods.
 
 ### Step 1: Get an MCP server
 
-This can be a public MCP server, one your organization runs internally, or one you host yourself. It must expose the **Streamable HTTP** transport at a single URL (commonly ending in `/mcp`).
+This can be a public MCP server, one your organization runs internally, one you host yourself, or a local command-line server you run via **stdio** (F-Droid/GitHub builds only — see [How It Works](#how-it-works)). An HTTP server must expose the **Streamable HTTP** transport at a single URL (commonly ending in `/mcp`).
 
 Some common mcp servers include:
 
@@ -69,17 +80,20 @@ Some common mcp servers include:
 1. Go to **Settings → MCP Servers**
 2. Enable **Enable MCP Tools**
 3. Tap **Add Server**
-4. Fill in the server details:
+4. Pick a **Transport**: **HTTP** (default) or **Stdio** (F-Droid/GitHub builds only — the chip still shows on Google Play but falls back to the HTTP fields, since there's no sandbox to run a subprocess in).
+5. Fill in the server details:
 
-| Field             | Description                                                                                           | Example                           |
-| ----------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Name**          | Display name for this server                                                                          | `Home Assistant`                  |
-| **Description**   | Optional note about what it's for. If left blank, the server's host is shown instead.                 | `Controls lights and thermostats` |
-| **Server URL**    | The MCP Streamable HTTP endpoint                                                                      | `https://example.com/mcp`         |
-| **Extra Headers** | Optional — one per line, as `Name: value`, for servers that expect auth or routing by a custom header | `X-Api-Key: secret`               |
-| **Timeout**       | Per-request timeout, 5–120 seconds                                                                    | `30`                              |
+| Field             | Transport | Description                                                                                           | Example                           |
+| ----------------- | --------- | ----------------------------------------------------------------------------------------------------- | --------------------------------- |
+| **Name**          | Both      | Display name for this server                                                                          | `Home Assistant`                  |
+| **Description**   | Both      | Optional note about what it's for. If left blank, the server's host is shown instead.                 | `Controls lights and thermostats` |
+| **Timeout**       | Both      | Per-request timeout, 5–120 seconds                                                                    | `30`                               |
+| **Server URL**    | HTTP      | The MCP Streamable HTTP endpoint                                                                      | `https://example.com/mcp`         |
+| **Extra Headers** | HTTP      | Optional — one per line, as `Name: value`, for servers that expect auth or routing by a custom header | `X-Api-Key: secret`               |
+| **Command**       | Stdio     | The shell command line to launch inside the sandbox                                                   | `npx -y @modelcontextprotocol/server-filesystem /home/agora` |
+| **Environment Variables** | Stdio | Optional — one per line, as `NAME=value`, passed to the subprocess                             | `API_KEY=secret`                  |
 
-Depending on the auth method you may need to provide additional details.
+Depending on the auth method you may need to provide additional details. OAuth and Bearer Token auth are HTTP-only — a stdio server authenticates however its own command line/environment variables tell it to (e.g. an API key baked into **Command** or **Environment Variables**).
 
 When using a bearer token simply enter it in the appropriate field. You do not need to include `Authorization: Bearer`.
 
@@ -88,8 +102,8 @@ If a provider supports DCR, press **Register Client** to register and populate t
 The **Resource Indicator** field is normally left blank — it's only needed if discovery didn't already resolve it and the server requires a specific `resource` value that differs from the Server URL.
 Press **Sign in**, once you've signed in you'll be redirected back to Agora and it should show **Connected**.
 
-5. Tap **Test Connection** to verify Agora can reach the server and see how many tools it exposes, before saving.
-6. Tap **Save**.
+6. Tap **Test Connection** to verify Agora can reach the server and see how many tools it exposes, before saving.
+7. Tap **Save**.
 
 Once a server connects successfully — either from Test Connection or from actual use in a chat — its name and version (as reported by the server) appear as a small badge next to its entry in the server list.
 
@@ -111,10 +125,18 @@ You can turn confirmation prompts off entirely with **Confirm destructive MCP to
 
 ### Test Connection fails
 
+**HTTP servers:**
+
 - Double-check the **Server URL** — it should be the full endpoint (e.g. `.../mcp`), not just the host
 - If the server requires auth, verify the **Bearer Token** or **Extra Headers** are correct
-- Confirm the server implements the Streamable HTTP transport, not stdio or the legacy HTTP+SSE transport
+- Confirm the server implements the Streamable HTTP transport, not the legacy HTTP+SSE transport
 - Check that the URL is reachable from your device (not just from your desktop's network)
+
+**Stdio servers:**
+
+- Confirm you're on an F-Droid or GitHub-release build with the [Local Sandbox](sandbox.md) set up — Google Play builds can't run stdio servers at all
+- Double-check **Command** actually runs inside the sandbox (e.g. `npx`/`node` need Node.js installed in the sandbox first — try running the same command from **Settings → Local Sandbox → Run Command**)
+- Check **Environment Variables** for typos — a missing API key or config path is a common cause of an otherwise-valid command failing to start
 
 ### The model never calls the tool
 

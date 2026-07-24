@@ -1,21 +1,23 @@
 # Android
 
-Agora can securely integrate with Android — both as **tools the model can call** (location, contacts, calendar, device state, installed apps) and as **system-level entry points** into the app itself (digital assistant, share target). This page covers the tools; see [Conversations](conversations.md#starting-a-conversation-from-outside-agora) for the assistant/share-target entry points.
+Agora can securely integrate with Android — both as **tools the model can call** (location, contacts, calendar, device state, apps, notifications, media, and more) and as **system-level entry points** into the app itself (digital assistant, share target). This page covers the tools; see [Conversations](conversations.md#starting-a-conversation-from-outside-agora) for the assistant/share-target entry points.
 
 ## Available Tools
 
-| Tool               | Purpose                                                        | Permission needed                            |
-| ------------------ | -------------------------------------------------------------- | -------------------------------------------- |
-| **Location**       | Retrieve the device's approximate or precise location          | Runtime (location)                           |
-| **Contacts**       | Search and read contacts stored on the device                  | Runtime (contacts)                           |
-| **Calendar**       | Read upcoming events and create new calendar entries           | Runtime (calendar)                           |
-| **Alarms & Timers**| Set alarms and timers, and dismiss/snooze them                 | None (normal permission)                     |
-| **Media Control**  | See what's playing and control playback (play/pause/skip)      | None (notification access)                   |
-| **Torch**          | Turn the flashlight on or off                                  | None                                         |
-| **Weather**        | Current conditions and forecast for a location                 | Runtime (location), only if auto-detecting |
-| **Device Info**    | Battery, ringer mode, network, storage, and other device state | None                                         |
-| **Installed Apps** | List apps installed on the device                              | None (fdroid/GitHub builds only — see below) |
-| **Calculator**     | Evaluate math expressions precisely                             | None                                         |
+| Tool                | Purpose                                                        | Permission needed                                                   |
+| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------- |
+| **Location**        | Retrieve the device's approximate or precise location          | Runtime (location)                                                  |
+| **Contacts**        | Search and read contacts stored on the device                  | Runtime (contacts)                                                  |
+| **Calendar**        | Read upcoming events and create new calendar entries           | Runtime (calendar)                                                  |
+| **Alarms & Timers** | Set alarms and timers, and dismiss/snooze them                 | None (normal permission)                                            |
+| **Media Control**   | See what's playing and control playback (play/pause/skip)      | None (notification access)                                          |
+| **Notifications**   | Read, reply to, dismiss, and create notifications              | None (notification access, except creating Agora's own — see below) |
+| **Torch**           | Turn the flashlight on or off                                  | None                                                                |
+| **Weather**         | Current conditions and forecast for a location                 | Runtime (location), only if auto-detecting                          |
+| **Device Info**     | Battery, ringer mode, network, storage, and other device state | None                                                                |
+| **Apps**            | List installed apps and open one by package name               | None                                                                 |
+| **Open URL**        | Open a URL in the browser (or whichever app handles it)        | None                                                                |
+| **Calculator**      | Evaluate math expressions precisely                            | None                                                                |
 
 The model automatically discovers enabled tools and decides when they are useful during a conversation.
 
@@ -25,10 +27,10 @@ Location, Contacts, and Calendar require standard Android runtime permissions �
 
 Alarms & Timers doesn't use a runtime permission either: setting an alarm/timer is a "normal" Android permission that's granted automatically at install, and the action itself is handed off to whatever clock app is installed on the device (Google Clock, Samsung Clock, etc.) rather than touching any protected data.
 
-Device Info and Installed Apps don't use runtime permissions at all: the values they read (battery, ringer mode, network type, storage, build info, installed package list) are exposed by Android without a permission dialog. Installed Apps has a separate, build-level restriction instead — see [Installed Apps](#installed-apps).
+Device Info and Apps don't use runtime permissions at all: the values they read (battery, ringer mode, network type, storage, build info, installed package list) are exposed by Android without a permission dialog — Apps only ever sees apps with a home-screen icon, via a permission-free package-visibility exception, so there's no Google Play restriction either. Open URL and Media Control likewise don't request a runtime permission — Media Control uses the same notification-access grant as [Notifications](#notifications) below.
 
 !!! note
-    You can revoke runtime permissions at any time from your device's Android Settings.
+You can revoke runtime permissions at any time from your device's Android Settings.
 
 ## Setup
 
@@ -36,12 +38,14 @@ Device Info and Installed Apps don't use runtime permissions at all: the values 
 2. Enable the tools you want the model to use:
    - **Digital Assistant** _(system integration, not a model tool — see [Conversations](conversations.md#starting-a-conversation-from-outside-agora))_
    - **Device Info Tool**
-   - **Installed Apps Tool** _(only shown as usable on fdroid/GitHub builds)_
+   - **Apps Tool** _(list + open apps, one switch)_
+   - **Open URL Tool**
    - **Location**
    - **Contacts**
    - **Calendar**
    - **Alarms & Timers**
    - **Media Control**
+   - **Notifications Tool**
    - **Torch**
    - **Weather**
    - **Calculator**
@@ -161,14 +165,60 @@ Typical uses include:
 
 Enabled by default — nothing on this list requires a runtime permission, so there's no permission prompt the first time it's used.
 
-## Installed Apps
+## Apps
 
-The Installed Apps tool lets the model list apps installed on your device (package name, app label, version, whether it's a system app) — useful for questions like "do I have Signal installed?" or "what apps do I have for editing PDFs?"
+The Apps tool lets the model list apps installed on your device (package name, app label, version, whether it's a system app) and open one — useful for questions like "do I have Signal installed?" or "open Spotify". Listing and opening share a single **Apps Tool** switch in Settings, since discovering a `package_name` (list) and acting on it (open) are two halves of the same capability.
 
-!!! warning "Not available on Google Play builds"
-    This tool only works on **fdroid and GitHub-release builds** of Agora. It relies on Android's `QUERY_ALL_PACKAGES` permission, which Google Play only allows for apps whose _core purpose_ is inspecting installed apps (launchers, antivirus, file managers, device management) and requires a separate declared-use justification to Google for. Rather than pursue that for a single tool among many, the Play build simply never declares the permission — the toggle for this tool still appears in Settings, but greyed out with a "not supported in the current build" label, same treatment as the Local Sandbox setting.
+Typical uses include:
 
-If you installed Agora from F-Droid or a GitHub release, this tool works out of the box once enabled (opt-in, off by default — it does reveal your installed-apps list to the model). If you installed from Google Play, this tool is not available; switching to a non-Play build is the only way to use it.
+- "Do I have Signal installed?"
+- "What apps do I have for editing PDFs?"
+- "Open Spotify" / "Open com.spotify.music"
+
+It only ever sees apps with a home-screen (launcher) icon — the same set you could tap from your home screen — via Android's package-visibility exception for `ACTION_MAIN`/`CATEGORY_LAUNCHER` apps, which needs no permission dialog and no `QUERY_ALL_PACKAGES` declaration. That's why this tool works identically, with no restriction, on every build including Google Play — it never touches the broader "every installed package" permission other apps sometimes need.
+
+Opening an app isn't gated behind a confirmation prompt — switching the foreground app is the same as tapping its home-screen icon, not a destructive action.
+
+This tool is opt-in and off by default — it does reveal your list of installed apps to the model.
+
+## Open URL
+
+The Open URL tool lets the model open a link in your browser (or whichever app is registered to handle it — e.g. a `market://` or deep link opening its own app), the same as tapping the link yourself.
+
+Typical uses include:
+
+- "Open the GitHub page for this project"
+- Opening a link the model found via web search
+- Handing off to another app that registers its own URL scheme
+
+Like Apps, this isn't gated behind a confirmation prompt — it's the same trust boundary as switching the foreground app.
+
+## Media Control
+
+The Media Control tool lets the model see what's currently playing (app, track title, artist, album, position) and control playback — play, pause, skip, seek, etc. — on whatever music, podcast, or video app currently holds the active media session.
+
+Typical uses include:
+
+- "What's playing right now?"
+- "Skip this song" / "Pause the music"
+
+It needs the same **notification access** grant as [Notifications](#notifications) below (Android exposes the active media session through that API), so enabling either one prompts you to grant it once, covering both.
+
+## Notifications
+
+The Notifications tool lets the model read, tap, dismiss, or snooze notifications from any app, and create Agora's own notifications. It's really two capabilities bundled into one tool because they share a single mental model ("notifications on this device"):
+
+- **Reading/acting on other apps' notifications** — listing what's currently showing, getting one notification's full details and available actions, tapping an action or reply field, dismissing, or snoozing — needs the same **notification access** grant as [Media Control](#media-control).
+- **Creating Agora's own notifications** only needs the ordinary Android 13+ notification permission (auto-granted on older versions) — it works even if you never grant notification-listener access, since it never needs to read anything.
+
+Typical uses include:
+
+- "What notifications do I have right now?"
+- "Reply 'on my way' to that message notification"
+- "Dismiss all my notifications from that app"
+- "Notify me when this task is done" (Agora's own notification)
+
+Listing/reading a notification isn't gated, the same as any other read-only tool — but tapping an action, replying, or dismissing another app's notification does show a confirmation prompt by default (it's acting on something you haven't necessarily seen yet), which you can turn off in **Settings → Android → Notifications**.
 
 ## Security
 
@@ -179,7 +229,7 @@ Location, Contacts, and Calendar use Android's built-in runtime permission syste
 - Disabled tools cannot be accessed
 - All access occurs locally through Android's permission framework
 
-Device Info and Installed Apps don't request runtime permissions, but are still gated by their own Settings toggle — disabling the toggle removes the tool from what the model can call, the same as any other tool here.
+Device Info, Apps, and Open URL don't request runtime permissions, but are still gated by their own Settings toggle — disabling the toggle removes the tool from what the model can call, the same as any other tool here. Media Control and the notification-reading half of Notifications instead require the notification-listener grant described above.
 
 Agora cannot access protected data without your permission.
 
@@ -203,6 +253,6 @@ If the model reports it cannot access a tool:
 
 Verify that your device contains calendar events or contacts and that the corresponding Android permission has been granted.
 
-### Installed Apps toggle is greyed out
+### Apps tool doesn't show an app I have installed
 
-This is expected on Google Play builds — see [Installed Apps](#installed-apps) above. It's not a bug and there's no permission to grant; the feature simply isn't present in that build.
+The Apps tool only sees apps with a home-screen (launcher) icon — see [Apps](#apps) above. A background service or component-only package with no launcher entry won't appear, by design.

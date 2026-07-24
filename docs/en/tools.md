@@ -50,7 +50,8 @@ Execute commands on remote machines via the [Conch](https://github.com/newo-ethe
 
 Connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and let the model call the tools they expose — search, databases, home automation, or internal APIs.
 
-- **Transport**: Streamable HTTP (tools only — no resources/prompts yet)
+- **Transport**: Streamable HTTP, or stdio (local subprocess, fdroid/GitHub builds only)
+- **Primitives**: tools, plus resources (surfaced as `list_resources`/`read_resource` tools) — prompts/sampling not yet implemented
 - **Configuration**: Settings → MCP Servers
 - **Guide**: [MCP Servers](mcp.md)
 
@@ -59,8 +60,15 @@ Connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and
 - **Location**: Retrieve the device's approximate or precise location
 - **Contacts**: Search and read contacts stored on the device
 - **Calendar**: Read upcoming events and create new calendar entries
+- **Alarms & Timers**: Set, dismiss, or snooze alarms and timers
+- **Media Control**: See what's playing and control playback
+- **Torch**: Turn the flashlight on or off
+- **Weather**: Current conditions and forecast for a location
+- **Calculator**: Evaluate math expressions precisely
 - **Device Info**: Battery, ringer mode, network, storage, and other current device state — no permission required
-- **Installed Apps**: List apps installed on the device — fdroid/GitHub builds only, unavailable on Google Play
+- **Apps**: List installed apps (with a home-screen icon) and open one by package name
+- **Open URL**: Open a URL in the browser
+- **Notifications**: Read, reply to, dismiss, and create notifications
 
 See [Android](android.md) for setup and details.
 
@@ -132,7 +140,17 @@ You control which tools the model can access:
 | Shell               | Settings → Shell                              | Off     |
 | MCP Servers         | Settings → MCP Servers                        | Off     |
 | Device Info         | Settings → Android                            | On      |
-| Installed Apps      | Settings → Android (fdroid/GitHub builds only) | Off     |
+| Apps (list/open)    | Settings → Android                            | Off     |
+| Open URL            | Settings → Android                            | Off     |
+| Torch               | Settings → Android                            | Off     |
+| Calculator          | Settings → Android                            | On      |
+| Weather             | Settings → Android                            | Off     |
+| Location            | Settings → Android                            | Off     |
+| Calendar            | Settings → Android                            | Off     |
+| Contacts            | Settings → Android                            | Off     |
+| Alarms & Timers     | Settings → Android                            | Off     |
+| Media Control       | Settings → Android                            | Off     |
+| Notifications       | Settings → Android                            | Off     |
 | Memory (Saved)      | Settings → Memory → Access Saved Memories     | Off     |
 | Memory (Active)     | Settings → Memory → Access Active Memory      | Off     |
 | Past Conversations  | Settings → Memory → Access Past Conversations | Off     |

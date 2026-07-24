@@ -57,6 +57,24 @@ Toggle **Enable Blur Effects** to control background blur and gradient blur thro
 
 ---
 
+## Reduce Motion
+
+Toggle **Reduce Motion** to turn off decorative animations — the background blobs, cycling placeholder text, and similar flourishes. Defaults to your device's system "reduce motion" accessibility setting, but can be overridden either way here.
+
+---
+
+## Haptic Feedback
+
+Toggle **Haptic Feedback** to use subtle vibration for generation status changes and key actions (on by default).
+
+---
+
+## Notify When Response Is Ready
+
+Toggle **Notify when response is ready** to get a system notification when a reply finishes generating while Agora is in the background — useful for longer generations you don't want to actively watch.
+
+---
+
 ## Dynamic Color (Android 12+)
 
 When enabled on devices running Android 12 or higher, Agora extracts a color palette from your system wallpaper and applies it automatically.
