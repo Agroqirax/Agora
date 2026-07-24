@@ -170,6 +170,11 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             // already correct straight out of the tarball — don't rewrite what's already right.
             ensureSandboxMountTargets()
             writeResolvConf()
+            // Ensure all binaries are executable recursively
+            listOf("bin", "usr/bin", "sbin", "usr/sbin", "usr/libexec").forEach { dir ->
+                val d = File(rootfsDir, dir)
+                if (d.isDirectory) d.walkTopDown().filter { it.isFile }.forEach { it.setExecutable(true) }
+            }
             // No auto `apk upgrade` here: the freshly-downloaded minirootfs is already a coherent
             // pinned release. Running upgrade immediately makes apk re-resolve /bin/sh and dead-locks
             // on the busybox-binsh vs yash-binsh `cmd:sh` conflict. Packages upgrade on demand.
@@ -642,8 +647,20 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         upgradedCount
     }
 
+    /** True if [f] is itself a symlink (not: resolves through one) — via lstat, since
+     *  File.isDirectory()/exists() follow symlinks and can't tell the difference. */
+    private fun isSymlink(f: File): Boolean = try {
+        android.system.OsConstants.S_ISLNK(android.system.Os.lstat(f.absolutePath).st_mode)
+    } catch (_: Throwable) { false }
+
     override suspend fun getDiskUsageMB(): Long = withContext(Dispatchers.IO) {
-        try { rootfsDir.walkTopDown().sumOf { it.length() } / (1024 * 1024) } catch (_: Throwable) { 0L }
+        try {
+            // Don't descend into symlinked directories (e.g. var/spool/cron/crontabs ->
+            // etc/crontabs) — real symlinks now exist post-extraction, and File.isDirectory
+            // follows them, so an unguarded walk would double-count their target's contents
+            // (or loop, if a package ever ships a cyclic symlink).
+            rootfsDir.walkTopDown().onEnter { !isSymlink(it) }.sumOf { it.length() } / (1024 * 1024)
+        } catch (_: Throwable) { 0L }
     }
 
     // ── Tar Extraction ──────────────────────────────────
@@ -669,15 +686,13 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         }
         for ((name, target) in symlinks) {
             val outFile = safeChild(name) ?: continue; if (outFile.exists()) continue
-            val src = if (target.startsWith("/")) File(destDir, target.trimStart('/'))
-                      else File(outFile.parentFile ?: destDir, target)
-            // Containment check on the symlink source too.
-            if (src.canonicalPath != destDir.canonicalPath && !src.canonicalPath.startsWith(destPrefix)) continue
-            if (!src.exists()) continue
-            try {
-                if (src.isDirectory) src.walkTopDown().forEach { f -> val rel = f.relativeTo(src).path; val dst = File(outFile, rel); if (f.isDirectory) dst.mkdirs() else { dst.parentFile?.mkdirs(); f.copyTo(dst, true) } }
-                else { outFile.parentFile?.mkdirs(); src.copyTo(outFile, true) }
-            } catch (_: Throwable) {}
+            outFile.parentFile?.mkdirs()
+            // Must be a real symlink, not a copy of the target's content: apk (e.g.
+            // alpine-baselayout) ships paths like var/spool/cron/crontabs as a symlink to
+            // ../../../etc/crontabs and re-links them on upgrade. A pre-existing real
+            // (non-empty) directory there makes apk's own rename-into-place fail with
+            // "failed to rename var/spool/cron/.apk... to var/spool/cron/crontabs".
+            try { android.system.Os.symlink(target, outFile.absolutePath) } catch (_: Throwable) {}
         }
     }
 
@@ -784,6 +799,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         if (!repos.exists() || repos.readText() != wantRepos) {
             repos.parentFile?.mkdirs(); repos.writeText(wantRepos)
         }
+        repairCrontabsSymlink()
         captureBaseWorld()
         if (!explicitPackagesFile.exists()) {
             val baseNames = readBaseWorld().map { worldPackageName(it) }.toSet()
@@ -795,6 +811,22 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             writeExplicitPackages(migratedExplicit)
         }
         normalizeWorld()
+    }
+
+    /**
+     * Self-heals rootfs installs extracted before symlinks were created as real symlinks
+     * (see extractTarEntries): var/spool/cron/crontabs was deep-copied as a real directory
+     * instead of a symlink to ../../../etc/crontabs, which made apk's own rename-into-place
+     * fail on every `apk upgrade` with "failed to rename var/spool/cron/.apk... to
+     * var/spool/cron/crontabs".
+     */
+    private fun repairCrontabsSymlink() {
+        val crontabs = File(rootfsDir, "var/spool/cron/crontabs")
+        if (isSymlink(crontabs) || !crontabs.exists()) return
+        try {
+            crontabs.deleteRecursively()
+            android.system.Os.symlink("../../../etc/crontabs", crontabs.absolutePath)
+        } catch (_: Throwable) {}
     }
 
     private fun normalizeWorld(explicitPackages: Set<String> = readExplicitPackages()) {
@@ -869,11 +901,15 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         remaining: Int = -1
     ) {
         try { dir.listFiles()?.forEach {
-            if (it.isDirectory) {
+            // Real symlinks live in the rootfs now (see extractTarEntries); it.isDirectory
+            // follows them, so without the isSymlink guard a symlinked directory's contents
+            // would be walked twice (once via the real path, once via the symlink) or, for a
+            // cyclic symlink, infinitely.
+            if (it.isDirectory && !isSymlink(it)) {
                 if (remaining < 0 || remaining > 1) {
                     walkVirtualFiles(it, result, physicalRootAbsPath, virtualRoot, if (remaining < 0) -1 else remaining - 1)
                 }
-            } else {
+            } else if (!it.isDirectory) {
                 val path = try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
                 val rel = path.removePrefix(physicalRootAbsPath).removePrefix(File.separator).replace(File.separatorChar, '/')
                 val prefix = if (virtualRoot == "/") "" else virtualRoot.trimEnd('/')
