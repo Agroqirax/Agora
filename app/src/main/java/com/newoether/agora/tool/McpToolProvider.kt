@@ -79,12 +79,23 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
         private const val STDIO_TIMEOUT_MESSAGE = "stdio server timed out"
     }
 
+    // REMOTE is a real server tool dispatched via tools/call. LIST_RESOURCES/READ_RESOURCE
+    // are synthetic tools synthesized locally (see fetchServerState) for servers that
+    // advertise the "resources" capability — they let the model browse/read MCP Resources
+    // through the same tool-call pipeline, since Agora has no separate resource-browsing UI.
+    private enum class ToolKind { REMOTE, LIST_RESOURCES, READ_RESOURCE }
+
     private data class RemoteTool(
         val name: String,
         val description: String,
         val inputSchema: JsonObject?,
-        val destructive: Boolean
+        val destructive: Boolean,
+        val kind: ToolKind = ToolKind.REMOTE
     )
+
+    private data class RemoteResource(val uri: String, val name: String, val description: String, val mimeType: String?)
+
+    private data class RemoteResourceTemplate(val uriTemplate: String, val name: String, val description: String, val mimeType: String?)
 
     private data class ServerState(
         val server: McpServerConfig,
@@ -95,7 +106,9 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
         val serverInfo: McpServerInfo? = null,
         // True when an OAuth refresh attempt failed (refresh token expired/revoked) —
         // distinct from a generic connection failure, surfaced via [reauthNeededFlow].
-        val needsReauth: Boolean = false
+        val needsReauth: Boolean = false,
+        val resources: List<RemoteResource> = emptyList(),
+        val resourceTemplates: List<RemoteResourceTemplate> = emptyList()
     )
 
     private data class RpcResult(val obj: JsonObject?, val sessionId: String?, val error: String?, val statusCode: Int? = null)
@@ -294,7 +307,97 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
                 null
             }
         }
-        ServerState(server, tools, initResult.sessionId ?: sessionId, System.currentTimeMillis(), null, serverInfo)
+
+        // Resources discovery — only attempted when the server actually advertises the
+        // capability, since many servers 405/-32601 on resources/* methods otherwise.
+        val resourcesCapability = try {
+            initResult.obj["result"]?.jsonObject?.get("capabilities")?.jsonObject?.get("resources")
+        } catch (_: Exception) { null }
+
+        var resources = emptyList<RemoteResource>()
+        var resourceTemplates = emptyList<RemoteResourceTemplate>()
+        var allTools = tools
+        if (resourcesCapability != null) {
+            val resourcesResult = rpcCall(server, { rpcRequest("resources/list", buildJsonObject {}) }, initResult.sessionId ?: sessionId)
+            if (resourcesResult.error == null) {
+                val resourcesArr = try {
+                    resourcesResult.obj?.get("result")?.jsonObject?.get("resources")?.jsonArray ?: JsonArray(emptyList())
+                } catch (e: Exception) { JsonArray(emptyList()) }
+                resources = resourcesArr.mapNotNull { el ->
+                    try {
+                        val o = el.jsonObject
+                        val uri = (o["uri"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+                        val name = (o["name"] as? JsonPrimitive)?.content ?: uri
+                        val description = (o["description"] as? JsonPrimitive)?.content ?: ""
+                        val mimeType = (o["mimeType"] as? JsonPrimitive)?.content
+                        RemoteResource(uri, name, description, mimeType)
+                    } catch (e: Exception) {
+                        DebugLog.e("McpToolProvider", "Skipping malformed resource from ${server.name}: ${e.message}")
+                        null
+                    }
+                }
+
+                // Best-effort — a server that supports resources but not templates (or errors
+                // on this call) just yields an empty template list, not a connection failure.
+                val templatesResult = rpcCall(server, { rpcRequest("resources/templates/list", buildJsonObject {}) }, initResult.sessionId ?: sessionId)
+                val templatesArr = try {
+                    templatesResult.obj?.get("result")?.jsonObject?.get("resourceTemplates")?.jsonArray ?: JsonArray(emptyList())
+                } catch (e: Exception) { JsonArray(emptyList()) }
+                resourceTemplates = templatesArr.mapNotNull { el ->
+                    try {
+                        val o = el.jsonObject
+                        val uriTemplate = (o["uriTemplate"] as? JsonPrimitive)?.content ?: return@mapNotNull null
+                        val name = (o["name"] as? JsonPrimitive)?.content ?: uriTemplate
+                        val description = (o["description"] as? JsonPrimitive)?.content ?: ""
+                        val mimeType = (o["mimeType"] as? JsonPrimitive)?.content
+                        RemoteResourceTemplate(uriTemplate, name, description, mimeType)
+                    } catch (e: Exception) { null }
+                }
+
+                // Synthetic tools exposing resources through the same tools/call pipeline the
+                // model already knows how to use — Agora has no separate resource-browsing UI.
+                // Skipped per-name if the server itself already exposes a real tool of that name.
+                val existingNames = tools.map { it.name }.toSet()
+                val synthetic = mutableListOf<RemoteTool>()
+                if ("list_resources" !in existingNames) {
+                    synthetic.add(
+                        RemoteTool(
+                            name = "list_resources",
+                            description = "List resources available from this MCP server",
+                            inputSchema = buildJsonObject { put("type", "object"); put("properties", buildJsonObject {}) },
+                            destructive = false,
+                            kind = ToolKind.LIST_RESOURCES
+                        )
+                    )
+                }
+                if ("read_resource" !in existingNames) {
+                    synthetic.add(
+                        RemoteTool(
+                            name = "read_resource",
+                            description = "Read the contents of a resource URI from this MCP server (see list_resources)",
+                            inputSchema = buildJsonObject {
+                                put("type", "object")
+                                put("properties", buildJsonObject {
+                                    put("uri", buildJsonObject {
+                                        put("type", "string")
+                                        put("description", "The resource URI to read, from list_resources")
+                                    })
+                                })
+                                put("required", JsonArray(listOf(JsonPrimitive("uri"))))
+                            },
+                            destructive = false,
+                            kind = ToolKind.READ_RESOURCE
+                        )
+                    )
+                }
+                allTools = tools + synthetic
+            }
+        }
+
+        ServerState(
+            server, allTools, initResult.sessionId ?: sessionId, System.currentTimeMillis(), null, serverInfo,
+            resources = resources, resourceTemplates = resourceTemplates
+        )
     }
 
     /** Ad-hoc connection test for the settings UI: connects, lists tools, and returns
@@ -569,6 +672,12 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
         val (server, tool) = resolve(name)
             ?: return "Error: unknown or unconfigured MCP tool \"$name\""
 
+        when (tool.kind) {
+            ToolKind.LIST_RESOURCES -> return formatResourcesListing(cache[server.id])
+            ToolKind.READ_RESOURCE -> return executeReadResource(server, arguments, ctx)
+            ToolKind.REMOTE -> Unit
+        }
+
         if (tool.destructive) {
             val summary = buildSummary(tool.name, arguments)
             val allowed = confirm?.invoke(server.id, server.name, tool.name, summary) ?: true
@@ -631,7 +740,12 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
                 val o = el.jsonObject
                 when ((o["type"] as? JsonPrimitive)?.content) {
                     "text" -> (o["text"] as? JsonPrimitive)?.content ?: ""
-                    "resource" -> "[resource: ${(o["resource"]?.jsonObject?.get("uri") as? JsonPrimitive)?.content ?: "unknown"}]"
+                    // An embedded resource content block carries its contents inline (no
+                    // extra fetch needed) — surface the text directly when present, and
+                    // only fall back to a placeholder for blob/absent contents.
+                    "resource" -> o["resource"]?.jsonObject?.let { formatResourceContent(it) }
+                        ?.takeIf { it.isNotBlank() }
+                        ?: "[resource: ${(o["resource"]?.jsonObject?.get("uri") as? JsonPrimitive)?.content ?: "unknown"}]"
                     "image" -> "[image content omitted]"
                     "audio" -> "[audio content omitted]"
                     else -> el.toString()
@@ -649,5 +763,101 @@ class McpToolProvider(private val sandboxFactory: SandboxManagerFactory? = null)
     private fun buildSummary(toolName: String, arguments: String): String {
         val compact = arguments.trim().let { if (it.length > 200) it.take(200) + "…" else it }
         return "$toolName($compact)"
+    }
+
+    // ── Resources (synthetic list_resources/read_resource tools) ────────────────
+
+    /** Formats the cached resource/template listing for the synthetic `list_resources`
+     *  tool — no RPC here, [state] is refreshed the same way (and on the same TTL) as
+     *  the regular tool list, via [refresh]. */
+    private fun formatResourcesListing(state: ServerState?): String {
+        if (state == null) return "No resources available."
+        val lines = mutableListOf<String>()
+        if (state.resources.isNotEmpty()) {
+            lines.add("Resources:")
+            state.resources.forEach { r ->
+                val desc = r.description.ifBlank { null }?.let { ": $it" } ?: ""
+                val mime = r.mimeType?.let { " [$it]" } ?: ""
+                lines.add("- ${r.uri} (${r.name})$desc$mime")
+            }
+        }
+        if (state.resourceTemplates.isNotEmpty()) {
+            lines.add("Resource templates:")
+            state.resourceTemplates.forEach { t ->
+                val desc = t.description.ifBlank { null }?.let { ": $it" } ?: ""
+                val mime = t.mimeType?.let { " [$it]" } ?: ""
+                lines.add("- ${t.uriTemplate} (${t.name})$desc$mime")
+            }
+        }
+        return lines.joinToString("\n").ifBlank { "No resources available." }
+    }
+
+    /** Formats one `resources/read` (or embedded `resource` content block) contents
+     *  entry: `{ uri, mimeType?, text? | blob? }`. Text is returned verbatim; a `blob`
+     *  (base64) has no text representation Agora can pass to the model, so it becomes a
+     *  placeholder describing what it is, same spirit as the image/audio placeholders
+     *  above. */
+    private fun formatResourceContent(o: JsonObject): String {
+        return try {
+            val text = (o["text"] as? JsonPrimitive)?.content
+            if (text != null) return text
+            val blob = (o["blob"] as? JsonPrimitive)?.content
+            if (blob != null) {
+                val uri = (o["uri"] as? JsonPrimitive)?.content ?: "unknown"
+                val mimeType = (o["mimeType"] as? JsonPrimitive)?.content ?: "unknown"
+                val approxBytes = (blob.length * 3) / 4
+                return "[binary resource: $uri, mimeType: $mimeType, ~$approxBytes bytes — binary content isn't supported in tool results]"
+            }
+            ""
+        } catch (_: Exception) { "" }
+    }
+
+    /** Implements the synthetic `read_resource` tool: calls `resources/read` for the
+     *  `uri` argument and formats its `contents[]`. Mirrors the session-expiry-retry
+     *  shape [execute] uses for `tools/call`, since this is just another RPC method to
+     *  the same server/session. */
+    private suspend fun executeReadResource(server: McpServerConfig, arguments: String, ctx: GenerationContext): String {
+        val argsObj = try {
+            json.parseToJsonElement(arguments.ifBlank { "{}" }).jsonObject
+        } catch (e: Exception) { JsonObject(emptyMap()) }
+        val uri = (argsObj["uri"] as? JsonPrimitive)?.content
+        if (uri.isNullOrBlank()) return "Error: read_resource requires a \"uri\" argument"
+
+        val currentServer = ctx.mcpServers.find { it.id == server.id } ?: server
+        val readParams = buildJsonObject { put("uri", uri) }
+
+        var state = cache[server.id]
+        var result = rpcCall(currentServer, { rpcRequest("resources/read", readParams) }, state?.sessionId)
+
+        val stdioDied = currentServer.transport == "stdio" && result.error != STDIO_TIMEOUT_MESSAGE
+        if (result.obj == null && (result.error?.contains("404") == true || stdioDied)) {
+            closeStdioConnection(currentServer.id)
+            val fresh = fetchServerState(currentServer)
+            cache[server.id] = fresh
+            recordServerInfo(server.id, fresh.serverInfo)
+            recordReauth(server.id, fresh.needsReauth)
+            state = fresh
+            result = rpcCall(currentServer, { rpcRequest("resources/read", readParams) }, fresh.sessionId)
+        }
+
+        if (result.error == REAUTH_REQUIRED_SENTINEL) {
+            recordReauth(server.id, true)
+            return "Error: sign in again to MCP server \"${currentServer.name}\" to continue using its tools"
+        }
+
+        if (result.sessionId != null && result.sessionId != state?.sessionId) {
+            state?.let { cache[server.id] = it.copy(sessionId = result.sessionId) }
+        }
+
+        if (result.obj == null) return "Error: MCP resource read failed — ${result.error ?: "no response"}"
+        recordReauth(server.id, false)
+        val resultObj = try { result.obj["result"]?.jsonObject } catch (_: Exception) { null }
+            ?: return "Error: MCP resource read failed — ${result.error ?: "empty response"}"
+
+        val contentsArr = try { resultObj["contents"]?.jsonArray ?: JsonArray(emptyList()) } catch (_: Exception) { JsonArray(emptyList()) }
+        val text = contentsArr.joinToString("\n") { el ->
+            try { formatResourceContent(el.jsonObject) } catch (_: Exception) { "" }
+        }.trim()
+        return text.ifBlank { "Error: resource \"$uri\" returned no content" }
     }
 }

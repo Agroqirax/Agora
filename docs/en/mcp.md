@@ -3,7 +3,7 @@
 Agora can connect to [Model Context Protocol](https://modelcontextprotocol.io) servers and let the model call the tools they expose — search engines, databases, home automation, internal company APIs, or anything else you or a third party has built an MCP server for.
 
 !!! note
-    Agora currently supports MCP **tools** only. Resources, prompts, and sampling are not yet implemented.
+    Agora supports MCP **tools** and **resources**. Prompts and sampling are not yet implemented.
 
 ## How It Works
 
@@ -18,6 +18,10 @@ Agora (Android)  ──HTTPS (Streamable HTTP transport)──▶  MCP Server
 Agora speaks the MCP **Streamable HTTP** transport (a single HTTP endpoint, not stdio or the older HTTP+SSE transport). On first use it opens a session with `initialize`, lists the server's tools with `tools/list`, and lets the model invoke them with `tools/call`. The tool list is cached for about 30 seconds per server so repeated messages don't re-handshake every time; if the server ends the session, Agora reconnects automatically on the next call.
 
 The model decides when to use an MCP tool on its own, the same way it decides to use web search or the shell — there's no manual trigger.
+
+## Resources
+
+For servers that advertise the `resources` capability, Agora adds two extra read-only tools automatically: `list_resources` and `read_resource`. There's no separate resource-browsing UI — the model can call these the same way it calls any other tool, deciding on its own when a resource is relevant to what you asked. `list_resources` also surfaces any [resource templates](https://modelcontextprotocol.io/specification/server/resources#resource-templates) the server defines, so the model knows what URI patterns it can fill in before calling `read_resource`.
 
 ## Security
 
