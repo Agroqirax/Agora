@@ -1,7 +1,10 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,7 +37,16 @@ class ShellConfirmationController(private val settings: SettingsRepository) {
         if (sessionAllowedServers.contains(server)) return true
         val deferred = CompletableDeferred<Boolean>()
         _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
-        return try { deferred.await() } finally {
+        return try {
+            // Bound the wait. The dialog renders only while the Activity is composing, so if it is
+            // backgrounded/rebuilt (or this is a headless automation run with no UI) the deferred
+            // would never resolve and the inline-blocking stream coroutine would hang forever
+            // (#49). Fail safe — refuse the command — after the timeout, and let the finally
+            // below clear the stale prompt so a late user tap can't resurrect a dead request.
+            withTimeout(Constants.SHELL_CONFIRM_TIMEOUT_MS) { deferred.await() }
+        } catch (e: TimeoutCancellationException) {
+            false
+        } finally {
             if (_pendingShellCommand.value?.deferred === deferred) _pendingShellCommand.value = null
         }
     }

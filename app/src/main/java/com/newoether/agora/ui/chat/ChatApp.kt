@@ -514,7 +514,7 @@ fun ChatApp(
             }
             val ca by animateFloatAsState(targetCa, tween(800))
             val qa by animateFloatAsState(targetQa, tween(800))
-            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark)
+            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark, blurEnabled = blurEffectsEnabled)
 
             Scaffold(
                 containerColor = Color.Transparent,

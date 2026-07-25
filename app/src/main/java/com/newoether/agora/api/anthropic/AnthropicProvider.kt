@@ -135,7 +135,7 @@ class AnthropicProvider : LlmProvider {
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
-        val baseUrl = config.baseUrl?.trimEnd('/') ?: "https://api.anthropic.com/v1"
+        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
         val modelName = config.modelId
 
         val validatedPath = prepareMessages(messages, config.maxContextWindow)
@@ -439,7 +439,7 @@ class AnthropicProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/') ?: "https://api.anthropic.com/v1"
+            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
             val responseText = HttpClient.fetchModels(
                 "$effectiveBaseUrl/models",
                 mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")

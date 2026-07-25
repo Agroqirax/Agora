@@ -76,7 +76,7 @@ class ProviderRegistry(
     }
 
     fun getEffectiveBaseUrl(providerName: String): String? =
-        settings.providerBaseUrls.value[providerName]
+        settings.providerBaseUrls.value[providerName]?.takeIf { it.isNotBlank() }
             ?: providers[providerName]?.takeIf { !isBuiltIn(providerName) }?.defaultBaseUrl
 
     fun isConfigured(providerName: String, activeKey: String): Boolean =
@@ -143,7 +143,10 @@ class ProviderRegistry(
         val baseUrl = if (!isBuiltIn(name)) {
             settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() } ?: provider.defaultBaseUrl
         } else {
-            settings.providerBaseUrls.value[name]
+            // Built-in: a blank persisted entry is the same as absent (use the provider default).
+            // Without this guard, "" flows straight to the provider, which only elvis-checks null
+            // and would build a malformed relative endpoint.
+            settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() }
         }
 
         // Resolve the "/v1" ambiguity ONCE here (config time) and persist the canonical

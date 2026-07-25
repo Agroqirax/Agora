@@ -139,10 +139,19 @@ fun SettingsProviderDetailPage(
                         baseUrlState.edit { replace(0, length, ext) }
                     }
                 }
-                // Save user input with 500ms debounce.
+                // Save user input with 500ms debounce — but only on a *real* edit.
+                // On first composition the field is initialized to `savedUrl ?: ""`, and a DataStore
+                // cold load can deliver savedUrl=null momentarily; writing that "" back would poison
+                // the persisted map (see SettingsManager.saveProviderBaseUrl). Skipping when the text
+                // already equals the persisted (or absent) value eliminates that race and also avoids
+                // re-writing the same URL the LaunchedEffect(savedUrl) sync just applied.
                 LaunchedEffect(baseUrlState.text) {
                     delay(500)
-                    viewModel.settings.setProviderBaseUrl(providerName, baseUrlState.text.toString())
+                    val text = baseUrlState.text.toString()
+                    val stored = providerBaseUrls[providerName] ?: ""
+                    if (text != stored) {
+                        viewModel.settings.setProviderBaseUrl(providerName, text)
+                    }
                 }
                 SettingsGroup(
                     title = stringResource(R.string.provider_base_url),

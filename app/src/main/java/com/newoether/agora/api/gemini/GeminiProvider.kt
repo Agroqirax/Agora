@@ -156,7 +156,7 @@ class GeminiProvider : LlmProvider {
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
-        val baseUrl = config.baseUrl?.trimEnd('/') ?: defaultBaseUrl
+        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
         val cleanModelName = config.modelId.removePrefix("models/")
         
         // Context windowing
@@ -498,7 +498,7 @@ class GeminiProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/') ?: defaultBaseUrl
+            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
             val finalUrlString = if (effectiveBaseUrl.contains("/v1") || effectiveBaseUrl.contains("/v1beta")) {
                 "$effectiveBaseUrl/models"
             } else {

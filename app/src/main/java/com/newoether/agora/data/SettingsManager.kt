@@ -362,6 +362,18 @@ class SettingsManager(private val context: Context) {
     val lastModelsFetchFingerprint: Flow<String> = context.dataStore.data.map { it[LAST_MODELS_FETCH_FINGERPRINT] ?: "" }
 
     suspend fun saveProviderBaseUrl(provider: String, url: String) {
+        // Blank = "use the provider's default base URL". Persisting "" would poison the map
+        // (callers that resolve an effective URL treat "" as a real override, not as absent),
+        // so a blank value removes the key entirely — "absent" is the canonical "default" state.
+        // rename/delete pass "" to clear an entry, which is exactly this semantics.
+        if (url.isBlank()) {
+            context.dataStore.edit { prefs ->
+                val current = prefs[PROVIDER_BASE_URLS] ?: return@edit
+                val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { return@edit }
+                if (map.remove(provider) != null) prefs[PROVIDER_BASE_URLS] = json.encodeToString(map)
+            }
+            return
+        }
         context.dataStore.edit { prefs ->
             val current = prefs[PROVIDER_BASE_URLS] ?: "{}"
             val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { mutableMapOf() }

@@ -43,7 +43,14 @@ fun AnimatedBlobBackground(
     centerAlpha: Float = 0.10f,
     quarterAlpha: Float = 0.05f,
     edgeAlpha: Float = 0.0f,
-    dark: Boolean = true
+    dark: Boolean = true,
+    // When false, neither the RenderEffect blur nor the ~16ms animation loop run. This is the
+    // root-cause fix for the system photo picker being composited as transparent on some HWC
+    // paths (e.g. Moto g84 / Android 15): an unconditional, every-frame RenderEffect layer on the
+    // bottom-most background got promoted to an overlay and clobbered the picker's z-order. Gating
+    // it on the existing "Blur Effects" setting both gives the user a real escape hatch (the
+    // setting previously had no effect on this layer) and restores correct composition when off.
+    blurEnabled: Boolean = true,
 ) {
     val density = LocalDensity.current
     val cs = MaterialTheme.colorScheme
@@ -77,7 +84,10 @@ fun AnimatedBlobBackground(
 
     var timeSec by remember { mutableStateOf(0.0) }
 
-    LaunchedEffect(Unit) {
+    // Drive the animation only while blur is enabled; with blur off the background is intentionally
+    // static, which also avoids the per-frame RenderEffect layer that triggered the HWC overlay bug.
+    LaunchedEffect(Unit, blurEnabled) {
+        if (!blurEnabled) return@LaunchedEffect
         val startNanos = System.nanoTime()
         while (true) {
             timeSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
@@ -89,7 +99,7 @@ fun AnimatedBlobBackground(
         Canvas(
             modifier = Modifier
                 .fillMaxSize()
-                .blur(radius = blurRadius.dp)
+                .then(if (blurEnabled) Modifier.blur(radius = blurRadius.dp) else Modifier)
         ) {
             val w = size.width
             val h = size.height

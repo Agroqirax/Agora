@@ -68,14 +68,31 @@ class AgoraForegroundService : Service() {
         private fun startService(context: Context): Boolean {
             val appContext = context.applicationContext
             val intent = Intent(appContext, AgoraForegroundService::class.java)
-            // Diagnostic trail for the unreproducible "did not start in time" crash:
-            // record process importance (foreground vs background) at start.
-            val state = try {
-                val info = ActivityManager.RunningAppProcessInfo()
+            // Record process importance (foreground vs background) at start — both as a diagnostic
+            // trail for the unreproducible "did not start in time" crash (#60) and as the gate.
+            val info = ActivityManager.RunningAppProcessInfo()
+            val importance = try {
                 ActivityManager.getMyMemoryState(info)
-                "importance=${info.importance} trim=${info.lastTrimLevel}"
-            } catch (e: Exception) { "importance=?" }
-            CrashReporter.note("FGS.start api=${Build.VERSION.SDK_INT} $state")
+                info.importance
+            } catch (e: Exception) {
+                CrashReporter.note("FGS.start getMyMemoryState threw ${e.javaClass.simpleName}")
+                // If we can't read state, assume foreground so we don't silently disable FGS.
+                ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
+            }
+            CrashReporter.note("FGS.start api=${Build.VERSION.SDK_INT} importance=$importance trim=${info.lastTrimLevel}")
+            // Fail-closed (the 5s-timeout crash is the alternative): starting a foreground service
+            // while the process is already backgrounded is exactly what triggers
+            // ForegroundServiceDidNotStartInTimeException — the system defers Service instantiation
+            // and onCreate's startForeground can't run within 5s (#60, 140 crashes). The generation
+            // that requested the lease keeps running on its existing coroutine without a persistent
+            // notification; a possible later OS kill under memory pressure is a far better failure
+            // mode than an immediate crash. Foreground owners (importance <= FOREGROUND_SERVICE)
+            // always proceed.
+            if (importance > ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND_SERVICE) {
+                CrashReporter.note("FGS.start skipped importance=$importance not-foreground")
+                DebugLog.w(TAG, "Skipping FGS start: process not foreground (importance=$importance)")
+                return false
+            }
             return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     appContext.startForegroundService(intent)

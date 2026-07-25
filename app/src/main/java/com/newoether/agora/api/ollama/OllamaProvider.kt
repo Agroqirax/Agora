@@ -68,7 +68,7 @@ class OllamaProvider : LlmProvider {
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
-        val baseUrl = config.baseUrl?.trimEnd('/')
+        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null }
             ?: defaultBaseUrl.ifEmpty { null }
             ?: return@flow emit(StreamEvent.Error(GenerationError.Configuration("Ollama base URL not configured")))
         val modelName = config.modelId
@@ -288,7 +288,7 @@ class OllamaProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/') ?: "http://localhost:11434"
+            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "http://localhost:11434"
             val responseText = HttpClient.fetchModels("$effectiveBaseUrl/api/tags") ?: run {
                 DebugLog.e("AgoraAPI", "Failed to fetch Ollama models: empty response")
                 return@withContext emptyList()

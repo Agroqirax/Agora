@@ -602,7 +602,16 @@ class MessageGenerationController(
                                     else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
                                 }
                             }
-                            localProvider.releaseEngine()
+                            // Intentionally do NOT releaseEngine() here. Title generation runs right
+                            // after the first message of a new conversation, on the same model the
+                            // user is actively chatting with; LocalProvider.ensureEngineLoaded reuses
+                            // the already-loaded engine. Releasing here would force the next message
+                            // to re-load a multi-GB model onto a possibly-fragmented native heap,
+                            // which is the leading suspect for the "second message OOM" crash (#53,
+                            // 31 OOM reports) — the text path itself is crash-safe. Keeping the
+                            // engine session-scoped (released only on model switch / RAG / process
+                            // death) eliminates that reload churn. This is an OOM-probability
+                            // reduction, NOT a claimed #53 root-case fix (that needs a logcat).
                         }
                     } else {
                         provider.generateResponse(titlePrompt, config).collect { event ->

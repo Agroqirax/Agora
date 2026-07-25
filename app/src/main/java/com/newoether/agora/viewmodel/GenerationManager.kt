@@ -10,6 +10,7 @@ import com.newoether.agora.data.MemoryManager
 
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -28,6 +29,8 @@ import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
@@ -98,7 +101,10 @@ data class GenerationContext(
     val transcriptionProviderName: String = "",
     val transcriptionModelId: String = "",
     val transcriptionApiKey: String = "",
-    val transcriptionBaseUrl: String? = null
+    val transcriptionBaseUrl: String? = null,
+    /** Wall-clock budget for a single tool execution; downgrades a blocking tool from a
+     *  permanent generation hang to a recoverable tool error (#49). */
+    val toolTimeoutMs: Long = Constants.TOOL_EXECUTION_TIMEOUT_MS
 )
 
 internal fun applyUserTemplateToMessages(
@@ -214,10 +220,19 @@ class GenerationManager(
         return try {
             for (provider in toolProviders) {
                 if (provider.handles(name)) {
-                    return provider.execute(name, arguments, ctx)
+                    // Tools run inline on the stream-consuming coroutine, so a tool that blocks
+                    // forever hangs the whole generation. Bound it; on timeout return a tool error
+                    // so the tool loop continues instead of hanging (#49).
+                    return withTimeout(ctx.toolTimeoutMs) {
+                        provider.execute(name, arguments, ctx)
+                    }
                 }
             }
             "Unknown tool: $name"
+        } catch (e: TimeoutCancellationException) {
+            // A timeout is a recoverable tool failure, NOT a generation cancellation — return an
+            // error string so the model can react, instead of unwinding the whole generation.
+            "Error executing tool '$name': timed out after ${ctx.toolTimeoutMs}ms"
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -667,9 +682,13 @@ class GenerationManager(
                 val toolMsgId = "${Constants.TOOL_MSG_PREFIX}${UUID.randomUUID()}"
                 val toolMsgSegs = txedSegments.ifEmpty { null }
                 val tcds = toolCallDataList
-                val allSegmentsJson = Json.encodeToString(toolMsgSegs ?: tcds.map { tc ->
+                val allSegments = toolMsgSegs ?: tcds.map { tc ->
                     MessageSegment(type = "tool", toolName = tc.toolName, toolArgs = tc.arguments, toolResult = tc.result, signature = tc.signature, toolCallId = tc.toolCallId)
-                })
+                }
+                // Bound the aggregate: a model message row crams every tool round into one
+                // toolCallJson column, so many rounds × a clipped 100KB result can still exceed the
+                // 2MB CursorWindow. The guard halves the largest results until it fits (#51).
+                val allSegmentsJson = MessagePersistenceGuard.encodeSegmentsBounded(allSegments)
                 val resultMsgs = tcds.map { tcData ->
                     val rid = "${Constants.RESULT_MSG_PREFIX}${UUID.randomUUID()}"
                     val displayText = SearchResultFormatter.format(tcData.result, context)
@@ -734,7 +753,7 @@ class GenerationManager(
                             id = msg.id, conversationId = conversationId, parentId = msg.parentId,
                             text = msg.text, thoughts = null, status = msg.status,
                             participant = msg.participant, timestamp = System.currentTimeMillis(),
-                            toolCallJson = msg.segments?.let { Json.encodeToString(it) }
+                            toolCallJson = msg.segments?.let { MessagePersistenceGuard.encodeSegmentsBounded(it) }
                                 ?: msg.toolCall?.let { Json.encodeToString(listOf(
                                     MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result, signature = it.signature, toolCallId = it.toolCallId)
                                 )) }
@@ -777,11 +796,13 @@ class GenerationManager(
                                 currentThoughtDurationMs.takeIf { it > 0L }
                             )
                                 ?: segments.toList().ifEmpty { null }
-                            val segmentsJson = finalSegments?.let { Json.encodeToString(it) }
+                            // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
+                            // text column — together they can exceed the 2MB CursorWindow otherwise.
+                            val segmentsJson = MessagePersistenceGuard.encodeSegmentsBounded(finalSegments)
                             val effectiveParentId = parentId
                             conversations.upsertMessage(MessageEntity(
                                 id = modelMessageId, conversationId = conversationId, parentId = effectiveParentId,
-                                text = totalText, images = generatedImages.toList(),
+                                text = MessagePersistenceGuard.clipText(totalText), images = generatedImages.toList(),
                                 thoughts = totalThoughts.ifBlank { null },
                                 thoughtTitle = totalThoughtTitle, tokenCount = totalTokenCount,
                                 status = currentStatus, participant = Participant.MODEL, timestamp = startTime,

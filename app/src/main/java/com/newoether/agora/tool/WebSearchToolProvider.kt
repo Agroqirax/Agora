@@ -120,8 +120,14 @@ class WebSearchToolProvider : ToolProvider {
                 )
                 "searxng" -> {
                     val baseUrl = ctx.webSearchBaseUrl.ifBlank { "https://searx.be" }
+                    // Don't pin engines=google,brave: many public/self-hosted SearXNG instances
+                    // disable those engines (rate-limited/require config), and pinning them yields
+                    // an empty result set. Letting the instance use its own default-enabled engines
+                    // matches how other SearXNG clients behave. Send a browser-like User-Agent so
+                    // bot-filtering instances don't 403 us (same reason web_fetch sets one).
                     HttpClient.fetchModels(
-                        "$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json&engines=google,brave"
+                        "$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json",
+                        mapOf("User-Agent" to Constants.WEB_FETCH_USER_AGENT)
                     )
                 }
                 else -> HttpClient.fetchModels(

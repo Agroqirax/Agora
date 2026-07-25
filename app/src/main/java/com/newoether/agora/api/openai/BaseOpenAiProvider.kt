@@ -82,7 +82,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
-        val baseUrl = config.baseUrl?.trimEnd('/') ?: defaultBaseUrl
+        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
         val endpointUrls = endpointCandidates(baseUrl, "chat/completions")
 
         val validatedMessages = prepareMessages(messages, config.maxContextWindow)
@@ -182,6 +182,14 @@ abstract class BaseOpenAiProvider : LlmProvider {
         emit: suspend (StreamEvent) -> Unit
     ) {
         val pendingToolCalls = mutableMapOf<Int, PendingToolCall>()
+        // Accumulate answer content so that, if the server emits tool calls as content text rather
+        // than as structured delta.tool_calls (#33 path B), we can recover them at stream end.
+        val contentBuf = StringBuilder()
+        val emitAndAccumulate: suspend (StreamEvent) -> Unit = { event ->
+            if (event is StreamEvent.TextChunk) contentBuf.append(event.text)
+            emit(event)
+        }
+        var structuredToolCallsEmitted = false
 
         while (currentCoroutineContext().isActive) {
             val line = try {
@@ -200,7 +208,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 val choice = response.choices?.firstOrNull()
 
                 choice?.delta?.let { delta ->
-                    parseDeltaContent(delta, config, thinkParser) { emit(it) }
+                    parseDeltaContent(delta, config, thinkParser, emitAndAccumulate)
 
                     delta.toolCalls?.forEach { tc ->
                         val existing = if (tc.id != null) pendingToolCalls.values.firstOrNull { it.id == tc.id } else null
@@ -221,8 +229,8 @@ abstract class BaseOpenAiProvider : LlmProvider {
                         StreamEvent.ToolCallRequest(it.id, it.name, it.args.toString())
                     }
                     pendingToolCalls.clear()
-                    if (calls.size == 1) emit(calls.first())
-                    else if (calls.size > 1) emit(StreamEvent.ToolCallsRequest(calls))
+                    if (calls.size == 1) { structuredToolCallsEmitted = true; emit(calls.first()) }
+                    else if (calls.size > 1) { structuredToolCallsEmitted = true; emit(StreamEvent.ToolCallsRequest(calls)) }
                 }
 
                 response.usage?.let { usage ->
@@ -239,9 +247,26 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
 
         thinkParser.flush(
-            onText = { emit(StreamEvent.TextChunk(it)) },
-            onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+            onText = { emitAndAccumulate(StreamEvent.TextChunk(it)) },
+            onThought = { emitAndAccumulate(StreamEvent.ThoughtChunk(it)) }
         )
+
+        // Fallback (#33 path B): some OpenAI-compatible servers (llama.cpp et al.) finish with
+        // finish_reason == "stop" and put the tool call in the content text instead of the
+        // structured delta.tool_calls field. If we never saw structured tool calls but tools were
+        // offered, parse them out of the accumulated content so the generation enters the
+        // tool-call phase instead of just printing the JSON as an answer. Brings these servers to
+        // parity with Ollama, which reads its structured tool_calls field directly.
+        if (!structuredToolCallsEmitted && !config.tools.isNullOrEmpty()) {
+            val parsed = ToolCallTextParser.parse(contentBuf.toString())
+            if (parsed.size == 1) {
+                emit(StreamEvent.ToolCallRequest(syntheticToolCallId(), parsed[0].name, parsed[0].arguments))
+            } else if (parsed.size > 1) {
+                emit(StreamEvent.ToolCallsRequest(parsed.map {
+                    StreamEvent.ToolCallRequest(syntheticToolCallId(), it.name, it.arguments)
+                }))
+            }
+        }
 
         if (!currentCoroutineContext().isActive) {
             throw CancellationException("Stream cancelled")
@@ -259,6 +284,11 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
         return listOf(primary, "$normalizedBaseUrl/v1/$cleanPath")
     }
+
+    /** Synthetic id for tool calls recovered from content text (#33 path B), where the server
+     *  provides no id. Unique per call so the result can still be paired back to the request. */
+    private fun syntheticToolCallId(): String =
+        "call_text_${java.util.UUID.randomUUID()}"
 
     private fun buildGenerationError(
         statusCode: Int,
@@ -287,7 +317,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = withContext(Dispatchers.IO) {
         try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/') ?: defaultBaseUrl
+            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
             val endpointUrls = endpointCandidates(effectiveBaseUrl, "models")
             val headers = authHeaders(apiKey)
             var lastParseError: Exception? = null
