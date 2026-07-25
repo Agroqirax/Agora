@@ -10,13 +10,18 @@ import com.newoether.agora.api.HttpClient
 import com.newoether.agora.data.McpServerConfig
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.util.DebugLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import net.openid.appauth.AuthState
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -27,7 +32,6 @@ import net.openid.appauth.ClientAuthentication
 import net.openid.appauth.ClientSecretBasic
 import net.openid.appauth.ClientSecretPost
 import net.openid.appauth.NoClientAuthentication
-import net.openid.appauth.RegistrationRequest
 import net.openid.appauth.ResponseTypeValues
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.resume
@@ -127,7 +131,24 @@ fun launchMcpOAuthAuthorization(context: Context, authorizationRequest: McpOAuth
  * custom manifest intent-filter; it only needs to know which [McpServerConfig] a finished
  * sign-in was for, threaded through as a plain intent extra (see [MCP_OAUTH_EXTRA_SERVER_ID]).
  */
-class McpOAuthManager(private val context: Context, private val settingsRepository: SettingsRepository) {
+class McpOAuthManager(context: Context, private val settingsRepository: SettingsRepository) {
+
+    // AppContainer/ChatViewModelFactory hand this constructor a raw Activity Context (see
+    // AppContainer's `appContext` param, built from `this@MainActivity`) rather than an
+    // Application one — and McpOAuthManager lives inside ChatViewModel, which is *designed*
+    // to outlive any single Activity instance across configuration changes (rotation, theme
+    // switch, locale change, or the system recreating the Activity under memory pressure).
+    // Storing the raw Activity Context here would bind [authService] to whichever Activity
+    // happened to exist when this manager was constructed; once that Activity is destroyed
+    // and recreated, every AppAuth call routed through the stale `authService` (DCR,
+    // discovery, token exchange/refresh) silently never completes — no exception, nothing
+    // in logcat, just a permanently spinning UI, since AppAuth has no way to know its
+    // Context died. .applicationContext is stable for the process lifetime and never goes
+    // through this, so it's used for everything here except the interactive sign-in launch
+    // (`launchMcpOAuthAuthorization`, a top-level function below that legitimately needs a
+    // *live* Activity Context to start the Custom Tab, and is always given a fresh one from
+    // Compose's `LocalContext.current` at call time rather than stored).
+    private val context = context.applicationContext
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -239,6 +260,8 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
                     if (cont.isActive) cont.resume(serviceConfig)
                 }
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (_: Exception) { null } ?: return null
         return McpOAuthDiscoveryResult(
             trimmed,
@@ -273,25 +296,47 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
 
     /** Registers Agora as a public native client (no secret — PKCE covers code
      *  interception). Returns null on failure/unsupported servers; callers fall back to
-     *  manual client_id/(optional secret) entry. */
+     *  manual client_id/(optional secret) entry.
+     *
+     *  Hand-rolled (POST + parse) rather than routed through AppAuth's own
+     *  `performRegistrationRequest` / `RegistrationResponse.Builder.fromResponseJson`: that
+     *  parser treats `registration_access_token` as a *mandatory* response field, but RFC
+     *  7591 only requires it for servers that also expose RFC 7592's client-configuration-
+     *  management endpoint — plenty of real-world servers (Notion's included) legitimately
+     *  omit it. AppAuth throws `RegistrationResponse.MissingArgumentException`, catches it
+     *  internally inside `RegistrationRequestTask.onPostExecute`, and then returns *without*
+     *  ever invoking the registration callback — so the [suspendCancellableCoroutine] this
+     *  used to wrap would never resume: no exception surfaces to Agora, nothing lands in
+     *  logcat, the request just hangs forever. Doing the POST/parse ourselves (as already
+     *  done above for the RFC 8414/9728 discovery documents, for similar AppAuth gaps)
+     *  sidesteps that bug entirely. */
     suspend fun registerClient(registrationEndpoint: String, redirectUri: String): McpDcrResult? = withContext(Dispatchers.IO) {
-        val config = AuthorizationServiceConfiguration(
-            Uri.parse("about:blank"), Uri.parse("about:blank"), Uri.parse(registrationEndpoint)
-        )
-        val request = RegistrationRequest.Builder(config, listOf(Uri.parse(redirectUri)))
-            .setTokenEndpointAuthenticationMethod("none")
-            .build()
+        val body = buildJsonObject {
+            put("redirect_uris", buildJsonArray { add(redirectUri) })
+            put("application_type", "native")
+            put("token_endpoint_auth_method", "none")
+        }.toString()
         try {
-            suspendCancellableCoroutine { cont ->
-                authService.performRegistrationRequest(request) { response, ex ->
-                    if (ex != null || response == null) {
-                        DebugLog.e("McpOAuthManager", "DCR failed: ${ex?.message}")
-                        if (cont.isActive) cont.resume(null)
-                    } else {
-                        if (cont.isActive) cont.resume(McpDcrResult(response.clientId, response.clientSecret ?: ""))
-                    }
-                }
+            val responseBody = HttpClient.post(registrationEndpoint, body)
+            if (responseBody == null) {
+                DebugLog.e("McpOAuthManager", "DCR failed: empty/error response from $registrationEndpoint")
+                return@withContext null
             }
+            val obj = json.parseToJsonElement(responseBody).jsonObject
+            val clientId = (obj["client_id"] as? JsonPrimitive)?.content
+            if (clientId == null) {
+                DebugLog.e("McpOAuthManager", "DCR failed: no client_id in response from $registrationEndpoint")
+                return@withContext null
+            }
+            val clientSecret = (obj["client_secret"] as? JsonPrimitive)?.content ?: ""
+            McpDcrResult(clientId, clientSecret)
+        } catch (e: CancellationException) {
+            // The caller's scope (e.g. a Composable's rememberCoroutineScope) was cancelled
+            // mid-request. Not a real DCR failure — don't log it as one, and let it
+            // propagate so structured concurrency actually cancels this coroutine instead
+            // of returning a misleading null the caller can't tell apart from a genuine
+            // server rejection.
+            throw e
         } catch (e: Exception) {
             DebugLog.e("McpOAuthManager", "DCR failed: ${e.message}")
             null
@@ -368,6 +413,8 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
             state.update(authResponse, null)
             state.update(tokenResp, null)
             Result.success(persistAuthState(server, state))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -397,6 +444,8 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
                 return@withContext Result.failure(Exception(tokenErrorMessage(outcome)))
             }
             Result.success(persistAuthState(server, state))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -427,6 +476,8 @@ class McpOAuthManager(private val context: Context, private val settingsReposito
                 return@withContext Result.failure(Exception(tokenErrorMessage(ex)))
             }
             Result.success(persistAuthState(server, state))
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(e)
         }

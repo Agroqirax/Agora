@@ -57,6 +57,7 @@ import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -1020,8 +1021,16 @@ class ChatViewModel(
     val mcpServerInfo: kotlinx.coroutines.flow.StateFlow<Map<String, com.newoether.agora.tool.McpServerInfo>>
         get() = generationManager.mcpServerInfo
 
+    /** Runs on [viewModelScope], not the caller's own scope: this is normally invoked from
+     *  a Composable's rememberCoroutineScope, which gets cancelled the instant that screen
+     *  leaves composition (navigating back, a config change, etc.) — that used to abort the
+     *  in-flight network call and, worse, surface as a misleading "connection failed" (the
+     *  resulting CancellationException got caught by a blanket catch block). Parenting the
+     *  actual work to viewModelScope instead means routine navigation can no longer be
+     *  mistaken for a real test failure; the caller's own await still throws/cancels
+     *  normally if it goes away, it just no longer kills the underlying request. */
     suspend fun testMcpServer(server: com.newoether.agora.data.McpServerConfig): Result<List<String>> =
-        generationManager.testMcpConnection(server)
+        viewModelScope.async { generationManager.testMcpConnection(server) }.await()
 
     /** Per-server "sign in again" flag — true once an OAuth refresh attempt has failed
      *  (refresh token expired/revoked), until the user completes sign-in again. */
@@ -1029,14 +1038,18 @@ class ChatViewModel(
         get() = generationManager.mcpReauthNeeded
 
     /** Discovers OAuth metadata for [server]'s URL (RFC 9728/8414), falling back to null
-     *  (manual endpoint entry in the UI) if either step fails. */
+     *  (manual endpoint entry in the UI) if either step fails. Parented to [viewModelScope]
+     *  rather than the caller's — see [testMcpServer]'s doc for why. */
     suspend fun discoverMcpOAuthMetadata(server: com.newoether.agora.data.McpServerConfig) =
-        mcpOAuthManager.discover(server.url)
+        viewModelScope.async { mcpOAuthManager.discover(server.url) }.await()
 
     /** Registers Agora as an OAuth client with [registrationEndpoint] (RFC 7591). Null on
-     *  failure/unsupported — the UI falls back to manual client_id/secret entry. */
+     *  failure/unsupported — the UI falls back to manual client_id/secret entry. Parented to
+     *  [viewModelScope] rather than the caller's — see [testMcpServer]'s doc for why. */
     suspend fun registerMcpOAuthClient(registrationEndpoint: String) =
-        mcpOAuthManager.registerClient(registrationEndpoint, com.newoether.agora.tool.MCP_OAUTH_REDIRECT_URI)
+        viewModelScope.async {
+            mcpOAuthManager.registerClient(registrationEndpoint, com.newoether.agora.tool.MCP_OAUTH_REDIRECT_URI)
+        }.await()
 
     private val _pendingMcpOAuthLaunch = kotlinx.coroutines.flow.MutableStateFlow<com.newoether.agora.tool.McpOAuthAuthorizationRequest?>(null)
     /** Set once [com.newoether.agora.tool.McpOAuthManager.buildAuthorizationRequest] has built
