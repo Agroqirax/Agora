@@ -49,7 +49,16 @@ class TaskWorker(
                     container.taskManager.finishScheduledRun(taskId, scheduledAt)
                     Result.success()
                 }
-                is TaskManager.ExecutionResult.Skipped -> Result.success()
+                is TaskManager.ExecutionResult.Skipped -> {
+                    // A skipped occurrence still consumed the AlarmManager slot. If the schedule is
+                    // intact (stale/disabled/incomplete), advance nextRunAt so the Room flow emits
+                    // and the scheduler re-arms the next occurrence; otherwise (already running /
+                    // task gone) there is nothing to advance and advancing would corrupt a live run.
+                    if (outcome.advancesSchedule) {
+                        container.taskManager.finishScheduledRun(taskId, scheduledAt)
+                    }
+                    Result.success()
+                }
                 is TaskManager.ExecutionResult.Failure -> {
                     if (outcome.retryable && runAttemptCount < MAX_RETRY_ATTEMPTS) {
                         Result.retry()

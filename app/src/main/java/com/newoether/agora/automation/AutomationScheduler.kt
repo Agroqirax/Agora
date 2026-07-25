@@ -132,9 +132,14 @@ class AutomationScheduler(
         val activeTaskIds = activeTasks.mapTo(mutableSetOf()) { it.id }
         (armedTasks.keys - activeTaskIds).toList().forEach(::cancelTaskLocked)
         activeTasks.forEach { task ->
+            // nextRunAt may be 0 for an enabled task if a prior path cleared it without recomputing
+            // (e.g. a future bug or a manual edit). Arm from cron in that case, and persist the
+            // computed value so executeById's stale check matches and the alarm doesn't fire into
+            // a permanent H4-style skip loop.
             val logicalFireAt = task.nextRunAt.takeIf { it > 0L }
-                ?: CronExpression.parse(task.cronExpr)?.next(now)
-                ?: return@forEach
+                ?: CronExpression.parse(task.cronExpr)?.next(now)?.also { next ->
+                    taskRepository.updateTaskNextRunAtIfUnchanged(task, next)
+                } ?: return@forEach
             val desired = ArmedAlarm(logicalFireAt, useExact)
             if (armedTasks[task.id] == desired) return@forEach
 

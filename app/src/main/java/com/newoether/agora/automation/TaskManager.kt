@@ -58,7 +58,7 @@ class TaskManager(
             val reason: String,
             val retryable: Boolean,
         ) : ExecutionResult
-        data class Skipped(val reason: String) : ExecutionResult
+        data class Skipped(val reason: String, val advancesSchedule: Boolean = false) : ExecutionResult
     }
 
     sealed interface DeleteResult {
@@ -77,6 +77,12 @@ class TaskManager(
 
     private val taskCoordinator = ConversationExecutionCoordinator()
     private val manualJobs = ConcurrentHashMap<String, Job>()
+
+    /** A scheduled occurrence delayed beyond this window is dropped (not made up). Prevents a
+     *  "9am daily" from firing at 3am after the phone was off; a few-minute Doze lag still runs. */
+    private companion object {
+        const val MAX_OCCURRENCE_LATENCY_MS = 15L * 60_000L
+    }
 
     fun executionsForTask(taskId: String): Flow<List<ChatConversation>> =
         conversationRepository.getExecutionsForTask(taskId)
@@ -110,14 +116,19 @@ class TaskManager(
             return
         }
         validateTask(task)
-        val previous = taskRepository.getTask(task.id)
-        if (
-            !task.enabled || task.cronExpr.isBlank() ||
-            (previous != null && previous.cronExpr != task.cronExpr)
-        ) {
-            cancelExecutions(task.id)
+        // Cancel any in-flight execution only when the schedule actually changed, and do it under
+        // the task lock so a running Worker unwinds cleanly before we overwrite its state. Cancelling
+        // before the lock (the old behaviour) killed a mid-flight generation the instant the user
+        // edited anything, even an unrelated field; and reading `previous` outside the lock could
+        // miss a concurrent cron change. The stale-occurrence check in executeById still makes a
+        // queued Worker harmless, but cancelling here also frees the running slot promptly.
+        withTaskLock(task.id) {
+            val previous = taskRepository.getTask(task.id)
+            val scheduleChanged = !task.enabled || task.cronExpr.isBlank() ||
+                (previous != null && previous.cronExpr != task.cronExpr)
+            if (scheduleChanged) cancelExecutions(task.id)
+            saveTaskLocked(task)
         }
-        withTaskLock(task.id) { saveTaskLocked(task) }
     }
 
     private suspend fun saveTaskLocked(task: TaskEntity) {
@@ -241,7 +252,13 @@ class TaskManager(
         job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 withTaskLock(task.id) {
-                    saveTaskLocked(task)
+                    // Persist the caller's name/prompt/model/cron (the user expects "Run now" to use
+                    // what they see), but NEVER overwrite the enabled flag from the UI snapshot.
+                    // The snapshot may be stale (e.g. the user just toggled the switch off and the
+                    // flow hasn't re-emitted yet); letting runNow re-enable a disabled task would
+                    // silently revive it. The persisted enabled state is authoritative here.
+                    val persistedEnabled = taskRepository.getTask(task.id)?.enabled ?: task.enabled
+                    saveTaskLocked(task.copy(enabled = persistedEnabled))
                     val persisted = taskRepository.getTask(task.id) ?: task
                     executeLocked(
                         task = persisted,
@@ -271,13 +288,29 @@ class TaskManager(
                 ?: return@withTaskLock ExecutionResult.Skipped("Task no longer exists")
             if (task.name.isBlank() || task.prompt.isBlank()) {
                 taskRepository.upsertTask(task.copy(enabled = false, nextRunAt = 0L))
-                return@withTaskLock ExecutionResult.Skipped("Task is incomplete and was disabled")
+                return@withTaskLock ExecutionResult.Skipped(
+                    "Task is incomplete and was disabled", advancesSchedule = true,
+                )
             }
             if (!task.enabled || task.cronExpr.isBlank()) {
-                return@withTaskLock ExecutionResult.Skipped("Task is disabled")
+                return@withTaskLock ExecutionResult.Skipped("Task is disabled", advancesSchedule = true)
             }
             if (expectedRunAt > 0L && task.nextRunAt != expectedRunAt) {
-                return@withTaskLock ExecutionResult.Skipped("Scheduled occurrence is stale")
+                return@withTaskLock ExecutionResult.Skipped(
+                    "Scheduled occurrence is stale", advancesSchedule = true,
+                )
+            }
+            // Drop an occurrence that was delayed far past its slot (device was off, Doze, etc.)
+            // rather than running a "9am report" at 3am after a reboot. The schedule advances to
+            // the next real occurrence via finishScheduledRun. A short delay (under the threshold)
+            // still runs, so a few-minute Doze lag doesn't silently drop a legitimate firing.
+            if (expectedRunAt > 0L) {
+                val lateByMs = System.currentTimeMillis() - expectedRunAt
+                if (lateByMs > MAX_OCCURRENCE_LATENCY_MS) {
+                    return@withTaskLock ExecutionResult.Skipped(
+                        "Scheduled occurrence is too late ($lateByMs ms)", advancesSchedule = true,
+                    )
+                }
             }
             executeLocked(
                 task = task,
@@ -295,12 +328,21 @@ class TaskManager(
         withTaskLock(taskId) {
             val fresh = taskRepository.getTask(taskId) ?: return@withTaskLock
             val now = System.currentTimeMillis()
-            val next = if (expectedRunAt <= 0L || fresh.nextRunAt == expectedRunAt) {
-                nextRunFor(fresh, now)
-            } else {
-                fresh.nextRunAt
+            val next = when {
+                // The expected occurrence ran (or was skipped-as-stale after the alarm fired).
+                expectedRunAt <= 0L || fresh.nextRunAt == expectedRunAt -> nextRunFor(fresh, now)
+                // A concurrent edit moved nextRunAt forward to a still-future time: respect it.
+                fresh.nextRunAt > now -> fresh.nextRunAt
+                // The persisted nextRunAt is in the past (e.g. a stale occurrence that was never
+                // advanced). Recompute from cron so the scheduler re-arms the next real occurrence
+                // instead of leaving the task permanently un-armed (the old H4 silent-death path).
+                else -> nextRunFor(fresh, now)
             }
-            taskRepository.upsertTask(fresh.copy(lastRunAt = now, nextRunAt = next))
+            if (next != fresh.nextRunAt) {
+                taskRepository.upsertTask(fresh.copy(lastRunAt = now, nextRunAt = next))
+            } else if (fresh.lastRunAt != now) {
+                taskRepository.upsertTask(fresh.copy(lastRunAt = now))
+            }
         }
     }
 
@@ -321,7 +363,9 @@ class TaskManager(
         val existing = conversationRepository.getConversation(conversationId)
         if (existing != null) {
             if (existing.taskId == task.id && existing.graduated) {
-                return ExecutionResult.Skipped("Execution conversation was taken over by the user")
+                return ExecutionResult.Skipped(
+                    "Execution conversation was taken over by the user", advancesSchedule = true,
+                )
             }
             if (existing.taskId == task.id) {
                 val recovery = recoverExistingExecution(existing)
