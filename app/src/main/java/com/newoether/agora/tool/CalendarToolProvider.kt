@@ -66,7 +66,7 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                 description = "Get calendar events in a time range. Recurring events are expanded into individual occurrences.",
                 parameters = ToolParameters(
                     properties = mapOf(
-                        "start_time" to ToolProperty("string", "Start of the range, ISO-8601 (e.g. 2026-07-08T00:00:00Z)."),
+                        "start_time" to ToolProperty("string", "Start of the range, ISO-8601 (e.g. 2026-07-08T00:00:00Z or 2026-07-08T02:00:00+02:00). A value with no UTC offset is assumed to be in the device's local timezone."),
                         "end_time" to ToolProperty("string", "End of the range, ISO-8601."),
                         "query" to ToolProperty("string", "Optional substring to filter by event title."),
                         "calendar_id" to ToolProperty("string", "Optional calendar id to restrict the search to (see list_calendars).")
@@ -80,12 +80,13 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                 parameters = ToolParameters(
                     properties = mapOf(
                         "title" to ToolProperty("string", "Event title."),
-                        "start_time" to ToolProperty("string", "Start time, ISO-8601."),
+                        "start_time" to ToolProperty("string", "Start time, ISO-8601 (e.g. 2026-07-08T11:00:00+02:00 or ...Z for UTC). A value with no UTC offset is interpreted using timezone (or the device's local timezone if timezone is also omitted)."),
                         "end_time" to ToolProperty("string", "End time, ISO-8601. Required unless all_day is true."),
                         "all_day" to ToolProperty("boolean", "Whether this is an all-day event (optional, default false)."),
                         "location" to ToolProperty("string", "Event location (optional)."),
                         "description" to ToolProperty("string", "Event notes/description (optional)."),
-                        "calendar_id" to ToolProperty("string", "Calendar to create the event on (optional, defaults to the device's primary writable calendar).")
+                        "calendar_id" to ToolProperty("string", "Calendar to create the event on (optional, defaults to the device's primary writable calendar)."),
+                        "timezone" to ToolProperty("string", "IANA timezone id the event should be recorded in, e.g. \"Europe/Amsterdam\" (optional, defaults to the device's local timezone). Also used to interpret start_time/end_time when they carry no UTC offset.")
                     ),
                     required = listOf("title", "start_time")
                 )
@@ -100,7 +101,8 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                         "start_time" to ToolProperty("string", "New start time, ISO-8601 (optional)."),
                         "end_time" to ToolProperty("string", "New end time, ISO-8601 (optional)."),
                         "location" to ToolProperty("string", "New location (optional)."),
-                        "description" to ToolProperty("string", "New notes/description (optional).")
+                        "description" to ToolProperty("string", "New notes/description (optional)."),
+                        "timezone" to ToolProperty("string", "New IANA timezone id for the event, e.g. \"Europe/Amsterdam\" (optional). Also used to interpret new start_time/end_time when they carry no UTC offset.")
                     ),
                     required = listOf("event_id")
                 )
@@ -235,8 +237,8 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                 events.add(buildJsonObject {
                     put("event_id", c.getLong(0).toString())
                     put("title", title)
-                    put("start_time", isoUtc(c.getLong(2)))
-                    put("end_time", isoUtc(c.getLong(3)))
+                    put("start_time", isoLocal(c.getLong(2)))
+                    put("end_time", isoLocal(c.getLong(3)))
                     put("all_day", c.getInt(4) == 1)
                     put("location", c.getString(5) ?: "")
                     put("description", c.getString(6) ?: "")
@@ -256,10 +258,12 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
         val title = arg(args, "title")
         if (title.isBlank()) return err("invalid_argument", "title is required")
         val allDay = arg(args, "all_day").equals("true", ignoreCase = true)
-        val startMs = parseInstant(arg(args, "start_time"))
+        val eventTz = resolveTimeZone(arg(args, "timezone"))
+            ?: return err("invalid_argument", "timezone is not a recognized IANA timezone id.")
+        val startMs = parseInstant(arg(args, "start_time"), eventTz)
             ?: return err("invalid_argument", "start_time must be a valid ISO-8601 date-time.")
         val endMs = if (allDay) startMs else {
-            parseInstant(arg(args, "end_time"))
+            parseInstant(arg(args, "end_time"), eventTz)
                 ?: return err("invalid_argument", "end_time is required (unless all_day) and must be ISO-8601.")
         }
         val location = arg(args, "location")
@@ -270,8 +274,8 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
 
         if (!hasWritePermission()) return err("permission_denied", "Write-calendar permission was not granted.")
 
-        val range = if (allDay) "on ${isoUtc(startMs)}"
-            else "from ${isoUtc(startMs)} to ${isoUtc(endMs)}"
+        val range = if (allDay) "on ${isoLocal(startMs)}"
+            else "from ${isoLocal(startMs)} to ${isoLocal(endMs)}"
         if (confirmWrite?.invoke("Create \"$title\" $range") == false) {
             return err("user_denied", "The user declined to create this event.")
         }
@@ -283,7 +287,7 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                 put(CalendarContract.Events.DTSTART, startMs)
                 put(CalendarContract.Events.DTEND, endMs)
                 put(CalendarContract.Events.ALL_DAY, if (allDay) 1 else 0)
-                put(CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().getID())
+                put(CalendarContract.Events.EVENT_TIMEZONE, eventTz.id)
                 if (location.isNotBlank()) put(CalendarContract.Events.EVENT_LOCATION, location)
                 if (description.isNotBlank()) put(CalendarContract.Events.DESCRIPTION, description)
             }
@@ -305,22 +309,28 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
 
         val current = fetchEventSummary(eventId) ?: return err("not_found", "No event with id $eventId.")
 
+        val newTimeZone = if (args.containsKey("timezone")) {
+            resolveTimeZone(arg(args, "timezone"))
+                ?: return err("invalid_argument", "timezone is not a recognized IANA timezone id.")
+        } else null
+        val parseTz = newTimeZone ?: TimeZone.getDefault()
         val newTitle = arg(args, "title").ifBlank { null }
         val newStartMs = arg(args, "start_time").ifBlank { null }?.let {
-            parseInstant(it) ?: return err("invalid_argument", "start_time must be a valid ISO-8601 date-time.")
+            parseInstant(it, parseTz) ?: return err("invalid_argument", "start_time must be a valid ISO-8601 date-time.")
         }
         val newEndMs = arg(args, "end_time").ifBlank { null }?.let {
-            parseInstant(it) ?: return err("invalid_argument", "end_time must be a valid ISO-8601 date-time.")
+            parseInstant(it, parseTz) ?: return err("invalid_argument", "end_time must be a valid ISO-8601 date-time.")
         }
         val newLocation = if (args.containsKey("location")) arg(args, "location") else null
         val newDescription = if (args.containsKey("description")) arg(args, "description") else null
 
         val changes = buildList {
             if (newTitle != null) add("title -> \"$newTitle\"")
-            if (newStartMs != null) add("start -> ${isoUtc(newStartMs)}")
-            if (newEndMs != null) add("end -> ${isoUtc(newEndMs)}")
+            if (newStartMs != null) add("start -> ${isoLocal(newStartMs)}")
+            if (newEndMs != null) add("end -> ${isoLocal(newEndMs)}")
             if (newLocation != null) add("location -> \"$newLocation\"")
             if (newDescription != null) add("description updated")
+            if (newTimeZone != null) add("timezone -> ${newTimeZone.id}")
         }
         if (changes.isEmpty()) return err("invalid_argument", "No fields to update were provided.")
         if (!hasWritePermission()) return err("permission_denied", "Write-calendar permission was not granted.")
@@ -336,6 +346,7 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
                 newEndMs?.let { put(CalendarContract.Events.DTEND, it) }
                 newLocation?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
                 newDescription?.let { put(CalendarContract.Events.DESCRIPTION, it) }
+                newTimeZone?.let { put(CalendarContract.Events.EVENT_TIMEZONE, it.id) }
             }
             val uri = ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, eventId)
             val rows = resolver.update(uri, values, null, null)
@@ -373,7 +384,7 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
             if (c.moveToFirst()) {
                 val title = c.getString(0) ?: "(untitled)"
                 val start = c.getLong(1)
-                return@withContext title to isoUtc(start)
+                return@withContext title to isoLocal(start)
             }
         }
         null
@@ -388,25 +399,38 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
     private fun arg(args: Map<String, JsonElement>, key: String): String =
         (args[key] as? JsonPrimitive)?.content ?: ""
 
-    /** Formats an epoch-millis timestamp as a UTC ISO-8601 instant, e.g. "2026-07-08T09:00:00Z".
+    /** Formats an epoch-millis timestamp as an ISO-8601 instant in the device's local
+     *  timezone with an explicit UTC offset, e.g. "2026-07-08T11:00:00+02:00". An explicit
+     *  offset (rather than converting to UTC "Z") avoids models silently misreading the
+     *  timestamp as already being in local time.
      *  Uses java.text.SimpleDateFormat rather than java.time (minSdk 24 predates java.time,
      *  which needs API 26+ or core library desugaring — neither is set up in this module). */
-    private fun isoUtc(epochMs: Long): String {
-        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
-        sdf.timeZone = TimeZone.getTimeZone("UTC")
+    private fun isoLocal(epochMs: Long): String {
+        val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
+        sdf.timeZone = TimeZone.getDefault()
         return sdf.format(Date(epochMs))
     }
 
-    /** Accepts full ISO-8601 UTC instants ("...Z", with or without milliseconds) or bare
-     *  local date-times with no zone (assumed device-local timezone), matching what a model
-     *  is likely to send back after seeing [isoUtc]'s output from get_calendar_events. */
-    private fun parseInstant(value: String): Long? {
+    /** Resolves an IANA timezone id, returning the device default when [id] is blank, or
+     *  null when [id] is non-blank but not a recognized zone (TimeZone.getTimeZone silently
+     *  falls back to GMT for unknown ids, so unknown ids are rejected explicitly here). */
+    private fun resolveTimeZone(id: String): TimeZone? {
+        if (id.isBlank()) return TimeZone.getDefault()
+        val tz = TimeZone.getTimeZone(id)
+        if (tz.id != id && !id.equals("GMT", ignoreCase = true) && !id.equals("UTC", ignoreCase = true)) return null
+        return tz
+    }
+
+    /** Accepts ISO-8601 date-times with an explicit UTC offset ("...Z" or "...+02:00", with
+     *  or without milliseconds) or bare date-times with no zone, in which case [defaultTz] is
+     *  used — matching what a model is likely to send back after seeing [isoLocal]'s output
+     *  from get_calendar_events. */
+    private fun parseInstant(value: String, defaultTz: TimeZone = TimeZone.getDefault()): Long? {
         if (value.isBlank()) return null
-        val utcPatterns = listOf("yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
-        for (pattern in utcPatterns) {
+        val offsetPatterns = listOf("yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ss.SSSXXX")
+        for (pattern in offsetPatterns) {
             try {
                 val sdf = SimpleDateFormat(pattern, Locale.US)
-                sdf.timeZone = TimeZone.getTimeZone("UTC")
                 sdf.isLenient = false
                 return sdf.parse(value)?.time
             } catch (_: Exception) { /* try next pattern */ }
@@ -415,7 +439,7 @@ class CalendarToolProvider(private val app: Application) : ToolProvider {
         for (pattern in localPatterns) {
             try {
                 val sdf = SimpleDateFormat(pattern, Locale.US)
-                sdf.timeZone = TimeZone.getDefault()
+                sdf.timeZone = defaultTz
                 sdf.isLenient = false
                 return sdf.parse(value)?.time
             } catch (_: Exception) { /* try next pattern */ }

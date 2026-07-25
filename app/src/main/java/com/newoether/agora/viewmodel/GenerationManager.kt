@@ -134,7 +134,7 @@ internal fun applyUserTemplateToMessages(
     postpend: String?
 ): List<ChatMessage> {
     if (prepend == null && postpend == null) return messages
-    val timeSdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+    val timeSdf = java.text.SimpleDateFormat("HH:mm:ssXXX", java.util.Locale.US)
     val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
     return messages.map { msg ->
         val isToolMessage = msg.id.startsWith(Constants.TOOL_MSG_PREFIX) ||

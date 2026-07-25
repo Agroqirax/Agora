@@ -204,7 +204,7 @@ class GenerationRequestBuilder(
         val includeActiveMemory = settings.accessActiveMemory.value
         val modelId = ModelId.parse(currentActiveModel.value).modelName
 
-        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+        val sdf = java.text.SimpleDateFormat("HH:mm:ssXXX", java.util.Locale.US)
         val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
         val now = java.util.Date()
 

@@ -28,9 +28,9 @@ object PredefinedVariables {
     val PER_MESSAGE_VARS = setOf(SENT_TIME, SENT_DATE)
 
     val EXAMPLE_VALUES = mapOf(
-        TIME to "14:30:00",
+        TIME to "14:30:00+02:00",
         DATE to "2026-05-10",
-        SENT_TIME to "10:05:00",
+        SENT_TIME to "10:05:00+02:00",
         SENT_DATE to "2026-05-11",
         ACTIVE_MEMORY to "[Example memory content]",
         MODEL_ID to Constants.EXAMPLE_MODEL_ID
