@@ -207,11 +207,18 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
 
-        intent.registerIfSettingsRequest()
-        intent.registerIfAssistLaunch()
-        intent.registerIfShareRequest()
-        intent.registerIfMcpOAuthResult()
-        intent.registerIfQuickLaunch()
+        // Only process the launch intent on a genuinely fresh Activity instance. On
+        // orientation change (or other config changes) Android recreates the Activity
+        // with the *same* intent still returned by getIntent(), and savedInstanceState
+        // is non-null — without this guard we'd re-trigger e.g. quick-launch's
+        // createNewChat() a second time and yank the user away from wherever they were.
+        if (savedInstanceState == null) {
+            intent.registerIfSettingsRequest()
+            intent.registerIfAssistLaunch()
+            intent.registerIfShareRequest()
+            intent.registerIfMcpOAuthResult()
+            intent.registerIfQuickLaunch()
+        }
 
         com.newoether.agora.util.DebugLog.init(this)
         AgoraForegroundService.createChannel(this)

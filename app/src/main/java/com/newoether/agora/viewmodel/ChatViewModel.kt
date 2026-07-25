@@ -552,7 +552,13 @@ class ChatViewModel(
     private val _isSyncingModels = MutableStateFlow(false)
     val isSyncingModels: StateFlow<Boolean> = _isSyncingModels.asStateFlow()
 
-    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>(replay = 1)
+    // replay = 0: this is a one-shot event stream, not app state. A replay buffer would
+    // re-deliver the last snackbar (e.g. "Title generated.") to the fresh collector that
+    // subscribes whenever MainActivity is recreated (e.g. on orientation change), showing
+    // it again even though it was already shown once. extraBufferCapacity avoids suspending
+    // emit() during the brief gap while the Activity is being recreated and no collector
+    // is attached yet.
+    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>(replay = 0, extraBufferCapacity = 1)
     val snackbarMessage = _snackbarMessage.asSharedFlow()
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
