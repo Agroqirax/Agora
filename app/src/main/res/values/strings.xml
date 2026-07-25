@@ -1063,6 +1063,23 @@
     <string name="shell_ssh_verify_failed">Could not reach host: %1$s</string>
     <string name="shell_ssh_verifying">Connecting…</string>
     <string name="shell_ssh_unpin">Remove pinned key</string>
+    <string name="shell_ssh_verify_auth_failed">Host key captured, but authentication failed: %1$s</string>
+    <!-- SSH public-key auth -->
+    <string name="shell_ssh_auth_method">Authentication</string>
+    <string name="shell_ssh_auth_password">Password</string>
+    <string name="shell_ssh_auth_key">Public key</string>
+    <string name="shell_ssh_private_key">Private key</string>
+    <string name="shell_ssh_private_key_hint">Paste an existing OpenSSH private key, or generate one</string>
+    <string name="shell_ssh_private_key_passphrase">Passphrase (optional)</string>
+    <string name="shell_ssh_generate_key">Generate key pair</string>
+    <string name="shell_ssh_generating_key">Generating…</string>
+    <string name="shell_ssh_public_key_title">Public key generated</string>
+    <string name="shell_ssh_public_key_message">Add this line to ~/.ssh/authorized_keys on the server, then save this device.</string>
+    <string name="shell_ssh_copy_public_key">Copy public key</string>
+    <string name="shell_ssh_public_key_copied">Public key copied to clipboard</string>
+    <!-- Generic show/hide toggle for password & secret fields -->
+    <string name="show_password">Show</string>
+    <string name="hide_password">Hide</string>
     <!-- Remote shell confirmation gate -->
     <string name="shell_confirm_title">Allow action on \"%1$s\"?</string>
     <string name="shell_confirm_allow">Allow once</string>

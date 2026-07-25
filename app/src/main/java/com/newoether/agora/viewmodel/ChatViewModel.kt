@@ -1102,31 +1102,58 @@ class ChatViewModel(
         }
     }
 
+    /** Result of [verifySshHostKey]: the captured host key/fingerprint (the handshake
+     *  happens before authentication, so this is always populated once the host is
+     *  reachable) plus [authError] — non-null when the credentials themselves were
+     *  rejected, so the caller can surface that separately from host-key trust — and
+     *  [remoteHostname] — the server's own `hostname` output (e.g. "laptop"), only
+     *  available when auth succeeded, for defaulting the device's display name to
+     *  something more useful than the IP/host the user typed in. */
+    data class SshVerifyResult(val hostKey: String, val fingerprint: String, val authError: String?, val remoteHostname: String?)
+
     /**
      * Connects to an SSH host in capture mode and returns the server host key
      * (base64) together with its SHA-256 fingerprint, for the user to review and
-     * pin. The host key is exchanged before authentication, so this succeeds even
-     * if the password is wrong — letting the user pin the key first.
+     * pin, plus whether the supplied credentials actually authenticated. The host
+     * key is exchanged before authentication, so it's captured even if the
+     * password/key is wrong — letting the user pin it regardless — but a bad
+     * password/key is reported via [SshVerifyResult.authError] rather than silently
+     * swallowed.
      */
     suspend fun verifySshHostKey(
-        host: String, port: Int, user: String, password: String, timeoutSec: Int
-    ): Result<Pair<String, String>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        host: String, port: Int, user: String, password: String, timeoutSec: Int,
+        privateKey: String = "", privateKeyPassphrase: String = ""
+    ): Result<SshVerifyResult> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         if (host.isBlank()) return@withContext Result.failure(Exception("Host is empty"))
         val client = SshClient(
             host, port, user.ifBlank { "root" }, password, timeoutSec * 1000,
-            pinnedHostKey = "", allowUnknownHostKey = true
+            pinnedHostKey = "", allowUnknownHostKey = true,
+            privateKey = privateKey, privateKeyPassphrase = privateKeyPassphrase
         )
-        try {
-            client.executeCommand("true")
-        } catch (_: Exception) {
-            // Ignore — the host key is captured during the handshake regardless of auth result.
+        var remoteHostname: String? = null
+        val authError = try {
+            val result = client.executeCommand("hostname")
+            if (result.exitCode == 0) remoteHostname = result.stdout.trim().ifBlank { null }
+            null
+        } catch (e: Exception) {
+            e.message ?: "Authentication failed"
         } finally {
             client.close()
         }
         val key = client.capturedHostKey
         if (key.isNullOrBlank()) Result.failure(Exception("Could not reach host or no host key presented"))
-        else Result.success(key to SshClient.fingerprintSha256(key))
+        else Result.success(SshVerifyResult(key, SshClient.fingerprintSha256(key), authError, remoteHostname))
     }
+
+    /** Generates a fresh Ed25519 keypair for SSH public-key auth (see SettingsShellPage). */
+    suspend fun generateSshKeyPair(passphrase: String = ""): Result<SshClient.KeyPairResult> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            try {
+                Result.success(SshClient.generateKeyPair("agora", passphrase))
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
     suspend fun testRemoteEmbedding(modelName: String, baseUrl: String, apiKey: String = ""): String? {
         val effectiveKey = apiKey.ifBlank { ragManager.resolveEmbeddingApiKey() ?: "" }
         val url = baseUrl.ifBlank { ragManager.resolveEmbeddingBaseUrl() }

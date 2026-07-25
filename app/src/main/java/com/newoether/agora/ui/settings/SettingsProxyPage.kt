@@ -9,6 +9,8 @@ import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Lan
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -169,6 +171,7 @@ private fun ProxyLabeledField(
     singleLine: Boolean = true
 ) {
     var draft by remember { mutableStateOf(value) }
+    var visible by remember { mutableStateOf(false) }
     LaunchedEffect(value) { if (value != draft) draft = value }
     Column(modifier = modifier) {
         Text(
@@ -191,7 +194,17 @@ private fun ProxyLabeledField(
                 placeholder = placeholder?.let { ph -> { Text(ph, style = MaterialTheme.typography.bodyMedium) } },
                 singleLine = singleLine,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboard),
-                visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+                visualTransformation = if (password && !visible) PasswordVisualTransformation() else VisualTransformation.None,
+                trailingIcon = if (password) {
+                    {
+                        IconButton(onClick = { visible = !visible }) {
+                            Icon(
+                                if (visible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                stringResource(if (visible) R.string.hide_password else R.string.show_password)
+                            )
+                        }
+                    }
+                } else null,
                 shape = RoundedCornerShape(16.dp),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.fillMaxWidth()

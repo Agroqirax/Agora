@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -146,12 +148,16 @@ internal fun AddRemoteEmbeddingDialog(
                 Spacer(modifier = Modifier.height(12.dp))
                 // API Key
                 val currentKey = state.apiKeys[state.selectedProviderIdx]
+                var keyVisible by remember { mutableStateOf(false) }
                 OutlinedTextField(
                     value = currentKey,
                     onValueChange = { state.apiKeys[state.selectedProviderIdx] = it },
                     label = { Text(stringResource(R.string.embedding_api_key)) },
                     placeholder = { Text(stringResource(R.string.embedding_api_key_hint)) },
-                    visualTransformation = PasswordVisualTransformation(),
+                    trailingIcon = { IconButton(onClick = { keyVisible = !keyVisible }) {
+                        Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (keyVisible) R.string.hide_password else R.string.show_password))
+                    } },
+                    visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                     singleLine = true,
                     shape = RoundedCornerShape(16.dp),
                     modifier = Modifier.fillMaxWidth()

@@ -352,9 +352,13 @@ private fun ServerEditor(
 
                     if (authTypeInput == "bearer") {
                         Spacer(Modifier.height(10.dp))
+                        var tokenVisible by remember(server.id) { mutableStateOf(false) }
                         OutlinedTextField(value = tokenInput, onValueChange = { tokenInput = it }, label = { Text(stringResource(R.string.mcp_server_bearer_token)) },
                             placeholder = { Text(stringResource(R.string.mcp_server_bearer_token_hint)) }, leadingIcon = { Icon(Icons.Default.Key, null) },
-                            singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                            trailingIcon = { IconButton(onClick = { tokenVisible = !tokenVisible }) {
+                                Icon(if (tokenVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (tokenVisible) R.string.hide_password else R.string.show_password))
+                            } },
+                            singleLine = true, visualTransformation = if (tokenVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                             shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
                     }
 
@@ -730,8 +734,12 @@ private fun McpOAuthSection(
     OutlinedTextField(value = clientIdInput, onValueChange = onClientIdChange, label = { Text(stringResource(R.string.mcp_oauth_client_id)) },
         singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
     Spacer(Modifier.height(10.dp))
+    var clientSecretVisible by remember(server.id) { mutableStateOf(false) }
     OutlinedTextField(value = clientSecretInput, onValueChange = onClientSecretChange, label = { Text(stringResource(R.string.mcp_oauth_client_secret)) },
-        singleLine = true, visualTransformation = PasswordVisualTransformation(),
+        trailingIcon = { IconButton(onClick = { clientSecretVisible = !clientSecretVisible }) {
+            Icon(if (clientSecretVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (clientSecretVisible) R.string.hide_password else R.string.show_password))
+        } },
+        singleLine = true, visualTransformation = if (clientSecretVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
         shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
     Spacer(Modifier.height(10.dp))
     OutlinedTextField(value = scopeInput, onValueChange = onScopeChange, label = { Text(stringResource(R.string.mcp_oauth_scope)) },

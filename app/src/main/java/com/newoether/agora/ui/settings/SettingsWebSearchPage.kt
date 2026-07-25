@@ -12,6 +12,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.foundation.text.input.TextFieldState
@@ -104,6 +106,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
+                                                var apiKeyVisible by remember(webSearchProvider) { mutableStateOf(false) }
                                                 OutlinedTextField(
                                                     value = apiKeyText,
                                                     onValueChange = { apiKeyText = it; viewModel.settings.setWebSearchApiKey(webSearchProvider, it) },
@@ -118,7 +121,10 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                             )
                                                         )
                                                     },
-                                                    visualTransformation = PasswordVisualTransformation(),
+                                                    trailingIcon = { IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                                                        Icon(if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (apiKeyVisible) R.string.hide_password else R.string.show_password))
+                                                    } },
+                                                    visualTransformation = if (apiKeyVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                                                     shape = RoundedCornerShape(16.dp),
                                                     modifier = Modifier.fillMaxWidth(),
                                                     textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)

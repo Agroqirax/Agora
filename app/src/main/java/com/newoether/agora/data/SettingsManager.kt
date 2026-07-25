@@ -74,7 +74,12 @@ data class ShellDeviceConfig(
     val sshHost: String = "",
     val sshPort: Int = 22,
     val sshUser: String = "root",
+    // "password" | "key". Default "password" so pre-existing configs keep working unchanged.
+    val sshAuthMethod: String = "password",
     val sshPassword: String = "",
+    // Public-key auth (sshAuthMethod == "key"): PEM private key + optional passphrase.
+    val sshPrivateKey: String = "",
+    val sshPrivateKeyPassphrase: String = "",
     // Pinned SSH host key (base64 of the server public-key blob). Blank = not yet
     // pinned (trust-on-first-use); once set, connections must match or are rejected.
     val sshHostKey: String = ""

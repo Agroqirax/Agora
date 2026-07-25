@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -478,12 +479,22 @@ fun SettingsProviderDetailPage(
     // API Key dialog
     showKeyDialog?.let { entry ->
         var name by remember { mutableStateOf(entry.name) }; var key by remember { mutableStateOf(entry.key) }
+        var keyVisible by remember { mutableStateOf(false) }
         val isEdit = apiKeys.any { it.id == entry.id }
         AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showKeyDialog = null }, title = { Text(if (isEdit) stringResource(R.string.provider_edit_key) else stringResource(R.string.provider_add_key_title), fontWeight = FontWeight.Bold) }, text = {
             Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.provider_key_name_hint)) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().noOpBringIntoView())
                 Spacer(modifier = Modifier.height(8.dp))
-                Box(modifier = Modifier.noOpBringIntoView()) { OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("${providerName} API Key") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) }
+                Box(modifier = Modifier.noOpBringIntoView()) {
+                    OutlinedTextField(
+                        value = key, onValueChange = { key = it }, label = { Text("${providerName} API Key") },
+                        trailingIcon = { IconButton(onClick = { keyVisible = !keyVisible }) {
+                            Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (keyVisible) R.string.hide_password else R.string.show_password))
+                        } },
+                        visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                        shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
         }, confirmButton = { TextButton(onClick = { if (name.isNotBlank() && key.isNotBlank()) { if (isEdit) viewModel.settings.updateApiKey(entry.id, name, key) else viewModel.settings.addApiKey(name, key, providerName); showKeyDialog = null } }) { Text(if (isEdit) stringResource(R.string.provider_save) else stringResource(R.string.provider_add)) } }, dismissButton = { TextButton(onClick = { showKeyDialog = null }) { Text(stringResource(R.string.cancel)) } })
     }

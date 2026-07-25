@@ -25,6 +25,10 @@ import java.nio.file.FileSystems
  *    devices); the captured value is exposed via [capturedHostKey].
  *  - blank + false → unknown keys are rejected (fail-closed).
  *
+ * Auth: password auth is used unless [privateKey] is non-blank, in which case a
+ * public-key identity (OpenSSH/PEM private key, optionally passphrase-protected) is
+ * used instead and [password] is ignored.
+ *
  * NOT thread-safe — create a new instance per tool call.
  */
 class SshClient(
@@ -34,7 +38,9 @@ class SshClient(
     private val password: String,
     private val timeoutMs: Int = 30000,
     private val pinnedHostKey: String = "",
-    private val allowUnknownHostKey: Boolean = false
+    private val allowUnknownHostKey: Boolean = false,
+    private val privateKey: String = "",
+    private val privateKeyPassphrase: String = ""
 ) {
     private var session: Session? = null
 
@@ -48,9 +54,21 @@ class SshClient(
         session?.let { if (it.isConnected) return it }
         return withContext(Dispatchers.IO) {
             val jsch = JSch()
+            if (privateKey.isNotBlank()) {
+                jsch.addIdentity(
+                    "agora-$host",
+                    privateKey.toByteArray(Charsets.UTF_8),
+                    null,
+                    privateKeyPassphrase.toByteArray(Charsets.UTF_8)
+                )
+            }
             val s = jsch.getSession(user, host, port).apply {
-                setPassword(password)
-                setConfig("PreferredAuthentications", "password")
+                if (privateKey.isNotBlank()) {
+                    setConfig("PreferredAuthentications", "publickey")
+                } else {
+                    setPassword(password)
+                    setConfig("PreferredAuthentications", "password")
+                }
                 hostKeyRepository = TofuHostKeyRepository()
                 // "yes" makes JSch reject NOT_INCLUDED/CHANGED keys; "no" accepts (capture mode).
                 setConfig("StrictHostKeyChecking", if (allowUnknownHostKey && pinnedHostKey.isBlank()) "no" else "yes")
@@ -80,6 +98,11 @@ class SshClient(
         override fun getHostKey(host: String?, type: String?): Array<HostKey> = emptyArray()
     }
 
+    /** An OpenSSH-format keypair: [privateKeyPem] (PEM, optionally passphrase-encrypted)
+     *  and [publicKeyLine] (the "ssh-rsa AAAA... comment" line to append to the remote's
+     *  ~/.ssh/authorized_keys). */
+    data class KeyPairResult(val privateKeyPem: String, val publicKeyLine: String)
+
     companion object {
         /** OpenSSH-style "SHA256:…" fingerprint of a base64 host-key blob, for display. */
         fun fingerprintSha256(base64Key: String): String = try {
@@ -87,6 +110,34 @@ class SshClient(
             val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
             "SHA256:" + java.util.Base64.getEncoder().withoutPadding().encodeToString(digest)
         } catch (_: Exception) { "" }
+
+        /** Generates a fresh RSA-3072 keypair for public-key auth. Runs on [Dispatchers.IO].
+         *
+         *  RSA, not Ed25519: mwiede/jsch can *parse and use* an Ed25519 private key (that's
+         *  how the "paste an existing key" path works), but its [com.jcraft.jsch.KeyPair.
+         *  writePrivateKey] always calls the legacy PKCS1-style [com.jcraft.jsch.KeyPair.
+         *  getPrivateKey], which [com.jcraft.jsch.KeyPairEdDSA] unconditionally throws
+         *  UnsupportedOperationException from — there is no public API in this library
+         *  version to *serialize* a freshly generated Ed25519/Ed448 key to OpenSSH-v1 PEM.
+         *  RSA uses the classic format and round-trips fine. */
+        suspend fun generateKeyPair(comment: String, passphrase: String = ""): KeyPairResult =
+            withContext(Dispatchers.IO) {
+                val jsch = JSch()
+                val kpair = com.jcraft.jsch.KeyPair.genKeyPair(jsch, com.jcraft.jsch.KeyPair.RSA, 3072)
+                val privOut = ByteArrayOutputStream()
+                val pubOut = ByteArrayOutputStream()
+                if (passphrase.isNotBlank()) {
+                    kpair.writePrivateKey(privOut, passphrase.toByteArray(Charsets.UTF_8))
+                } else {
+                    kpair.writePrivateKey(privOut)
+                }
+                kpair.writePublicKey(pubOut, comment)
+                kpair.dispose()
+                KeyPairResult(
+                    privateKeyPem = privOut.toString("UTF-8"),
+                    publicKeyLine = pubOut.toString("UTF-8").trim()
+                )
+            }
     }
 
     fun close() {

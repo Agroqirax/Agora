@@ -178,6 +178,8 @@ class ShellToolProvider(
         private val port = device.sshPort
         private val user = device.sshUser
         private val password = device.sshPassword
+        private val privateKey = if (device.sshAuthMethod == "key") device.sshPrivateKey else ""
+        private val privateKeyPassphrase = device.sshPrivateKeyPassphrase
         private val timeout = device.timeout
         private val deviceName = device.name
         private val hostKey = device.sshHostKey
@@ -187,7 +189,9 @@ class ShellToolProvider(
                 host, port, user, password, timeout * 1000,
                 pinnedHostKey = hostKey,
                 // Un-pinned devices stay usable (capture-only); once a key is pinned it is enforced.
-                allowUnknownHostKey = hostKey.isBlank()
+                allowUnknownHostKey = hostKey.isBlank(),
+                privateKey = privateKey,
+                privateKeyPassphrase = privateKeyPassphrase
             )
         }
 

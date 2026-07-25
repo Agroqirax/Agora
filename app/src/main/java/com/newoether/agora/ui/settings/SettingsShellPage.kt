@@ -20,6 +20,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.activity.compose.BackHandler
@@ -233,16 +235,30 @@ private fun DeviceEditor(
     var sshHostInput by remember(device.id) { mutableStateOf(device.sshHost) }
     var sshPortInput by remember(device.id) { mutableStateOf(device.sshPort.toString()) }
     var sshUserInput by remember(device.id) { mutableStateOf(device.sshUser) }
+    var sshAuthMethodInput by remember(device.id) { mutableStateOf(device.sshAuthMethod) }
     var sshPwInput by remember(device.id) { mutableStateOf(device.sshPassword) }
+    var sshPrivateKeyInput by remember(device.id) { mutableStateOf(device.sshPrivateKey) }
+    var sshPrivateKeyPassphraseInput by remember(device.id) { mutableStateOf(device.sshPrivateKeyPassphrase) }
+    var keyVisible by remember(device.id) { mutableStateOf(false) }
+    var sshPwVisible by remember(device.id) { mutableStateOf(false) }
+    var sshPassphraseVisible by remember(device.id) { mutableStateOf(false) }
     var timeoutInput by remember(device.id) { mutableStateOf(device.timeout) }
     var sshHostKeyInput by remember(device.id) { mutableStateOf(device.sshHostKey) }
     val nameFocusRequester = remember { FocusRequester() }
     val urlFocusRequester = remember { FocusRequester() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
     var verifying by remember(device.id) { mutableStateOf(false) }
     // Captured (key, fingerprint) awaiting the user's trust decision.
     var pendingVerify by remember(device.id) { mutableStateOf<Pair<String, String>?>(null) }
     var verifyError by remember(device.id) { mutableStateOf<String?>(null) }
+    // Set when the host was reachable (host key captured) but the credentials themselves
+    // were rejected — distinct from [verifyError], which means the host wasn't reachable at all.
+    var verifyAuthError by remember(device.id) { mutableStateOf<String?>(null) }
+    var generatingKey by remember(device.id) { mutableStateOf(false) }
+    // Newly generated public key line, shown once so the user can copy it to the server.
+    var generatedPublicKey by remember(device.id) { mutableStateOf<String?>(null) }
+    var generateKeyError by remember(device.id) { mutableStateOf<String?>(null) }
 
     LaunchedEffect(device) {
         enabledInput = device.enabled
@@ -250,7 +266,10 @@ private fun DeviceEditor(
         nameInput = device.name; descInput = device.description; typeInput = device.type
         urlInput = device.serverUrl; keyInput = device.apiKey
         sshHostInput = device.sshHost; sshPortInput = device.sshPort.toString()
-        sshUserInput = device.sshUser; sshPwInput = device.sshPassword; timeoutInput = device.timeout
+        sshUserInput = device.sshUser; sshAuthMethodInput = device.sshAuthMethod
+        sshPwInput = device.sshPassword
+        sshPrivateKeyInput = device.sshPrivateKey; sshPrivateKeyPassphraseInput = device.sshPrivateKeyPassphrase
+        timeoutInput = device.timeout
         sshHostKeyInput = device.sshHostKey
     }
 
@@ -341,7 +360,11 @@ private fun DeviceEditor(
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(value = keyInput, onValueChange = { keyInput = it }, label = { Text(stringResource(R.string.shell_device_key)) },
                         placeholder = { Text(stringResource(R.string.shell_device_key_hint)) }, leadingIcon = { Icon(Icons.Default.Key, null) },
-                        visualTransformation = PasswordVisualTransformation(), singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                        trailingIcon = { IconButton(onClick = { keyVisible = !keyVisible }) {
+                            Icon(if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (keyVisible) R.string.hide_password else R.string.show_password))
+                        } },
+                        visualTransformation = if (keyVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
                 } else {
                     OutlinedTextField(value = sshHostInput, onValueChange = { sshHostInput = it }, label = { Text(stringResource(R.string.shell_device_host)) },
                         placeholder = { Text(stringResource(R.string.shell_device_host_hint)) }, leadingIcon = { Icon(Icons.Default.Dns, null) },
@@ -356,9 +379,87 @@ private fun DeviceEditor(
                             singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.weight(0.6f))
                     }
                     Spacer(Modifier.height(10.dp))
-                    OutlinedTextField(value = sshPwInput, onValueChange = { sshPwInput = it }, label = { Text(stringResource(R.string.shell_device_password)) },
-                        leadingIcon = { Icon(Icons.Default.Password, null) }, visualTransformation = PasswordVisualTransformation(),
-                        singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+
+                    // ── Auth method (password vs. public key) ──
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        FilterChip(
+                            selected = sshAuthMethodInput == "password",
+                            onClick = { sshAuthMethodInput = "password" },
+                            label = { Text(stringResource(R.string.shell_ssh_auth_password)) },
+                            leadingIcon = { Icon(Icons.Default.Password, null, modifier = Modifier.size(18.dp)) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = sshAuthMethodInput == "key",
+                            onClick = { sshAuthMethodInput = "key" },
+                            label = { Text(stringResource(R.string.shell_ssh_auth_key)) },
+                            leadingIcon = { Icon(Icons.Default.Key, null, modifier = Modifier.size(18.dp)) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
+
+                    if (sshAuthMethodInput == "key") {
+                        OutlinedTextField(
+                            value = sshPrivateKeyInput, onValueChange = { sshPrivateKeyInput = it },
+                            label = { Text(stringResource(R.string.shell_ssh_private_key)) },
+                            placeholder = { Text(stringResource(R.string.shell_ssh_private_key_hint)) },
+                            leadingIcon = { Icon(Icons.Default.Key, null) },
+                            minLines = 3, maxLines = 6,
+                            shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = sshPrivateKeyPassphraseInput, onValueChange = { sshPrivateKeyPassphraseInput = it },
+                            label = { Text(stringResource(R.string.shell_ssh_private_key_passphrase)) },
+                            leadingIcon = { Icon(Icons.Default.Password, null) },
+                            trailingIcon = { IconButton(onClick = { sshPassphraseVisible = !sshPassphraseVisible }) {
+                                Icon(if (sshPassphraseVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (sshPassphraseVisible) R.string.hide_password else R.string.show_password))
+                            } },
+                            visualTransformation = if (sshPassphraseVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                            singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedButton(
+                            onClick = {
+                                generatingKey = true
+                                generateKeyError = null
+                                scope.launch {
+                                    val result = viewModel.generateSshKeyPair(sshPrivateKeyPassphraseInput)
+                                    generatingKey = false
+                                    result.fold(
+                                        onSuccess = { pair ->
+                                            sshPrivateKeyInput = pair.privateKeyPem
+                                            generatedPublicKey = pair.publicKeyLine
+                                        },
+                                        onFailure = { generateKeyError = it.message }
+                                    )
+                                }
+                            },
+                            enabled = !generatingKey,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (generatingKey) {
+                                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.shell_ssh_generating_key))
+                            } else {
+                                Icon(Icons.Default.VpnKey, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.shell_ssh_generate_key))
+                            }
+                        }
+                        generateKeyError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    } else {
+                        OutlinedTextField(value = sshPwInput, onValueChange = { sshPwInput = it }, label = { Text(stringResource(R.string.shell_device_password)) },
+                            leadingIcon = { Icon(Icons.Default.Password, null) },
+                            trailingIcon = { IconButton(onClick = { sshPwVisible = !sshPwVisible }) {
+                                Icon(if (sshPwVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility, stringResource(if (sshPwVisible) R.string.hide_password else R.string.show_password))
+                            } },
+                            visualTransformation = if (sshPwVisible) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                            singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
+                    }
 
                     // ── Host-key pinning (TOFU) ──
                     Spacer(Modifier.height(10.dp))
@@ -389,18 +490,35 @@ private fun DeviceEditor(
                         }
                     }
                     verifyError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                    verifyAuthError?.let {
+                        Text(
+                            stringResource(R.string.shell_ssh_verify_auth_failed, it),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
                     Spacer(Modifier.height(6.dp))
                     OutlinedButton(
                         onClick = {
-                            verifyError = null; verifying = true
+                            verifyError = null; verifyAuthError = null; verifying = true
                             scope.launch {
                                 val result = viewModel.verifySshHostKey(
                                     sshHostInput.trim(), sshPortInput.toIntOrNull() ?: 22,
-                                    sshUserInput.trim().ifBlank { "root" }, sshPwInput, timeoutInput
+                                    sshUserInput.trim().ifBlank { "root" }, sshPwInput, timeoutInput,
+                                    privateKey = if (sshAuthMethodInput == "key") sshPrivateKeyInput else "",
+                                    privateKeyPassphrase = sshPrivateKeyPassphraseInput
                                 )
                                 verifying = false
                                 result.fold(
-                                    onSuccess = { pendingVerify = it },
+                                    onSuccess = { verified ->
+                                        pendingVerify = verified.hostKey to verified.fingerprint
+                                        verifyAuthError = verified.authError
+                                        // Prefer the server's own hostname (e.g. "laptop") over the
+                                        // IP/host the user typed in — only known once auth succeeds.
+                                        if (nameInput.isBlank()) {
+                                            nameInput = verified.remoteHostname ?: sshHostInput.trim()
+                                        }
+                                    },
                                     onFailure = { verifyError = it.message }
                                 )
                             }
@@ -453,7 +571,10 @@ private fun DeviceEditor(
                             sshHost = if (typeInput == "ssh") sshHostInput.trim() else "",
                             sshPort = sshPortInput.toIntOrNull() ?: 22,
                             sshUser = if (typeInput == "ssh") sshUserInput.trim().ifBlank { "root" } else "root",
-                            sshPassword = if (typeInput == "ssh") sshPwInput else "",
+                            sshAuthMethod = if (typeInput == "ssh") sshAuthMethodInput else "password",
+                            sshPassword = if (typeInput == "ssh" && sshAuthMethodInput == "password") sshPwInput else "",
+                            sshPrivateKey = if (typeInput == "ssh" && sshAuthMethodInput == "key") sshPrivateKeyInput else "",
+                            sshPrivateKeyPassphrase = if (typeInput == "ssh" && sshAuthMethodInput == "key") sshPrivateKeyPassphraseInput else "",
                             sshHostKey = if (typeInput == "ssh") sshHostKeyInput else "",
                             timeout = timeoutInput
                         )); expanded = false
@@ -489,6 +610,35 @@ private fun DeviceEditor(
                     }
                 },
                 dismissButton = { TextButton(onClick = { pendingVerify = null }) { Text(stringResource(R.string.cancel)) } }
+            )
+        }
+
+        // ── Generated public key — copy to the server's authorized_keys ──
+        generatedPublicKey?.let { publicKey ->
+            AlertDialog(
+                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                onDismissRequest = { generatedPublicKey = null },
+                icon = { Icon(Icons.Default.VpnKey, null, tint = MaterialTheme.colorScheme.primary) },
+                title = { Text(stringResource(R.string.shell_ssh_public_key_title), fontWeight = FontWeight.Bold) },
+                text = {
+                    Column {
+                        Text(stringResource(R.string.shell_ssh_public_key_message))
+                        Spacer(Modifier.height(12.dp))
+                        Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text(
+                                publicKey,
+                                modifier = Modifier.padding(12.dp),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { clipboardManager.setText(AnnotatedString(publicKey)); generatedPublicKey = null }) {
+                        Text(stringResource(R.string.shell_ssh_copy_public_key))
+                    }
+                },
+                dismissButton = { TextButton(onClick = { generatedPublicKey = null }) { Text(stringResource(R.string.cancel)) } }
             )
         }
     }

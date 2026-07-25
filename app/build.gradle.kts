@@ -204,6 +204,11 @@ dependencies {
     implementation(libs.lottie.compose)
     implementation(libs.work.runtime.ktx)
     implementation(libs.jsch)
+    // mwiede/jsch falls back to its `com.jcraft.jsch.bc.*` Ed25519/Ed448 signature and
+    // keygen implementations on Android (java.version < 15), which need BouncyCastle's
+    // lightweight crypto classes on the classpath — without this, SSH key generation and
+    // any ed25519 key auth fail with an opaque "Auth fail" / silently-swallowed exception.
+    implementation(libs.bouncycastle)
     implementation(libs.commons.compress)
     implementation(libs.androidx.browser)
     implementation(libs.appauth)
