@@ -200,14 +200,18 @@ class McpOAuthManager(context: Context, private val settingsRepository: Settings
 
     private fun guessIssuer(mcpServerUrl: String): String? = try {
         val uri = java.net.URI(mcpServerUrl)
-        "${uri.scheme}://${uri.authority}"
+        val scheme = uri.scheme
+        val authority = uri.authority
+        if (scheme == null || authority == null) null else "$scheme://$authority"
     } catch (_: Exception) { null }
 
     private data class ProtectedResourceInfo(val issuer: String, val resource: String)
 
     private fun discoverProtectedResourceMetadata(mcpServerUrl: String): ProtectedResourceInfo? {
         val uri = try { java.net.URI(mcpServerUrl) } catch (_: Exception) { return null }
-        val origin = "${uri.scheme}://${uri.authority}"
+        val scheme = uri.scheme ?: return null
+        val authority = uri.authority ?: return null
+        val origin = "$scheme://$authority"
         val path = uri.rawPath?.trimEnd('/').orEmpty()
         val candidates = if (path.isNotBlank()) {
             listOf("$origin/.well-known/oauth-protected-resource$path", "$origin/.well-known/oauth-protected-resource")
@@ -239,6 +243,12 @@ class McpOAuthManager(context: Context, private val settingsRepository: Settings
      *  hand-rolled, and only falls through to AppAuth's own discovery when it's absent. */
     private suspend fun discoverAuthorizationServerMetadata(issuer: String, resource: String): McpOAuthDiscoveryResult? {
         val trimmed = issuer.trimEnd('/')
+        if (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
+            // AppAuth's fetchFromIssuer() below enforces https at the connection layer by
+            // throwing from its own background-thread executor, outside any try/catch we
+            // could wrap around the call — an invalid scheme must never reach it.
+            return null
+        }
         val body = try { HttpClient.fetchModels("$trimmed/.well-known/oauth-authorization-server") } catch (_: Exception) { null }
         val obj = body?.let { try { json.parseToJsonElement(it).jsonObject } catch (_: Exception) { null } }
         val authEndpoint = (obj?.get("authorization_endpoint") as? JsonPrimitive)?.content

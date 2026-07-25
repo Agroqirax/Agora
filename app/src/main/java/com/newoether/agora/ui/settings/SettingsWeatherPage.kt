@@ -15,6 +15,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.util.UrlUtils
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
@@ -132,7 +133,7 @@ private fun WeatherBaseUrlField(
                 LaunchedEffect(urlState.text) {
                     delay(500)
                     val text = urlState.text.toString()
-                    onSave(text.ifBlank { defaultValue })
+                    onSave(text.ifBlank { defaultValue }.let { if (it == defaultValue) it else UrlUtils.normalize(it) ?: it })
                 }
                 Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                     OutlinedTextField(

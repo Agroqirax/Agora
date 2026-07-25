@@ -38,6 +38,7 @@ import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
+import com.newoether.agora.util.UrlUtils
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.Dispatchers
@@ -143,7 +144,8 @@ fun SettingsProviderDetailPage(
                 // Save user input with 500ms debounce.
                 LaunchedEffect(baseUrlState.text) {
                     delay(500)
-                    viewModel.settings.setProviderBaseUrl(providerName, baseUrlState.text.toString())
+                    val typed = baseUrlState.text.toString()
+                    viewModel.settings.setProviderBaseUrl(providerName, if (typed.isBlank()) typed else UrlUtils.normalize(typed) ?: typed)
                 }
                 SettingsGroup(
                     title = stringResource(R.string.provider_base_url),

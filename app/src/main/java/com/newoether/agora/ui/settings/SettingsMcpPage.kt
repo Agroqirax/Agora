@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.McpServerConfig
+import com.newoether.agora.util.UrlUtils
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -419,7 +420,7 @@ private fun ServerEditor(
                         scope.launch {
                             val probe = McpServerConfig(
                                 id = server.id, name = nameInput.trim().ifBlank { server.name }, description = descInput.trim(),
-                                url = urlInput.trim(), enabled = true, bearerToken = tokenInput.trim(),
+                                url = UrlUtils.normalize(urlInput) ?: urlInput.trim(), enabled = true, bearerToken = tokenInput.trim(),
                                 transport = transportInput, stdioCommand = commandInput.trim(), stdioEnv = textToEnv(stdioEnvInput),
                                 headers = textToHeaders(headersInput), timeout = timeoutInput,
                                 authType = authTypeInput,
@@ -505,7 +506,7 @@ private fun ServerEditor(
                         // sign-in/refresh flows, not by this form's plain "Save" action.
                         viewModel.updateMcpServer(server.copy(
                             enabled = enabledInput, confirmEnabled = confirmEnabledInput, name = nameInput.trim(), description = descInput.trim(),
-                            url = urlInput.trim(), bearerToken = tokenInput.trim(),
+                            url = UrlUtils.normalize(urlInput) ?: urlInput.trim(), bearerToken = tokenInput.trim(),
                             transport = transportInput, stdioCommand = commandInput.trim(), stdioEnv = textToEnv(stdioEnvInput),
                             headers = textToHeaders(headersInput), timeout = timeoutInput,
                             authType = authTypeInput,
@@ -629,7 +630,7 @@ private fun McpOAuthSection(
     fun signIn() {
         scope.launch {
             val updated = server.copy(
-                authType = "oauth", url = urlInput.trim(),
+                authType = "oauth", url = UrlUtils.normalize(urlInput) ?: urlInput.trim(),
                 oauthAuthorizationEndpoint = authEndpointInput.trim(), oauthTokenEndpoint = tokenEndpointInput.trim(),
                 oauthRegistrationEndpoint = registrationEndpointInput.trim(), oauthResource = resourceInput.trim(),
                 oauthClientId = clientIdInput.trim(),
@@ -648,7 +649,7 @@ private fun McpOAuthSection(
             onClick = {
                 scope.launch {
                     onDiscoveringChange(true); onDiscoverFailedChange(false)
-                    val result = viewModel.discoverMcpOAuthMetadata(server.copy(url = urlInput.trim()))
+                    val result = viewModel.discoverMcpOAuthMetadata(server.copy(url = UrlUtils.normalize(urlInput) ?: urlInput.trim()))
                     onDiscoveringChange(false)
                     if (result != null) {
                         onAuthEndpointChange(result.authorizationEndpoint)

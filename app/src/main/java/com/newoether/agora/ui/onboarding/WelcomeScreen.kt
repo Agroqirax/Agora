@@ -97,6 +97,7 @@ import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
+import com.newoether.agora.util.UrlUtils
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlin.math.absoluteValue
 import kotlinx.coroutines.Dispatchers
@@ -264,11 +265,12 @@ fun WelcomeScreen(
         val p = selectedProvider ?: return@save
         when {
             p == Constants.PROVIDER_LOCAL -> { /* handled by GGUF import */ }
-            p == Constants.PROVIDER_OLLAMA -> if (apiKeyText.isNotBlank()) viewModel.settings.setProviderBaseUrl(Constants.PROVIDER_OLLAMA, apiKeyText)
+            p == Constants.PROVIDER_OLLAMA -> if (apiKeyText.isNotBlank()) viewModel.settings.setProviderBaseUrl(Constants.PROVIDER_OLLAMA, UrlUtils.normalize(apiKeyText) ?: apiKeyText.trim())
             isCustomProvider -> {
                 if (baseUrlText.isNotBlank()) {
-                    if (customProviders.none { it.name == p }) viewModel.addCustomProvider(p, baseUrlText)
-                    else viewModel.settings.setProviderBaseUrl(p, baseUrlText)
+                    val normalizedBaseUrl = UrlUtils.normalize(baseUrlText) ?: baseUrlText.trim()
+                    if (customProviders.none { it.name == p }) viewModel.addCustomProvider(p, normalizedBaseUrl)
+                    else viewModel.settings.setProviderBaseUrl(p, normalizedBaseUrl)
                 }
                 if (apiKeyText.isNotBlank()) viewModel.settings.upsertApiKey(p, apiKeyText, p)
             }

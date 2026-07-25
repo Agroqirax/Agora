@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.util.UrlUtils
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
@@ -160,7 +161,8 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             // Save user input with 500ms debounce.
                                             LaunchedEffect(urlState.text) {
                                                 delay(500)
-                                                viewModel.settings.setWebSearchBaseUrl(urlState.text.toString())
+                                                val typed = urlState.text.toString()
+                                                viewModel.settings.setWebSearchBaseUrl(if (typed.isBlank()) typed else UrlUtils.normalize(typed) ?: typed)
                                             }
                                             Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                                 OutlinedTextField(

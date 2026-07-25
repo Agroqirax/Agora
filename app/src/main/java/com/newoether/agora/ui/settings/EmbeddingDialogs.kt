@@ -283,14 +283,15 @@ internal fun AddRemoteEmbeddingDialog(
                     state.isTesting = true
                     state.testStatus = null
                     scope.launch {
-                        val result = viewModel.testRemoteEmbedding(finalModel, state.baseUrl, state.apiKeys[state.selectedProviderIdx])
+                        val normalizedBaseUrl = com.newoether.agora.util.UrlUtils.normalize(state.baseUrl) ?: state.baseUrl.trim()
+                        val result = viewModel.testRemoteEmbedding(finalModel, normalizedBaseUrl, state.apiKeys[state.selectedProviderIdx])
                         if (result != null && result.startsWith("OK")) {
                             viewModel.addEmbeddingModel(
                                 com.newoether.agora.data.EmbeddingModelConfig(
                                     name = finalName,
                                     type = com.newoether.agora.data.EmbeddingModelType.REMOTE,
                                     remoteModelName = finalModel,
-                                    remoteBaseUrl = state.baseUrl,
+                                    remoteBaseUrl = normalizedBaseUrl,
                                     remoteApiKey = state.apiKeys[state.selectedProviderIdx],
                                     batchSize = state.batchSize.toIntOrNull() ?: 8
                                 )

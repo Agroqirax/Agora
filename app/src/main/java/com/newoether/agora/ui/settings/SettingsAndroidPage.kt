@@ -192,6 +192,7 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             val text = urlState.text.toString()
                                             viewModel.settings.setLocationNominatimBaseUrl(
                                                 text.ifBlank { com.newoether.agora.data.SettingsManager.DEFAULT_NOMINATIM_BASE_URL }
+                                                    .let { com.newoether.agora.util.UrlUtils.normalize(it) ?: it }
                                             )
                                         }
                                         Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
