@@ -454,26 +454,6 @@ fun ChatApp(
         }
     }
 
-    var observedGeneration by remember { mutableStateOf(isLoading) }
-    var previousIsLoading by remember { mutableStateOf(isLoading) }
-    LaunchedEffect(isLoading) {
-        when {
-            isLoading && !previousIsLoading -> {
-                observedGeneration = true
-            }
-            !isLoading && previousIsLoading && observedGeneration -> {
-                val terminalStatus = messages.lastOrNull { it.participant == Participant.MODEL }?.status
-                when (terminalStatus) {
-                    MessageStatus.ERROR -> haptics.reject()
-                    MessageStatus.STOPPED -> haptics.generationStopped()
-                    else -> haptics.generationEnd()
-                }
-                observedGeneration = false
-            }
-        }
-        previousIsLoading = isLoading
-    }
-
     val answeringHapticActive = isLoading &&
         generatingInConversationId == currentConversationId &&
         messages.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
@@ -490,21 +470,6 @@ fun ChatApp(
         onDispose {
             haptics.stopAnsweringTexture()
         }
-    }
-
-    var pendingDrawerConversationHaptic by remember { mutableStateOf<String?>(null) }
-    var previousIsSwitching by remember { mutableStateOf(isSwitching) }
-    LaunchedEffect(isSwitching, currentConversationId) {
-        if (
-            previousIsSwitching &&
-            !isSwitching &&
-            pendingDrawerConversationHaptic != null &&
-            pendingDrawerConversationHaptic == currentConversationId
-        ) {
-            haptics.success()
-            pendingDrawerConversationHaptic = null
-        }
-        previousIsSwitching = isSwitching
     }
 
     CompositionLocalProvider(LocalAgoraHaptics provides haptics) {
@@ -525,7 +490,6 @@ fun ChatApp(
                 onOpenTasks = { onOpenTasks(null) },
                 onRequestRename = { id, title -> showRenameDialog = id; conversationToRename = title },
                 onRequestDelete = { id -> showDeleteConfirmDialog = id },
-                onPendingDrawerHaptic = { pendingDrawerConversationHaptic = it }
             )
         }
     ) {

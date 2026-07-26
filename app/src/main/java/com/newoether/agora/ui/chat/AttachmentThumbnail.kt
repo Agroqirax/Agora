@@ -25,12 +25,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.util.AttachmentSourceReader
+import com.newoether.agora.util.Constants
 
 fun resolveAttachmentType(
     path: String,
@@ -60,11 +63,12 @@ fun findMetaForIndex(meta: AttachmentMeta?, index: Int): AttachmentItem? {
     }
 }
 
-fun readFileContent(context: Context, uriString: String, maxChars: Int = 10_000): String {
-    return try {
-        val stream = context.contentResolver.openInputStream(Uri.parse(uriString))
-        stream?.bufferedReader()?.use { it.readText().take(maxChars) } ?: ""
-    } catch (_: Exception) { "" }
+fun readFileContent(
+    context: Context,
+    uriString: String,
+    maxChars: Int = Constants.MAX_FILE_CONTENT_READ_LENGTH,
+): String {
+    return AttachmentSourceReader.readText(context, uriString, maxChars) ?: ""
 }
 
 @Composable
@@ -117,16 +121,35 @@ fun AttachmentThumbnailItem(
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalAgoraHaptics.current
+    val context = LocalContext.current
     val thumbModifier = modifier
         .size(120.dp, 90.dp)
         .clip(RoundedCornerShape(8.dp))
 
     when (type) {
         "file" -> {
-            val clickMod = if (textContent?.isNotEmpty() == true && handlers.onFileClick != null)
-                Modifier.clip(RoundedCornerShape(8.dp)).clickable { handlers.onFileClick(fileName ?: "", textContent) } else Modifier
-            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp)) {
-                FileThumbnail(fileName = fileName, isPdf = false, modifier = Modifier.size(64.dp).then(clickMod))
+            val canOpen = handlers.onFileClick != null &&
+                (textContent != null || originalUri != null)
+            val clickMod = if (canOpen) {
+                Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        val content = textContent ?: originalUri?.let {
+                            AttachmentSourceReader.readText(
+                                context = context,
+                                source = it,
+                                maxChars = Constants.MAX_FILE_CONTENT_READ_LENGTH,
+                            )
+                        }
+                        if (content != null) {
+                            handlers.onFileClick?.invoke(fileName ?: "", content)
+                        }
+                    }
+            } else {
+                Modifier
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(72.dp).then(clickMod)) {
+                FileThumbnail(fileName = fileName, isPdf = false, modifier = Modifier.size(64.dp))
                 if (showFileName && fileName != null) {
                     Text(fileName, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                 }

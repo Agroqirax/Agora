@@ -100,7 +100,6 @@ internal fun ChatDrawerContent(
     onOpenTasks: () -> Unit,
     onRequestRename: (String, String) -> Unit,
     onRequestDelete: (String) -> Unit,
-    onPendingDrawerHaptic: (String?) -> Unit
 ) {
     val haptics = LocalAgoraHaptics.current
     val focusManager = LocalFocusManager.current
@@ -110,7 +109,6 @@ internal fun ChatDrawerContent(
 
     val conversations by viewModel.conversations.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
-    val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
     val generatingConversationIds by viewModel.generatingConversationIds.collectAsState()
 
@@ -238,9 +236,6 @@ internal fun ChatDrawerContent(
                             query = search.query,
                             onClick = {
                                 haptics.selection()
-                                if (convId != currentConversationId || isNewChatMode) {
-                                    onPendingDrawerHaptic(convId)
-                                }
                                 viewModel.selectConversation(convId)
                                 scope.launch { drawerState.close() }
                             }
@@ -277,9 +272,6 @@ internal fun ChatDrawerContent(
                                         enabled = !isSwitching,
                                         onClick = {
                                             haptics.selection()
-                                            if (conversation.id != currentConversationId || isNewChatMode) {
-                                                onPendingDrawerHaptic(conversation.id)
-                                            }
                                             viewModel.selectConversation(conversation.id)
                                             scope.launch { drawerState.close() }
                                         },

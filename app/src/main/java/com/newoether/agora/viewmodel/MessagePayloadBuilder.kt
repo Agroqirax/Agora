@@ -9,6 +9,7 @@ import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.PdfPageRenderer
+import com.newoether.agora.util.AttachmentSourceReader
 
 /**
  * Resolves outgoing message attachments (images / video / file / pdf) into concrete
@@ -107,17 +108,21 @@ class MessagePayloadBuilder(
                     }
                 }
                 "file" -> {
-                    var textContent: String? = null
-                    try {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(att.localPath ?: att.uri))?.use { stream ->
-                            val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
-                            if (content.isNotBlank()) {
-                                textContent = content
-                            }
-                        }
-                    } catch (e: Exception) { DebugLog.e("ChatViewModel", "Failed to read attachment content: ${att.fileName}", e) }
+                    val source = att.localPath ?: att.uri
+                    val textContent = AttachmentSourceReader.readText(
+                        context = app,
+                        source = source,
+                        maxChars = Constants.MAX_FILE_CONTENT_READ_LENGTH,
+                    )
+                    if (textContent == null) {
+                        DebugLog.e(
+                            "ChatViewModel",
+                            "Failed to read attachment content: ${att.fileName}",
+                        )
+                    }
                     metaItems.add(AttachmentItem(
-                        originalUri = att.uri, type = "file",
+                        originalUri = att.localPath?.let { "file://$it" } ?: att.uri,
+                        type = "file",
                         fileName = att.fileName, mimeType = att.mimeType,
                         textContent = textContent
                     ))

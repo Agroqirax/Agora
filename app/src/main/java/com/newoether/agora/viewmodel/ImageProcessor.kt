@@ -98,25 +98,6 @@ class ImageProcessor(
         }
     }
 
-    /**
-     * Open an input stream for an image source. Since P6 the composer copies picked images to
-     * app-private storage and passes the resulting BARE absolute path (e.g. /data/.../att_x.img) —
-     * which [android.content.ContentResolver.openInputStream] cannot open (it only handles
-     * content:// / file:// / android.resource://). Read those (and file:// URIs) straight off disk;
-     * everything else (content:// pickers) still goes through the resolver.
-     */
-    private fun openStream(source: String): java.io.InputStream? {
-        return try {
-            when {
-                source.startsWith("content://") ->
-                    app.contentResolver.openInputStream(android.net.Uri.parse(source))
-                source.startsWith("file://") ->
-                    java.io.FileInputStream(android.net.Uri.parse(source).path ?: return null)
-                source.startsWith("/") -> java.io.FileInputStream(source)
-                else -> app.contentResolver.openInputStream(android.net.Uri.parse(source))
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
+    private fun openStream(source: String): java.io.InputStream? =
+        com.newoether.agora.util.AttachmentSourceReader.open(app, source)
 }

@@ -23,9 +23,6 @@ interface AgoraHaptics {
     fun longPress()
     fun success()
     fun reject()
-    fun generationStart()
-    fun generationTick()
-    fun generationEnd()
     fun generationStopped()
     fun startAnsweringTexture()
     fun stopAnsweringTexture()
@@ -37,9 +34,6 @@ object NoOpAgoraHaptics : AgoraHaptics {
     override fun longPress() = Unit
     override fun success() = Unit
     override fun reject() = Unit
-    override fun generationStart() = Unit
-    override fun generationTick() = Unit
-    override fun generationEnd() = Unit
     override fun generationStopped() = Unit
     override fun startAnsweringTexture() = Unit
     override fun stopAnsweringTexture() = Unit
@@ -83,12 +77,6 @@ private class PlatformAgoraHaptics(
     override fun success() = perform(confirmFeedback())
 
     override fun reject() = perform(rejectFeedback())
-
-    override fun generationStart() = perform(HapticFeedbackConstants.VIRTUAL_KEY)
-
-    override fun generationTick() = perform(HapticFeedbackConstants.CLOCK_TICK)
-
-    override fun generationEnd() = success()
 
     override fun generationStopped() = perform(HapticFeedbackConstants.CONTEXT_CLICK)
 

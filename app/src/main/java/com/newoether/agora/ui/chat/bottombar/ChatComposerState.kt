@@ -83,13 +83,18 @@ class ChatComposerState(
     /** Copy a content URI to app-private storage, returning the absolute path (or null). */
     private suspend fun copyToPrivate(uri: Uri, ext: String): String? {
         return withContext(Dispatchers.IO) {
+            val target = java.io.File(context.filesDir, "att_${UUID.randomUUID()}.$ext")
             try {
-                val target = java.io.File(context.filesDir, "att_${UUID.randomUUID()}.$ext")
-                context.contentResolver.openInputStream(uri)?.use { input ->
+                val input = context.contentResolver.openInputStream(uri)
+                    ?: return@withContext null
+                input.use {
                     target.outputStream().use { output -> input.copyTo(output) }
                 }
                 target.absolutePath
-            } catch (_: Exception) { null }
+            } catch (_: Exception) {
+                runCatching { target.delete() }
+                null
+            }
         }
     }
 
@@ -210,6 +215,7 @@ class ChatComposerState(
      *  page rendering, adds the rest as attachments). */
     fun onPickFiles(uris: List<Uri>, onInitPdfSelection: ((Set<Int>) -> Unit)?) {
         val validAttachments = mutableListOf<SelectedAttachment>()
+        val fileCopySources = mutableListOf<Pair<Uri, SelectedAttachment>>()
         val rejectedMessages = mutableListOf<String>()
         for (uri in uris) {
             val validation = FileValidator.validate(context, uri)
@@ -259,10 +265,14 @@ class ChatComposerState(
                     continue
                 }
             }
-            validAttachments.add(SelectedAttachment(
+            val attachment = SelectedAttachment(
                 uri = uri.toString(), type = type,
                 mimeType = mimeType, fileName = fileName
-            ))
+            )
+            validAttachments.add(attachment)
+            if (type == "file") {
+                fileCopySources.add(uri to attachment)
+            }
         }
         if (rejectedMessages.isNotEmpty()) {
             haptics.reject()
@@ -272,8 +282,7 @@ class ChatComposerState(
         selectedAttachments = selectedAttachments + validAttachments
 
         // Copy generic files to app-private storage immediately
-        for ((uri, att) in uris.zip(validAttachments)) {
-            if (att.type != "file") continue
+        for ((uri, att) in fileCopySources) {
             val uriStr = uri.toString()
             val ext = att.fileName?.substringAfterLast('.', "bin") ?: "bin"
             processingStates = processingStates + (uriStr to 0f)
