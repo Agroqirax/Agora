@@ -60,6 +60,7 @@ internal fun ComposerSendButton(
     val showStop = isLoading && textIsEmpty && attachmentsIsEmpty
 
     val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching
+            && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
     val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching
     FloatingActionButton(
         onClick = {

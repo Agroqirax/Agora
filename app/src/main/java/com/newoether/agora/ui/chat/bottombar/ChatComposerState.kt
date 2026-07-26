@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 /**
  * State holder for the chat composer's attachment subsystem (images / videos / PDFs /
@@ -79,6 +80,19 @@ class ChatComposerState(
         selectedAttachments = emptyList()
     }
 
+    /** Copy a content URI to app-private storage, returning the absolute path (or null). */
+    private suspend fun copyToPrivate(uri: Uri, ext: String): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val target = java.io.File(context.filesDir, "att_${UUID.randomUUID()}.$ext")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                target.absolutePath
+            } catch (_: Exception) { null }
+        }
+    }
+
     /** Remove the attachment at [index], cancelling any in-flight extraction and deleting its
      *  pre-extracted frame / rendered-page files. */
     fun removeAttachmentAt(index: Int) {
@@ -101,6 +115,8 @@ class ChatComposerState(
                 try { java.io.File(path).delete() } catch (_: Exception) {}
             }
         }
+        // Clean up copied-to-private file (image / generic file)
+        removed?.localPath?.let { runCatching { java.io.File(it).delete() } }
         val uriStr = removed?.uri
         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(index) }
         if (uriStr != null) processingStates = processingStates - uriStr
@@ -161,14 +177,36 @@ class ChatComposerState(
         }
     }
 
-    /** Handle images picked from the photo picker. */
+    /** Handle images picked from the photo picker. Copies each URI to app-private
+     *  storage immediately so the path is stable regardless of URI permission expiry. */
     fun onPickImages(uris: List<Uri>) {
         if (uris.isNotEmpty()) haptics.selection()
-        selectedAttachments = selectedAttachments + uris.map {
+        val newAttachments = uris.map {
             SelectedAttachment(
                 uri = it.toString(), type = "image",
                 mimeType = try { context.contentResolver.getType(it) } catch (_: Exception) { null }
             )
+        }
+        selectedAttachments = selectedAttachments + newAttachments
+        for ((uriObj, att) in uris.zip(newAttachments)) {
+            val uriStr = uriObj.toString()
+            processingStates = processingStates + (uriStr to 0f)
+            scope.launch(Dispatchers.IO) {
+                val localPath = copyToPrivate(uriObj, "img")
+                if (localPath != null) {
+                    selectedAttachments = selectedAttachments.map { a ->
+                        if (a.uri == uriStr) a.copy(localPath = localPath) else a
+                    }
+                } else {
+                    // Copy failed -- remove the attachment and show rejection
+                    val idx = selectedAttachments.indexOfFirst { it.uri == uriStr }
+                    if (idx >= 0) {
+                        selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(idx) }
+                    }
+                    rejectedMessage = "Failed to copy image to local storage"
+                }
+                processingStates = processingStates - uriStr
+            }
         }
     }
 
@@ -244,6 +282,29 @@ class ChatComposerState(
         }
         if (validAttachments.isNotEmpty()) haptics.selection()
         selectedAttachments = selectedAttachments + validAttachments
+
+        // Copy generic files to app-private storage immediately
+        for ((uri, att) in uris.zip(validAttachments)) {
+            if (att.type != "file") continue
+            val uriStr = uri.toString()
+            val ext = att.fileName?.substringAfterLast('.', "bin") ?: "bin"
+            processingStates = processingStates + (uriStr to 0f)
+            scope.launch(Dispatchers.IO) {
+                val localPath = copyToPrivate(uri, ext)
+                if (localPath != null) {
+                    selectedAttachments = selectedAttachments.map { a ->
+                        if (a.uri == uriStr) a.copy(localPath = localPath) else a
+                    }
+                } else {
+                    val idx = selectedAttachments.indexOfFirst { it.uri == uriStr }
+                    if (idx >= 0) {
+                        selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(idx) }
+                    }
+                    rejectedMessage = "Failed to copy file to local storage"
+                }
+                processingStates = processingStates - uriStr
+            }
+        }
     }
 
     /** Add a sliced video as an attachment and start background frame extraction. */

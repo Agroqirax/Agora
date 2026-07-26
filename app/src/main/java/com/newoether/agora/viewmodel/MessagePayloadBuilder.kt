@@ -54,7 +54,7 @@ class MessagePayloadBuilder(
         for (att in attachments) {
             when (att.type) {
                 "image" -> {
-                    mediaUris.add(att.uri)
+                    mediaUris.add(att.localPath ?: att.uri)
                     metaItems.add(AttachmentItem(
                         originalUri = att.uri, type = "image", mimeType = att.mimeType,
                         imageIndex = nextImageIndex
@@ -109,7 +109,7 @@ class MessagePayloadBuilder(
                 "file" -> {
                     var textContent: String? = null
                     try {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { stream ->
+                        app.contentResolver.openInputStream(android.net.Uri.parse(att.localPath ?: att.uri))?.use { stream ->
                             val content = stream.bufferedReader().readText().take(Constants.MAX_FILE_CONTENT_READ_LENGTH)
                             if (content.isNotBlank()) {
                                 textContent = content

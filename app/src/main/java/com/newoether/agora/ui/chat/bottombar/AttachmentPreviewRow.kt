@@ -69,6 +69,8 @@ internal fun AttachmentPreviewRow(
             val isFile = attachment.type == "file"
             val isProcessing = uriStr in composer.processingStates
             val progress = composer.processingStates[uriStr] ?: 0f
+            // Video extraction shows determinate progress; image/file copy is indeterminate
+            val showIndeterminate = isProcessing && !isVideo
 
             var videoThumb by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
             LaunchedEffect(uriStr, isVideo) {
@@ -91,7 +93,7 @@ internal fun AttachmentPreviewRow(
                     val clickableMod = when {
                         isFile -> {
                             if (onFileContentClick != null) Modifier.clickable {
-                                val content = readFileContent(context, uriStr)
+                                val content = readFileContent(context, attachment.localPath ?: uriStr)
                                 onFileContentClick(attachment.fileName ?: uriStr, content)
                             } else Modifier
                         }
@@ -166,7 +168,7 @@ internal fun AttachmentPreviewRow(
                         }
                         else -> {
                             coil.compose.AsyncImage(
-                                model = uriStr,
+                                model = attachment.localPath ?: uriStr,
                                 contentDescription = null,
                                 modifier = thumbModifier,
                                 contentScale = androidx.compose.ui.layout.ContentScale.Crop
@@ -183,12 +185,20 @@ internal fun AttachmentPreviewRow(
                                 .background(Color.Black.copy(alpha = 0.4f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            CircularProgressIndicator(
-                                progress = { progress },
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.dp,
-                                color = Color.White
-                            )
+                            if (showIndeterminate) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                            } else {
+                                CircularProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                            }
                         }
                     }
 

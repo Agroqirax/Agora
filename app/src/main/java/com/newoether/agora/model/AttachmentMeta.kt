@@ -31,5 +31,6 @@ data class SelectedAttachment(
     val fileSize: Long? = null,
     val processedFrames: List<String>? = null,
     val selectedPages: Set<Int>? = null,
-    val preRenderedPaths: List<String>? = null
+    val preRenderedPaths: List<String>? = null,
+    val localPath: String? = null   // copied to app-private storage at pick time
 )
