@@ -12,11 +12,21 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.file.FileSystems
 class ProotSandboxManager(private val context: Context) : SandboxManager {
+
+    // Serializes every state-mutating operation against the shared Alpine rootfs. The sandbox
+    // filesystem is process-global (one rootfs/home shared across all conversations and across
+    // the foreground + headless engines), so without this, two parallel shell/file operations
+    // on different conversations could corrupt lib/apk/db/installed, /etc/apk/world, or lose
+    // updates to a file both are editing. Read-only ops (fileRead/fileGlob/fileGrep/apkList) are
+    // intentionally NOT serialized — they read snapshots and don't mutate state.
+    private val mutationMutex = Mutex()
 
     // Pin to the stable v3.21 branch to match the downloaded minirootfs (3.21.0). Using edge here
     // caused `apk upgrade` to pull divergent packages (e.g. yash-binsh vs busybox-binsh /bin/sh
@@ -321,7 +331,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         return tallocDir.absolutePath
     }
 
-    private fun executeRaw(command: String, workdir: String = homeMountPath, timeoutMs: Int = 30000): SandboxManager.SandboxResult {
+    private suspend fun executeRaw(command: String, workdir: String = homeMountPath, timeoutMs: Int = 30000): SandboxManager.SandboxResult = mutationMutex.withLock {
         ensureShell()
         ensureSandboxMountTargets()
         val tmpDir = File(rootfsDir, "tmp").apply { mkdirs() }.absolutePath
