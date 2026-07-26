@@ -92,7 +92,6 @@ class ChatViewModel(
     private val automationToolProvider: com.newoether.agora.tool.AutomationToolProvider,
     private val conversationExecutionCoordinator: com.newoether.agora.automation.ConversationExecutionCoordinator,
     private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
-    private val generationQueue: com.newoether.agora.automation.GenerationQueue,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -446,6 +445,16 @@ class ChatViewModel(
     private val _generatingInConversationId = MutableStateFlow<String?>(null)
     val generatingInConversationId: StateFlow<String?> = _generatingInConversationId.asStateFlow()
 
+    /** Per-conversation generation state registry. Each conversation owns an independent
+     *  ConversationGenerationState; the global _isLoading/_streamingMessage/_generatingInConversationId
+     *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */
+    private val generationRegistry = ConversationStateRegistry().also { registry ->
+        registry.onStateCreated = { state ->
+            state.onActive = registry::markActive
+            state.onIdle = registry::markIdle
+        }
+    }
+
     /** Race-free generation lifecycle: IO scope, current job, send gate, stop/persist tokens. */
     private val session = GenerationSession(
         app = application,
@@ -522,7 +531,6 @@ class ChatViewModel(
             providerRegistry = providerRegistry,
             localProvider = localProvider,
             executionCoordinator = conversationExecutionCoordinator,
-            generationQueue = generationQueue,
             allMessages = _allMessages,
             selectedChildren = _selectedChildren,
             streamingMessage = _streamingMessage,
@@ -587,6 +595,10 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
+                    // Ensure the open conversation has a state object so its onActive/onIdle hooks
+                    // are wired (the mirror collectors are installed once GenerationSession becomes
+                    // a facade writing private state — see P3 step 3).
+                    generationRegistry.getOrCreate(id)
                     // Fix stuck sending states when loading conversation — skip if currently generating
                     if (!_isLoading.value) {
                         val stuckMessages = convRepo.getMessagesForConversation(id).first()

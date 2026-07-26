@@ -30,8 +30,14 @@ class ConversationStateRegistry {
      *  per conversation and the multi-conversation generating indicator. */
     val activeConversationIds: StateFlow<Set<String>> = _activeConversationIds.asStateFlow()
 
+    /** Invoked once when a new ConversationGenerationState is created, so ChatViewModel can wire
+     *  its onActive/onIdle hooks to markActive/markIdle. */
+    @Volatile var onStateCreated: ((ConversationGenerationState) -> Unit)? = null
+
     fun getOrCreate(conversationId: String): ConversationGenerationState =
-        states.computeIfAbsent(conversationId) { ConversationGenerationState(it) }
+        states.computeIfAbsent(conversationId) {
+            ConversationGenerationState(it).also { state -> onStateCreated?.invoke(state) }
+        }
 
     fun get(conversationId: String): ConversationGenerationState? = states[conversationId]
 

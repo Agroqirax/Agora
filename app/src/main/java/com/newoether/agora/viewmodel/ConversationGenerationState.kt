@@ -91,12 +91,39 @@ class ConversationGenerationState(val conversationId: String) {
     fun loadingChange(uiToken: Long, value: Boolean) {
         synchronized(genLock) { if (uiGenToken == uiToken) isLoading.value = value }
     }
+    fun generatingIdChange(uiToken: Long, id: String?) {
+        synchronized(genLock) {
+            if (uiGenToken != uiToken) return
+            if (id != null) {
+                generating.value = true
+                onActive?.invoke(conversationId)
+            } else {
+                generating.value = false
+                onIdle?.invoke(conversationId)
+            }
+        }
+    }
     fun streamClear(uiToken: Long) {
         synchronized(genLock) {
             if (uiGenToken != uiToken) return
             streamingMessage.value = null
         }
     }
+
+    /** Wired by ChatViewModel to mark this conversation active/idle in the registry. */
+    @Volatile var onActive: ((String) -> Unit)? = null
+    @Volatile var onIdle: ((String) -> Unit)? = null
+
+    /** Builds the token-gated callbacks for one generation, writing ONLY to this conversation's
+     *  private state. The ChatViewModel mirror pipes private→global when this conversation is
+     *  open, so the callbacks need no knowledge of the current conversation id. */
+    fun callbacksFor(uiToken: Long, persistId: Long): GenerationCallbacks = GenerationCallbacks(
+        onStreamUpdate = { streamUpdate(uiToken, it) },
+        onLoadingChange = { loadingChange(uiToken, it) },
+        onGeneratingIdChange = { generatingIdChange(uiToken, it) },
+        onStreamClear = { streamClear(uiToken) },
+        isLatestPersist = { isLatestPersist(persistId) },
+    )
 
     // ── Stop / finalization ───────────────────────────────────────────────
     /**
@@ -122,6 +149,7 @@ class ConversationGenerationState(val conversationId: String) {
             generating.value = false
             s
         }
+        onIdle?.invoke(conversationId)
         if (releaseSendGate) sendGate.set(false)
         return StopResult(stoppedMsg, conversationId)
     }
