@@ -10,7 +10,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -35,22 +34,19 @@ import java.util.concurrent.atomic.AtomicLong
  *    (never on stop), so a stopped generation still persists its own text while a superseded
  *    one is blocked from clobbering the newer message.
  *
- * ## Slot lifecycle (acquireForSend / acquireForReplacement / endGeneration / stop)
+ * ## Slot lifecycle (acquireForSend / tryAcquireForReplacement / endGeneration / stop)
  *
  * The generation "slot" (the [generating] flag under [genLock]) is the single atomic decision
  * point for launch-vs-enqueue. [acquireForSend] claims it cooperatively (null → enqueue);
- * [acquireForReplacement] claims it pre-emptively for regenerate/edit (cancels in-flight but keeps
- * the slot occupied); [endGeneration] releases it token-gated when a generation ends; [stop] is a
- * terminal user Stop that fully releases it. All of these cancel ONLY this conversation's
+ * [tryAcquireForReplacement] claims it only while idle (regenerate/edit are disabled during an
+ * active generation); [endGeneration] releases it token-gated when a generation ends; [stop] is
+ * a terminal user Stop that fully releases it. Stop cancels ONLY this conversation's
  * [generationJob] and in-flight HTTP streams (via [streamScope]) — never another conversation's.
- * This is the fix for the cross-conversation "Stop kills the wrong generation" race.
  */
 class ConversationGenerationState(val conversationId: String) {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     var generationJob: Job? = null
-
-    @Volatile private var stopFinalizationJob: Job? = null
 
     /** This conversation's in-flight HTTP streaming handles. Cancelled together on stop. */
     val streamScope: StreamScope = StreamScope()
@@ -99,25 +95,17 @@ class ConversationGenerationState(val conversationId: String) {
     }
 
     /**
-     * Pre-emptive claim for regenerate/edit. Cancels the in-flight generation (job + this
-     * conversation's HTTP streams), advances the UI token, and — crucially — KEEPS the slot
-     * occupied (generating stays true) so a concurrent Send enqueues behind the replacement
-     * instead of launching a parallel generation. Returns the new token plus the stopped-message
-     * snapshot so the caller can persist STOPPED.
+     * Atomic idle-only claim for regenerate/edit. The UI disables both actions while this
+     * conversation is generating, but that visual gate can lag by a frame during a conversation
+     * switch; enforcing the same rule here makes the state machine authoritative.
      */
-    fun acquireForReplacement(): ReplacementResult {
-        val previousJob = generationJob
-        streamScope.cancelAll()
-        previousJob?.cancel()
-        return synchronized(genLock) {
+    fun tryAcquireForReplacement(): Long? = synchronized(genLock) {
+            if (generating.value) return null
             uiGenToken += 1
             isLoading.value = true
-            val stopped = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
-            streamingMessage.value = stopped
             generating.value = true
             onActive?.invoke(conversationId)
-            ReplacementResult(uiGenToken, stopped, conversationId)
-        }
+            uiGenToken
     }
 
     /**
@@ -144,13 +132,22 @@ class ConversationGenerationState(val conversationId: String) {
     fun streamClear(uiToken: Long) {
         synchronized(genLock) {
             if (uiGenToken != uiToken) return
-            streamingMessage.value = null
+            val message = streamingMessage.value
+            // A user Stop deliberately keeps the STOPPED overlay until Room has persisted it.
+            // Normal completion must commit the final in-memory message before removing the
+            // overlay, otherwise the UI briefly falls back to the empty SENDING placeholder.
+            if (message?.status != MessageStatus.STOPPED) {
+                if (message != null) onStreamCommit?.invoke(conversationId, message)
+                streamingMessage.value = null
+            }
         }
     }
 
-    /** Wired by ChatViewModel to mark this conversation active/idle in the registry. */
+    /** Wired by ChatViewModel to mark this conversation active/idle in the registry and to commit
+     * the final streaming message into the currently open conversation before overlay removal. */
     @Volatile var onActive: ((String) -> Unit)? = null
     @Volatile var onIdle: ((String) -> Unit)? = null
+    @Volatile var onStreamCommit: ((String, ChatMessage) -> Unit)? = null
 
     /** Builds the token-gated callbacks for one generation, writing ONLY to this conversation's
      *  private state. The ChatViewModel mirror pipes private→global when this conversation is
@@ -167,8 +164,8 @@ class ConversationGenerationState(val conversationId: String) {
      * Terminal stop that fully releases the slot (Stop button, or a delete that lands inside the
      * generating conversation). Cancels ONLY this conversation's job + in-flight HTTP streams,
      * advances the UI token, commits STOPPED to the streaming snapshot, and clears the slot
-     * (generating=false + onIdle). Regenerate/edit do NOT use this — they use
-     * [acquireForReplacement] which keeps the slot occupied for the incoming generation.
+     * (generating=false + onIdle). Regenerate/edit never call Stop; they can claim only an idle
+     * slot through [tryAcquireForReplacement].
      */
     fun stop(): StopResult {
         val previousJob = generationJob
@@ -186,14 +183,6 @@ class ConversationGenerationState(val conversationId: String) {
         }
         return StopResult(stoppedMsg, conversationId)
     }
-
-    /** Records the stop-finalization job so a subsequent stop can chain onto it. */
-    fun setStopFinalizationJob(job: Job?) {
-        synchronized(genLock) { stopFinalizationJob = job }
-    }
-
-    fun currentStopFinalizationJob(): Job? =
-        synchronized(genLock) { stopFinalizationJob?.takeUnless { it.isCompleted } }
 
     /** Cancel this conversation's scope (called when the conversation is deleted). */
     fun cancelScope() {
@@ -228,21 +217,6 @@ class ConversationGenerationState(val conversationId: String) {
 
     data class StopResult(val stoppedMessage: ChatMessage?, val conversationId: String)
 
-    /** Result of [acquireForReplacement]: the new UI token plus the stopped-message snapshot. */
-    data class ReplacementResult(
-        val uiToken: Long,
-        val stoppedMessage: ChatMessage?,
-        val conversationId: String,
-    )
-
-    /** Launch a stop-finalization coroutine on this conversation's scope. */
-    fun launchFinalization(block: suspend () -> Unit): Job {
-        val job = scope.launch {
-            try { block() } catch (_: Exception) { /* callers log inside block */ }
-        }
-        setStopFinalizationJob(job)
-        return job
-    }
 }
 
 /**
@@ -256,6 +230,8 @@ class ConversationGenerationState(val conversationId: String) {
 data class QueuedSend(
     val id: String,
     val text: String,
+    /** Model selected in the originating conversation when Send was tapped. */
+    val modelId: String,
     val attachments: List<SelectedAttachment>,
     val createdAt: Long = System.currentTimeMillis(),
 )

@@ -19,10 +19,9 @@ import kotlinx.serialization.json.Json
  * from per-conversation [ConversationGenerationState] (which owns no repos) so it can delegate
  * finalization without holding repository references.
  *
- * Runs on the conversation's own scope via [ConversationGenerationState.launchFinalization]; the
- * stopped conversation id comes from [ConversationGenerationState.StopResult], NOT from the live
- * `currentConversationId`, so a stop triggered after the user switched conversations still persists
- * to the ORIGINAL conversation (the G2/G3 fix).
+ * Runs on the supplied conversation-owned scope; the stopped conversation id comes from
+ * [ConversationGenerationState.StopResult], NOT from the live `currentConversationId`, so a stop
+ * triggered after the user switched conversations still persists to the ORIGINAL conversation.
  */
 class GenerationFinalizer(
     private val convRepo: ConversationRepository,

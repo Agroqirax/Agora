@@ -136,7 +136,7 @@ internal fun applyUserTemplateToMessages(
  *
  * Note: the generation-slot lifecycle (generating flag / active-conversation set) is owned by
  * [MessageGenerationController] via [ConversationGenerationState.acquireForSend] /
- * [ConversationGenerationState.acquireForReplacement] / [ConversationGenerationState.endGeneration],
+ * [ConversationGenerationState.tryAcquireForReplacement] / [ConversationGenerationState.endGeneration],
  * NOT by these callbacks — GenerationManager only streams tokens into the message and persists the
  * terminal DB row.
  */

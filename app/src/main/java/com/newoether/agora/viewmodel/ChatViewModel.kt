@@ -454,8 +454,30 @@ class ChatViewModel(
      *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */
     private val generationRegistry = ConversationStateRegistry().also { registry ->
         registry.onStateCreated = { state ->
-            state.onActive = registry::markActive
-            state.onIdle = registry::markIdle
+            state.onActive = { conversationId ->
+                registry.markActive(conversationId)
+                if (_currentConversationId.value == conversationId) {
+                    // Publish the state transition synchronously with the slot claim. Besides
+                    // making the Stop button immediate, this closes the one-frame window where
+                    // an in-progress edit could remain open after a normal composer Send.
+                    _isLoading.value = true
+                    _generatingInConversationId.value = conversationId
+                }
+            }
+            state.onIdle = { conversationId ->
+                registry.markIdle(conversationId)
+                if (_currentConversationId.value == conversationId) {
+                    _isLoading.value = false
+                    _generatingInConversationId.value = null
+                }
+            }
+            state.onStreamCommit = { conversationId, message ->
+                if (_currentConversationId.value == conversationId) {
+                    _allMessages.update { messages ->
+                        messages.map { if (it.id == message.id) message else it }
+                    }
+                }
+            }
         }
     }
 
@@ -529,10 +551,7 @@ class ChatViewModel(
             executionCoordinator = conversationExecutionCoordinator,
             allMessages = _allMessages,
             selectedChildren = _selectedChildren,
-            streamingMessage = _streamingMessage,
             currentConversationId = _currentConversationId,
-            isLoading = _isLoading,
-            generatingInConversationId = _generatingInConversationId,
             isNewChatMode = _isNewChatMode,
             pendingConversationSettings = _pendingConversationSettings,
             pendingSystemPromptId = _pendingSystemPromptId,
@@ -591,24 +610,12 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
-                    // Mirror the open conversation's private generation state into the global UI
-                    // flows. Background conversations mutate only their own private state; these
-                    // collectors pipe it to the screen only while that conversation is open, so
-                    // switching conversations updates the Stop button / loading spinner to reflect
-                    // the target conversation (R1) without cross-talk. collectLatest cancels the
-                    // previous conversation's collectors on switch.
                     val state = generationRegistry.getOrCreate(id)
-                    launch { state.streamingMessage.collect { _streamingMessage.value = it } }
-                    launch { state.isLoading.collect { _isLoading.value = it } }
-                    launch {
-                        state.generating.collect { gen -> _generatingInConversationId.value = if (gen) id else null }
-                    }
                     // Fix stuck sending states when loading a conversation. Read THIS conversation's
                     // own slot (state.generating), not the global _isLoading mirror: at switch time
-                    // the mirror still reflects the previous conversation (the collectors above were
-                    // just launched and haven't emitted yet), so a background generation in the
-                    // target conversation would be misread as idle and its in-flight SENDING message
-                    // wrongly marked STOPPED. state.generating is the per-conversation source of truth.
+                    // the mirror still reflects the previous conversation, so a background
+                    // generation in the target conversation would be misread as idle and its
+                    // in-flight SENDING message wrongly marked STOPPED.
                     if (!state.generating.value) {
                         val stuckMessages = convRepo.getMessagesForConversation(id).first()
                             .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
@@ -632,6 +639,7 @@ class ChatViewModel(
                         _selectedChildren.value = emptyMap()
                     }
 
+                    var generationMirrorStarted = false
                     convRepo.getMessagesForConversation(id).collect { entities ->
                         val mapped = entities.map {
                             ChatMessage(
@@ -675,10 +683,34 @@ class ChatViewModel(
                                 } else msg
                             } else msg
                         }
+                        if (!generationMirrorStarted) {
+                            generationMirrorStarted = true
+                            // Publish the target conversation's generation overlay only AFTER its
+                            // Room messages and branch selections are installed. Otherwise the
+                            // overlay alone can make `messages` non-empty, release the switching
+                            // scrim early, and render it against the previous conversation's tree.
+                            _streamingMessage.value = state.streamingMessage.value
+                            _isLoading.value = state.isLoading.value
+                            _generatingInConversationId.value =
+                                if (state.generating.value) id else null
+                            launch {
+                                state.streamingMessage.collect { _streamingMessage.value = it }
+                            }
+                            launch { state.isLoading.collect { _isLoading.value = it } }
+                            launch {
+                                state.generating.collect { generating ->
+                                    _generatingInConversationId.value =
+                                        if (generating) id else null
+                                }
+                            }
+                        }
                     }
                 } else {
                     _allMessages.value = emptyList()
                     _selectedChildren.value = emptyMap()
+                    _streamingMessage.value = null
+                    _isLoading.value = false
+                    _generatingInConversationId.value = null
                 }
             }
         }

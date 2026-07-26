@@ -66,10 +66,7 @@ class MessageGenerationController(
     // ── 共享 UI 状态:必须是 ChatViewModel 里的同一个实例 ──
     private val allMessages: MutableStateFlow<List<ChatMessage>>,          // = _allMessages
     private val selectedChildren: MutableStateFlow<Map<String?, String>>,  // = _selectedChildren
-    private val streamingMessage: MutableStateFlow<ChatMessage?>,          // = _streamingMessage
     private val currentConversationId: MutableStateFlow<String?>,          // = _currentConversationId
-    private val isLoading: MutableStateFlow<Boolean>,                      // = _isLoading
-    private val generatingInConversationId: MutableStateFlow<String?>,     // = _generatingInConversationId
     private val isNewChatMode: MutableStateFlow<Boolean>,                  // = _isNewChatMode
     private val pendingConversationSettings: MutableStateFlow<ConversationSettings?>, // = _pendingConversationSettings
     private val pendingSystemPromptId: MutableStateFlow<String?>,          // = _pendingSystemPromptId
@@ -128,7 +125,7 @@ class MessageGenerationController(
         // P1: Only stop generation if deleting within the currently-generating conversation.
         // P0: stop() + join() prevents the STOPPED-upsert race that can resurrect deleted messages
         //     (the only write path that was missing it).
-        val stopFinalization: Job? = if (generatingInConversationId.value == currentId) {
+        val stopFinalization: Job? = if (registry.isActive(currentId)) {
             val state = registry.getOrCreate(currentId)
             // Delete inside the generating conversation is a terminal stop: fully release the slot.
             val r = state.stop()
@@ -145,9 +142,9 @@ class MessageGenerationController(
             // could resurrect the deleted row as a zombie/orphan after our DELETE.
             stopFinalization?.join()
 
-            // Recompute staleIds from the latest allMessages after join(),
-            // in case the message tree changed during finalization.
-            val allMsgs = allMessages.value
+            // Recompute from the target conversation's DB snapshot. The user may have switched
+            // conversations while this coroutine was waiting for generation/finalization.
+            val allMsgs = convRepo.getMessagesForConversationSnapshot(currentId)
             if (allMsgs.none { it.id == messageId }) return@lock  // already deleted during wait
             val staleIds = linkedSetOf(messageId)
             val queue = mutableListOf(messageId)
@@ -169,19 +166,15 @@ class MessageGenerationController(
             // DB delete
             convRepo.deleteMessagesByIds(staleIds.toList())
 
-            // Update allMessages
-            allMessages.update { it.filter { m -> m.id !in staleIds } }
-
             // Fix selectedChildren — remove entries where key or value is deleted.
             // If a deleted message was the selected branch, switch to the next available sibling.
-            val remainingMsgs = allMessages.value
-            val newSelected = selectedChildren.value.toMutableMap()
-            var changed = false
-            for ((parentId, childId) in selectedChildren.value) {
+            val remainingMsgs = allMsgs.filter { it.id !in staleIds }
+            val previousSelected = convRepo.restoreBranchSelections(currentId)
+            val newSelected = previousSelected.toMutableMap()
+            for ((parentId, childId) in previousSelected) {
                 // Remove entry if the parent itself was deleted
                 if (parentId != null && parentId in staleIds) {
                     newSelected.remove(parentId)
-                    changed = true
                     continue
                 }
                 if (childId in staleIds) {
@@ -195,10 +188,13 @@ class MessageGenerationController(
                     } else {
                         newSelected.remove(parentId)
                     }
-                    changed = true
                 }
             }
-            if (changed) selectedChildren.value = newSelected
+            onPersistSelectedChildren(currentId, newSelected)
+            ifOpenOn(currentId) {
+                allMessages.update { it.filter { message -> message.id !in staleIds } }
+                selectedChildren.value = newSelected
+            }
             }
         }
 
@@ -215,24 +211,23 @@ class MessageGenerationController(
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
 
-        // Validate the target BEFORE claiming the slot: acquireForReplacement keeps generating=true
+        // Validate and snapshot the open conversation BEFORE claiming the slot. The generation
+        // coroutine may wait behind automation while the user switches to another conversation.
+        val openMessages = allMessages.value
+        val selectedAtStart = selectedChildren.value.toMap()
+        // Validate the target BEFORE claiming the slot: the claim keeps generating=true
         // for the incoming generation, so an early return after it would leak the slot forever.
-        val messageToRegenerate = allMessages.value.find { it.id == messageId } ?: return
+        val messageToRegenerate = openMessages.find { it.id == messageId } ?: return
         val parentId = messageToRegenerate.parentId ?: return
         val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
-        val isLatest = allMessages.value.none { it.parentId == messageId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
+        val isLatest = openMessages.none { it.parentId == messageId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
         // Error/stopped: purge and replace in-place. Normal: create new branch.
         val modelMessageId = if (isErrorOrStopped && isLatest) messageId else UUID.randomUUID().toString()
         val startTime = System.currentTimeMillis() + 1
 
-        // Pre-emptively claim the slot: cancels the in-flight generation, KEEPS the slot occupied
-        // (so a concurrent Send enqueues behind us instead of launching parallel), advances the UI
-        // token, and returns the STOPPED snapshot to finalize.
-        val replacement = state.acquireForReplacement()
-        val myUiToken = replacement.uiToken
-        val stopFinalization: Job? = replacement.stoppedMessage?.let { stopped ->
-            finalizer.launchStopFinalization(state.scope, replacement.conversationId, listOf(stopped))
-        }
+        // Regenerate is idle-only by product rule. Enforce it atomically in the state machine in
+        // addition to the UI's enabled flag, which can lag during a conversation switch.
+        val myUiToken = state.tryAcquireForReplacement() ?: return
 
         // Insert placeholder into allMessages and update selectedChildren on the calling
         // thread BEFORE setting streamingMessage. This ensures the combine function sees a
@@ -243,32 +238,27 @@ class MessageGenerationController(
             status = MessageStatus.SENDING, timestamp = startTime
         )
         ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
-        val newMap = selectedChildren.value.toMutableMap()
+        val newMap = selectedAtStart.toMutableMap()
         newMap[parentId] = modelMessageId
         val selectedAfterRegenerate = newMap.toMap()
         ifOpenOn(genId) { selectedChildren.value = selectedAfterRegenerate }
 
-        // acquireForReplacement already set isLoading=true + streamingMessage=STOPPED; overwrite the
-        // streaming overlay with the new placeholder.
         state.streamUpdate(myUiToken, placeholder)
 
         state.generationJob = state.scope.launch {
-            // Wait only for the short STOPPED DB finalization. The cancelled provider
-            // may still be unwinding, but it no longer owns the next generation path.
-            stopFinalization?.join()
             val myPersistId = state.nextPersistId()
             try {
                 executionCoordinator.withConversationLock(genId) lock@ {
-                allMessages.value.find { it.id == parentId } ?: return@lock
+                val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
+                if (persistedMessages.none { it.id == parentId }) return@lock
 
                 if (isErrorOrStopped && isLatest) {
                     // Purge stale tool call children, thinking content, and embeddings
-                    val allMsgs = allMessages.value
                     val staleIds = mutableListOf<String>()
                     val queue = mutableListOf(modelMessageId)
                     while (queue.isNotEmpty()) {
                         val pid = queue.removeAt(0)
-                        allMsgs.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
+                        persistedMessages.filter { it.parentId == pid && (it.id.startsWith(Constants.TOOL_MSG_PREFIX) || it.id.startsWith(Constants.RESULT_MSG_PREFIX)) }
                             .forEach { staleIds.add(it.id); queue.add(it.id) }
                     }
                     if (staleIds.isNotEmpty()) {
@@ -279,14 +269,14 @@ class MessageGenerationController(
                     convRepo.upsertMessage(MessageEntity(
                         id = modelMessageId, conversationId = genId, parentId = parentId,
                         text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                        modelName = currentActiveModel.value, toolCallJson = null
+                        modelName = modelId, toolCallJson = null
                     ))
                 } else {
                     // New branch — old message and its tool calls stay as a selectable branch
                     convRepo.upsertMessage(MessageEntity(
                         id = modelMessageId, conversationId = genId, parentId = parentId,
                         text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                        modelName = currentActiveModel.value
+                        modelName = modelId
                     ))
                 }
                 onPersistSelectedChildren(genId, selectedAfterRegenerate)
@@ -356,7 +346,7 @@ class MessageGenerationController(
                 startTime = startTime,
                 isRegenerate = isRegenerate,
                 replaceMessageId = replaceMessageId,
-                modelName = currentActiveModel.value,
+                modelName = modelId,
                 config = config,
                 ctx = genCtx,
                 generationJob = state.generationJob,
@@ -375,30 +365,29 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun editMessage(messageId: String, newText: String) {
+        if (newText.isBlank()) return
         val genId = currentConversationId.value ?: return
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
+        val messageToEdit = allMessages.value.find { it.id == messageId } ?: return
+        val selectedAtStart = selectedChildren.value.toMap()
 
-        // Pre-emptively claim the slot (cancels in-flight, keeps generating=true so a concurrent
-        // Send enqueues behind us, advances the token, returns the STOPPED snapshot to finalize).
-        val replacement = state.acquireForReplacement()
-        val myUiToken = replacement.uiToken
-        val stopFinalization: Job? = replacement.stoppedMessage?.let { stopped ->
-            finalizer.launchStopFinalization(state.scope, replacement.conversationId, listOf(stopped))
-        }
+        // Edit is idle-only by product rule; enforce it atomically below the UI gate.
+        val myUiToken = state.tryAcquireForReplacement() ?: return
         state.generationJob = state.scope.launch {
-            stopFinalization?.join()
             val myPersistId = state.nextPersistId()
             try {
             executionCoordinator.withConversationLock(genId) lock@ {
-            val messageToEdit = allMessages.value.find { it.id == messageId } ?: return@lock
+            if (convRepo.getMessagesForConversationSnapshot(genId).none { it.id == messageId }) {
+                return@lock
+            }
             val newUserMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
                 id = newUserMessageId, conversationId = genId, parentId = messageToEdit.parentId,
                 text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
             ))
-            val newMap = selectedChildren.value.toMutableMap()
+            val newMap = selectedAtStart.toMutableMap()
             newMap[messageToEdit.parentId] = newUserMessageId
             val selectedAfterUserEdit = newMap.toMap()
             onPersistSelectedChildren(genId, selectedAfterUserEdit)
@@ -408,7 +397,7 @@ class MessageGenerationController(
             convRepo.upsertMessage(MessageEntity(
                 id = modelMessageId, conversationId = genId, parentId = newUserMessageId,
                 text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                modelName = currentActiveModel.value
+                modelName = modelId
             ))
             convRepo.getConversation(genId)?.let { conv ->
                 convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
@@ -417,7 +406,7 @@ class MessageGenerationController(
             // evaluates with stale allMessages data but no streaming overlay.
             val placeholder = ChatMessage(
                 id = modelMessageId, parentId = newUserMessageId, text = "", participant = Participant.MODEL,
-                status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
+                status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId
             )
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
@@ -444,9 +433,10 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
+        val selectedModelId = currentActiveModel.value
         // Pre-flight: a blank model fails fast BEFORE creating a new-chat row or enqueueing, so the
         // Send button never swallows a message into a conversation that can't generate.
-        if (currentActiveModel.value.isBlank()) {
+        if (selectedModelId.isBlank()) {
             onSnackbar(application.getString(R.string.no_model_selected))
             return false
         }
@@ -461,7 +451,7 @@ class MessageGenerationController(
                 convRepo.upsertConversation(ChatEntity(
                     id = newId,
                     title = appContext.getString(R.string.new_chat),
-                    modelId = currentActiveModel.value,
+                    modelId = selectedModelId,
                     systemPromptId = pendingSystemPromptId.value
                 ))
             }
@@ -471,7 +461,7 @@ class MessageGenerationController(
             isNewChatMode.value = false
         }
         val genId = currentConversationId.value ?: return false
-        return sendInto(genId, wasNewChat, text, images, attachments)
+        return sendInto(genId, wasNewChat, text, images, attachments, selectedModelId)
     }
 
     /** Release [uiToken]'s slot and, only if this call actually released it, drain the next queued
@@ -481,7 +471,14 @@ class MessageGenerationController(
             state.dequeueSend()?.let { queued ->
                 // Re-enter with the ORIGINATING genId (never re-reading currentConversationId), so a
                 // message queued in conversation A can't land in B after the user switches chats.
-                sendInto(genId, wasNewChat = false, text = queued.text, images = emptyList(), attachments = queued.attachments)
+                sendInto(
+                    genId = genId,
+                    wasNewChat = false,
+                    text = queued.text,
+                    images = emptyList(),
+                    attachments = queued.attachments,
+                    modelId = queued.modelId,
+                )
             }
         }
     }
@@ -499,6 +496,7 @@ class MessageGenerationController(
         text: String,
         images: List<String>,
         attachments: List<SelectedAttachment>,
+        modelId: String,
     ): Boolean {
         val state = registry.getOrCreate(genId)
         // Atomic launch-or-enqueue decision. null → a generation already owns this conversation's
@@ -507,11 +505,11 @@ class MessageGenerationController(
             state.enqueueSend(QueuedSend(
                 id = UUID.randomUUID().toString(),
                 text = text,
+                modelId = modelId,
                 attachments = attachments,
             ))
             return true
         }
-        val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
             state.endGeneration(myUiToken); return false
         }
@@ -547,6 +545,7 @@ class MessageGenerationController(
             // parallel) must append to ITS own conversation's leaf, otherwise it would graft onto
             // whichever conversation the user is looking at.
             val snapshotEntities = convRepo.getMessagesForConversationSnapshot(currentId)
+            val selectedBeforeSend = convRepo.restoreBranchSelections(currentId)
             val path = ConversationUiState.resolvePath(
                 allMessages = snapshotEntities.map {
                     ChatMessage(
@@ -555,7 +554,7 @@ class MessageGenerationController(
                     )
                 },
                 streamingMsg = null,
-                selectedChildren = convRepo.restoreBranchSelections(currentId),
+                selectedChildren = selectedBeforeSend,
             )
             val lastMessageId = path.lastOrNull()?.id
             val userMessageId = UUID.randomUUID().toString()
@@ -570,7 +569,7 @@ class MessageGenerationController(
             convRepo.upsertMessage(MessageEntity(
                 id = modelMessageId, conversationId = currentId, parentId = userMessageId,
                 text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                modelName = currentActiveModel.value
+                modelName = modelId
             ))
             convRepo.getConversation(currentId)?.let { conv ->
                 convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
@@ -580,11 +579,11 @@ class MessageGenerationController(
             // visible — eliminating the single-frame gap.
             val placeholder = ChatMessage(
                 id = modelMessageId, parentId = userMessageId, text = "", participant = Participant.MODEL,
-                status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
+                status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId
             )
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
-            val newChildren = selectedChildren.value.toMutableMap()
+            val newChildren = selectedBeforeSend.toMutableMap()
             newChildren[userMessageId] = modelMessageId
             onPersistSelectedChildren(currentId, newChildren)
             ifOpenOn(genId) { selectedChildren.value = newChildren }
