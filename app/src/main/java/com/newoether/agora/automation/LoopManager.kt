@@ -169,7 +169,7 @@ class LoopManager(
         conversationId: String,
         expectedFireAt: Long = 0L,
     ): ExecutionResult =
-        executionCoordinator.withConversationLock(conversationId) {
+        executionCoordinator.withAutomationConversationLock(conversationId) conversationLock@ {
             val snapshot = stateMutex.withLock {
                 val loop = taskRepository.getLoop(conversationId).first()
                     ?: return@withLock null
@@ -193,21 +193,21 @@ class LoopManager(
                 }
             }
 
-            if (snapshot == null) return@withConversationLock ExecutionResult.NotFound
-            if (!snapshot.active) return@withConversationLock ExecutionResult.Inactive
+            if (snapshot == null) return@conversationLock ExecutionResult.NotFound
+            if (!snapshot.active) return@conversationLock ExecutionResult.Inactive
             if (expectedFireAt > 0L && snapshot.nextFireAt != expectedFireAt) {
-                return@withConversationLock ExecutionResult.Superseded(snapshot)
+                return@conversationLock ExecutionResult.Superseded(snapshot)
             }
 
             val now = clock()
             if (snapshot.nextFireAt > now) {
-                return@withConversationLock ExecutionResult.NotDue(snapshot.nextFireAt)
+                return@conversationLock ExecutionResult.NotDue(snapshot.nextFireAt)
             }
 
             val conversation = conversationRepository.getConversation(conversationId)
             if (conversation == null) {
                 stateMutex.withLock { taskRepository.deleteLoop(conversationId) }
-                return@withConversationLock ExecutionResult.NotFound
+                return@conversationLock ExecutionResult.NotFound
             }
 
             // Persistently claim this cycle *before* any model/tool side effect. If the process
@@ -235,13 +235,13 @@ class LoopManager(
                         0L
                     },
                 ).also { taskRepository.upsertLoop(it) }
-            } ?: return@withConversationLock ExecutionResult.Superseded(
+            } ?: return@conversationLock ExecutionResult.Superseded(
                 taskRepository.getLoop(conversationId).first()
             )
 
             _runningConversationIds.update { it + conversationId }
             val generationResult = try {
-                engine.runOnce(
+                engine.runOnceWithConversationLockHeld(
                     conversationId = conversationId,
                     userText = LoopPolicy.promptForExecution(claimed.prompt),
                     modelId = conversation.modelId,

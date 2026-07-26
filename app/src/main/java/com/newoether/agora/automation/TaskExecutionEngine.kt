@@ -106,17 +106,59 @@ class TaskExecutionEngine(
         foregroundServiceManagedExternally: Boolean = false,
         precondition: suspend () -> Boolean = { true },
     ): Result = automationExecutionGate.withExecution {
-        executionCoordinator.withConversationLock(conversationId) {
+        executionCoordinator.withAutomationConversationLock(conversationId) {
+            runOnceLocked(
+                conversationId = conversationId,
+                userText = userText,
+                modelId = modelId,
+                systemPromptOverride = systemPromptOverride,
+                foregroundServiceManagedExternally = foregroundServiceManagedExternally,
+                precondition = precondition,
+            )
+        }
+    }
+
+    /**
+     * LoopManager owns the conversation lock across its persistent cycle claim, generation, and
+     * schedule update. Re-entering the non-reentrant coordinator from [runOnce] would self-deadlock,
+     * so this entry point performs the same execution-gate work while trusting that outer owner.
+     */
+    internal suspend fun runOnceWithConversationLockHeld(
+        conversationId: String,
+        userText: String,
+        modelId: String? = null,
+        systemPromptOverride: String? = null,
+        foregroundServiceManagedExternally: Boolean = false,
+        precondition: suspend () -> Boolean = { true },
+    ): Result = automationExecutionGate.withExecution {
+        runOnceLocked(
+            conversationId = conversationId,
+            userText = userText,
+            modelId = modelId,
+            systemPromptOverride = systemPromptOverride,
+            foregroundServiceManagedExternally = foregroundServiceManagedExternally,
+            precondition = precondition,
+        )
+    }
+
+    private suspend fun runOnceLocked(
+        conversationId: String,
+        userText: String,
+        modelId: String?,
+        systemPromptOverride: String?,
+        foregroundServiceManagedExternally: Boolean,
+        precondition: suspend () -> Boolean,
+    ): Result {
         // A Worker may construct the process from an alarm while every StateFlow still exposes
         // its eager default. Wait for the real DataStore snapshot, then synchronously materialize
         // custom providers before resolving either the model or request configuration.
         settings.awaitInitialLoad()
         providerRegistry.awaitInitialSync()
         if (!precondition()) {
-            return@withConversationLock Result.Failure("Execution cancelled")
+            return Result.Failure("Execution cancelled")
         }
         val conversation = convRepo.getConversation(conversationId)
-            ?: return@withConversationLock Result.Failure("Conversation not found: $conversationId")
+            ?: return Result.Failure("Conversation not found: $conversationId")
         val effectiveModelId = modelId?.takeIf { it.isNotBlank() }
             ?: conversation.modelId?.takeIf { it.isNotBlank() }
             ?: settings.selectedModel.value
@@ -154,7 +196,7 @@ class TaskExecutionEngine(
             convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
         }
 
-        return@withConversationLock try {
+        return try {
             suspend fun fail(reason: String): Result.Failure {
                 convRepo.upsertMessage(
                     MessageEntity(
@@ -175,14 +217,14 @@ class TaskExecutionEngine(
                 return Result.Failure(reason)
             }
 
-            if (effectiveModelId.isBlank()) return@withConversationLock fail("No model selected")
+            if (effectiveModelId.isBlank()) return fail("No model selected")
             val providerName = providerRegistry.providerForModel(effectiveModelId)
             // Re-resolve against on-disk settings (DataStore may not have loaded yet), with
             // the synchronous value as a fallback — same fresh-key logic the foreground uses.
             val activeKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() }
                 ?: settings.resolveActiveKey(providerName) ?: ""
             if (!providerRegistry.isConfigured(providerName, activeKey)) {
-                return@withConversationLock fail("Provider not configured: $providerName")
+                return fail("Provider not configured: $providerName")
             }
 
             // Build the request headlessly through the same builder the ViewModel uses,
@@ -279,7 +321,6 @@ class TaskExecutionEngine(
                 )
             )
             Result.Failure(reason)
-        }
         }
     }
 }

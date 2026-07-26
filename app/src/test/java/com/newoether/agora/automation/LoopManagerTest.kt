@@ -82,7 +82,7 @@ class LoopManagerTest {
     fun successfulCycleAdvancesAndSchedulesFromCompletionTime() = runTest {
         stored.value = loop(maxCycles = 2, revision = 3L)
         coEvery {
-            engine.runOnce("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Success("model-message", "done")
         val manager = manager()
 
@@ -99,7 +99,7 @@ class LoopManagerTest {
     fun modelFailureStillConsumesFinalCycleWithoutImmediateRetry() = runTest {
         stored.value = loop(maxCycles = 1)
         coEvery {
-            engine.runOnce("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Failure("provider failed")
         val manager = manager()
 
@@ -115,7 +115,7 @@ class LoopManagerTest {
     fun stopDuringGenerationCannotBeOverwrittenByStaleCompletion() = runTest {
         stored.value = loop(maxCycles = 5, revision = 10L)
         coEvery {
-            engine.runOnce("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } coAnswers {
             stored.value = stored.value!!.copy(active = false, revision = 11L)
             TaskExecutionEngine.Result.Success("model-message", "done")
@@ -137,7 +137,7 @@ class LoopManagerTest {
         val scheduledAt = now
         stored.value = loop(nextFireAt = scheduledAt, maxCycles = 3)
         coEvery {
-            engine.runOnce("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Success("model-message", "done")
         val manager = manager()
 
@@ -148,7 +148,7 @@ class LoopManagerTest {
         assertTrue(retry is LoopManager.ExecutionResult.Superseded)
         assertEquals(1, stored.value!!.cycleCount)
         coVerify(exactly = 1) {
-            engine.runOnce("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         }
     }
 
@@ -171,7 +171,9 @@ class LoopManagerTest {
         val result = manager.executeByConversationId("conversation")
 
         assertEquals(LoopManager.ExecutionResult.NotDue(now + 5_000L), result)
-        coVerify(exactly = 0) { engine.runOnce(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            engine.runOnceWithConversationLockHeld(any(), any(), any(), any(), any(), any())
+        }
     }
 
     private fun kotlinx.coroutines.test.TestScope.manager() = LoopManager(

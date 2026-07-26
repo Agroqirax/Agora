@@ -2,6 +2,7 @@ package com.newoether.agora.automation
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -90,5 +91,64 @@ class ConversationExecutionCoordinatorTest {
         releaseFirst.complete(Unit)
         first.join()
         assertEquals(0, coordinator.trackedConversationCount())
+    }
+
+    @Test
+    fun automationWaiters_runBeforeAlreadyQueuedForegroundWaiters() = runTest {
+        val coordinator = ConversationExecutionCoordinator()
+        val firstEntered = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val order = mutableListOf<String>()
+
+        val first = launch {
+            coordinator.withConversationLock("conversation") {
+                firstEntered.complete(Unit)
+                releaseFirst.await()
+            }
+        }
+        firstEntered.await()
+        val foreground = launch {
+            coordinator.withConversationLock("conversation") { order += "foreground" }
+        }
+        runCurrent()
+        val automationOne = launch {
+            coordinator.withAutomationConversationLock("conversation") {
+                order += "automation-1"
+            }
+        }
+        val automationTwo = launch {
+            coordinator.withAutomationConversationLock("conversation") {
+                order += "automation-2"
+            }
+        }
+        runCurrent()
+
+        releaseFirst.complete(Unit)
+        joinAll(first, foreground, automationOne, automationTwo)
+
+        assertEquals(listOf("automation-1", "automation-2", "foreground"), order)
+        assertEquals(0, coordinator.trackedConversationCount())
+    }
+
+    @Test
+    fun automationOwnership_isExposedSeparatelyFromForegroundWork() = runTest {
+        val coordinator = ConversationExecutionCoordinator()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val job = launch {
+            coordinator.withAutomationConversationLock("conversation") {
+                entered.complete(Unit)
+                release.await()
+            }
+        }
+
+        entered.await()
+        assertTrue("conversation" in coordinator.activeConversationIds.value)
+        assertTrue("conversation" in coordinator.activeAutomationConversationIds.value)
+
+        release.complete(Unit)
+        job.join()
+        assertFalse("conversation" in coordinator.activeConversationIds.value)
+        assertFalse("conversation" in coordinator.activeAutomationConversationIds.value)
     }
 }
