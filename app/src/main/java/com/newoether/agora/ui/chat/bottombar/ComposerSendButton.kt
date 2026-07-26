@@ -71,8 +71,10 @@ internal fun ComposerSendButton(
                 composer.pendingSend = false
             }
             else if (canSend) {
+                // Haptic = button touch feel, fires on every tap regardless of whether the send
+                // is immediate or deferred behind attachment processing.
+                haptics.action()
                 if (anyProcessing) {
-                    haptics.action()
                     composer.pendingSend = true
                 } else {
                     if (onSendMessage(textFieldState.text.toString(), composer.selectedAttachments)) {

@@ -851,6 +851,9 @@ class ChatViewModel(
     }
 
     fun createNewChat() {
+        // Already on the new-chat screen: ignore (both the drawer and the top-bar capsule route
+        // here; behaviour must be identical and a no-op when there's nothing to reset).
+        if (_isNewChatMode.value) return
         switchingJob?.cancel()
         if (!_isNewChatMode.value) {
             _pendingSystemPromptId.value = null
@@ -1034,8 +1037,22 @@ class ChatViewModel(
         }
     }
 
-    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean =
-        generationController.sendMessage(text, images, attachments)
+    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
+        val sent = generationController.sendMessage(text, images, attachments)
+        if (sent) {
+            // The message has left the composer (launched or queued) — clear this conversation's
+            // persisted draft so switching back doesn't restore text the user already sent.
+            val id = _currentConversationId.value
+            if (id != null) {
+                viewModelScope.launch {
+                    runCatching { convRepo.updateDraft(id, "", null) }
+                    // Reset the anti-loop snapshot so the next real edit writes through.
+                    lastLoadedDraft = "" to emptyList()
+                }
+            }
+        }
+        return sent
+    }
 
     /**
      * Onboarding-focused model fetch for a single provider.

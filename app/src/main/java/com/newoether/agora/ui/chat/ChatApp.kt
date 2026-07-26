@@ -399,7 +399,16 @@ fun ChatApp(
     // snapshotFlow; updateDraft itself also compares against lastLoadedDraft for the
     // debounce-delay window (belt-and-suspenders anti-loop).
     LaunchedEffect(currentConversationId) {
-        val id = currentConversationId ?: return@LaunchedEffect
+        val id = currentConversationId
+        if (id == null) {
+            // New-chat screen: clear the composer so a draft from the previous conversation
+            // doesn't carry over.
+            viewModel.loadingDraft = true
+            textFieldState.edit { replace(0, length, "") }
+            composer.selectedAttachments = emptyList()
+            viewModel.loadingDraft = false
+            return@LaunchedEffect
+        }
         viewModel.loadingDraft = true
         val (draftText, draftAttachments) = try {
             viewModel.loadDraft(id)
@@ -551,10 +560,14 @@ fun ChatApp(
                         onOpenDrawer = { haptics.action(); focusManager.clearFocus(); scope.launch { drawerState.open() } },
                         onSystemPromptClick = { haptics.action(); showPromptDialog = true },
                         onNewChat = {
+                            // Haptic = button touch feel, fires on every tap even when the action
+                            // is a no-op (already on the new-chat screen), so feedback never feels dead.
                             haptics.action()
-                            isExpanded = false
-                            viewModel.createNewChat()
-                            inputFocusRequester.requestFocus()
+                            if (!isNewChatMode) {
+                                isExpanded = false
+                                viewModel.createNewChat()
+                                inputFocusRequester.requestFocus()
+                            }
                         },
                     )
                 }
@@ -817,7 +830,10 @@ fun ChatApp(
                         onSendMessage = { text, attachments ->
                             viewModel.sendMessage(text, attachments = attachments).also { sent ->
                                 if (sent) {
-                                    haptics.action()
+                                    // No haptic here: the Send button's touch haptic already fired
+                                    // at tap time (ComposerSendButton). This path is reached both for
+                                    // direct sends and the deferred pending-send auto-fire; buzzing
+                                    // again here would double-buzz the direct-send path.
                                     scope.launch {
                                         delay(200)
                                         scrollToLastUserMessage(animate = true)
