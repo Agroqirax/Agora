@@ -57,6 +57,7 @@ import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -491,6 +492,16 @@ class ChatViewModel(
         foreground + automation
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
+    private val generationMirror = ConversationGenerationMirror(
+        currentConversationId = _currentConversationId,
+        onSnapshot = { conversationId, snapshot ->
+            _streamingMessage.value = snapshot.streamingMessage
+            _isLoading.value = snapshot.isLoading
+            _generatingInConversationId.value =
+                if (snapshot.isGenerating) conversationId else null
+        },
+    )
+
     /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
     private val generationFinalizer by lazy {
         GenerationFinalizer(convRepo, settings, ::indexMessageForRag)
@@ -620,97 +631,90 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
-                    val state = generationRegistry.getOrCreate(id)
-                    // Fix stuck sending states when loading a conversation. Read THIS conversation's
-                    // own slot (state.generating), not the global _isLoading mirror: at switch time
-                    // the mirror still reflects the previous conversation, so a background
-                    // generation in the target conversation would be misread as idle and its
-                    // in-flight SENDING message wrongly marked STOPPED.
-                    if (!state.generating.value) {
-                        val stuckMessages = convRepo.getMessagesForConversation(id).first()
-                            .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
+                    coroutineScope {
+                        val switchScope = this
+                        val state = generationRegistry.getOrCreate(id)
+                        // Fix stuck sending states when loading a conversation. Read THIS conversation's
+                        // own slot (state.generating), not the global _isLoading mirror: at switch time
+                        // the mirror still reflects the previous conversation, so a background
+                        // generation in the target conversation would be misread as idle and its
+                        // in-flight SENDING message wrongly marked STOPPED.
+                        if (!state.generating.value) {
+                            val stuckMessages = convRepo.getMessagesForConversation(id).first()
+                                .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
 
-                        stuckMessages.forEach { msg ->
-                            convRepo.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
+                            stuckMessages.forEach { msg ->
+                                convRepo.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
+                            }
                         }
-                    }
 
-                    // Restore selected branches
-                    val conversation = convRepo.getConversation(id)
-                    if (conversation?.selectedBranchesJson != null) {
-                        try {
-                            val map = Json.decodeFromString<Map<String, String>>(conversation.selectedBranchesJson)
-                            val decodedMap = map.mapKeys { if (it.key == "null") null else it.key }
-                            _selectedChildren.value = decodedMap
-                        } catch (e: Exception) {
+                        // Restore selected branches
+                        val conversation = convRepo.getConversation(id)
+                        if (conversation?.selectedBranchesJson != null) {
+                            try {
+                                val map = Json.decodeFromString<Map<String, String>>(conversation.selectedBranchesJson)
+                                val decodedMap = map.mapKeys { if (it.key == "null") null else it.key }
+                                _selectedChildren.value = decodedMap
+                            } catch (e: Exception) {
+                                _selectedChildren.value = emptyMap()
+                            }
+                        } else {
                             _selectedChildren.value = emptyMap()
                         }
-                    } else {
-                        _selectedChildren.value = emptyMap()
-                    }
 
-                    var generationMirrorStarted = false
-                    convRepo.getMessagesForConversation(id).collect { entities ->
-                        val mapped = entities.map {
-                            ChatMessage(
-                                id = it.id,
-                                parentId = it.parentId,
-                                text = SearchResultFormatter.format(it.text, appContext),
-                                images = it.images,
-                                thoughts = it.thoughts,
-                                thoughtTitle = it.thoughtTitle,
-                                tokenCount = it.tokenCount,
-                                status = it.status,
-                                participant = it.participant,
-                                timestamp = it.timestamp,
-                                thoughtTimeMs = it.thoughtTimeMs,
-                                modelName = it.modelName,
-                                segments = it.toolCallJson?.let { json ->
-                                    try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null }
-                                } ?: it.thoughts?.takeIf { t -> t.isNotBlank() }?.let { listOf(MessageSegment(type = "thought", content = it)) },
-                                toolCall = it.toolCallJson?.let { json ->
-                                    try {
-                                        val segs = Json.decodeFromString<List<MessageSegment>>(json)
-                                        segs.lastOrNull { s -> s.type == "tool" }?.let { s ->
-                                            val rawResult = s.toolResult ?: ""
-                                            ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", SearchResultFormatter.format(rawResult, appContext))
-                                        }
-                                    } catch (_: Exception) { null }
-                                },
-                                attachmentMeta = it.attachmentMeta?.let { json ->
-                                    try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
-                                }
-                            )
-                        }
-                        // Backfill toolCall for old result_ messages persisted without toolCallJson.
-                        // They inherit the parent tool_ message's ToolCallData so the provider can
-                        // format them as proper "tool" role messages with matching tool_call_id.
-                        _allMessages.value = mapped.map { msg ->
-                            if (msg.id.startsWith(Constants.RESULT_MSG_PREFIX) && msg.toolCall == null) {
-                                val parentTool = mapped.find { it.id == msg.parentId }
-                                if (parentTool != null && parentTool.toolCall != null) {
-                                    msg.copy(toolCall = parentTool.toolCall)
-                                } else msg
-                            } else msg
-                        }
-                        if (!generationMirrorStarted) {
-                            generationMirrorStarted = true
-                            // Publish the target conversation's generation overlay only AFTER its
-                            // Room messages and branch selections are installed. Otherwise the
-                            // overlay alone can make `messages` non-empty, release the switching
-                            // scrim early, and render it against the previous conversation's tree.
-                            _streamingMessage.value = state.streamingMessage.value
-                            _isLoading.value = state.isLoading.value
-                            _generatingInConversationId.value =
-                                if (state.generating.value) id else null
-                            launch {
-                                state.streamingMessage.collect { _streamingMessage.value = it }
+                        var generationMirrorStarted = false
+                        convRepo.getMessagesForConversation(id).collect { entities ->
+                            val mapped = entities.map {
+                                ChatMessage(
+                                    id = it.id,
+                                    parentId = it.parentId,
+                                    text = SearchResultFormatter.format(it.text, appContext),
+                                    images = it.images,
+                                    thoughts = it.thoughts,
+                                    thoughtTitle = it.thoughtTitle,
+                                    tokenCount = it.tokenCount,
+                                    status = it.status,
+                                    participant = it.participant,
+                                    timestamp = it.timestamp,
+                                    thoughtTimeMs = it.thoughtTimeMs,
+                                    modelName = it.modelName,
+                                    segments = it.toolCallJson?.let { json ->
+                                        try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null }
+                                    } ?: it.thoughts?.takeIf { t -> t.isNotBlank() }?.let { listOf(MessageSegment(type = "thought", content = it)) },
+                                    toolCall = it.toolCallJson?.let { json ->
+                                        try {
+                                            val segs = Json.decodeFromString<List<MessageSegment>>(json)
+                                            segs.lastOrNull { s -> s.type == "tool" }?.let { s ->
+                                                val rawResult = s.toolResult ?: ""
+                                                ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", SearchResultFormatter.format(rawResult, appContext))
+                                            }
+                                        } catch (_: Exception) { null }
+                                    },
+                                    attachmentMeta = it.attachmentMeta?.let { json ->
+                                        try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
+                                    }
+                                )
                             }
-                            launch { state.isLoading.collect { _isLoading.value = it } }
-                            launch {
-                                state.generating.collect { generating ->
-                                    _generatingInConversationId.value =
-                                        if (generating) id else null
+                            // Backfill toolCall for old result_ messages persisted without toolCallJson.
+                            // They inherit the parent tool_ message's ToolCallData so the provider can
+                            // format them as proper "tool" role messages with matching tool_call_id.
+                            _allMessages.value = mapped.map { msg ->
+                                if (msg.id.startsWith(Constants.RESULT_MSG_PREFIX) && msg.toolCall == null) {
+                                    val parentTool = mapped.find { it.id == msg.parentId }
+                                    if (parentTool != null && parentTool.toolCall != null) {
+                                        msg.copy(toolCall = parentTool.toolCall)
+                                    } else msg
+                                } else msg
+                            }
+                            if (!generationMirrorStarted) {
+                                generationMirrorStarted = true
+                                // Publish the target conversation's generation overlay only AFTER its
+                                // Room messages and branch selections are installed. Otherwise the
+                                // overlay alone can make `messages` non-empty, release the switching
+                                // scrim early, and render it against the previous conversation's tree.
+                                generationMirror.publishCurrent(id, state)
+                                switchScope.launch {
+                                    generationMirror.collect(id, state)
                                 }
                             }
                         }
