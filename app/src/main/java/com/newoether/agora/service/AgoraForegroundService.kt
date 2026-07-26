@@ -199,7 +199,7 @@ class AgoraForegroundService : Service() {
         }
     }
 
-    private var currentText: String = "Generating response…"
+    @Volatile private var currentText: String = "Generating response…"
     private var foregroundStarted: Boolean = false
 
     override fun onCreate() {

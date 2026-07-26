@@ -97,11 +97,24 @@ class MemoryManager(context: Context) {
             ?.sortedBy { it.name } ?: emptyList()
     }
 
+    @Synchronized
     fun getMetaJson(): String =
         if (metaFile.exists()) metaFile.readText() else "{}"
 
+    @Synchronized
     fun saveMetaJson(jsonStr: String) {
-        metaFile.writeText(jsonStr)
+        // Atomic write via temp-file + rename so a concurrent getMetaJson can never observe
+        // a half-written JSON (POSIX write is not atomic; parallel generations on different
+        // conversations both touch this global meta file).
+        val tmp = java.io.File(metaFile.parentFile, metaFile.name + ".tmp")
+        tmp.writeText(jsonStr)
+        if (!tmp.renameTo(metaFile)) {
+            // Rename can fail on some filesystems if the target exists; fall back to a plain
+            // write under the same @Synchronized lock (still safe against concurrent readers,
+            // just not torn-write-safe on crash). Best-effort cleanup.
+            metaFile.writeText(jsonStr)
+            tmp.delete()
+        }
     }
 
     @Synchronized

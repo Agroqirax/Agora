@@ -31,6 +31,7 @@ class LoopManager(
     private val cancelWork: (String) -> Unit = {},
     private val cancelAlarm: suspend (String) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
+    executionCoordinator: ConversationExecutionCoordinator? = null,
 ) {
     /** Production convenience constructor; the primary constructor stays fully JVM-testable. */
     constructor(
@@ -38,11 +39,13 @@ class LoopManager(
         taskRepository: TaskRepository,
         conversationRepository: ConversationRepository,
         engine: TaskExecutionEngine,
+        executionCoordinator: ConversationExecutionCoordinator,
     ) : this(
         taskRepository = taskRepository,
         conversationRepository = conversationRepository,
         engine = engine,
         cancelWork = { conversationId -> LoopWorker.cancel(context, conversationId) },
+        executionCoordinator = executionCoordinator,
     )
 
     sealed interface StartResult {
@@ -70,7 +73,10 @@ class LoopManager(
     }
 
     private val stateMutex = Mutex()
-    private val executionCoordinator = ConversationExecutionCoordinator()
+    // Use the SHARED coordinator when injected (production), so a Loop fire on conversation X
+    // is serialized against a user Send on X. Falls back to a private instance for JVM tests
+    // that don't supply one (S4: same-conversation race fix).
+    private val executionCoordinator = executionCoordinator ?: ConversationExecutionCoordinator()
 
     private val _runningConversationIds = MutableStateFlow<Set<String>>(emptySet())
     val runningConversationIds = _runningConversationIds.asStateFlow()
