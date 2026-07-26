@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -111,7 +112,7 @@ internal fun ChatDrawerContent(
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
+    val generatingConversationIds by viewModel.generatingConversationIds.collectAsState()
 
     ModalDrawerSheet(
         drawerShape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp),
@@ -248,6 +249,8 @@ internal fun ChatDrawerContent(
                 } else {
                     items(conversations) { conversation ->
                         val isSelected = conversation.id == currentConversationId
+                        val isGenerating = conversation.id in generatingConversationIds
+                        val menuEnabled = !isSwitching && !isGenerating
                         var showMenu by remember { mutableStateOf(false) }
                         var pressOffset by remember { mutableStateOf(DpOffset.Zero) }
                         var lastPosition by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -292,13 +295,32 @@ internal fun ChatDrawerContent(
                                 color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                                 shape = CircleShape
                             ) {
-                                Text(
-                                    text = conversation.title,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                    maxLines = 1,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = conversation.title,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 1,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    if (isGenerating) {
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.onSecondaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.primary
+                                            },
+                                        )
+                                    }
+                                }
                             }
 
                             DropdownMenu(
@@ -312,7 +334,7 @@ internal fun ChatDrawerContent(
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.generate_title)) },
                                     leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-                                    enabled = !isSwitching && !isLoading,
+                                    enabled = menuEnabled,
                                     onClick = {
                                         haptics.action()
                                         showMenu = false
@@ -322,7 +344,7 @@ internal fun ChatDrawerContent(
                             DropdownMenuItem(
                                 text = { Text(stringResource(R.string.rename)) },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                enabled = !isSwitching && !isLoading,
+                                enabled = menuEnabled,
                                 onClick = {
                                     haptics.action()
                                     showMenu = false
@@ -330,9 +352,9 @@ internal fun ChatDrawerContent(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text(stringResource(R.string.delete), color = if (!isSwitching && !isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = if (!isSwitching && !isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                enabled = !isSwitching && !isLoading,
+                                text = { Text(stringResource(R.string.delete), color = if (menuEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
+                                leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = if (menuEnabled) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
+                                enabled = menuEnabled,
                                 onClick = {
                                     showMenu = false
                                     onRequestDelete(conversation.id)

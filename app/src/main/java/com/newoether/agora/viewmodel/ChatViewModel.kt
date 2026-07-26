@@ -481,6 +481,16 @@ class ChatViewModel(
         }
     }
 
+    /** Every conversation currently mutating its message tree through foreground generation or
+     * headless Task/Loop execution. Drawer rows use this per-id set instead of the open
+     * conversation's `_isLoading` mirror. */
+    val generatingConversationIds: StateFlow<Set<String>> = combine(
+        generationRegistry.activeConversationIds,
+        conversationExecutionCoordinator.activeAutomationConversationIds,
+    ) { foreground, automation ->
+        foreground + automation
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
     /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
     private val generationFinalizer by lazy {
         GenerationFinalizer(convRepo, settings, ::indexMessageForRag)
