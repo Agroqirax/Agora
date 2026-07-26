@@ -144,9 +144,13 @@ object HttpClient {
         .proxyAuthenticator(proxyAuthenticator)
         .build()
 
-    /** The currently active streaming handle, if any. Used to cancel
-     *  generation immediately by closing the underlying socket. */
-    @Volatile var activeStreamHandle: StreamHandle? = null
+    /** Every currently-live streaming handle in the process that is NOT owned by a per-
+     *  conversation [StreamScope]. A single generation spawns 1 + N streams (initial
+     *  response + one per tool round, each with up to 3 retry attempts), and
+     *  [com.newoether.agora.tool.ShellToolProvider] opens its own stream too. Registered on
+     *  open by [streamPost], removed on [StreamHandle.close]. */
+    private val liveHandles: MutableSet<StreamHandle> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
     class StreamHandle(private val call: okhttp3.Call, private val response: okhttp3.Response) {
         val code: Int get() = response.code
@@ -155,9 +159,11 @@ object HttpClient {
             try { response.body?.string() } catch (_: Exception) { null }
         }
         fun close() {
-            if (HttpClient.activeStreamHandle === this) {
-                HttpClient.activeStreamHandle = null
-            }
+            HttpClient.liveHandles.remove(this)
+            // Cancel the Call even on normal completion: a no-op when already done,
+            // but guarantees any blocked readLine() on this handle is woken the moment
+            // the response is torn down rather than waiting on the read timeout.
+            runCatching { call.cancel() }
             response.close()
         }
         fun readLine(): String? = source?.readUtf8Line()
@@ -165,15 +171,58 @@ object HttpClient {
         fun cancel() = call.cancel()
     }
 
-    fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle {
+    fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle =
+        streamPost(url, jsonBody, headers, scope = currentStreamScope)
+
+    /**
+     * Open a streaming POST. If [scope] is non-null, the handle is registered there so a
+     * per-conversation Stop can cancel exactly this generation's streams without severing
+     * another conversation's in-flight stream. If null, the handle is only in the global
+     * [liveHandles] set cancelled by [cancelAllStreams].
+     *
+     * Callers that want per-conversation cancellation set [currentStreamScope] for the
+     * duration of a generation (see [com.newoether.agora.viewmodel.GenerationManager]);
+     * legacy callers (shell tool) leave it null.
+     */
+    fun streamPost(
+        url: String,
+        jsonBody: String,
+        headers: Map<String, String> = emptyMap(),
+        scope: com.newoether.agora.viewmodel.StreamScope?,
+    ): StreamHandle {
         guardCleartextCredentials(url, headers)
         val body = jsonBody.toRequestBody(JSON)
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
         val call = client.newCall(requestBuilder.build())
         val handle = StreamHandle(call, call.execute())
-        activeStreamHandle = handle
+        if (scope != null) scope.register(handle)
+        liveHandles.add(handle)
         return handle
+    }
+
+    /**
+     * The per-conversation stream scope currently in effect, or null for legacy callers.
+     * Set by [com.newoether.agora.viewmodel.GenerationManager] for the duration of a
+     * generation so every [streamPost] opened by the provider registers into that
+     * conversation's [com.newoether.agora.viewmodel.StreamScope]; a Stop then cancels
+     * only that scope instead of every stream in the process.
+     *
+     * Safe as a process-global volatile because conversation generation is serialized within
+     * a conversation by the ConversationExecutionCoordinator and across conversations each
+     * owns a distinct scope — the only writers are generation entry points, which set it
+     * on entry and clear on exit.
+     */
+    @Volatile
+    var currentStreamScope: com.newoether.agora.viewmodel.StreamScope? = null
+
+    /** Cancel EVERY in-flight streaming Call in the process — the "stop everything" backstop
+     *  (e.g. ViewModel cleared). Per-conversation Stop should use the conversation's
+     *  [com.newoether.agora.viewmodel.StreamScope] instead, so it doesn't kill another
+     *  conversation's generation. */
+    fun cancelAllStreams() {
+        liveHandles.toList().forEach { runCatching { it.cancel() } }
+        liveHandles.clear()
     }
 
     fun post(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): String? {

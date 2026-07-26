@@ -60,6 +60,15 @@ class GenerationSession(
     val sendGate = AtomicBoolean(false)
     @Volatile private var stopFinalizationJob: Job? = null
 
+    /**
+     * The stream scope bound to the current generation, if any. When set, [stopInternal]
+     * cancels only this scope's in-flight HTTP streams instead of every stream in the process,
+     * so a Stop on one conversation doesn't kill another conversation's generation. Set by the
+     * generation entry points alongside [generationJob]. Will move into ConversationGenerationState
+     * in P4.
+     */
+    @Volatile var streamScope: StreamScope? = null
+
     private val genLock = Any()
     private var uiGenToken = 0L
     private val persistId = AtomicLong(0L)
@@ -123,7 +132,13 @@ class GenerationSession(
 
     private fun stopInternal(releaseSendGate: Boolean): Job? {
         val previousJob = generationJob
-        com.newoether.agora.api.HttpClient.activeStreamHandle?.cancel()
+        // Hard kill: cancel THIS conversation's in-flight streaming Calls only (when a
+        // streamScope is bound), falling back to the global set for legacy callers. Cancelling
+        // only the most-recent stream left earlier streams blocked on readLine() and tokens kept
+        // flowing after Stop; this severs them at the socket level. Per-scope cancellation
+        // ensures a Stop on conversation A does not kill conversation B's in-flight generation.
+        val scope = streamScope
+        if (scope != null) scope.cancelAll() else com.newoether.agora.api.HttpClient.cancelAllStreams()
         previousJob?.cancel()
         // Advance the UI-ownership token and commit the terminal UI state as one
         // atomic step under genLock. Any callback from the cancelled generation that

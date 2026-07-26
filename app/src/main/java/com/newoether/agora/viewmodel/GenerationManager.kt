@@ -412,8 +412,15 @@ class GenerationManager(
         config: GenerationConfig,
         ctx: GenerationContext,
         generationJob: kotlinx.coroutines.Job?,
-        callbacks: GenerationCallbacks
+        callbacks: GenerationCallbacks,
+        streamScope: StreamScope? = null,
     ) {
+        // Bind this generation's HTTP streams to its conversation's StreamScope so a Stop
+        // cancels only this generation's in-flight calls, not another conversation's. Cleared
+        // in finally so a subsequent generation on a different conversation is unscoped until
+        // its own generate() sets it. Null = legacy/headless caller, falls back to global.
+        val previousScope = com.newoether.agora.api.HttpClient.currentStreamScope
+        if (streamScope != null) com.newoether.agora.api.HttpClient.currentStreamScope = streamScope
         // Destructure into locals so the body below reads exactly as before.
         val (onStreamUpdate, onLoadingChange, onGeneratingIdChange, onStreamClear, isLatestPersist) = callbacks
 
@@ -779,6 +786,12 @@ class GenerationManager(
                 totalText = "Error: ${e.localizedMessage ?: "An unexpected error occurred."}"
             }
         } finally {
+            // Critical non-cancellable section: only the terminal DB upsert (and the
+            // image drain that feeds it). A stopped/superseded generation MUST still
+            // write its final row so it isn't left as SENDING. Everything else — RAG
+            // indexing, UI cleanup, foreground release, notifications — is moved below
+            // so a Stop returns from here as soon as the row is written, instead of
+            // running a heavy non-cancellable tail that held the generation lock/queue.
             withContext(NonCancellable) {
                 // A cancellation can arrive as ImageGenToolProvider's withContext returns,
                 // after the file was queued but before the normal post-tool drain ran.
@@ -808,28 +821,36 @@ class GenerationManager(
                                 status = currentStatus, participant = Participant.MODEL, timestamp = startTime,
                                 thoughtTimeMs = totalThoughtTimeMs, modelName = modelName, toolCallJson = segmentsJson
                             ))
-                            if (totalText.isNotBlank()) {
-                                onMessagePersisted?.invoke(modelMessageId, totalText)
-                            }
                         }
                     }
                 } catch (e: Exception) {
                     DebugLog.e("AgoraVM", "Failed to persist message to DB", e)
                 }
-                // Terminal UI cleanup. These callbacks are token-gated at the sink
-                // (in ChatViewModel), so they automatically no-op when this generation
-                // was stopped or superseded — only the still-current generation resets
-                // the loading/streaming/generating-id UI state.
-                onStreamClear()
-                onLoadingChange(false)
-                onGeneratingIdChange(null)
-                if (foregroundLeaseAcquired) {
-                    AgoraForegroundService.release(app, modelMessageId)
+            }
+            // Movable tail (cancellable, no suspension points): runs to completion even
+            // on cancellation because none of these suspend. Kept OUT of NonCancellable
+            // so a heavy RAG-indexing callback or notification can't pin the generation.
+            // RAG indexing hook — fire-and-forget; the persist above already committed.
+            try {
+                if (isLatestPersist() && totalText.isNotBlank()) {
+                    onMessagePersisted?.invoke(modelMessageId, totalText)
                 }
-                if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
-                    AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
-                }
+            } catch (_: Exception) { /* indexing must never break terminal cleanup */ }
+            // Terminal UI cleanup. Token-gated at the sink (in ChatViewModel), so they
+            // no-op when this generation was stopped/superseded — only the still-current
+            // generation resets the loading/streaming/generating-id UI state.
+            onStreamClear()
+            onLoadingChange(false)
+            onGeneratingIdChange(null)
+            if (foregroundLeaseAcquired) {
+                AgoraForegroundService.release(app, modelMessageId)
+            }
+            if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
+                AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
             }
         }
+        // Restore the prior stream scope so a nested/sequential generation on a different
+        // conversation doesn't inherit this one's scope.
+        com.newoether.agora.api.HttpClient.currentStreamScope = previousScope
     }
 }
