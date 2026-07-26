@@ -6,6 +6,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSource
+import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -144,15 +146,17 @@ object HttpClient {
         .proxyAuthenticator(proxyAuthenticator)
         .build()
 
-    /** Every currently-live streaming handle in the process that is NOT owned by a per-
-     *  conversation [StreamScope]. A single generation spawns 1 + N streams (initial
-     *  response + one per tool round, each with up to 3 retry attempts), and
-     *  [com.newoether.agora.tool.ShellToolProvider] opens its own stream too. Registered on
-     *  open by [streamPost], removed on [StreamHandle.close]. */
+    /** Every currently-live streaming handle in the process. Per-conversation scopes additionally
+     * index their own handles for targeted Stop; this global set remains the process-shutdown
+     * backstop. Registered on open by [streamPost], removed on [StreamHandle.close]. */
     private val liveHandles: MutableSet<StreamHandle> =
         java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
 
-    class StreamHandle(private val call: okhttp3.Call, private val response: okhttp3.Response) {
+    class StreamHandle(
+        private val call: okhttp3.Call,
+        private val response: okhttp3.Response,
+        private val scope: com.newoether.agora.viewmodel.StreamScope?,
+    ) {
         val code: Int get() = response.code
         val source: BufferedSource? get() = response.body?.source()
         val errorBody: String? by lazy {
@@ -160,6 +164,7 @@ object HttpClient {
         }
         fun close() {
             HttpClient.liveHandles.remove(this)
+            scope?.unregister(this)
             // Cancel the Call even on normal completion: a no-op when already done,
             // but guarantees any blocked readLine() on this handle is woken the moment
             // the response is torn down rather than waiting on the read timeout.
@@ -172,7 +177,7 @@ object HttpClient {
     }
 
     fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle =
-        streamPost(url, jsonBody, headers, scope = currentStreamScope)
+        streamPost(url, jsonBody, headers, scope = boundStreamScope())
 
     /**
      * Open a streaming POST. If [scope] is non-null, the handle is registered there so a
@@ -180,9 +185,9 @@ object HttpClient {
      * another conversation's in-flight stream. If null, the handle is only in the global
      * [liveHandles] set cancelled by [cancelAllStreams].
      *
-     * Callers that want per-conversation cancellation set [currentStreamScope] for the
-     * duration of a generation (see [com.newoether.agora.viewmodel.GenerationManager]);
-     * legacy callers (shell tool) leave it null.
+     * GenerationManager binds the scope to its coroutine context through [withStreamScope].
+     * Child `withContext` calls inherit that binding, while parallel conversation coroutines keep
+     * independent values even when they execute on the same pooled thread.
      */
     fun streamPost(
         url: String,
@@ -195,26 +200,25 @@ object HttpClient {
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
         val call = client.newCall(requestBuilder.build())
-        val handle = StreamHandle(call, call.execute())
+        val handle = StreamHandle(call, call.execute(), scope)
         if (scope != null) scope.register(handle)
         liveHandles.add(handle)
         return handle
     }
 
-    /**
-     * The per-conversation stream scope currently in effect, or null for legacy callers.
-     * Set by [com.newoether.agora.viewmodel.GenerationManager] for the duration of a
-     * generation so every [streamPost] opened by the provider registers into that
-     * conversation's [com.newoether.agora.viewmodel.StreamScope]; a Stop then cancels
-     * only that scope instead of every stream in the process.
-     *
-     * Safe as a process-global volatile because conversation generation is serialized within
-     * a conversation by the ConversationExecutionCoordinator and across conversations each
-     * owns a distinct scope — the only writers are generation entry points, which set it
-     * on entry and clear on exit.
-     */
-    @Volatile
-    var currentStreamScope: com.newoether.agora.viewmodel.StreamScope? = null
+    private val coroutineStreamScope =
+        ThreadLocal<com.newoether.agora.viewmodel.StreamScope?>()
+
+    /** Bind [scope] to the current generation coroutine. Thread-context propagation keeps the
+     * value stable across suspensions/dispatcher hops without exposing process-global mutable
+     * ownership to parallel conversations. */
+    internal suspend fun <T> withStreamScope(
+        scope: com.newoether.agora.viewmodel.StreamScope?,
+        block: suspend () -> T,
+    ): T = withContext(coroutineStreamScope.asContextElement(scope)) { block() }
+
+    internal fun boundStreamScope(): com.newoether.agora.viewmodel.StreamScope? =
+        coroutineStreamScope.get()
 
     /** Cancel EVERY in-flight streaming Call in the process — the "stop everything" backstop
      *  (e.g. ViewModel cleared). Per-conversation Stop should use the conversation's

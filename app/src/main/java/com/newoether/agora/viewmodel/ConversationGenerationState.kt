@@ -250,6 +250,10 @@ class StreamScope {
         handles.add(handle)
     }
 
+    fun unregister(handle: com.newoether.agora.api.HttpClient.StreamHandle) {
+        handles.remove(handle)
+    }
+
     fun cancelAll() {
         handles.toList().forEach { runCatching { it.cancel() } }
         handles.clear()

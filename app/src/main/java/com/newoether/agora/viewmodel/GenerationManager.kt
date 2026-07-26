@@ -419,13 +419,10 @@ class GenerationManager(
         generationJob: kotlinx.coroutines.Job?,
         callbacks: GenerationCallbacks,
         streamScope: StreamScope? = null,
-    ) {
-        // Bind this generation's HTTP streams to its conversation's StreamScope so a Stop
-        // cancels only this generation's in-flight calls, not another conversation's. Cleared
-        // in finally so a subsequent generation on a different conversation is unscoped until
-        // its own generate() sets it. Null = legacy/headless caller, falls back to global.
-        val previousScope = com.newoether.agora.api.HttpClient.currentStreamScope
-        if (streamScope != null) com.newoether.agora.api.HttpClient.currentStreamScope = streamScope
+    ) = com.newoether.agora.api.HttpClient.withStreamScope(streamScope) {
+        // Bind every provider/tool stream opened by this generation to its coroutine-local
+        // StreamScope. Parallel conversations therefore cannot overwrite one another's Stop
+        // ownership, while child dispatcher hops inherit the same context element.
         // Destructure into locals so the body below reads exactly as before.
         val (onStreamUpdate, onLoadingChange, onStreamClear, isLatestPersist) = callbacks
 
@@ -856,8 +853,5 @@ class GenerationManager(
                 AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
             }
         }
-        // Restore the prior stream scope so a nested/sequential generation on a different
-        // conversation doesn't inherit this one's scope.
-        com.newoether.agora.api.HttpClient.currentStreamScope = previousScope
     }
 }
