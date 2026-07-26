@@ -126,11 +126,12 @@ class MessageGenerationController(
         }
 
         // P1: Only stop generation if deleting within the currently-generating conversation.
-        // P0: Use stopForReplacement() + join() to prevent the STOPPED-upsert race
-        //     that can resurrect deleted messages (the only write path that was missing it).
+        // P0: stop() + join() prevents the STOPPED-upsert race that can resurrect deleted messages
+        //     (the only write path that was missing it).
         val stopFinalization: Job? = if (generatingInConversationId.value == currentId) {
             val state = registry.getOrCreate(currentId)
-            val r = state.stopForReplacement()
+            // Delete inside the generating conversation is a terminal stop: fully release the slot.
+            val r = state.stop()
             val msgs = listOfNotNull(r.stoppedMessage)
             if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
         } else {
@@ -214,17 +215,8 @@ class MessageGenerationController(
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
 
-        val stopResult = state.stopForReplacement()
-        val stopFinalization: Job? = stopResult?.let { r ->
-            val msgs = listOfNotNull(r.stoppedMessage)
-            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
-        }
-        // Capture ownership on the UI thread, immediately after stopGeneration advanced
-        // the token, so no concurrent stop can slip in before we record it.
-        val myUiToken = state.captureUiToken()
-
-        // Compute IDs and set placeholder on the calling thread before launching IO work,
-        // so the combine function never sees streamingMessage=null while the error is in allMessages.
+        // Validate the target BEFORE claiming the slot: acquireForReplacement keeps generating=true
+        // for the incoming generation, so an early return after it would leak the slot forever.
         val messageToRegenerate = allMessages.value.find { it.id == messageId } ?: return
         val parentId = messageToRegenerate.parentId ?: return
         val isErrorOrStopped = messageToRegenerate.status == MessageStatus.ERROR || messageToRegenerate.status == MessageStatus.STOPPED
@@ -232,6 +224,15 @@ class MessageGenerationController(
         // Error/stopped: purge and replace in-place. Normal: create new branch.
         val modelMessageId = if (isErrorOrStopped && isLatest) messageId else UUID.randomUUID().toString()
         val startTime = System.currentTimeMillis() + 1
+
+        // Pre-emptively claim the slot: cancels the in-flight generation, KEEPS the slot occupied
+        // (so a concurrent Send enqueues behind us instead of launching parallel), advances the UI
+        // token, and returns the STOPPED snapshot to finalize.
+        val replacement = state.acquireForReplacement()
+        val myUiToken = replacement.uiToken
+        val stopFinalization: Job? = replacement.stoppedMessage?.let { stopped ->
+            finalizer.launchStopFinalization(state.scope, replacement.conversationId, listOf(stopped))
+        }
 
         // Insert placeholder into allMessages and update selectedChildren on the calling
         // thread BEFORE setting streamingMessage. This ensures the combine function sees a
@@ -247,8 +248,9 @@ class MessageGenerationController(
         val selectedAfterRegenerate = newMap.toMap()
         ifOpenOn(genId) { selectedChildren.value = selectedAfterRegenerate }
 
+        // acquireForReplacement already set isLoading=true + streamingMessage=STOPPED; overwrite the
+        // streaming overlay with the new placeholder.
         state.streamUpdate(myUiToken, placeholder)
-        state.loadingChange(myUiToken, true)
 
         state.generationJob = state.scope.launch {
             // Wait only for the short STOPPED DB finalization. The cancelled provider
@@ -299,7 +301,7 @@ class MessageGenerationController(
                 )
                 }
             } finally {
-                state.loadingChange(myUiToken, false)
+                releaseAndDrain(state, myUiToken, genId)
             }
         }
     }
@@ -378,16 +380,13 @@ class MessageGenerationController(
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
 
-        val stopResult = state.stopForReplacement()
-        val stopFinalization: Job? = stopResult?.let { r ->
-            val msgs = listOfNotNull(r.stoppedMessage)
-            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
+        // Pre-emptively claim the slot (cancels in-flight, keeps generating=true so a concurrent
+        // Send enqueues behind us, advances the token, returns the STOPPED snapshot to finalize).
+        val replacement = state.acquireForReplacement()
+        val myUiToken = replacement.uiToken
+        val stopFinalization: Job? = replacement.stoppedMessage?.let { stopped ->
+            finalizer.launchStopFinalization(state.scope, replacement.conversationId, listOf(stopped))
         }
-        val myUiToken = state.captureUiToken()
-        // Set loading synchronously on the calling thread (like sendMessage/regenerate)
-        // so the global generation gate disables all per-message actions immediately,
-        // with no window during stopFinalization.join() + DB setup.
-        state.loadingChange(myUiToken, true)
         state.generationJob = state.scope.launch {
             stopFinalization?.join()
             val myPersistId = state.nextPersistId()
@@ -435,7 +434,7 @@ class MessageGenerationController(
             )
             }
             } finally {
-                state.loadingChange(myUiToken, false)
+                releaseAndDrain(state, myUiToken, genId)
             }
         }
     }
@@ -445,11 +444,16 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
-        // G9: resolve the conversation id on the calling thread BEFORE launching the
-        // generation coroutine, so the registry keys the new generation on the correct
-        // conversation even if the user switches chats before the coroutine runs. The
-        // new-conversation row is a fast DB insert; doing it here (rather than inside
-        // the coroutine) closes the race where genId was unknown on the calling thread.
+        // Pre-flight: a blank model fails fast BEFORE creating a new-chat row or enqueueing, so the
+        // Send button never swallows a message into a conversation that can't generate.
+        if (currentActiveModel.value.isBlank()) {
+            onSnackbar(application.getString(R.string.no_model_selected))
+            return false
+        }
+        // G9: resolve the conversation id on the calling thread BEFORE launching the generation
+        // coroutine, so the registry keys the new generation on the correct conversation even if
+        // the user switches chats before the coroutine runs. The new-conversation row is a fast DB
+        // insert; doing it here closes the race where genId was unknown on the calling thread.
         val wasNewChat = isNewChatMode.value || currentConversationId.value == null
         if (wasNewChat) {
             val newId = UUID.randomUUID().toString()
@@ -467,52 +471,63 @@ class MessageGenerationController(
             isNewChatMode.value = false
         }
         val genId = currentConversationId.value ?: return false
+        return sendInto(genId, wasNewChat, text, images, attachments)
+    }
+
+    /** Release [uiToken]'s slot and, only if this call actually released it, drain the next queued
+     *  send into its originating conversation. */
+    private fun releaseAndDrain(state: ConversationGenerationState, uiToken: Long, genId: String) {
+        if (state.endGeneration(uiToken)) {
+            state.dequeueSend()?.let { queued ->
+                // Re-enter with the ORIGINATING genId (never re-reading currentConversationId), so a
+                // message queued in conversation A can't land in B after the user switches chats.
+                sendInto(genId, wasNewChat = false, text = queued.text, images = emptyList(), attachments = queued.attachments)
+            }
+        }
+    }
+    /**
+     * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
+     * background/drained send lands in its own conversation). Atomically claims the generation slot
+     * via [ConversationGenerationState.acquireForSend]: if a generation is already running the
+     * message is enqueued (carrying its full attachment list) and this returns true; otherwise the
+     * slot is held, generating is set synchronously, and the generation launches. The finally
+     * releases the slot (token-gated) and drains the next queued send.
+     */
+    private fun sendInto(
+        genId: String,
+        wasNewChat: Boolean,
+        text: String,
+        images: List<String>,
+        attachments: List<SelectedAttachment>,
+    ): Boolean {
         val state = registry.getOrCreate(genId)
-        // If this conversation is already generating, enqueue the message instead of launching a
-        // new generation. The Send button stays visible (text/attachments non-empty) per the
-        // Send/Stop UX, and the queued message sends automatically once the current generation
-        // finishes (see launchGeneration's tail drain). The queue is per-conversation.
-        if (state.generating.value) {
+        // Atomic launch-or-enqueue decision. null → a generation already owns this conversation's
+        // tree; enqueue behind it (attachments carried whole) and let the drain send it in order.
+        val myUiToken = state.acquireForSend() ?: run {
             state.enqueueSend(QueuedSend(
                 id = UUID.randomUUID().toString(),
                 text = text,
-                attachmentPaths = images,
+                attachments = attachments,
             ))
             return true
         }
-        if (!state.sendGate.compareAndSet(false, true)) return false
-        var committed = false
-        try {
         val modelId = currentActiveModel.value
-        if (modelId.isBlank()) {
-            onSnackbar(application.getString(R.string.no_model_selected))
-            return false
+        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
+            state.endGeneration(myUiToken); return false
         }
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return false
         if (providerName == Constants.PROVIDER_LOCAL) {
             val localModelId = modelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
             val config = settings.localChatModels.value.find { it.modelId == localModelId }
             if (config == null || !java.io.File(config.localFilePath).exists()) {
                 onSnackbar(application.getString(R.string.local_model_not_found))
-                return false
+                state.endGeneration(myUiToken); return false
             }
         }
-        val stopResult = state.stopForReplacement()
-        val stopFinalization: Job? = stopResult?.let { r ->
-            val msgs = listOfNotNull(r.stoppedMessage)
-            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
-        }
-        // Capture ownership on the UI thread right after stopGeneration advanced the token,
-        // and set loading immediately so UI shows sending state during attachment processing.
-        val myUiToken = state.captureUiToken()
+        // Set loading immediately so the UI shows the sending state during attachment processing.
         state.loadingChange(myUiToken, true)
 
-        committed = true
         state.generationJob = state.scope.launch {
             try {
-            // Wait only for the short STOPPED DB finalization. The cancelled provider
-            // may still be unwinding, but it no longer owns the next generation path.
-            stopFinalization?.join()
             val myPersistId = state.nextPersistId()
             val (allImages, attachmentMeta) = payloadBuilder.buildMessagePayload(application, images, attachments)
             val currentId = genId
@@ -590,25 +605,12 @@ class MessageGenerationController(
             }
             }
         } finally {
-            // Token-gated: only the still-current generation clears the button, so a
-            // cancelled/superseded coroutine can't revert the icon mid-generation.
-            state.loadingChange(myUiToken, false)
-            // sendGate must ALWAYS be freed, even when this coroutine was cancelled
-            // by a subsequent regenerate(). Otherwise the send button stays locked.
-            state.sendGate.set(false)
-            // Drain the per-conversation queue: if the user enqueued messages while this
-            // generation ran, send the next one. Only the still-current generation drains
-            // (a stopped/superseded one leaves the queue intact for the user to retry/cancel).
-            if (state.captureUiToken() == myUiToken) {
-                state.dequeueSend()?.let { queued ->
-                    sendMessage(queued.text, images = queued.attachmentPaths)
-                }
-            }
+            // Single slot owner: release the slot (token-gated — a superseded/stopped coroutine
+            // no-ops) and, only if we actually released, drain the next queued send into THIS
+            // conversation. Replaces the old loadingChange + sendGate.set + manual drain trio.
+            releaseAndDrain(state, myUiToken, genId)
         }
         } // end launch
-    } finally {
-        if (!committed) state.sendGate.set(false)
-    }
         return true
     }
 

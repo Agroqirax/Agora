@@ -2,15 +2,15 @@ package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.SelectedAttachment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicLong
  * queued-send list — so two conversations can generate in parallel without their state
  * clobbering each other.
  *
- * Replaces the process-global single-slot state that previously lived in [GenerationSession].
+ * Replaces the process-global single-slot generation state that predated per-conversation parallelism.
  * The global StateFlows ChatViewModel exposes to the UI are now a mirror of whichever
  * conversation is currently open (see [ConversationStateRegistry]); background conversations
  * mutate only their own private flows here and write the DB, so they stay invisible until the
@@ -35,17 +35,20 @@ import java.util.concurrent.atomic.AtomicLong
  *    (never on stop), so a stopped generation still persists its own text while a superseded
  *    one is blocked from clobbering the newer message.
  *
- * ## Stop / stopForReplacement
+ * ## Slot lifecycle (acquireForSend / acquireForReplacement / endGeneration / stop)
  *
- * [stop] / [stopForReplacement] cancel ONLY this conversation's [generationJob] and this
- * conversation's in-flight HTTP streams (via [streamScope]) — never another conversation's.
+ * The generation "slot" (the [generating] flag under [genLock]) is the single atomic decision
+ * point for launch-vs-enqueue. [acquireForSend] claims it cooperatively (null → enqueue);
+ * [acquireForReplacement] claims it pre-emptively for regenerate/edit (cancels in-flight but keeps
+ * the slot occupied); [endGeneration] releases it token-gated when a generation ends; [stop] is a
+ * terminal user Stop that fully releases it. All of these cancel ONLY this conversation's
+ * [generationJob] and in-flight HTTP streams (via [streamScope]) — never another conversation's.
  * This is the fix for the cross-conversation "Stop kills the wrong generation" race.
  */
 class ConversationGenerationState(val conversationId: String) {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     var generationJob: Job? = null
-    val sendGate = AtomicBoolean(false)
 
     @Volatile private var stopFinalizationJob: Job? = null
 
@@ -72,16 +75,63 @@ class ConversationGenerationState(val conversationId: String) {
     fun nextPersistId(): Long = persistId.incrementAndGet()
     /** True while [persistId] still belongs to the generation that captured [id]. */
     fun isLatestPersist(id: Long): Boolean = persistId.get() == id
+    /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
+    fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
 
-    /** Marks this conversation as actively generating and claims a fresh persist id. */
-    fun beginGeneration(): Long {
+    // ── Generation slot (single source of truth: [generating] under [genLock]) ────────────
+    // Replaces the old `sendGate` AtomicBoolean. The slot is the atomic decision point for
+    // "launch now vs enqueue": exactly one generation owns a conversation's tree at a time.
+
+    /**
+     * Cooperative claim for a fresh send. If the slot is free, atomically marks this conversation
+     * generating (advancing the UI token so any just-finished generation's late callbacks are gated
+     * out), flips it active in the registry, and returns the captured token. If a generation is
+     * already running, returns null → the caller must enqueue instead of launching (fixes the
+     * silent-drop / same-conversation-parallel window: [generating] is now set synchronously here,
+     * not deep inside the coroutine).
+     */
+    fun acquireForSend(): Long? = synchronized(genLock) {
+        if (generating.value) return null
+        uiGenToken += 1
         generating.value = true
-        return nextPersistId()
+        onActive?.invoke(conversationId)
+        uiGenToken
     }
 
-    /** Clears the generating flag (token-gated so a stale generation can't resurrect it). */
-    fun clearGenerating(uiToken: Long) {
-        synchronized(genLock) { if (uiGenToken == uiToken) generating.value = false }
+    /**
+     * Pre-emptive claim for regenerate/edit. Cancels the in-flight generation (job + this
+     * conversation's HTTP streams), advances the UI token, and — crucially — KEEPS the slot
+     * occupied (generating stays true) so a concurrent Send enqueues behind the replacement
+     * instead of launching a parallel generation. Returns the new token plus the stopped-message
+     * snapshot so the caller can persist STOPPED.
+     */
+    fun acquireForReplacement(): ReplacementResult {
+        val previousJob = generationJob
+        streamScope.cancelAll()
+        previousJob?.cancel()
+        return synchronized(genLock) {
+            uiGenToken += 1
+            isLoading.value = true
+            val stopped = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
+            streamingMessage.value = stopped
+            generating.value = true
+            onActive?.invoke(conversationId)
+            ReplacementResult(uiGenToken, stopped, conversationId)
+        }
+    }
+
+    /**
+     * Token-gated release of the slot when a generation coroutine finishes (or dies before
+     * reaching [GenerationManager]'s tail). Only the still-current owner clears the slot, so a
+     * superseded/stopped coroutine's finally is a no-op. Returns true if this call actually
+     * released (i.e. the caller may now drain the queue).
+     */
+    fun endGeneration(uiToken: Long): Boolean = synchronized(genLock) {
+        if (uiGenToken != uiToken) return false
+        isLoading.value = false
+        generating.value = false
+        onIdle?.invoke(conversationId)
+        true
     }
 
     // ── Token-gated UI mutators ───────────────────────────────────────────
@@ -90,18 +140,6 @@ class ConversationGenerationState(val conversationId: String) {
     }
     fun loadingChange(uiToken: Long, value: Boolean) {
         synchronized(genLock) { if (uiGenToken == uiToken) isLoading.value = value }
-    }
-    fun generatingIdChange(uiToken: Long, id: String?) {
-        synchronized(genLock) {
-            if (uiGenToken != uiToken) return
-            if (id != null) {
-                generating.value = true
-                onActive?.invoke(conversationId)
-            } else {
-                generating.value = false
-                onIdle?.invoke(conversationId)
-            }
-        }
     }
     fun streamClear(uiToken: Long) {
         synchronized(genLock) {
@@ -120,23 +158,19 @@ class ConversationGenerationState(val conversationId: String) {
     fun callbacksFor(uiToken: Long, persistId: Long): GenerationCallbacks = GenerationCallbacks(
         onStreamUpdate = { streamUpdate(uiToken, it) },
         onLoadingChange = { loadingChange(uiToken, it) },
-        onGeneratingIdChange = { generatingIdChange(uiToken, it) },
         onStreamClear = { streamClear(uiToken) },
         isLatestPersist = { isLatestPersist(persistId) },
     )
 
     // ── Stop / finalization ───────────────────────────────────────────────
     /**
-     * Advance the UI-ownership token and commit terminal UI state as one atomic step. Returns
-     * the [StopResult] (the stopped message snapshot + a finalization job) so the caller can
-     * persist STOPPED to the DB. The caller wires DB/rag callbacks because they depend on repos
-     * this class deliberately doesn't hold.
+     * Terminal stop that fully releases the slot (Stop button, or a delete that lands inside the
+     * generating conversation). Cancels ONLY this conversation's job + in-flight HTTP streams,
+     * advances the UI token, commits STOPPED to the streaming snapshot, and clears the slot
+     * (generating=false + onIdle). Regenerate/edit do NOT use this — they use
+     * [acquireForReplacement] which keeps the slot occupied for the incoming generation.
      */
-    fun stop(): StopResult = stopInternal(releaseSendGate = true)
-
-    fun stopForReplacement(): StopResult = stopInternal(releaseSendGate = false)
-
-    private fun stopInternal(releaseSendGate: Boolean): StopResult {
+    fun stop(): StopResult {
         val previousJob = generationJob
         // Hard kill: cancel THIS conversation's in-flight HTTP streams only.
         streamScope.cancelAll()
@@ -147,10 +181,9 @@ class ConversationGenerationState(val conversationId: String) {
             val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
             streamingMessage.value = s
             generating.value = false
+            onIdle?.invoke(conversationId)
             s
         }
-        onIdle?.invoke(conversationId)
-        if (releaseSendGate) sendGate.set(false)
         return StopResult(stoppedMsg, conversationId)
     }
 
@@ -172,31 +205,35 @@ class ConversationGenerationState(val conversationId: String) {
         queuedSends.update { it + send }
     }
 
-    /** Pop and return the next queued send, or null if empty. */
-    fun dequeueSend(): QueuedSend? {
-        var popped: QueuedSend? = null
-        queuedSends.update { queue ->
-            if (queue.isEmpty()) queue
-            else { popped = queue.first(); queue.drop(1) }
-        }
-        return popped
+    /**
+     * Atomically pop the head of the queue. Uses [getAndUpdate] so the returned item is derived
+     * from the exact pre-update snapshot that won the CAS — no mutable side-effect var that a
+     * retried update lambda could re-assign.
+     */
+    fun dequeueSend(): QueuedSend? =
+        queuedSends.getAndUpdate { if (it.isEmpty()) it else it.drop(1) }.firstOrNull()
+
+    /**
+     * Remove a queued send by id (X button). Returns the removed item (or null) so the caller can
+     * delete its now-orphaned attachment files — the composer already cleared its own reference on
+     * enqueue, so the QueuedSend holds the only handle to those copied files.
+     */
+    fun removeQueuedSend(id: String): QueuedSend? {
+        val before = queuedSends.getAndUpdate { queue -> queue.filterNot { it.id == id } }
+        return before.firstOrNull { it.id == id }
     }
 
-    /** Remove a queued send by id (X button). Returns true if removed. */
-    fun removeQueuedSend(id: String): Boolean {
-        var removed = false
-        queuedSends.update { queue ->
-            val target = queue.firstOrNull { it.id == id }
-            if (target != null) { removed = true; queue.filterNot { it.id == id } } else queue
-        }
-        return removed
-    }
-
-    fun clearQueuedSends() {
-        queuedSends.value = emptyList()
-    }
+    /** Clear the whole queue, returning the removed items for orphan-file cleanup. */
+    fun clearQueuedSends(): List<QueuedSend> = queuedSends.getAndUpdate { emptyList() }
 
     data class StopResult(val stoppedMessage: ChatMessage?, val conversationId: String)
+
+    /** Result of [acquireForReplacement]: the new UI token plus the stopped-message snapshot. */
+    data class ReplacementResult(
+        val uiToken: Long,
+        val stoppedMessage: ChatMessage?,
+        val conversationId: String,
+    )
 
     /** Launch a stop-finalization coroutine on this conversation's scope. */
     fun launchFinalization(block: suspend () -> Unit): Job {
@@ -208,11 +245,18 @@ class ConversationGenerationState(val conversationId: String) {
     }
 }
 
-/** A message queued behind an in-progress generation, waiting to be sent. */
+/**
+ * A message queued behind an in-progress generation, waiting to be sent. Carries the full
+ * [SelectedAttachment] list (not bare paths) so a drained send rebuilds the exact same payload —
+ * image/video frames, PDF pages, slice configs — as a direct send would. The composer copies each
+ * attachment to app-private storage before enqueue and then clears its own list, so this list
+ * holds the only live reference to those files until the send drains (ownership → MessageEntity)
+ * or the item is removed (files deleted).
+ */
 data class QueuedSend(
     val id: String,
     val text: String,
-    val attachmentPaths: List<String>,
+    val attachments: List<SelectedAttachment>,
     val createdAt: Long = System.currentTimeMillis(),
 )
 

@@ -7,12 +7,12 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,9 +36,12 @@ import com.newoether.agora.R
 import com.newoether.agora.viewmodel.QueuedSend
 
 /**
- * Displays queued messages that are waiting behind an in-progress generation.
- * Each queued message shows a truncated text preview, an optional attachment
- * count badge, a per-item remove button, and a "Clear all" action at the bottom.
+ * Queued messages waiting behind an in-progress generation, shown as a compact gray banner that
+ * hugs the top of the text field — styled to match [LoopControlBar] (the cron banner): full-width,
+ * secondaryContainer, asymmetric corners (rounded top, near-flat bottom so it sits flush on the
+ * input). The Column grows one compact row per queued message; each row is a read-only text
+ * preview + optional attachment-count badge + an X to remove it. A "Clear all" action appears only
+ * when more than one is queued (a lone item's X already clears the queue).
  */
 @Composable
 internal fun QueuedMessagesBanner(
@@ -53,79 +56,65 @@ internal fun QueuedMessagesBanner(
         exit = shrinkVertically(tween(250)) + fadeOut(tween(180)),
     ) {
         Surface(
-            modifier = modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            shape = RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            tonalElevation = 1.dp,
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .animateContentSize(tween(400))
-                    .padding(12.dp),
+                    .padding(vertical = 2.dp),
             ) {
                 queuedSends.forEach { queued ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .heightIn(min = 36.dp)
+                            .padding(start = 14.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Truncated text preview
                         Text(
                             text = queued.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f),
                         )
-                        // Attachment count badge
-                        if (queued.attachmentPaths.isNotEmpty()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 6.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.AttachFile,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text(
-                                    text = queued.attachmentPaths.size.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
+                        if (queued.attachments.isNotEmpty()) {
+                            Icon(
+                                Icons.Default.AttachFile,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                text = queued.attachments.size.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            Spacer(Modifier.width(4.dp))
                         }
-                        // Per-item remove button
-                        IconButton(
-                            onClick = { onRemove(queued.id) },
-                            modifier = Modifier.size(24.dp),
-                        ) {
+                        IconButton(onClick = { onRemove(queued.id) }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 Icons.Default.Close,
                                 contentDescription = stringResource(R.string.remove),
                                 modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                 }
-                // "Clear all" action
-                TextButton(
-                    onClick = onClearAll,
-                    modifier = Modifier.align(Alignment.End),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        text = "Clear all",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
+                if (queuedSends.size > 1) {
+                    TextButton(
+                        onClick = onClearAll,
+                        modifier = Modifier.align(Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.queue_clear_all),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
             }
         }

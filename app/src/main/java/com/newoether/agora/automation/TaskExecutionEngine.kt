@@ -84,7 +84,6 @@ class TaskExecutionEngine(
     private val headlessCallbacks = GenerationCallbacks(
         onStreamUpdate = {},
         onLoadingChange = {},
-        onGeneratingIdChange = {},
         onStreamClear = {},
         isLatestPersist = { true },
     )

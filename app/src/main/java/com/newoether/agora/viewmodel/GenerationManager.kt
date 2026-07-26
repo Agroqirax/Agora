@@ -130,14 +130,19 @@ internal fun applyUserTemplateToMessages(
 
 /**
  * The token-gated UI callbacks a single generation drives. Built once per call by
- * [GenerationSession.callbacksFor], so each generation entry point ([ChatViewModel]'s
- * send / regenerate / edit) wires the session ownership tokens in exactly one place
- * instead of re-threading five lambdas by hand.
+ * [ConversationGenerationState.callbacksFor], so each generation entry point
+ * ([MessageGenerationController]'s send / regenerate / edit) wires the per-conversation
+ * ownership tokens in exactly one place instead of re-threading lambdas by hand.
+ *
+ * Note: the generation-slot lifecycle (generating flag / active-conversation set) is owned by
+ * [MessageGenerationController] via [ConversationGenerationState.acquireForSend] /
+ * [ConversationGenerationState.acquireForReplacement] / [ConversationGenerationState.endGeneration],
+ * NOT by these callbacks — GenerationManager only streams tokens into the message and persists the
+ * terminal DB row.
  */
 data class GenerationCallbacks(
     val onStreamUpdate: (ChatMessage) -> Unit,
     val onLoadingChange: (Boolean) -> Unit,
-    val onGeneratingIdChange: (String?) -> Unit,
     val onStreamClear: () -> Unit,
     val isLatestPersist: () -> Boolean,
 )
@@ -422,7 +427,7 @@ class GenerationManager(
         val previousScope = com.newoether.agora.api.HttpClient.currentStreamScope
         if (streamScope != null) com.newoether.agora.api.HttpClient.currentStreamScope = streamScope
         // Destructure into locals so the body below reads exactly as before.
-        val (onStreamUpdate, onLoadingChange, onGeneratingIdChange, onStreamClear, isLatestPersist) = callbacks
+        val (onStreamUpdate, onLoadingChange, onStreamClear, isLatestPersist) = callbacks
 
         var foregroundLeaseAcquired = false
         var totalText = ""
@@ -463,7 +468,8 @@ class GenerationManager(
         try {
             val provider = getProviderInstance(config.providerName)
             onLoadingChange(true)
-            onGeneratingIdChange(conversationId)
+            // Slot ownership (generating flag / active set) is claimed synchronously by the
+            // controller before this coroutine runs — GenerationManager no longer touches it.
             com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName} regen=$isRegenerate")
             thinkingPlaceholder = context.getString(R.string.thinking_ellipsis)
             val placeholder = conversations.getMessagesForConversationSnapshot(conversationId)
@@ -841,7 +847,8 @@ class GenerationManager(
             // generation resets the loading/streaming/generating-id UI state.
             onStreamClear()
             onLoadingChange(false)
-            onGeneratingIdChange(null)
+            // The generating flag + active-set are released by the controller's endGeneration()
+            // in its finally (which also drains the queue), so the slot lifecycle has a single owner.
             if (foregroundLeaseAcquired) {
                 AgoraForegroundService.release(app, modelMessageId)
             }

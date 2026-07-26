@@ -739,6 +739,8 @@
     <string name="remove">移除</string>
     <string name="menu">菜单</string>
     <string name="options">选项</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">全部清除</string>
     <string name="video_thumbnail">视频缩略图</string>
     <string name="play">播放</string>
     <string name="video_preview">视频预览</string>

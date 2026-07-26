@@ -644,6 +644,8 @@
     <string name="remove">Remove</string>
     <string name="menu">Menu</string>
     <string name="options">Options</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">Clear all</string>
     <string name="video_thumbnail">Video thumbnail</string>
     <string name="play">Play</string>
     <string name="video_preview">Video preview</string>

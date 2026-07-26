@@ -182,11 +182,6 @@ fun ChatBottomBar(
                 LoopControlBar(loop = loop, isRunning = loopRunning, onStop = onStopLoop)
             }
         }
-        QueuedMessagesBanner(
-            queuedSends = queuedSends,
-            onRemove = onRemoveQueuedSend,
-            onClearAll = onClearQueuedSends,
-        )
         if (composer.selectedAttachments.isNotEmpty() && !isExpanded) {
             AttachmentPreviewRow(
                 composer = composer,
@@ -195,6 +190,13 @@ fun ChatBottomBar(
                 onPdfPagesClick = onPdfPagesClick,
             )
         }
+        // Directly above the text field (below the attachment preview) so the queue banner hugs
+        // the input — matching ChatGPT/Claude desktop and the LoopControlBar cron banner.
+        QueuedMessagesBanner(
+            queuedSends = queuedSends,
+            onRemove = onRemoveQueuedSend,
+            onClearAll = onClearQueuedSends,
+        )
 
         Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).noOpBringIntoView()) {
             TextField(

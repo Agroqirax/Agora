@@ -258,9 +258,8 @@ class ChatViewModel(
         // (launched once in AppContainer), so they survive ViewModel recreation.
     }
 
-    // Generation lifecycle (IO scope, current job, send gate, race-free stop/persist
-    // ownership tokens) lives in [GenerationSession]; declared below once the
-    // generation StateFlows it shares are initialized.
+    // Per-conversation generation lifecycle (IO scope, job, slot, race-free stop/persist tokens)
+    // lives in [ConversationGenerationState], one per conversation via [generationRegistry].
 
     private val generationManager by lazy {
         GenerationManager(
@@ -289,7 +288,6 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         sandboxManager?.close()
-        session.cancelScope()
         generationRegistry.cancelAll()
         autoBackupManager.destroy()
     }
@@ -466,20 +464,6 @@ class ChatViewModel(
         GenerationFinalizer(convRepo, settings, ::indexMessageForRag)
     }
 
-    /** Race-free generation lifecycle: IO scope, current job, send gate, stop/persist tokens. */
-    private val session = GenerationSession(
-        app = application,
-        convRepo = convRepo,
-        settings = settings,
-        isLoading = _isLoading,
-        streamingMessage = _streamingMessage,
-        generatingInConversationId = _generatingInConversationId,
-        allMessages = _allMessages,
-        currentConversationId = _currentConversationId,
-        onIndexMessageForRag = ::indexMessageForRag,
-        onCacheMessages = { cacheMessagesForModel(it, silent = true) },
-    )
-
     private val _isSwitching = MutableStateFlow(false)
     val isSwitching: StateFlow<Boolean> = _isSwitching.asStateFlow()
 
@@ -619,8 +603,13 @@ class ChatViewModel(
                     launch {
                         state.generating.collect { gen -> _generatingInConversationId.value = if (gen) id else null }
                     }
-                    // Fix stuck sending states when loading conversation — skip if currently generating
-                    if (!_isLoading.value) {
+                    // Fix stuck sending states when loading a conversation. Read THIS conversation's
+                    // own slot (state.generating), not the global _isLoading mirror: at switch time
+                    // the mirror still reflects the previous conversation (the collectors above were
+                    // just launched and haven't emitted yet), so a background generation in the
+                    // target conversation would be misread as idle and its in-flight SENDING message
+                    // wrongly marked STOPPED. state.generating is the per-conversation source of truth.
+                    if (!state.generating.value) {
                         val stuckMessages = convRepo.getMessagesForConversation(id).first()
                             .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
 
@@ -957,11 +946,19 @@ class ChatViewModel(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
     fun removeQueuedSend(id: String) {
-        _currentConversationId.value?.let { generationRegistry.getOrCreate(it).removeQueuedSend(id) }
+        val removed = _currentConversationId.value?.let {
+            generationRegistry.getOrCreate(it).removeQueuedSend(id)
+        } ?: return
+        // The queued send held the only reference to its copied attachment files (the composer
+        // cleared its own on enqueue). It was never sent → delete them so they don't orphan.
+        com.newoether.agora.util.AttachmentFiles.deleteBacking(removed.attachments)
     }
 
     fun clearQueuedSends() {
-        _currentConversationId.value?.let { generationRegistry.getOrCreate(it).clearQueuedSends() }
+        val removed = _currentConversationId.value?.let {
+            generationRegistry.getOrCreate(it).clearQueuedSends()
+        } ?: return
+        removed.forEach { com.newoether.agora.util.AttachmentFiles.deleteBacking(it.attachments) }
     }
 
     fun stopGeneration() {
@@ -970,8 +967,8 @@ class ChatViewModel(
         // see. registry.stop() cancels that conversation's job + streamScope (not other
         // conversations'), and finalizer persists STOPPED to the correct conversation id.
         val id = _currentConversationId.value ?: return
-        val state = generationRegistry.get(id) ?: generationRegistry.getOrCreate(id)
-        val result = state.stop() ?: return
+        val state = generationRegistry.get(id) ?: return
+        val result = state.stop()
         val stoppedMsg = result.stoppedMessage
         val messages = if (stoppedMsg != null) listOf(stoppedMsg) else {
             // streamingMessage was null — mark any in-flight model message in the open list directly.

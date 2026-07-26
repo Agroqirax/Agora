@@ -15,9 +15,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * Persists terminal (STOPPED) message state to the DB after a generation is stopped. Extracted
- * from the old [GenerationSession] so per-conversation [ConversationGenerationState] (which owns
- * no repos) can delegate finalization without holding repository references.
+ * Persists terminal (STOPPED) message state to the DB after a generation is stopped. Kept separate
+ * from per-conversation [ConversationGenerationState] (which owns no repos) so it can delegate
+ * finalization without holding repository references.
  *
  * Runs on the conversation's own scope via [ConversationGenerationState.launchFinalization]; the
  * stopped conversation id comes from [ConversationGenerationState.StopResult], NOT from the live

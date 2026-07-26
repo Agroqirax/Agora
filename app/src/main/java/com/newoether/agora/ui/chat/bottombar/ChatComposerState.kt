@@ -103,20 +103,8 @@ class ChatComposerState(
             videoExtractionJobs[removed.uri]?.cancel()
             videoExtractionJobs.remove(removed.uri)
         }
-        // Clean up pre-extracted video frame files
-        if (removed?.processedFrames != null) {
-            for (path in removed.processedFrames) {
-                try { java.io.File(path).delete() } catch (_: Exception) {}
-            }
-        }
-        // Clean up PDF page preview files
-        if (removed?.preRenderedPaths != null) {
-            for (path in removed.preRenderedPaths) {
-                try { java.io.File(path).delete() } catch (_: Exception) {}
-            }
-        }
-        // Clean up copied-to-private file (image / generic file)
-        removed?.localPath?.let { runCatching { java.io.File(it).delete() } }
+        // Delete all app-private files backing this attachment (frames / PDF pages / copied file).
+        removed?.let { com.newoether.agora.util.AttachmentFiles.deleteBacking(it) }
         val uriStr = removed?.uri
         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(index) }
         if (uriStr != null) processingStates = processingStates - uriStr
