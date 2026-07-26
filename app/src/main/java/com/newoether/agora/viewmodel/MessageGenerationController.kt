@@ -3,7 +3,6 @@ package com.newoether.agora.viewmodel
 import android.app.Application
 import android.content.Context
 import com.newoether.agora.R
-import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.api.ProviderConfig
 import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.api.local.LocalProvider
@@ -24,10 +23,13 @@ import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -37,6 +39,13 @@ import java.util.UUID
  * race-free generation handshake. Extracted VERBATIM from ChatViewModel.
  * Holds references to the SAME MutableStateFlow instances that ChatViewModel
  * exposes — do NOT create new ones here.
+ *
+ * Generation state is held per-conversation in [ConversationGenerationState]
+ * (obtained from [ConversationStateRegistry]); the global StateFlows
+ * ChatViewModel exposes to the UI are a mirror of whichever conversation is
+ * currently open. Synchronous writes to the global flows inside the generation
+ * coroutines are gated on the open conversation via [ifOpenOn] so a background
+ * generation can't clobber the visible conversation's UI.
  */
 class MessageGenerationController(
     // ── 协程作用域(用 viewModelScope 传进来)──
@@ -46,14 +55,14 @@ class MessageGenerationController(
     // ── 单例协作者 ──
     private val convRepo: ConversationRepository,
     private val settings: SettingsRepository,
-    private val session: GenerationSession,
+    private val registry: ConversationStateRegistry,
+    private val finalizer: GenerationFinalizer,
     private val generationManagerProvider: () -> GenerationManager,
     private val requestBuilder: GenerationRequestBuilder,
     private val payloadBuilder: MessagePayloadBuilder,
     private val providerRegistry: ProviderRegistry,
     private val localProvider: LocalProvider,
     private val executionCoordinator: ConversationExecutionCoordinator,
-    private val generationQueue: com.newoether.agora.automation.GenerationQueue,
     // ── 共享 UI 状态:必须是 ChatViewModel 里的同一个实例 ──
     private val allMessages: MutableStateFlow<List<ChatMessage>>,          // = _allMessages
     private val selectedChildren: MutableStateFlow<Map<String?, String>>,  // = _selectedChildren
@@ -80,6 +89,15 @@ class MessageGenerationController(
     private val onConversationGraduated: (String) -> Unit = {},
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
+
+    /**
+     * Run [block] only if the currently-open conversation is [genId]. Guards synchronous
+     * writes to the shared global flows so a background generation (operating on its own
+     * private [ConversationGenerationState] flows) cannot clobber the visible conversation's UI.
+     */
+    private fun ifOpenOn(genId: String, block: () -> Unit) {
+        if (currentConversationId.value == genId) block()
+    }
 
     // ════════════════════════════════════════════════════════════════════
     // deleteMessage
@@ -110,8 +128,11 @@ class MessageGenerationController(
         // P1: Only stop generation if deleting within the currently-generating conversation.
         // P0: Use stopForReplacement() + join() to prevent the STOPPED-upsert race
         //     that can resurrect deleted messages (the only write path that was missing it).
-        val stopFinalization = if (generatingInConversationId.value == currentId) {
-            session.stopForReplacement()
+        val stopFinalization: Job? = if (generatingInConversationId.value == currentId) {
+            val state = registry.getOrCreate(currentId)
+            val r = state.stopForReplacement()
+            val msgs = listOfNotNull(r.stoppedMessage)
+            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
         } else {
             null
         }
@@ -188,14 +209,19 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun regenerate(messageId: String) {
-        val currentId = currentConversationId.value ?: return
+        val genId = currentConversationId.value ?: return
+        val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
 
-        val stopFinalization = session.stopForReplacement()
+        val stopResult = state.stopForReplacement()
+        val stopFinalization: Job? = stopResult?.let { r ->
+            val msgs = listOfNotNull(r.stoppedMessage)
+            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
+        }
         // Capture ownership on the UI thread, immediately after stopGeneration advanced
         // the token, so no concurrent stop can slip in before we record it.
-        val myUiToken = session.captureUiToken()
+        val myUiToken = state.captureUiToken()
 
         // Compute IDs and set placeholder on the calling thread before launching IO work,
         // so the combine function never sees streamingMessage=null while the error is in allMessages.
@@ -215,22 +241,22 @@ class MessageGenerationController(
             id = modelMessageId, parentId = parentId, text = "", participant = Participant.MODEL,
             status = MessageStatus.SENDING, timestamp = startTime
         )
-        allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
+        ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
         val newMap = selectedChildren.value.toMutableMap()
         newMap[parentId] = modelMessageId
         val selectedAfterRegenerate = newMap.toMap()
-        selectedChildren.value = selectedAfterRegenerate
+        ifOpenOn(genId) { selectedChildren.value = selectedAfterRegenerate }
 
-        streamingMessage.value = placeholder
-        isLoading.value = true
+        state.streamUpdate(myUiToken, placeholder)
+        state.loadingChange(myUiToken, true)
 
-        session.generationJob = session.scope.launch {
+        state.generationJob = state.scope.launch {
             // Wait only for the short STOPPED DB finalization. The cancelled provider
             // may still be unwinding, but it no longer owns the next generation path.
             stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
+            val myPersistId = state.nextPersistId()
             try {
-                executionCoordinator.withConversationLock(currentId) lock@ {
+                executionCoordinator.withConversationLock(genId) lock@ {
                 allMessages.value.find { it.id == parentId } ?: return@lock
 
                 if (isErrorOrStopped && isLatest) {
@@ -245,35 +271,35 @@ class MessageGenerationController(
                     }
                     if (staleIds.isNotEmpty()) {
                         convRepo.deleteMessagesByIds(staleIds)
-                        allMessages.update { it.filter { m -> m.id !in staleIds } }
+                        ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id !in staleIds } } }
                     }
                     convRepo.deleteEmbedding(modelMessageId)
                     convRepo.upsertMessage(MessageEntity(
-                        id = modelMessageId, conversationId = currentId, parentId = parentId,
+                        id = modelMessageId, conversationId = genId, parentId = parentId,
                         text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
                         modelName = currentActiveModel.value, toolCallJson = null
                     ))
                 } else {
                     // New branch — old message and its tool calls stay as a selectable branch
                     convRepo.upsertMessage(MessageEntity(
-                        id = modelMessageId, conversationId = currentId, parentId = parentId,
-                        text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
+                        id = modelMessageId, conversationId = genId, parentId = parentId,
+                        text = "", thoughts = null, thoughtTitle = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
                         modelName = currentActiveModel.value
                     ))
                 }
-                onPersistSelectedChildren(currentId, selectedAfterRegenerate)
-                convRepo.getConversation(currentId)?.let { conv ->
+                onPersistSelectedChildren(genId, selectedAfterRegenerate)
+                convRepo.getConversation(genId)?.let { conv ->
                     convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
                 }
                 launchGeneration(
-                    currentId, modelMessageId, startTime,
+                    genId, modelMessageId, startTime,
                     isRegenerate = true, replaceMessageId = messageId,
                     providerName, modelId, activeKey, myUiToken, myPersistId,
-                    callerTag = "regenerate"
+                    state, callerTag = "regenerate"
                 )
                 }
             } finally {
-                session.loadingChange(myUiToken, false)
+                state.loadingChange(myUiToken, false)
             }
         }
     }
@@ -302,6 +328,7 @@ class MessageGenerationController(
         activeKey: String,
         uiToken: Long,
         persistId: Long,
+        state: ConversationGenerationState,
         callerTag: String
     ) {
         val resolved = requestBuilder.buildEffectiveSystemPrompt(currentId)
@@ -317,22 +344,23 @@ class MessageGenerationController(
             effectiveSettings, currentId
         )
         try {
-            // Global single-slot queue: only one generation streams at a time across the whole
-            // process. Held INSIDE the conversation lock (conversation → queue ordering).
-            generationQueue.withLock {
-                generationManager.generate(
-                    conversationId = currentId,
-                    modelMessageId = modelMessageId,
-                    startTime = startTime,
-                    isRegenerate = isRegenerate,
-                    replaceMessageId = replaceMessageId,
-                    modelName = currentActiveModel.value,
-                    config = config,
-                    ctx = genCtx,
-                    generationJob = session.generationJob,
-                    callbacks = session.callbacksFor(uiToken, persistId)
-                )
-            }
+            // No global slot: remote generations run concurrently (only the per-conversation
+            // lock above serializes same-conversation work); local model work is serialized
+            // inside LocalProvider via LocalModelSerializer. Stop therefore releases
+            // immediately — nothing is queued behind a held process-wide mutex.
+            generationManager.generate(
+                conversationId = currentId,
+                modelMessageId = modelMessageId,
+                startTime = startTime,
+                isRegenerate = isRegenerate,
+                replaceMessageId = replaceMessageId,
+                modelName = currentActiveModel.value,
+                config = config,
+                ctx = genCtx,
+                generationJob = state.generationJob,
+                callbacks = state.callbacksFor(uiToken, persistId),
+                streamScope = state.streamScope
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -345,40 +373,45 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun editMessage(messageId: String, newText: String) {
-        val currentId = currentConversationId.value ?: return
+        val genId = currentConversationId.value ?: return
+        val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
 
-        val stopFinalization = session.stopForReplacement()
-        val myUiToken = session.captureUiToken()
+        val stopResult = state.stopForReplacement()
+        val stopFinalization: Job? = stopResult?.let { r ->
+            val msgs = listOfNotNull(r.stoppedMessage)
+            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
+        }
+        val myUiToken = state.captureUiToken()
         // Set loading synchronously on the calling thread (like sendMessage/regenerate)
         // so the global generation gate disables all per-message actions immediately,
         // with no window during stopFinalization.join() + DB setup.
-        isLoading.value = true
-        session.generationJob = session.scope.launch {
+        state.loadingChange(myUiToken, true)
+        state.generationJob = state.scope.launch {
             stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
+            val myPersistId = state.nextPersistId()
             try {
-            executionCoordinator.withConversationLock(currentId) lock@ {
+            executionCoordinator.withConversationLock(genId) lock@ {
             val messageToEdit = allMessages.value.find { it.id == messageId } ?: return@lock
             val newUserMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
-                id = newUserMessageId, conversationId = currentId, parentId = messageToEdit.parentId,
+                id = newUserMessageId, conversationId = genId, parentId = messageToEdit.parentId,
                 text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
             ))
             val newMap = selectedChildren.value.toMutableMap()
             newMap[messageToEdit.parentId] = newUserMessageId
             val selectedAfterUserEdit = newMap.toMap()
-            selectedChildren.value = selectedAfterUserEdit
-            onPersistSelectedChildren(currentId, selectedAfterUserEdit)
+            onPersistSelectedChildren(genId, selectedAfterUserEdit)
+            ifOpenOn(genId) { selectedChildren.value = selectedAfterUserEdit }
             val modelMessageId = UUID.randomUUID().toString()
             val startTime = System.currentTimeMillis() + 1
             convRepo.upsertMessage(MessageEntity(
-                id = modelMessageId, conversationId = currentId, parentId = newUserMessageId,
+                id = modelMessageId, conversationId = genId, parentId = newUserMessageId,
                 text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
                 modelName = currentActiveModel.value
             ))
-            convRepo.getConversation(currentId)?.let { conv ->
+            convRepo.getConversation(genId)?.let { conv ->
                 convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
             }
             // Set streamingMessage BEFORE allMessages so the combine never
@@ -387,22 +420,22 @@ class MessageGenerationController(
                 id = modelMessageId, parentId = newUserMessageId, text = "", participant = Participant.MODEL,
                 status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
             )
-            session.streamUpdate(myUiToken, placeholder)
-            allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
+            state.streamUpdate(myUiToken, placeholder)
+            ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
             val editChildren = selectedAfterUserEdit.toMutableMap()
             editChildren[newUserMessageId] = modelMessageId
             val selectedAfterModelEdit = editChildren.toMap()
-            selectedChildren.value = selectedAfterModelEdit
-            onPersistSelectedChildren(currentId, selectedAfterModelEdit)
+            onPersistSelectedChildren(genId, selectedAfterModelEdit)
+            ifOpenOn(genId) { selectedChildren.value = selectedAfterModelEdit }
             launchGeneration(
-                currentId, modelMessageId, startTime,
+                genId, modelMessageId, startTime,
                 isRegenerate = false, replaceMessageId = null,
                 providerName, modelId, activeKey, myUiToken, myPersistId,
-                callerTag = "editMessage"
+                state, callerTag = "editMessage"
             )
             }
             } finally {
-                session.loadingChange(myUiToken, false)
+                state.loadingChange(myUiToken, false)
             }
         }
     }
@@ -412,7 +445,30 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
-        if (!session.sendGate.compareAndSet(false, true)) return false
+        // G9: resolve the conversation id on the calling thread BEFORE launching the
+        // generation coroutine, so the registry keys the new generation on the correct
+        // conversation even if the user switches chats before the coroutine runs. The
+        // new-conversation row is a fast DB insert; doing it here (rather than inside
+        // the coroutine) closes the race where genId was unknown on the calling thread.
+        val wasNewChat = isNewChatMode.value || currentConversationId.value == null
+        if (wasNewChat) {
+            val newId = UUID.randomUUID().toString()
+            runBlocking {
+                convRepo.upsertConversation(ChatEntity(
+                    id = newId,
+                    title = appContext.getString(R.string.new_chat),
+                    modelId = currentActiveModel.value,
+                    systemPromptId = pendingSystemPromptId.value
+                ))
+            }
+            // Suppress the conversation-open auto-scroll BEFORE the id change triggers it.
+            onConversationCreatedBySend()
+            currentConversationId.value = newId
+            isNewChatMode.value = false
+        }
+        val genId = currentConversationId.value ?: return false
+        val state = registry.getOrCreate(genId)
+        if (!state.sendGate.compareAndSet(false, true)) return false
         var committed = false
         try {
         val modelId = currentActiveModel.value
@@ -429,31 +485,25 @@ class MessageGenerationController(
                 return false
             }
         }
-        val stopFinalization = session.stopForReplacement()
-        // Set loading immediately so UI shows sending state during attachment processing
-        isLoading.value = true
-        // Capture ownership on the UI thread right after stopGeneration advanced the token.
-        val myUiToken = session.captureUiToken()
+        val stopResult = state.stopForReplacement()
+        val stopFinalization: Job? = stopResult?.let { r ->
+            val msgs = listOfNotNull(r.stoppedMessage)
+            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
+        }
+        // Capture ownership on the UI thread right after stopGeneration advanced the token,
+        // and set loading immediately so UI shows sending state during attachment processing.
+        val myUiToken = state.captureUiToken()
+        state.loadingChange(myUiToken, true)
 
         committed = true
-        session.generationJob = session.scope.launch {
+        state.generationJob = state.scope.launch {
             try {
             // Wait only for the short STOPPED DB finalization. The cancelled provider
             // may still be unwinding, but it no longer owns the next generation path.
             stopFinalization?.join()
-            val myPersistId = session.nextPersistId()
+            val myPersistId = state.nextPersistId()
             val (allImages, attachmentMeta) = payloadBuilder.buildMessagePayload(application, images, attachments)
-            var currentId = currentConversationId.value
-            val wasNewChat = isNewChatMode.value
-            if (wasNewChat || currentId == null) {
-                val newId = UUID.randomUUID().toString()
-                convRepo.upsertConversation(ChatEntity(id = newId, title = appContext.getString(R.string.new_chat), modelId = currentActiveModel.value, systemPromptId = pendingSystemPromptId.value))
-                // Suppress the conversation-open auto-scroll BEFORE the id change triggers it.
-                onConversationCreatedBySend()
-                currentConversationId.value = newId
-                isNewChatMode.value = false
-                currentId = newId
-            }
+            val currentId = genId
             executionCoordinator.withConversationLock(currentId) {
             // First user turn into a task/loop execution graduates it into the main list.
             if (convRepo.graduateConversation(currentId)) {
@@ -465,8 +515,22 @@ class MessageGenerationController(
                 settings.setConversationSettings(currentId, pendingSettings)
                 pendingConversationSettings.value = null
             }
-            val currentPath = messages.value
-            val lastMessageId = currentPath.lastOrNull()?.id
+            // Resolve the conversation leaf from the DB snapshot — NOT from the global `messages`
+            // flow, which reflects the currently-OPEN conversation. A background send (queued or
+            // parallel) must append to ITS own conversation's leaf, otherwise it would graft onto
+            // whichever conversation the user is looking at.
+            val snapshotEntities = convRepo.getMessagesForConversationSnapshot(currentId)
+            val path = ConversationUiState.resolvePath(
+                allMessages = snapshotEntities.map {
+                    ChatMessage(
+                        id = it.id, parentId = it.parentId, text = it.text,
+                        participant = it.participant, timestamp = it.timestamp, status = it.status,
+                    )
+                },
+                streamingMsg = null,
+                selectedChildren = convRepo.restoreBranchSelections(currentId),
+            )
+            val lastMessageId = path.lastOrNull()?.id
             val userMessageId = UUID.randomUUID().toString()
             convRepo.upsertMessage(MessageEntity(
                 id = userMessageId, conversationId = currentId, parentId = lastMessageId,
@@ -491,36 +555,39 @@ class MessageGenerationController(
                 id = modelMessageId, parentId = userMessageId, text = "", participant = Participant.MODEL,
                 status = MessageStatus.SENDING, timestamp = startTime, modelName = currentActiveModel.value
             )
-            session.streamUpdate(myUiToken, placeholder)
-            allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder }
+            state.streamUpdate(myUiToken, placeholder)
+            ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
             val newChildren = selectedChildren.value.toMutableMap()
             newChildren[userMessageId] = modelMessageId
-            selectedChildren.value = newChildren
-            onScrollToMessage(userMessageId)
+            onPersistSelectedChildren(currentId, newChildren)
+            ifOpenOn(genId) { selectedChildren.value = newChildren }
+            ifOpenOn(genId) { onScrollToMessage(userMessageId) }
 
             launchGeneration(
                 currentId, modelMessageId, startTime,
                 isRegenerate = false, replaceMessageId = null,
                 providerName, modelId, activeKey, myUiToken, myPersistId,
-                callerTag = "sendMessage"
+                state, callerTag = "sendMessage"
             )
 
-            val lastMsg = allMessages.value.find { it.id == modelMessageId }
-            if (wasNewChat && settings.titleGenerationEnabled.value && session.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
+            // Check the persisted status from the DB — allMessages.value reflects the OPEN
+            // conversation, which may not be this one for a background send.
+            val lastMsg = convRepo.getMessagesForConversationSnapshot(currentId).find { it.id == modelMessageId }
+            if (wasNewChat && settings.titleGenerationEnabled.value && state.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
                 generateTitle(currentId)
             }
             }
         } finally {
             // Token-gated: only the still-current generation clears the button, so a
             // cancelled/superseded coroutine can't revert the icon mid-generation.
-            session.loadingChange(myUiToken, false)
+            state.loadingChange(myUiToken, false)
             // sendGate must ALWAYS be freed, even when this coroutine was cancelled
             // by a subsequent regenerate(). Otherwise the send button stays locked.
-            session.sendGate.set(false)
+            state.sendGate.set(false)
         }
         } // end launch
     } finally {
-        if (!committed) session.sendGate.set(false)
+        if (!committed) state.sendGate.set(false)
     }
         return true
     }
@@ -588,36 +655,34 @@ class MessageGenerationController(
 
             var title = ""
             try {
-                // Title generation is a real provider call, so it must take the same global slot
-                // as message generation — otherwise it would stream in parallel with the reply it
-                // is summarizing (remote) or fight for the model (local). The queue is fair, so it
-                // simply runs after the message generation that triggered it releases the slot.
-                generationQueue.withLock {
-                    // Serialize with embedding to avoid dual model load OOM
-                    if (providerName == Constants.PROVIDER_LOCAL) {
-                        LlamaEngine.modelMutex.withLock {
-                            withContext(Dispatchers.IO) {
-                                provider.generateResponse(titlePrompt, config).collect { event ->
-                                    if (event is StreamEvent.TextChunk) title += event.text
-                                    else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                                }
+                // Title generation is a real provider call. Remote title gen runs without any
+                // global slot (it's cheap and independent); local title gen takes the shared
+                // LocalModelSerializer mutex so it can't load a model alongside an in-flight
+                // chat/embedding turn (OOM). The mutex is fair and cancellable, so a Stop or a
+                // new send isn't blocked behind it.
+                if (providerName == Constants.PROVIDER_LOCAL) {
+                    com.newoether.agora.api.LocalModelSerializer.mutex.withLock {
+                        withContext(Dispatchers.IO) {
+                            provider.generateResponse(titlePrompt, config).collect { event ->
+                                if (event is StreamEvent.TextChunk) title += event.text
+                                else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
                             }
-                            // Intentionally do NOT releaseEngine() here. Title generation runs right
-                            // after the first message of a new conversation, on the same model the
-                            // user is actively chatting with; LocalProvider.ensureEngineLoaded reuses
-                            // the already-loaded engine. Releasing here would force the next message
-                            // to re-load a multi-GB model onto a possibly-fragmented native heap,
-                            // which is the leading suspect for the "second message OOM" crash (#53,
-                            // 31 OOM reports) — the text path itself is crash-safe. Keeping the
-                            // engine session-scoped (released only on model switch / RAG / process
-                            // death) eliminates that reload churn. This is an OOM-probability
-                            // reduction, NOT a claimed #53 root-case fix (that needs a logcat).
                         }
-                    } else {
-                        provider.generateResponse(titlePrompt, config).collect { event ->
-                            if (event is StreamEvent.TextChunk) title += event.text
-                            else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                        }
+                        // Intentionally do NOT releaseEngine() here. Title generation runs right
+                        // after the first message of a new conversation, on the same model the
+                        // user is actively chatting with; LocalProvider.ensureEngineLoaded reuses
+                        // the already-loaded engine. Releasing here would force the next message
+                        // to re-load a multi-GB model onto a possibly-fragmented native heap,
+                        // which is the leading suspect for the "second message OOM" crash (#53,
+                        // 31 OOM reports) — the text path itself is crash-safe. Keeping the
+                        // engine session-scoped (released only on model switch / RAG / process
+                        // death) eliminates that reload churn. This is an OOM-probability
+                        // reduction, NOT a claimed #53 root-case fix (that needs a logcat).
+                    }
+                } else {
+                    provider.generateResponse(titlePrompt, config).collect { event ->
+                        if (event is StreamEvent.TextChunk) title += event.text
+                        else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
                     }
                 }
             } catch (e: Exception) {

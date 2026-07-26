@@ -290,6 +290,7 @@ class ChatViewModel(
         super.onCleared()
         sandboxManager?.close()
         session.cancelScope()
+        generationRegistry.cancelAll()
         autoBackupManager.destroy()
     }
 
@@ -455,6 +456,11 @@ class ChatViewModel(
         }
     }
 
+    /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
+    private val generationFinalizer by lazy {
+        GenerationFinalizer(convRepo, settings, ::indexMessageForRag)
+    }
+
     /** Race-free generation lifecycle: IO scope, current job, send gate, stop/persist tokens. */
     private val session = GenerationSession(
         app = application,
@@ -524,7 +530,8 @@ class ChatViewModel(
             appContext = appContext,
             convRepo = convRepo,
             settings = settings,
-            session = session,
+            registry = generationRegistry,
+            finalizer = generationFinalizer,
             generationManagerProvider = { generationManager },
             requestBuilder = requestBuilder,
             payloadBuilder = payloadBuilder,
@@ -595,10 +602,18 @@ class ChatViewModel(
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 if (id != null) {
-                    // Ensure the open conversation has a state object so its onActive/onIdle hooks
-                    // are wired (the mirror collectors are installed once GenerationSession becomes
-                    // a facade writing private state — see P3 step 3).
-                    generationRegistry.getOrCreate(id)
+                    // Mirror the open conversation's private generation state into the global UI
+                    // flows. Background conversations mutate only their own private state; these
+                    // collectors pipe it to the screen only while that conversation is open, so
+                    // switching conversations updates the Stop button / loading spinner to reflect
+                    // the target conversation (R1) without cross-talk. collectLatest cancels the
+                    // previous conversation's collectors on switch.
+                    val state = generationRegistry.getOrCreate(id)
+                    launch { state.streamingMessage.collect { _streamingMessage.value = it } }
+                    launch { state.isLoading.collect { _isLoading.value = it } }
+                    launch {
+                        state.generating.collect { gen -> _generatingInConversationId.value = if (gen) id else null }
+                    }
                     // Fix stuck sending states when loading conversation — skip if currently generating
                     if (!_isLoading.value) {
                         val stuckMessages = convRepo.getMessagesForConversation(id).first()
@@ -909,6 +924,7 @@ class ChatViewModel(
             conversationExecutionCoordinator.withConversationLock(id) {
                 convRepo.deleteConversation(id)
             }
+            generationRegistry.remove(id)
             if (_currentConversationId.value == id) {
                 withContext(Dispatchers.Main) { createNewChat() }
             }
@@ -923,7 +939,32 @@ class ChatViewModel(
      */
     fun deleteMessage(messageId: String): Int = generationController.deleteMessage(messageId)
 
-    fun stopGeneration() = session.stop()
+    fun stopGeneration() {
+        // Stop the CURRENTLY-OPEN conversation's generation only. A background conversation's
+        // generation is intentionally not killed here — the user is asking to stop what they
+        // see. registry.stop() cancels that conversation's job + streamScope (not other
+        // conversations'), and finalizer persists STOPPED to the correct conversation id.
+        val id = _currentConversationId.value ?: return
+        val state = generationRegistry.get(id) ?: generationRegistry.getOrCreate(id)
+        val result = state.stop() ?: return
+        val stoppedMsg = result.stoppedMessage
+        val messages = if (stoppedMsg != null) listOf(stoppedMsg) else {
+            // streamingMessage was null — mark any in-flight model message in the open list directly.
+            _allMessages.value.mapNotNull { m ->
+                if (m.participant == Participant.MODEL &&
+                    (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING ||
+                        m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
+                ) {
+                    val stopped = m.copy(status = MessageStatus.STOPPED)
+                    _allMessages.update { list -> list.map { if (it.id == m.id) stopped else it } }
+                    stopped
+                } else null
+            }
+        }
+        if (messages.isNotEmpty()) {
+            generationFinalizer.launchStopFinalization(state.scope, result.conversationId, messages)
+        }
+    }
 
     fun regenerate(messageId: String) = generationController.regenerate(messageId)
 
