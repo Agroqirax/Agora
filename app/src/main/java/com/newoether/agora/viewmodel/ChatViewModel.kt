@@ -939,6 +939,23 @@ class ChatViewModel(
      */
     fun deleteMessage(messageId: String): Int = generationController.deleteMessage(messageId)
 
+    /** Queued sends for the currently-open conversation (drives the queue banner above the input). */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val queuedSends: StateFlow<List<QueuedSend>> = _currentConversationId
+        .flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
+            else generationRegistry.getOrCreate(id).queuedSends
+        }
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+
+    fun removeQueuedSend(id: String) {
+        _currentConversationId.value?.let { generationRegistry.getOrCreate(it).removeQueuedSend(id) }
+    }
+
+    fun clearQueuedSends() {
+        _currentConversationId.value?.let { generationRegistry.getOrCreate(it).clearQueuedSends() }
+    }
+
     fun stopGeneration() {
         // Stop the CURRENTLY-OPEN conversation's generation only. A background conversation's
         // generation is intentionally not killed here — the user is asking to stop what they

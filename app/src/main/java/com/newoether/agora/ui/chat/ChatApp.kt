@@ -113,6 +113,7 @@ fun ChatApp(
     val messages by viewModel.messages.collectAsState()
     val allMessages by viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val queuedSends by viewModel.queuedSends.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val currentConversation by viewModel.currentConversation.collectAsState()
     val automationTasks by viewModel.tasks.collectAsState()
@@ -852,7 +853,10 @@ fun ChatApp(
                         onTogglePdfSelection = onTogglePdfSelection,
                         onInitPdfSelection = onInitPdfSelection,
                         fullScreenViewerUrls = fullScreenViewerUrls,
-                        onAdvancedClick = { showAdvancedDialog = true }
+                        onAdvancedClick = { showAdvancedDialog = true },
+                        queuedSends = queuedSends,
+                        onRemoveQueuedSend = viewModel::removeQueuedSend,
+                        onClearQueuedSends = viewModel::clearQueuedSends,
                     )
                 }
             }

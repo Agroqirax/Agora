@@ -55,12 +55,16 @@ internal fun ComposerSendButton(
             composer.pendingSend = false
         }
     }
-    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && !isLoading && isModelValid && !isSwitching
+    val textIsEmpty = textFieldState.text.isBlank()
+    val attachmentsIsEmpty = composer.selectedAttachments.isEmpty()
+    val showStop = isLoading && textIsEmpty && attachmentsIsEmpty
+
+    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching
     val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching
     FloatingActionButton(
         onClick = {
             if (isSwitching) return@FloatingActionButton
-            if (isLoading) onStopGeneration()
+            if (showStop) onStopGeneration()
             else if (composer.pendingSend) {
                 haptics.selection()
                 composer.pendingSend = false
@@ -86,7 +90,7 @@ internal fun ComposerSendButton(
     ) {
         val fabIcon = when {
             composer.pendingSend -> "pending"
-            isLoading -> "stop"
+            showStop -> "stop"
             else -> "send"
         }
         AnimatedContent(

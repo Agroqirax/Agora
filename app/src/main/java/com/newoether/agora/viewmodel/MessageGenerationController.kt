@@ -468,6 +468,18 @@ class MessageGenerationController(
         }
         val genId = currentConversationId.value ?: return false
         val state = registry.getOrCreate(genId)
+        // If this conversation is already generating, enqueue the message instead of launching a
+        // new generation. The Send button stays visible (text/attachments non-empty) per the
+        // Send/Stop UX, and the queued message sends automatically once the current generation
+        // finishes (see launchGeneration's tail drain). The queue is per-conversation.
+        if (state.generating.value) {
+            state.enqueueSend(QueuedSend(
+                id = UUID.randomUUID().toString(),
+                text = text,
+                attachmentPaths = images,
+            ))
+            return true
+        }
         if (!state.sendGate.compareAndSet(false, true)) return false
         var committed = false
         try {
@@ -584,6 +596,14 @@ class MessageGenerationController(
             // sendGate must ALWAYS be freed, even when this coroutine was cancelled
             // by a subsequent regenerate(). Otherwise the send button stays locked.
             state.sendGate.set(false)
+            // Drain the per-conversation queue: if the user enqueued messages while this
+            // generation ran, send the next one. Only the still-current generation drains
+            // (a stopped/superseded one leaves the queue intact for the user to retry/cancel).
+            if (state.captureUiToken() == myUiToken) {
+                state.dequeueSend()?.let { queued ->
+                    sendMessage(queued.text, images = queued.attachmentPaths)
+                }
+            }
         }
         } // end launch
     } finally {

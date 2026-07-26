@@ -46,6 +46,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
+import com.newoether.agora.viewmodel.QueuedSend
 import com.newoether.agora.ui.chat.PdfPageSelectDialog
 import com.newoether.agora.ui.chat.VideoSliceDialog
 import com.newoether.agora.ui.common.LocalAgoraHaptics
@@ -108,7 +109,10 @@ fun ChatBottomBar(
     onExpand: () -> Unit = {},
     showWebSearch: Boolean = true,
     showShell: Boolean = true,
-    onAdvancedClick: () -> Unit = {}
+    onAdvancedClick: () -> Unit = {},
+    queuedSends: List<QueuedSend> = emptyList(),
+    onRemoveQueuedSend: (String) -> Unit = {},
+    onClearQueuedSends: () -> Unit = {},
 ) {
     val scrollState = rememberScrollState()
     BackHandler(enabled = isExpanded) { onCollapse() }
@@ -160,6 +164,11 @@ fun ChatBottomBar(
                 LoopControlBar(loop = loop, isRunning = loopRunning, onStop = onStopLoop)
             }
         }
+        QueuedMessagesBanner(
+            queuedSends = queuedSends,
+            onRemove = onRemoveQueuedSend,
+            onClearAll = onClearQueuedSends,
+        )
         if (composer.selectedAttachments.isNotEmpty() && !isExpanded) {
             AttachmentPreviewRow(
                 composer = composer,
