@@ -51,7 +51,6 @@ class TaskExecutionEngine(
     appScope: CoroutineScope,
     private val executionCoordinator: ConversationExecutionCoordinator,
     private val automationExecutionGate: AutomationExecutionGate = AutomationExecutionGate(),
-    private val generationQueue: GenerationQueue,
 ) {
     sealed interface Result {
         data class Success(val modelMessageId: String, val text: String) : Result
@@ -222,23 +221,22 @@ class TaskExecutionEngine(
                 foregroundServiceManagedExternally = foregroundServiceManagedExternally,
             )
 
-            // Global single-slot queue: a headless Task/Loop turn waits behind any foreground
-            // send/regenerate/title generation (and vice versa). Held INSIDE the conversation
-            // lock (conversation → queue ordering), matching the foreground path.
-            generationQueue.withLock {
-                generationManager.generate(
-                    conversationId = conversationId,
-                    modelMessageId = modelMessageId,
-                    startTime = startTime,
-                    isRegenerate = false,
-                    replaceMessageId = null,
-                    modelName = effectiveModelId,
-                    config = config,
-                    ctx = genCtx,
-                    generationJob = null,
-                    callbacks = headlessCallbacks,
-                )
-            }
+            // No global slot: local model work is serialized inside LocalProvider via
+            // LocalModelSerializer; remote generations run concurrently. A headless turn
+            // therefore starts immediately and a Stop releases it without waiting on a
+            // process-wide mutex.
+            generationManager.generate(
+                conversationId = conversationId,
+                modelMessageId = modelMessageId,
+                startTime = startTime,
+                isRegenerate = false,
+                replaceMessageId = null,
+                modelName = effectiveModelId,
+                config = config,
+                ctx = genCtx,
+                generationJob = null,
+                callbacks = headlessCallbacks,
+            )
             val finalMsg = convRepo.getMessagesForConversationSnapshot(conversationId)
                 .find { it.id == modelMessageId }
             if (finalMsg != null && finalMsg.status == MessageStatus.SUCCESS) {

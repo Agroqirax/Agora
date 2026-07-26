@@ -10,6 +10,8 @@ import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.ShellClient
 import com.newoether.agora.util.SshClient
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -117,7 +119,7 @@ class ShellToolProvider(
                 var errorMessage: String? = null
                 var currentEvent: String? = null
                 val aesKey = client.getSessionKey()
-                while (true) {
+                while (currentCoroutineContext().isActive) {
                     val line = handle.readLine() ?: break
                     when {
                         line.startsWith("event: ") -> currentEvent = line.substring(7).trim()

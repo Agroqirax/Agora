@@ -188,6 +188,11 @@ class ConversationRepository(
     suspend fun getAllMessagesForIndexing(): List<MessageEntity> =
         chatDao.getAllMessagesForIndexing()
 
+    /** Persists the composer draft (text + serialized attachments) for a conversation. */
+    suspend fun updateDraft(conversationId: String, draftText: String, draftAttachments: String?) {
+        chatDao.updateDraft(conversationId, draftText, draftAttachments)
+    }
+
     /** Deletes all on-disk attachment files referenced by [messages]. Safe to call with
      *  an empty list. Errors per-file are swallowed so one bad path never aborts a delete. */
     suspend fun deleteMessageFiles(messages: List<MessageEntity>) = deleteAttachmentFilesFromEntities(messages)

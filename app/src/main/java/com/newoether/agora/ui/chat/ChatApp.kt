@@ -227,6 +227,7 @@ fun ChatApp(
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
     val listState = rememberLazyListState()
     val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
+    val composer = com.newoether.agora.ui.chat.bottombar.rememberChatComposerState()
     val inputFocusRequester = remember { FocusRequester() }
 
     val messageHeights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
@@ -392,6 +393,24 @@ fun ChatApp(
         } else {
             viewModel.setSwitching(false)
         }
+    }
+
+    // Load draft for the newly-opened conversation. loadingDraft gates the write-back
+    // snapshotFlow; updateDraft itself also compares against lastLoadedDraft for the
+    // debounce-delay window (belt-and-suspenders anti-loop).
+    LaunchedEffect(currentConversationId) {
+        val id = currentConversationId ?: return@LaunchedEffect
+        viewModel.loadingDraft = true
+        val (draftText, draftAttachments) = try {
+            viewModel.loadDraft(id)
+        } catch (e: Exception) {
+            "" to emptyList()
+        }
+        textFieldState.edit {
+            replace(0, length, draftText)
+        }
+        composer.selectedAttachments = draftAttachments
+        viewModel.loadingDraft = false
     }
 
     LaunchedEffect(Unit) {
@@ -840,6 +859,13 @@ fun ChatApp(
                         onFileContentClick = { name, content -> haptics.action(); viewModel.showFilePreview(name, content) },
                         modifier = Modifier,
                         textFieldState = textFieldState,
+                        composerState = composer,
+                        onDraftChanged = { text, attachments ->
+                            val id = currentConversationId
+                            if (id != null && !viewModel.loadingDraft) {
+                                viewModel.updateDraft(id, text, attachments)
+                            }
+                        },
                         focusRequester = inputFocusRequester,
                         isExpanded = isExpanded,
                         isExpandAnimating = isExpandAnimating,

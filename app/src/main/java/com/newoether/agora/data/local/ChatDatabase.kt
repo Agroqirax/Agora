@@ -52,7 +52,11 @@ data class ChatEntity(
     /** How this conversation was created: "user" | "task" | "loop". */
     val origin: String = "user",
     /** True once the user has taken over a task execution, promoting it into the main list. */
-    val graduated: Boolean = false
+    val graduated: Boolean = false,
+    /** Unsent composer text for per-conversation draft persistence. */
+    val draftText: String = "",
+    /** JSON-serialized list of [com.newoether.agora.model.SelectedAttachment]; null = no draft attachments. */
+    val draftAttachments: String? = null
 )
 
 /** A saved automation: a prompt + schedule that fans out a fresh conversation on each run. */
@@ -271,6 +275,9 @@ interface ChatDao {
     @Query("SELECT * FROM conversations WHERE taskId IS NULL OR graduated = 1 ORDER BY lastUpdated ASC")
     suspend fun getSearchableConversationsList(): List<ChatEntity>
 
+    @Query("UPDATE conversations SET draftText = :text, draftAttachments = :attachments WHERE id = :id")
+    suspend fun updateDraft(id: String, text: String, attachments: String?)
+
     // Bulk export/import
     @Query("SELECT * FROM conversations")
     suspend fun getAllConversationsList(): List<ChatEntity>
@@ -434,7 +441,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 14
+        const val CURRENT_VERSION = 15
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -548,6 +555,13 @@ abstract class ChatDatabase : RoomDatabase() {
             object : Migration(13, 14) {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE loops ADD COLUMN revision INTEGER NOT NULL DEFAULT 0")
+                }
+            },
+            // v14 → v15 adds per-conversation draft persistence for the composer.
+            object : Migration(14, 15) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN draftText TEXT NOT NULL DEFAULT ''")
+                    db.execSQL("ALTER TABLE conversations ADD COLUMN draftAttachments TEXT")
                 }
             }
         )

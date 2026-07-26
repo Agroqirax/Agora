@@ -307,6 +307,11 @@ class ChatViewModel(
     @Volatile
     var suppressNextOpenScroll: Boolean = false
 
+    /** When true, draft write-backs are suppressed to prevent feedback loops while
+     *  programmatically loading a stored draft into the composer field. */
+    @Volatile
+    var loadingDraft: Boolean = false
+
     fun triggerScrollToMessage(messageId: String? = null) {
         viewModelScope.launch {
             _scrollToMessage.emit(messageId)
@@ -1136,4 +1141,42 @@ class ChatViewModel(
         importExport.importGptChat(uri, strategy, selectedIds)
     fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) =
         importExport.importData(uri, decisions)
+
+    // ── Per-conversation draft persistence ─────────────────────
+
+    /** Snapshot of the last loaded draft; used to suppress write-back of unchanged values
+     *  (anti-loop: loading from DB must not trigger a write back to DB). */
+    @Volatile
+    var lastLoadedDraft: Pair<String, List<SelectedAttachment>>? = null
+
+    /** Persist the composer text and attachment list for a conversation. Fire-and-forget on
+     *  viewModelScope; the UI call site handles debouncing before calling this. */
+    fun updateDraft(conversationId: String, text: String, attachments: List<SelectedAttachment>) {
+        val last = lastLoadedDraft
+        if (last != null && last.first == text && last.second == attachments) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val json = if (attachments.isEmpty()) null
+            else Json.encodeToString(attachments)
+            convRepo.updateDraft(conversationId, text, json)
+        }
+    }
+
+    /** Load a stored draft for [conversationId]. Returns [draftText] and deserialized
+     *  [SelectedAttachment] list (empty if none stored). The caller must set [loadingDraft] before
+     *  mutating UI fields with the result, to suppress the write-back snapshotFlow. */
+    suspend fun loadDraft(conversationId: String): Pair<String, List<SelectedAttachment>> {
+        val entity = convRepo.getConversation(conversationId) ?: run {
+            lastLoadedDraft = "" to emptyList()
+            return "" to emptyList()
+        }
+        val attachments: List<SelectedAttachment> = try {
+            entity.draftAttachments?.let { Json.decodeFromString<List<SelectedAttachment>>(it) } ?: emptyList()
+        } catch (e: Exception) {
+            DebugLog.w("ChatViewModel", "Failed to deserialize draft attachments for $conversationId", e)
+            emptyList()
+        }
+        val draft = entity.draftText to attachments
+        lastLoadedDraft = draft
+        return draft
+    }
 }

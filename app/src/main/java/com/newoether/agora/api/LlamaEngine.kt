@@ -2,13 +2,11 @@ package com.newoether.agora.api
 
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 
 object LlamaEngine {
     private const val TAG = "LlamaEngine"
-    val modelMutex = Mutex()
 
     init {
         System.loadLibrary("c++_shared")
@@ -32,7 +30,7 @@ object LlamaEngine {
     fun computeEmbeddings(texts: List<String>, modelPath: String, beforeLoad: (() -> Unit)? = null): List<FloatArray?> {
         if (texts.isEmpty()) return emptyList()
         return runBlocking {
-            modelMutex.withLock {
+            LocalModelSerializer.mutex.withLock {
                 beforeLoad?.invoke()
                 val start = System.currentTimeMillis()
                 val handle = nativeLoadModel(modelPath)

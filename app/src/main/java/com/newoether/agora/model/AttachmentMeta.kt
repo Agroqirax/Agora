@@ -20,6 +20,7 @@ data class AttachmentItem(
 )
 
 /** Used for passing attachment metadata from ChatBottomBar to ViewModel. */
+@Serializable
 data class SelectedAttachment(
     val uri: String,
     val type: String,               // "image", "video", "file", "pdf"

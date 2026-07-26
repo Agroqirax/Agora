@@ -90,44 +90,52 @@ class LocalProvider(
                     maxTokens = config.maxTokens ?: modelConfig.maxTokens
                 )
             }
-            tokenFlow.collect { token ->
-                if (!coroutineContext.isActive) {
-                    engine.cancel()
-                    return@collect
-                }
-                if (stopped) return@collect
-                totalTokens++
+            // Serialize on-device model work process-wide: a resident chat model plus a
+            // concurrently-loaded embedding model can OOM the native heap. Replaces the
+            // former global GenerationQueue for the local path (remote generation no
+            // longer takes any global slot). Held only across the native sampling loop,
+            // not the whole generation, and withLock is cancellable so Stop releases it
+            // immediately. Each tool round re-acquires per turn.
+            com.newoether.agora.api.LocalModelSerializer.mutex.withLock {
+                tokenFlow.collect { token ->
+                    if (!coroutineContext.isActive) {
+                        engine.cancel()
+                        return@collect
+                    }
+                    if (stopped) return@collect
+                    totalTokens++
 
-                // Check for stop patterns in the rolling buffer
-                rawBuf += token
-                val hit = STOP_PATTERNS.firstOrNull { p -> rawBuf.contains(p) }
-                if (hit != null) {
-                    // Strip the stop pattern and anything after it, then stop
-                    val cleanEnd = rawBuf.substringBefore(hit)
-                    if (cleanEnd.isNotEmpty()) {
+                    // Check for stop patterns in the rolling buffer
+                    rawBuf += token
+                    val hit = STOP_PATTERNS.firstOrNull { p -> rawBuf.contains(p) }
+                    if (hit != null) {
+                        // Strip the stop pattern and anything after it, then stop
+                        val cleanEnd = rawBuf.substringBefore(hit)
+                        if (cleanEnd.isNotEmpty()) {
+                            thinkParser.feed(
+                                content = cleanEnd,
+                                thinkingEnabled = config.thinkingEnabled,
+                                onText = { emit(StreamEvent.TextChunk(it)) },
+                                onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+                            )
+                        }
+                        engine.cancel()
+                        stopped = true
+                        return@collect
+                    }
+
+                    // Keep buffer bounded — only as much as longest stop pattern
+                    val maxPatLen = STOP_PATTERNS.maxOf { it.length }
+                    if (rawBuf.length > maxPatLen * 2) {
+                        val emitPart = rawBuf.substring(0, rawBuf.length - maxPatLen)
                         thinkParser.feed(
-                            content = cleanEnd,
+                            content = emitPart,
                             thinkingEnabled = config.thinkingEnabled,
                             onText = { emit(StreamEvent.TextChunk(it)) },
                             onThought = { emit(StreamEvent.ThoughtChunk(it)) }
                         )
+                        rawBuf = rawBuf.substring(rawBuf.length - maxPatLen)
                     }
-                    engine.cancel()
-                    stopped = true
-                    return@collect
-                }
-
-                // Keep buffer bounded — only as much as longest stop pattern
-                val maxPatLen = STOP_PATTERNS.maxOf { it.length }
-                if (rawBuf.length > maxPatLen * 2) {
-                    val emitPart = rawBuf.substring(0, rawBuf.length - maxPatLen)
-                    thinkParser.feed(
-                        content = emitPart,
-                        thinkingEnabled = config.thinkingEnabled,
-                        onText = { emit(StreamEvent.TextChunk(it)) },
-                        onThought = { emit(StreamEvent.ThoughtChunk(it)) }
-                    )
-                    rawBuf = rawBuf.substring(rawBuf.length - maxPatLen)
                 }
             }
             // Flush remaining buffer (no stop pattern found)

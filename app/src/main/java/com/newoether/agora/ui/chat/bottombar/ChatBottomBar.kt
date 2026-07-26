@@ -54,6 +54,9 @@ import com.newoether.agora.ui.common.ThinkingControlPanel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -102,6 +105,8 @@ fun ChatBottomBar(
     fullScreenViewerUrls: List<String>? = null,
     modifier: Modifier = Modifier,
     textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() },
+    composerState: ChatComposerState = rememberChatComposerState(),
+    onDraftChanged: ((String, List<com.newoether.agora.model.SelectedAttachment>) -> Unit)? = null,
     focusRequester: FocusRequester = FocusRequester(),
     isExpanded: Boolean = false,
     isExpandAnimating: Boolean = false,
@@ -120,7 +125,20 @@ fun ChatBottomBar(
 
     // No-op bring-into-view to prevent auto-scrolling on text field focus
 
-    val composer = rememberChatComposerState()
+    val composer = composerState
+
+    // Persist draft on text / attachment changes with 300ms debounce.
+    if (onDraftChanged != null) {
+        @OptIn(FlowPreview::class)
+        LaunchedEffect(Unit) {
+            snapshotFlow { textFieldState.text.toString() to composer.selectedAttachments }
+                .distinctUntilChanged()
+                .debounce(300L)
+                .collect { (text, attachments) ->
+                    onDraftChanged(text, attachments)
+                }
+        }
+    }
 
     val context = LocalContext.current
     val haptics = LocalAgoraHaptics.current
