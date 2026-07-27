@@ -84,82 +84,78 @@ class EmbeddingCacheWorker(
         // Check cancellation
         if (isStopped) return Result.failure()
 
-        val allMessages = chatDao.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
-        val total = allMessages.size
+        val total = chatDao.getIndexableMessageCount()
         if (total == 0) {
             return Result.success(Data.Builder()
                 .putInt(KEY_CACHED, 0).putInt(KEY_TOTAL, 0).putInt(KEY_FAILED, 0).build())
         }
 
-        val existingIds = chatDao.getEmbeddedMessageIdsByModel(modelId).toSet()
-        val toProcess = allMessages.filter { it.id !in existingIds }
-        if (toProcess.isEmpty()) {
+        val alreadyDone = chatDao.getEmbeddingCountByModel(modelId).coerceAtMost(total)
+        if (alreadyDone >= total) {
             return Result.success(Data.Builder()
                 .putInt(KEY_CACHED, total).putInt(KEY_TOTAL, total).putInt(KEY_FAILED, 0).build())
         }
 
-        val alreadyDone = total - toProcess.size
         var succeeded = 0
         var attempted = 0
         val batchSize = model.batchSize.coerceIn(1, 100)
+        val remoteConfig = if (model.type == EmbeddingModelType.LOCAL) {
+            if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                return Result.failure(Data.Builder()
+                    .putString("error", "Local model file not found").build())
+            }
+            null
+        } else {
+            val apiKey = model.remoteApiKey.ifBlank { resolveApiKey(settingsManager) ?: "" }
+            if (apiKey.isBlank()) {
+                return Result.failure(Data.Builder()
+                    .putString("error", "No API key configured").build())
+            }
+            apiKey to model.remoteBaseUrl.ifBlank { resolveBaseUrl(settingsManager) }
+        }
 
         try {
             setProgress(workDataOf(KEY_CACHED to alreadyDone, KEY_TOTAL to total))
+            var afterMessageId: String? = null
+            while (true) {
+                if (isStopped) return Result.failure()
+                val batch = chatDao.getUnembeddedMessagesPage(
+                    modelId = modelId,
+                    afterId = afterMessageId,
+                    limit = batchSize,
+                )
+                if (batch.isEmpty()) break
+                afterMessageId = batch.last().id
 
-            if (model.type == EmbeddingModelType.LOCAL) {
-                if (!LlamaEngine.isModelReady(model.localFilePath)) {
-                    return Result.failure(Data.Builder()
-                        .putString("error", "Local model file not found").build())
-                }
-                toProcess.chunked(batchSize).forEach { batch ->
-                    if (isStopped) return Result.failure()
-                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
+                val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
+                val embeddings = if (model.type == EmbeddingModelType.LOCAL) {
                     // Release any resident chat engine first — same OOM guard as the in-app
                     // runner (chat model + embedding model resident together can OOM).
-                    val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
+                    LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
                         localProvider.releaseEngineBlocking()
                     }
-                    batch.zip(embeddings).forEach { (msg, embd) ->
-                        attempted++
-                        if (embd != null) {
-                            chatDao.upsertEmbedding(EmbeddingEntity(
-                                messageId = msg.id, modelId = modelId,
-                                embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
-                                dimension = embd.size
-                            ))
-                            succeeded++
-                        }
-                    }
-                    setProgress(workDataOf(KEY_CACHED to alreadyDone + attempted, KEY_TOTAL to total))
-                }
-            } else {
-                val apiKey = model.remoteApiKey.ifBlank { resolveApiKey(settingsManager) ?: "" }
-                if (apiKey.isBlank()) {
-                    return Result.failure(Data.Builder()
-                        .putString("error", "No API key configured").build())
-                }
-                val baseUrl = model.remoteBaseUrl.ifBlank { resolveBaseUrl(settingsManager) }
-                toProcess.chunked(batchSize).forEach { batch ->
-                    if (isStopped) return Result.failure()
-                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
-                    val embeddings = EmbeddingClient.computeEmbeddings(
+                } else {
+                    val (apiKey, baseUrl) = requireNotNull(remoteConfig)
+                    EmbeddingClient.computeEmbeddings(
                         texts, apiKey, model.remoteModelName, baseUrl
                     )
-                    batch.zip(embeddings).forEach { (msg, embd) ->
-                        attempted++
-                        if (embd != null) {
-                            chatDao.upsertEmbedding(EmbeddingEntity(
-                                messageId = msg.id, modelId = modelId,
-                                embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
-                                dimension = embd.size
-                            ))
-                            succeeded++
-                        }
-                    }
-                    setProgress(workDataOf(KEY_CACHED to alreadyDone + attempted, KEY_TOTAL to total))
                 }
+
+                attempted += batch.size
+                batch.zip(embeddings).forEach { (message, embedding) ->
+                    if (embedding != null) {
+                        chatDao.upsertEmbedding(EmbeddingEntity(
+                            messageId = message.id,
+                            modelId = modelId,
+                            embedding = EmbeddingIndexer.floatsToBytes(embedding),
+                            chunkText = message.text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
+                            dimension = embedding.size,
+                        ))
+                        succeeded++
+                    }
+                }
+                val completed = (alreadyDone + attempted).coerceAtMost(total)
+                setProgress(workDataOf(KEY_CACHED to completed, KEY_TOTAL to total))
             }
         } catch (e: Exception) {
             DebugLog.e(TAG, "Cache worker failed", e)
@@ -167,10 +163,10 @@ class EmbeddingCacheWorker(
                 .putString("error", e.localizedMessage ?: "Unknown error").build())
         }
 
-        val failed = toProcess.size - succeeded
+        val failed = attempted - succeeded
         DebugLog.d(TAG, "Cache complete: $succeeded/$total cached, $failed failed")
         return Result.success(Data.Builder()
-            .putInt(KEY_CACHED, alreadyDone + succeeded)
+            .putInt(KEY_CACHED, (alreadyDone + succeeded).coerceAtMost(total))
             .putInt(KEY_TOTAL, total)
             .putInt(KEY_FAILED, failed)
             .build())

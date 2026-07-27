@@ -69,8 +69,12 @@ data class TaskEntity(
     val systemPrompt: String? = null,
     /** null = use the app default model. */
     val modelId: String? = null,
-    /** 5-field cron expression driving the local schedule. */
+    /** 5-field cron expression driving a RECURRING schedule; blank for a one-shot. */
     val cronExpr: String,
+    /** One-shot fire time. A 5-field cron has no year, so "once on a date" cannot be a cron —
+     *  it is an absolute epoch instead, and the task disables itself after it fires.
+     *  Mutually exclusive with [cronExpr]: exactly one of the two is set on a scheduled task. */
+    val runAt: Long? = null,
     /** Local derived value; imports clear it until the user explicitly re-enables the task. */
     val nextRunAt: Long,
     val enabled: Boolean = true,
@@ -167,6 +171,29 @@ data class MessageEntity(
     val attachmentMeta: String? = null
 )
 
+/** Attachment-only projection used by sweeps and media export.
+ *
+ * These callers do not need message bodies, thoughts, or tool payloads. Returning a full
+ * [MessageEntity] for every row can otherwise expand a large database past Android's heap limit.
+ */
+data class MessageAttachmentReference(
+    val id: String,
+    val images: List<String>,
+    val attachmentMeta: String? = null,
+)
+
+/** Draft-only projection used by the orphaned attachment sweep. */
+data class ConversationDraftAttachmentReference(
+    val id: String,
+    val draftAttachments: String,
+)
+
+/** Minimal payload needed to generate an embedding. */
+data class IndexableMessage(
+    val id: String,
+    val text: String,
+)
+
 @Dao
 interface ChatDao {
     // Main list hides un-graduated task executions; they surface only via the task's
@@ -241,14 +268,33 @@ interface ChatDao {
     @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddingCountByModel(modelId: String): Int
 
-    @Query("SELECT e.messageId FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
-    suspend fun getEmbeddedMessageIdsByModel(modelId: String): List<String>
-
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
-    suspend fun getAllMessagesForIndexing(): List<MessageEntity>
-
     @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getIndexableMessageCount(): Int
+
+    @Query(
+        """
+        SELECT m.id, m.text
+        FROM messages m
+        INNER JOIN conversations c ON m.conversationId = c.id
+        WHERE (c.taskId IS NULL OR c.graduated = 1)
+          AND m.participant IN ('USER', 'MODEL')
+          AND m.text != ''
+          AND m.id NOT LIKE 'tool_%'
+          AND m.id NOT LIKE 'result_%'
+          AND NOT EXISTS (
+              SELECT 1 FROM embeddings e
+              WHERE e.messageId = m.id AND e.modelId = :modelId
+          )
+          AND (:afterId IS NULL OR m.id > :afterId)
+        ORDER BY m.id
+        LIMIT :limit
+        """
+    )
+    suspend fun getUnembeddedMessagesPage(
+        modelId: String,
+        afterId: String?,
+        limit: Int,
+    ): List<IndexableMessage>
 
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
@@ -283,56 +329,62 @@ interface ChatDao {
     @Query("SELECT * FROM conversations")
     suspend fun getAllConversationsList(): List<ChatEntity>
 
-    @Query("SELECT * FROM messages")
-    suspend fun getAllMessagesList(): List<MessageEntity>
+    @Query("SELECT id FROM conversations")
+    suspend fun getAllConversationIds(): List<String>
+
+    @Query("SELECT id FROM tasks")
+    suspend fun getAllTaskIds(): List<String>
+
+    @Query(
+        """
+        SELECT *
+        FROM messages
+        WHERE (:afterId IS NULL OR id > :afterId)
+        ORDER BY id
+        LIMIT :limit
+        """
+    )
+    suspend fun getMessagesPage(afterId: String?, limit: Int): List<MessageEntity>
+
+    @Query(
+        """
+        SELECT id, images, attachmentMeta
+        FROM messages
+        WHERE (:afterId IS NULL OR id > :afterId)
+          AND (
+              (images != '' AND images != '[]')
+              OR (attachmentMeta IS NOT NULL AND attachmentMeta != '')
+          )
+        ORDER BY id
+        LIMIT :limit
+        """
+    )
+    suspend fun getMessageAttachmentReferencesPage(
+        afterId: String?,
+        limit: Int,
+    ): List<MessageAttachmentReference>
+
+    @Query(
+        """
+        SELECT id, draftAttachments
+        FROM conversations
+        WHERE (:afterId IS NULL OR id > :afterId)
+          AND draftAttachments IS NOT NULL
+          AND draftAttachments != ''
+        ORDER BY id
+        LIMIT :limit
+        """
+    )
+    suspend fun getConversationDraftAttachmentReferencesPage(
+        afterId: String?,
+        limit: Int,
+    ): List<ConversationDraftAttachmentReference>
 
     @Query("DELETE FROM conversations")
     suspend fun deleteAllConversations()
 
     @Query("SELECT id FROM messages WHERE id IN (:ids)")
     suspend fun findExistingMessageIds(ids: List<String>): List<String>
-
-    /**
-     * Replaces the complete conversation/automation graph atomically. Parent rows are restored
-     * before their message/loop children, so malformed backup data rolls the whole replacement
-     * back instead of leaving the user's database partially cleared.
-     */
-    @Transaction
-    suspend fun replaceImportedConversations(
-        tasks: List<TaskEntity>,
-        conversations: List<ChatEntity>,
-        messages: List<MessageEntity>,
-        loops: List<LoopEntity>,
-    ) {
-        deleteAllLoops()
-        deleteAllConversations()
-        deleteAllTasks()
-        // Embeddings have no FK cascade. At this point there are no messages, so this clears
-        // stale vectors before imported messages (which may reuse the same IDs) are inserted.
-        deleteOrphanedEmbeddings()
-        tasks.forEach { upsertTask(it) }
-        conversations.forEach { upsertConversation(it) }
-        messages.forEach { upsertMessage(it) }
-        loops.forEach { upsertLoop(it) }
-    }
-
-    /** MERGE is also one graph transaction; a malformed row must not leave a partial import. */
-    @Transaction
-    suspend fun mergeImportedConversations(
-        tasks: List<TaskEntity>,
-        conversations: List<ChatEntity>,
-        messages: List<MessageEntity>,
-        loops: List<LoopEntity>,
-    ) {
-        tasks.forEach { upsertTask(it) }
-        conversations.forEach { upsertConversation(it) }
-        val existingIds = findExistingMessageIds(messages.map { it.id }).toSet()
-        messages.filter { it.id !in existingIds }.forEach { upsertMessage(it) }
-        // Preserve local message edits, but attach restored media when the backup carries it.
-        messages.filter { it.id in existingIds && it.images.isNotEmpty() }
-            .forEach { upsertMessage(it) }
-        loops.forEach { upsertLoop(it) }
-    }
 
     // ── Tasks ─────────────────────────────────────────────────
     @Query("SELECT * FROM tasks ORDER BY createdAt DESC")
@@ -442,7 +494,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 15
+        const val CURRENT_VERSION = 16
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -563,6 +615,12 @@ abstract class ChatDatabase : RoomDatabase() {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE conversations ADD COLUMN draftText TEXT NOT NULL DEFAULT ''")
                     db.execSQL("ALTER TABLE conversations ADD COLUMN draftAttachments TEXT")
+                }
+            },
+            // v15 → v16 adds one-shot ("run once at an instant") tasks, which a cron cannot express.
+            object : Migration(15, 16) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL("ALTER TABLE tasks ADD COLUMN runAt INTEGER")
                 }
             }
         )

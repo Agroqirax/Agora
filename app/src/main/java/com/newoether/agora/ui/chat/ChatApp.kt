@@ -258,7 +258,11 @@ fun ChatApp(
             }
 
             if (!hasAnyHeight && targetIndex > 0) {
-                listState.scrollToItem(targetIndex, 0)
+                if (animate) {
+                    listState.animateScrollToItem(targetIndex, 0)
+                } else {
+                    listState.scrollToItem(targetIndex, 0)
+                }
             } else {
                 val targetScrollPx = (topPaddingPx + totalHeightBeforePx - targetTopPx).coerceAtLeast(0f)
 
@@ -784,18 +788,7 @@ fun ChatApp(
                     ) {
                         ChatBottomBar(
                         onSendMessage = { text, attachments ->
-                            viewModel.sendMessage(text, attachments = attachments).also { sent ->
-                                if (sent) {
-                                    // No haptic here: the Send button's touch haptic already fired
-                                    // at tap time (ComposerSendButton). This path is reached both for
-                                    // direct sends and the deferred pending-send auto-fire; buzzing
-                                    // again here would double-buzz the direct-send path.
-                                    scope.launch {
-                                        delay(200)
-                                        scrollToLastUserMessage(animate = true)
-                                    }
-                                }
-                            }
+                            viewModel.sendMessage(text, attachments = attachments)
                         },
                         onStopGeneration = {
                             haptics.generationStopped()

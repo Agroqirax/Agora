@@ -5,6 +5,7 @@ import android.net.Uri
 import com.newoether.agora.automation.LoopPolicy
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
+import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.AttachmentMeta
 import kotlinx.coroutines.flow.first
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.InputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -24,6 +26,11 @@ class DataExporter(
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager
 ) {
+    companion object {
+        /** Bounds entity/string expansion while exporting databases with large chat histories. */
+        private const val MESSAGE_PAGE_SIZE = 64
+    }
+
     enum class ExportCategory(val manifestKey: String) {
         CONVERSATIONS("conversations"),
         MEMORIES("memories"),
@@ -47,14 +54,6 @@ class DataExporter(
     )
 
     @Serializable
-    private data class ExportConversations(
-        val conversations: List<ExportChatEntity>,
-        val messages: List<ExportMessageEntity>,
-        val tasks: List<ExportTaskEntity> = emptyList(),
-        val loops: List<ExportLoopEntity> = emptyList()
-    )
-
-    @Serializable
     private data class ExportChatEntity(
         val id: String,
         val title: String,
@@ -75,6 +74,8 @@ class DataExporter(
         val systemPrompt: String? = null,
         val modelId: String? = null,
         val cronExpr: String,
+        /** One-shot fire instant; null for a recurring (cron) task. */
+        val runAt: Long? = null,
         /** Informational snapshot; importers recompute this device-local derived value. */
         val nextRunAt: Long,
         val enabled: Boolean = true,
@@ -177,6 +178,163 @@ class DataExporter(
         return null
     }
 
+    private suspend fun forEachMessagePage(
+        block: suspend (List<MessageEntity>) -> Unit,
+    ) {
+        var afterId: String? = null
+        while (true) {
+            val page = chatDao.getMessagesPage(afterId, MESSAGE_PAGE_SIZE)
+            if (page.isEmpty()) break
+            block(page)
+            afterId = page.last().id
+            if (page.size < MESSAGE_PAGE_SIZE) break
+        }
+    }
+
+    private suspend fun forEachAttachmentReferencePage(
+        block: suspend (List<MessageAttachmentReference>) -> Unit,
+    ) {
+        var afterId: String? = null
+        while (true) {
+            val page = chatDao.getMessageAttachmentReferencesPage(afterId, MESSAGE_PAGE_SIZE)
+            if (page.isEmpty()) break
+            block(page)
+            afterId = page.last().id
+            if (page.size < MESSAGE_PAGE_SIZE) break
+        }
+    }
+
+    /** Copies one media stream directly into the archive without a heap-sized byte array. */
+    private fun copyStreamToZipEntry(
+        zip: ZipOutputStream,
+        entryName: String,
+        input: InputStream?,
+    ): Boolean {
+        if (input == null) return false
+        return input.use { stream ->
+            zip.putNextEntry(ZipEntry(entryName))
+            try {
+                stream.copyTo(zip) > 0L
+            } finally {
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun ZipOutputStream.writeJsonToken(value: String) {
+        write(value.toByteArray(Charsets.UTF_8))
+    }
+
+    /**
+     * Writes the existing conversations.json shape one entity at a time. The archive format stays
+     * compatible, but message bodies are never duplicated into an all-messages DTO list.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    private suspend fun writeConversationArchive(
+        zip: ZipOutputStream,
+        exportedImagesByMessage: Map<String, List<String>>,
+    ) {
+        zip.putNextEntry(ZipEntry("conversations.json"))
+        try {
+            zip.writeJsonToken("{\"conversations\":[")
+            var first = true
+            chatDao.getAllConversationsList().forEach { conversation ->
+                if (!first) zip.write(','.code)
+                first = false
+                Json.encodeToStream(
+                    ExportChatEntity(
+                        id = conversation.id,
+                        title = conversation.title,
+                        lastUpdated = conversation.lastUpdated,
+                        selectedBranchesJson = conversation.selectedBranchesJson,
+                        systemPromptId = conversation.systemPromptId,
+                        modelId = conversation.modelId,
+                        taskId = conversation.taskId,
+                        origin = conversation.origin,
+                        graduated = conversation.graduated,
+                    ),
+                    zip,
+                )
+            }
+
+            zip.writeJsonToken("],\"messages\":[")
+            first = true
+            forEachMessagePage { page ->
+                page.forEach { message ->
+                    if (!first) zip.write(','.code)
+                    first = false
+                    Json.encodeToStream(
+                        ExportMessageEntity(
+                            id = message.id,
+                            conversationId = message.conversationId,
+                            parentId = message.parentId,
+                            text = message.text,
+                            images = exportedImagesByMessage[message.id] ?: emptyList(),
+                            thoughts = message.thoughts,
+                            thoughtTitle = message.thoughtTitle,
+                            tokenCount = message.tokenCount,
+                            status = message.status.name,
+                            participant = message.participant.name,
+                            timestamp = message.timestamp,
+                            thoughtTimeMs = message.thoughtTimeMs,
+                            modelName = message.modelName,
+                            toolCallJson = message.toolCallJson,
+                            attachmentMeta = message.attachmentMeta,
+                        ),
+                        zip,
+                    )
+                }
+            }
+
+            zip.writeJsonToken("],\"tasks\":[")
+            first = true
+            chatDao.getAllTasksList().forEach { task ->
+                if (!first) zip.write(','.code)
+                first = false
+                Json.encodeToStream(
+                    ExportTaskEntity(
+                        id = task.id,
+                        name = task.name,
+                        prompt = task.prompt,
+                        systemPrompt = task.systemPrompt,
+                        modelId = task.modelId,
+                        cronExpr = task.cronExpr,
+                        runAt = task.runAt,
+                        nextRunAt = task.nextRunAt,
+                        enabled = task.enabled,
+                        createdAt = task.createdAt,
+                        lastRunAt = task.lastRunAt,
+                    ),
+                    zip,
+                )
+            }
+
+            zip.writeJsonToken("],\"loops\":[")
+            first = true
+            chatDao.getAllLoopsList().forEach { loop ->
+                if (!first) zip.write(','.code)
+                first = false
+                val sanitized = sanitizeImportedLoop(loop)
+                Json.encodeToStream(
+                    ExportLoopEntity(
+                        conversationId = sanitized.conversationId,
+                        intervalMs = sanitized.intervalMs,
+                        prompt = sanitized.prompt,
+                        nextFireAt = sanitized.nextFireAt,
+                        cycleCount = sanitized.cycleCount,
+                        maxCycles = sanitized.maxCycles,
+                        active = sanitized.active,
+                        revision = sanitized.revision,
+                    ),
+                    zip,
+                )
+            }
+            zip.writeJsonToken("]}")
+        } finally {
+            zip.closeEntry()
+        }
+    }
+
     @OptIn(ExperimentalSerializationApi::class)
     suspend fun export(
         uri: Uri,
@@ -213,110 +371,62 @@ class DataExporter(
 
             // Conversations
             if (ExportCategory.CONVERSATIONS in categories) {
-                val allMessages = chatDao.getAllMessagesList()
                 val imageMap = mutableMapOf<String, List<String>>() // messageId -> list of image URIs to keep
 
-                // Export image files alongside the JSON
-                for (msg in allMessages) {
-                    if (msg.images.isEmpty()) continue
-                    val surviving = mutableListOf<String>()
-                    for ((idx, imgUri) in msg.images.withIndex()) {
-                        try {
-                            val inStream = openImageStream(imgUri)
-                            val bytes = inStream?.readBytes()
-                            inStream?.close()
-                            if (bytes != null && bytes.isNotEmpty()) {
-                                zip.putNextEntry(ZipEntry("images/${msg.id}/$idx"))
-                                zip.write(bytes)
-                                zip.closeEntry()
-                                surviving.add(imgUri)
+                // Export media from attachment-only pages. Message bodies/thoughts/tool payloads
+                // are deliberately absent from this pass.
+                forEachAttachmentReferencePage { page ->
+                    page.forEach { message ->
+                        if (message.images.isNotEmpty()) {
+                            val surviving = mutableListOf<String>()
+                            message.images.forEachIndexed { index, imageUri ->
+                                val copied = try {
+                                    copyStreamToZipEntry(
+                                        zip = zip,
+                                        entryName = "images/${message.id}/$index",
+                                        input = openImageStream(imageUri),
+                                    )
+                                } catch (_: Exception) {
+                                    false
+                                }
+                                if (copied) {
+                                    surviving.add(imageUri)
+                                }
                             }
-                        } catch (_: Exception) {
-                            // File not accessible — drop from export
+                            imagesExportedTotal += surviving.size
+                            if (surviving.isNotEmpty()) {
+                                imageMap[message.id] = surviving
+                            }
                         }
-                    }
-                    imagesExportedTotal += surviving.size
-                    if (surviving.isNotEmpty()) {
-                        imageMap[msg.id] = surviving
-                    }
 
-                    // Export video files referenced by attachmentMeta
-                    val meta = try {
-                        msg.attachmentMeta?.let { Json.decodeFromString<AttachmentMeta>(it) }
-                    } catch (_: Exception) { null }
-                    if (meta != null) {
-                        for (item in meta.items) {
-                            if (item.type != "video" || item.originalUri.isNullOrBlank()) continue
-                            val uri = item.originalUri
-                            // Handle file:// URIs (local copies)
-                            if (uri.startsWith("file://")) {
-                                val filePath = uri.removePrefix("file://")
-                                val file = java.io.File(filePath)
-                                if (file.exists()) {
+                        val meta = try {
+                            message.attachmentMeta?.let { Json.decodeFromString<AttachmentMeta>(it) }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        meta?.items?.forEach { item ->
+                            val videoUri = item.originalUri
+                            if (item.type == "video" && !videoUri.isNullOrBlank() &&
+                                videoUri.startsWith("file://")
+                            ) {
+                                val file = File(videoUri.removePrefix("file://"))
+                                if (file.isFile) {
                                     try {
-                                        val bytes = file.readBytes()
-                                        if (bytes.isNotEmpty()) {
-                                            zip.putNextEntry(ZipEntry("videos/${msg.id}/${item.imageIndex ?: 0}"))
-                                            zip.write(bytes)
-                                            zip.closeEntry()
-                                        }
-                                    } catch (_: Exception) {}
+                                        copyStreamToZipEntry(
+                                            zip = zip,
+                                            entryName = "videos/${message.id}/${item.imageIndex ?: 0}",
+                                            input = file.inputStream(),
+                                        )
+                                    } catch (_: Exception) {
+                                        // Inaccessible media is omitted; the message still exports.
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                val conversations = chatDao.getAllConversationsList().map { c ->
-                    ExportChatEntity(
-                        id = c.id,
-                        title = c.title,
-                        lastUpdated = c.lastUpdated,
-                        selectedBranchesJson = c.selectedBranchesJson,
-                        systemPromptId = c.systemPromptId,
-                        modelId = c.modelId,
-                        taskId = c.taskId,
-                        origin = c.origin,
-                        graduated = c.graduated
-                    )
-                }
-                val messages = allMessages.map { m ->
-                    // Only include images that were successfully exported
-                    val exportedImages = imageMap[m.id] ?: emptyList()
-                    ExportMessageEntity(m.id, m.conversationId, m.parentId, m.text, exportedImages,
-                        m.thoughts, m.thoughtTitle, m.tokenCount, m.status.name, m.participant.name,
-                        m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson, m.attachmentMeta)
-                }
-                val tasks = chatDao.getAllTasksList().map { task ->
-                    ExportTaskEntity(
-                        id = task.id,
-                        name = task.name,
-                        prompt = task.prompt,
-                        systemPrompt = task.systemPrompt,
-                        modelId = task.modelId,
-                        cronExpr = task.cronExpr,
-                        nextRunAt = task.nextRunAt,
-                        enabled = task.enabled,
-                        createdAt = task.createdAt,
-                        lastRunAt = task.lastRunAt
-                    )
-                }
-                val loops = chatDao.getAllLoopsList().map { loop ->
-                    val sanitized = sanitizeImportedLoop(loop)
-                    ExportLoopEntity(
-                        conversationId = sanitized.conversationId,
-                        intervalMs = sanitized.intervalMs,
-                        prompt = sanitized.prompt,
-                        nextFireAt = sanitized.nextFireAt,
-                        cycleCount = sanitized.cycleCount,
-                        maxCycles = sanitized.maxCycles,
-                        active = sanitized.active,
-                        revision = sanitized.revision
-                    )
-                }
-                zip.putNextEntry(ZipEntry("conversations.json"))
-                Json.encodeToStream(ExportConversations(conversations, messages, tasks, loops), zip)
-                zip.closeEntry()
+                writeConversationArchive(zip, imageMap)
                 step()
             }
 

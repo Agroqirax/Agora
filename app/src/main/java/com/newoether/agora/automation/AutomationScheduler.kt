@@ -91,6 +91,8 @@ class AutomationScheduler(
         var loops = taskRepository.observeActiveLoops().first()
         if (recalculateForClockChange) {
             val now = System.currentTimeMillis()
+            // A one-shot's instant is absolute, so a clock/timezone change must not move it —
+            // only cron occurrences are re-derived from the new wall clock.
             tasks.filter { it.enabled && it.cronExpr.isNotBlank() }.forEach { task ->
                 val next = CronExpression.parse(task.cronExpr)?.next(now) ?: 0L
                 taskRepository.updateTaskNextRunAtIfUnchanged(task, next)
@@ -126,8 +128,11 @@ class AutomationScheduler(
         val useExact = snapshot.exactRequested && canScheduleExactAlarms()
 
         val activeTasks = snapshot.tasks.filter {
-            it.enabled && it.name.isNotBlank() && it.prompt.isNotBlank() &&
-                it.cronExpr.isNotBlank() && CronExpression.isValid(it.cronExpr)
+            it.enabled && it.name.isNotBlank() && it.prompt.isNotBlank() && when {
+                // One-shot: armable only while its instant is still ahead of us.
+                it.runAt != null -> it.runAt > now
+                else -> it.cronExpr.isNotBlank() && CronExpression.isValid(it.cronExpr)
+            }
         }
         val activeTaskIds = activeTasks.mapTo(mutableSetOf()) { it.id }
         (armedTasks.keys - activeTaskIds).toList().forEach(::cancelTaskLocked)
@@ -137,7 +142,8 @@ class AutomationScheduler(
             // computed value so executeById's stale check matches and the alarm doesn't fire into
             // a permanent H4-style skip loop.
             val logicalFireAt = task.nextRunAt.takeIf { it > 0L }
-                ?: CronExpression.parse(task.cronExpr)?.next(now)?.also { next ->
+                ?: (task.runAt?.takeIf { it > now }
+                    ?: CronExpression.parse(task.cronExpr)?.next(now))?.also { next ->
                     taskRepository.updateTaskNextRunAtIfUnchanged(task, next)
                 } ?: return@forEach
             val desired = ArmedAlarm(logicalFireAt, useExact)

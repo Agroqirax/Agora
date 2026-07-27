@@ -75,6 +75,7 @@ class ChatViewModel(
     // [chatDao] and [settingsManager] are retained ONLY to pass to ImportExportManager,
     // which threads them into DataExporter/DataImporter (bulk data-layer utilities that
     // genuinely need raw DAO/DataStore). All other managers use repositories uniformly.
+    private val database: com.newoether.agora.data.local.ChatDatabase,
     private val chatDao: com.newoether.agora.data.local.ChatDao,
     private val settingsManager: com.newoether.agora.data.SettingsManager,
     val memoryManager: MemoryManager,
@@ -98,6 +99,8 @@ class ChatViewModel(
     companion object {
         /** Overlay fade duration for conversation-switch transitions. */
         private const val SWITCH_OVERLAY_FADE_MS = 200L
+        /** Keeps startup database scans bounded even for very large chat histories. */
+        private const val DATABASE_SCAN_PAGE_SIZE = 64
         /** Auto-delete period tiers in hours: 7 days, 30 days, 365 days. */
         private val AUTO_DELETE_TIERS_HOURS = listOf(168, 720, 8760)
     }
@@ -128,6 +131,7 @@ class ChatViewModel(
     val importExport = ImportExportManager(
         app = getApplication(),
         conversations = convRepo,
+        database = database,
         chatDao = chatDao,
         settingsManager = settingsManager,
         memoryManager = memoryManager,
@@ -199,7 +203,7 @@ class ChatViewModel(
             val models = settings.getEmbeddingModels()
             val activeId = settings.getActiveEmbeddingModelId()
             val active = models.find { it.id == activeId } ?: return@launch
-            val total = convRepo.getAllMessagesForIndexing().count { it.text.isNotBlank() }
+            val total = convRepo.getIndexableMessageCount()
             val cached = convRepo.getEmbeddingCountByModel(active.id)
             val notCached = (total - cached).coerceAtLeast(0)
             if (notCached > 0 && !ragManager.cachingProgress.value.containsKey(active.id)) {
@@ -221,26 +225,45 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val referenced = HashSet<String>()
-                convRepo.getAllMessagesList().forEach { msg ->
-                    msg.images.forEach { referenced.add(it.removePrefix("file://")) }
-                    msg.attachmentMeta?.let { json ->
-                        runCatching { Json.decodeFromString<AttachmentMeta>(json) }.getOrNull()
-                            ?.items?.forEach { item ->
-                                item.originalUri?.takeIf { it.startsWith("file://") }
-                                    ?.let { referenced.add(it.removePrefix("file://")) }
-                            }
+                var afterMessageId: String? = null
+                while (true) {
+                    val page = convRepo.getMessageAttachmentReferencesPage(
+                        afterId = afterMessageId,
+                        limit = DATABASE_SCAN_PAGE_SIZE,
+                    )
+                    page.forEach { message ->
+                        message.images.forEach { referenced.add(it.removePrefix("file://")) }
+                        message.attachmentMeta?.let { json ->
+                            runCatching { Json.decodeFromString<AttachmentMeta>(json) }.getOrNull()
+                                ?.items?.forEach { item ->
+                                    item.originalUri?.takeIf { it.startsWith("file://") }
+                                        ?.let { referenced.add(it.removePrefix("file://")) }
+                                }
+                        }
                     }
+                    afterMessageId = page.lastOrNull()?.id
+                    if (page.size < DATABASE_SCAN_PAGE_SIZE) break
                 }
-                convRepo.getAllConversationsList().forEach { conv ->
-                    conv.draftAttachments?.let { json ->
+
+                var afterConversationId: String? = null
+                while (true) {
+                    val page = convRepo.getConversationDraftAttachmentReferencesPage(
+                        afterId = afterConversationId,
+                        limit = DATABASE_SCAN_PAGE_SIZE,
+                    )
+                    page.forEach { conversation ->
+                        val json = conversation.draftAttachments
                         runCatching { Json.decodeFromString<List<SelectedAttachment>>(json) }.getOrNull()
                             ?.forEach { att ->
                                 att.localPath?.let { referenced.add(it) }
                                 att.processedFrames?.forEach { referenced.add(it) }
                                 att.preRenderedPaths?.forEach { referenced.add(it) }
-                            }
+                        }
                     }
+                    afterConversationId = page.lastOrNull()?.id
+                    if (page.size < DATABASE_SCAN_PAGE_SIZE) break
                 }
+
                 val minAgeMs = 60 * 60 * 1000L
                 val now = System.currentTimeMillis()
                 val prefixes = arrayOf("att_", "vid_", "img_", "pdf_")
@@ -672,7 +695,14 @@ class ChatViewModel(
                         // conversation: at switch time the mirror still reflects the previous
                         // conversation, so a background generation in the target conversation would
                         // be misread as idle and its in-flight SENDING message wrongly marked STOPPED.
-                        if (!state.generating.value) {
+                        //
+                        // The registry only knows about FOREGROUND generations. A headless Task/Loop
+                        // run writes to Room without ever claiming a registry slot, so opening its
+                        // conversation mid-run used to mark the live message STOPPED — the execution
+                        // log opening as "generation stopped" while it was still generating.
+                        val automationRunning =
+                            id in conversationExecutionCoordinator.activeAutomationConversationIds.value
+                        if (!state.generating.value && !automationRunning) {
                             convRepo.fixStuckMessages(id)
                         }
 

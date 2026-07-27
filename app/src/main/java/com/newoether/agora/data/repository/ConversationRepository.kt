@@ -2,7 +2,10 @@ package com.newoether.agora.data.repository
 
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
+import com.newoether.agora.data.local.ConversationDraftAttachmentReference
 import com.newoether.agora.data.local.EmbeddingEntity
+import com.newoether.agora.data.local.IndexableMessage
+import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
@@ -141,9 +144,6 @@ class ConversationRepository(
     suspend fun deleteEmbeddingsByModel(modelId: String) =
         chatDao.deleteEmbeddingsByModel(modelId)
 
-    suspend fun getEmbeddedMessageIdsByModel(modelId: String): List<String> =
-        chatDao.getEmbeddedMessageIdsByModel(modelId)
-
     suspend fun upsertEmbedding(entity: EmbeddingEntity) =
         chatDao.upsertEmbedding(entity)
 
@@ -168,6 +168,13 @@ class ConversationRepository(
     suspend fun getIndexableMessageCount(): Int =
         chatDao.getIndexableMessageCount()
 
+    suspend fun getUnembeddedMessagesPage(
+        modelId: String,
+        afterId: String?,
+        limit: Int,
+    ): List<IndexableMessage> =
+        chatDao.getUnembeddedMessagesPage(modelId, afterId, limit)
+
     // ── Search ────────────────────────────────────────────────
 
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity> =
@@ -187,11 +194,17 @@ class ConversationRepository(
     suspend fun getSearchableConversationsList(): List<ChatEntity> =
         chatDao.getSearchableConversationsList()
 
-    suspend fun getAllMessagesList(): List<MessageEntity> =
-        chatDao.getAllMessagesList()
+    suspend fun getMessageAttachmentReferencesPage(
+        afterId: String?,
+        limit: Int,
+    ): List<MessageAttachmentReference> =
+        chatDao.getMessageAttachmentReferencesPage(afterId, limit)
 
-    suspend fun getAllMessagesForIndexing(): List<MessageEntity> =
-        chatDao.getAllMessagesForIndexing()
+    suspend fun getConversationDraftAttachmentReferencesPage(
+        afterId: String?,
+        limit: Int,
+    ): List<ConversationDraftAttachmentReference> =
+        chatDao.getConversationDraftAttachmentReferencesPage(afterId, limit)
 
     /** Persists the composer draft (text + serialized attachments) for a conversation. */
     suspend fun updateDraft(conversationId: String, draftText: String, draftAttachments: String?) {

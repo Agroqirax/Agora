@@ -2,9 +2,13 @@ package com.newoether.agora.data
 
 import android.content.Context
 import android.net.Uri
+import android.util.JsonReader
+import android.util.JsonToken
 import androidx.core.content.FileProvider
+import androidx.room.withTransaction
 import com.newoether.agora.automation.LoopPolicy
 import com.newoether.agora.data.local.ChatDao
+import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.LoopEntity
 import com.newoether.agora.data.local.MessageEntity
@@ -21,11 +25,17 @@ import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import java.io.Closeable
 import java.io.File
 import java.io.InputStream
+import java.io.InputStreamReader
 import java.util.UUID
 import java.util.zip.ZipFile
 
@@ -76,11 +86,16 @@ internal fun sanitizeImportedConversation(
 
 class DataImporter(
     private val context: Context,
+    private val database: ChatDatabase,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager
 ) {
     enum class ImportStrategy { MERGE, REPLACE, SKIP }
+
+    companion object {
+        private const val IMPORT_MESSAGE_BATCH_SIZE = 64
+    }
 
     private val importJson = Json { ignoreUnknownKeys = true }
 
@@ -180,6 +195,375 @@ class DataImporter(
         }
     }
 
+    private data class ConversationGraphCounts(
+        val conversations: Int = 0,
+        val tasks: Int = 0,
+        val loops: Int = 0,
+    )
+
+    private data class ConversationGraphHeaders(
+        val tasks: List<TaskEntity>,
+        val conversations: List<ChatEntity>,
+        val loops: List<LoopEntity>,
+        val availableConversationIds: Set<String>,
+    )
+
+    private data class RestoredMedia(
+        val imagesByMessage: Map<String, List<String>>,
+        val videosByMessage: Map<String, String>,
+        val createdFiles: List<File>,
+    )
+
+    /** Reads one JSON value only; callers retain at most one exported entity at a time. */
+    private fun readJsonElement(reader: JsonReader): JsonElement = when (reader.peek()) {
+        JsonToken.BEGIN_OBJECT -> {
+            val values = linkedMapOf<String, JsonElement>()
+            reader.beginObject()
+            while (reader.hasNext()) {
+                values[reader.nextName()] = readJsonElement(reader)
+            }
+            reader.endObject()
+            JsonObject(values)
+        }
+        JsonToken.BEGIN_ARRAY -> {
+            val values = mutableListOf<JsonElement>()
+            reader.beginArray()
+            while (reader.hasNext()) {
+                values.add(readJsonElement(reader))
+            }
+            reader.endArray()
+            JsonArray(values)
+        }
+        JsonToken.STRING -> JsonPrimitive(reader.nextString())
+        JsonToken.NUMBER -> importJson.parseToJsonElement(reader.nextString())
+        JsonToken.BOOLEAN -> JsonPrimitive(reader.nextBoolean())
+        JsonToken.NULL -> {
+            reader.nextNull()
+            JsonNull
+        }
+        else -> error("Unexpected JSON token ${reader.peek()}")
+    }
+
+    private inline fun <reified T> JsonReader.readSerializableArray(): List<T> {
+        val values = mutableListOf<T>()
+        beginArray()
+        while (hasNext()) {
+            values.add(importJson.decodeFromJsonElement(readJsonElement(this)))
+        }
+        endArray()
+        return values
+    }
+
+    private fun countArray(reader: JsonReader): Int {
+        var count = 0
+        reader.beginArray()
+        while (reader.hasNext()) {
+            reader.skipValue()
+            count++
+        }
+        reader.endArray()
+        return count
+    }
+
+    /** Counts graph headers without deserializing the messages array. */
+    private fun countConversationGraph(stream: InputStream): ConversationGraphCounts {
+        var conversations = 0
+        var tasks = 0
+        var loops = 0
+        JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "conversations" -> conversations = countArray(reader)
+                    "tasks" -> tasks = countArray(reader)
+                    "loops" -> loops = countArray(reader)
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+        }
+        return ConversationGraphCounts(conversations, tasks, loops)
+    }
+
+    private suspend fun readConversationGraphHeaders(
+        stream: InputStream,
+        strategy: ImportStrategy,
+    ): ConversationGraphHeaders {
+        var rawConversations = emptyList<ExportChatEntity>()
+        var rawTasks = emptyList<ExportTaskEntity>()
+        var rawLoops = emptyList<ExportLoopEntity>()
+        JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                when (reader.nextName()) {
+                    "conversations" -> rawConversations = reader.readSerializableArray()
+                    "tasks" -> rawTasks = reader.readSerializableArray()
+                    "loops" -> rawLoops = reader.readSerializableArray()
+                    else -> reader.skipValue()
+                }
+            }
+            reader.endObject()
+        }
+
+        val tasks = rawTasks.map { task ->
+            sanitizeImportedTask(TaskEntity(
+                id = task.id,
+                name = task.name,
+                prompt = task.prompt,
+                systemPrompt = task.systemPrompt,
+                modelId = task.modelId,
+                cronExpr = task.cronExpr,
+                runAt = task.runAt,
+                nextRunAt = task.nextRunAt,
+                enabled = task.enabled,
+                createdAt = task.createdAt,
+                lastRunAt = task.lastRunAt,
+            ))
+        }
+        val availableTaskIds = if (strategy == ImportStrategy.MERGE) {
+            chatDao.getAllTaskIds().toMutableSet()
+        } else {
+            mutableSetOf()
+        }.apply { addAll(tasks.map { it.id }) }
+
+        val conversations = rawConversations.map { conversation ->
+            sanitizeImportedConversation(
+                ChatEntity(
+                    id = conversation.id,
+                    title = conversation.title,
+                    lastUpdated = conversation.lastUpdated,
+                    selectedBranchesJson = conversation.selectedBranchesJson,
+                    systemPromptId = conversation.systemPromptId,
+                    modelId = conversation.modelId,
+                    taskId = conversation.taskId,
+                    origin = conversation.origin,
+                    graduated = conversation.graduated,
+                ),
+                availableTaskIds,
+            )
+        }
+        val availableConversationIds = if (strategy == ImportStrategy.MERGE) {
+            chatDao.getAllConversationIds().toMutableSet()
+        } else {
+            mutableSetOf()
+        }.apply { addAll(conversations.map { it.id }) }
+
+        val loops = rawLoops
+            .filter { it.conversationId in availableConversationIds }
+            .map { loop ->
+                sanitizeImportedLoop(LoopEntity(
+                    conversationId = loop.conversationId,
+                    intervalMs = loop.intervalMs,
+                    prompt = loop.prompt,
+                    nextFireAt = loop.nextFireAt,
+                    cycleCount = loop.cycleCount,
+                    maxCycles = loop.maxCycles,
+                    active = loop.active,
+                    revision = loop.revision,
+                ))
+            }
+        return ConversationGraphHeaders(
+            tasks = tasks,
+            conversations = conversations,
+            loops = loops,
+            availableConversationIds = availableConversationIds,
+        )
+    }
+
+    private fun restoreConversationMedia(archive: Archive): RestoredMedia {
+        val imagesByMessage = mutableMapOf<String, MutableList<String>>()
+        val videosByMessage = mutableMapOf<String, String>()
+        val createdFiles = mutableListOf<File>()
+        val names = archive.names()
+        try {
+            val imagesDir = File(context.filesDir, "images")
+            imagesDir.mkdirs()
+            names.filter { it.startsWith("images/") }.forEach { path ->
+                val parts = path.removePrefix("images/").split("/")
+                if (parts.size != 2) return@forEach
+                archive.stream(path)?.buffered()?.use { input ->
+                    input.mark(16)
+                    val header = ByteArray(16)
+                    val headerSize = input.read(header).coerceAtLeast(0)
+                    input.reset()
+                    val extension = detectImageExtension(header.copyOf(headerSize))
+                    val imageFile = File(
+                        imagesDir,
+                        "img_import_${UUID.randomUUID()}.$extension",
+                    )
+                    val copied = imageFile.outputStream().buffered().use { output ->
+                        input.copyTo(output)
+                    }
+                    if (copied > 0L) {
+                        createdFiles.add(imageFile)
+                        val contentUri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            imageFile,
+                        )
+                        imagesByMessage.getOrPut(parts[0]) { mutableListOf() }
+                            .add(contentUri.toString())
+                    } else {
+                        imageFile.delete()
+                    }
+                }
+            }
+
+            names.filter { it.startsWith("videos/") }.forEach { path ->
+                val parts = path.removePrefix("videos/").split("/")
+                if (parts.size != 2) return@forEach
+                archive.stream(path)?.buffered()?.use { input ->
+                    input.mark(16)
+                    val header = ByteArray(16)
+                    val headerSize = input.read(header).coerceAtLeast(0)
+                    input.reset()
+                    val extension = detectVideoExtension(header.copyOf(headerSize))
+                    val videoFile = File(
+                        context.filesDir,
+                        "vid_import_${UUID.randomUUID()}.$extension",
+                    )
+                    val copied = videoFile.outputStream().buffered().use { output ->
+                        input.copyTo(output)
+                    }
+                    if (copied > 0L) {
+                        createdFiles.add(videoFile)
+                        videosByMessage[parts[0]] = "file://${videoFile.absolutePath}"
+                    } else {
+                        videoFile.delete()
+                    }
+                }
+            }
+        } catch (error: Exception) {
+            createdFiles.forEach { runCatching { it.delete() } }
+            throw error
+        }
+
+        return RestoredMedia(
+            imagesByMessage = imagesByMessage,
+            videosByMessage = videosByMessage,
+            createdFiles = createdFiles,
+        )
+    }
+
+    private fun ExportMessageEntity.toMessageEntity(restoredMedia: RestoredMedia): MessageEntity {
+        var message = MessageEntity(
+            id = id,
+            conversationId = conversationId,
+            parentId = parentId,
+            text = text,
+            images = restoredMedia.imagesByMessage[id] ?: images,
+            thoughts = thoughts,
+            thoughtTitle = thoughtTitle,
+            tokenCount = tokenCount,
+            status = try {
+                MessageStatus.valueOf(status)
+            } catch (_: Exception) {
+                MessageStatus.SUCCESS
+            },
+            participant = try {
+                Participant.valueOf(participant)
+            } catch (_: Exception) {
+                Participant.MODEL
+            },
+            timestamp = timestamp,
+            thoughtTimeMs = thoughtTimeMs,
+            modelName = modelName,
+            toolCallJson = toolCallJson,
+            attachmentMeta = attachmentMeta,
+        )
+        val restoredVideo = restoredMedia.videosByMessage[id]
+        if (restoredVideo != null && message.attachmentMeta != null) {
+            try {
+                val meta = importJson.decodeFromString<AttachmentMeta>(message.attachmentMeta)
+                val adjustedItems = meta.items.map { item ->
+                    if (item.type == "video") item.copy(originalUri = restoredVideo) else item
+                }
+                message = message.copy(
+                    attachmentMeta = Json.encodeToString(AttachmentMeta(items = adjustedItems))
+                )
+            } catch (error: Exception) {
+                DebugLog.e("DataImporter", "Failed to parse attachment metadata", error)
+            }
+        }
+        return message
+    }
+
+    private suspend fun importMessagesFromGraph(
+        stream: InputStream,
+        strategy: ImportStrategy,
+        availableConversationIds: Set<String>,
+        restoredMedia: RestoredMedia,
+    ) {
+        val batch = mutableListOf<MessageEntity>()
+
+        suspend fun flushBatch() {
+            if (batch.isEmpty()) return
+            val existingIds = if (strategy == ImportStrategy.MERGE) {
+                chatDao.findExistingMessageIds(batch.map { it.id }).toSet()
+            } else {
+                emptySet()
+            }
+            batch.forEach { message ->
+                if (message.id !in existingIds || message.images.isNotEmpty()) {
+                    chatDao.upsertMessage(message)
+                }
+            }
+            batch.clear()
+        }
+
+        JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() != "messages") {
+                    reader.skipValue()
+                    continue
+                }
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    val exported = importJson.decodeFromJsonElement<ExportMessageEntity>(
+                        readJsonElement(reader)
+                    )
+                    if (exported.conversationId in availableConversationIds) {
+                        batch.add(exported.toMessageEntity(restoredMedia))
+                        if (batch.size >= IMPORT_MESSAGE_BATCH_SIZE) {
+                            flushBatch()
+                        }
+                    }
+                }
+                reader.endArray()
+            }
+            reader.endObject()
+        }
+        flushBatch()
+    }
+
+    private suspend fun importConversationGraph(
+        archive: Archive,
+        strategy: ImportStrategy,
+        headers: ConversationGraphHeaders,
+        restoredMedia: RestoredMedia,
+    ) {
+        database.withTransaction {
+            if (strategy == ImportStrategy.REPLACE) {
+                chatDao.deleteAllLoops()
+                chatDao.deleteAllConversations()
+                chatDao.deleteAllTasks()
+                chatDao.deleteOrphanedEmbeddings()
+            }
+            headers.tasks.forEach { chatDao.upsertTask(it) }
+            headers.conversations.forEach { chatDao.upsertConversation(it) }
+            archive.stream("conversations.json")?.use { stream ->
+                importMessagesFromGraph(
+                    stream = stream,
+                    strategy = strategy,
+                    availableConversationIds = headers.availableConversationIds,
+                    restoredMedia = restoredMedia,
+                )
+            } ?: error("conversations.json is missing")
+            headers.loops.forEach { chatDao.upsertLoop(it) }
+        }
+    }
+
     suspend fun readManifest(uri: Uri): ImportManifest? {
         return withContext(Dispatchers.IO) {
             Archive.open(context, uri)?.use { archive ->
@@ -216,10 +600,10 @@ class DataImporter(
 
                 archive.stream("conversations.json")?.use { stream ->
                     try {
-                        val graph = importJson.decodeFromStream<ExportConversations>(stream)
-                        conversationCount = graph.conversations.size
-                        taskCount = graph.tasks.size
-                        loopCount = graph.loops.size
+                        val counts = countConversationGraph(stream)
+                        conversationCount = counts.conversations
+                        taskCount = counts.tasks
+                        loopCount = counts.loops
                     } catch (e: Exception) { DebugLog.e("DataImporter", "Failed to parse conversations.json", e) }
                 }
 
@@ -270,160 +654,23 @@ class DataImporter(
             // Conversations
             val convDecision = decisions[DataExporter.ExportCategory.CONVERSATIONS]
             if (convDecision != null && convDecision != ImportStrategy.SKIP) {
-                val videoCleanupList = mutableListOf<java.io.File>()
+                var restoredMedia: RestoredMedia? = null
                 try {
-                    archive.stream("conversations.json")?.use { stream ->
-                        val data = importJson.decodeFromStream<ExportConversations>(stream)
-                        val taskEntities = data.tasks.map { task ->
-                            sanitizeImportedTask(TaskEntity(
-                                id = task.id,
-                                name = task.name,
-                                prompt = task.prompt,
-                                systemPrompt = task.systemPrompt,
-                                modelId = task.modelId,
-                                cronExpr = task.cronExpr,
-                                nextRunAt = task.nextRunAt,
-                                enabled = task.enabled,
-                                createdAt = task.createdAt,
-                                lastRunAt = task.lastRunAt
-                            ))
-                        }
-                        val existingTaskIds = if (convDecision == ImportStrategy.MERGE) {
-                            chatDao.getAllTasksList().mapTo(mutableSetOf()) { it.id }
-                        } else {
-                            mutableSetOf()
-                        }
-                        val availableTaskIds = existingTaskIds.apply {
-                            addAll(taskEntities.map { it.id })
-                        }
-                        val convEntities = data.conversations.map { c ->
-                            sanitizeImportedConversation(ChatEntity(
-                                id = c.id,
-                                title = c.title,
-                                lastUpdated = c.lastUpdated,
-                                selectedBranchesJson = c.selectedBranchesJson,
-                                systemPromptId = c.systemPromptId,
-                                modelId = c.modelId,
-                                taskId = c.taskId,
-                                origin = c.origin,
-                                graduated = c.graduated
-                            ), availableTaskIds)
-                        }
-                        val existingConversationIds = if (convDecision == ImportStrategy.MERGE) {
-                            chatDao.getAllConversationsList().mapTo(mutableSetOf()) { it.id }
-                        } else {
-                            mutableSetOf()
-                        }
-                        val availableConversationIds = existingConversationIds.apply {
-                            addAll(convEntities.map { it.id })
-                        }
-                        val msgEntities = data.messages
-                            .filter { it.conversationId in availableConversationIds }
-                            .map { m ->
-                            MessageEntity(m.id, m.conversationId, m.parentId, m.text, m.images,
-                                m.thoughts, m.thoughtTitle, m.tokenCount,
-                                try { MessageStatus.valueOf(m.status) } catch (_: Exception) { MessageStatus.SUCCESS },
-                                try { Participant.valueOf(m.participant) } catch (_: Exception) { Participant.MODEL },
-                                m.timestamp, m.thoughtTimeMs, m.modelName, m.toolCallJson, m.attachmentMeta)
-                        }
-                        val loopEntities = data.loops
-                            .filter { it.conversationId in availableConversationIds }
-                            .map { loop ->
-                                sanitizeImportedLoop(LoopEntity(
-                                    conversationId = loop.conversationId,
-                                    intervalMs = loop.intervalMs,
-                                    prompt = loop.prompt,
-                                    nextFireAt = loop.nextFireAt,
-                                    cycleCount = loop.cycleCount,
-                                    maxCycles = loop.maxCycles,
-                                    active = loop.active,
-                                    revision = loop.revision
-                                ))
-                            }
-                        // Restore image files from ZIP to app storage
-                        val imagesDir = java.io.File(context.filesDir, "images")
-                        imagesDir.mkdirs()
-                        val restoredImages = mutableMapOf<String, MutableList<String>>() // messageId -> file paths
-                        for (path in archive.names()) {
-                            if (!path.startsWith("images/")) continue
-                            val bytes = archive.bytes(path) ?: continue
-                            // path format: images/<messageId>/<index>
-                            val parts = path.removePrefix("images/").split("/")
-                            if (parts.size == 2) {
-                                val msgId = parts[0]
-                                val ext = detectImageExtension(bytes)
-                                val imgFile = java.io.File(imagesDir, "${msgId}_${parts[1]}.$ext")
-                                imgFile.writeBytes(bytes)
-                                val contentUri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    imgFile
-                                )
-                                restoredImages.getOrPut(msgId) { mutableListOf() }.add(contentUri.toString())
-                            }
-                        }
-
-                        // Restore video files from ZIP to app storage
-                        val restoredVideos = mutableMapOf<String, String>() // messageId -> local file path
-                        for (path in archive.names()) {
-                            if (!path.startsWith("videos/")) continue
-                            val bytes = archive.bytes(path) ?: continue
-                            // path format: videos/<messageId>/<index>
-                            val parts = path.removePrefix("videos/").split("/")
-                            if (parts.size == 2 && bytes.isNotEmpty()) {
-                                val msgId = parts[0]
-                                val ext = detectVideoExtension(bytes)
-                                val vidFile = java.io.File(context.filesDir, "vid_import_${java.util.UUID.randomUUID()}.$ext")
-                                vidFile.writeBytes(bytes)
-                                videoCleanupList.add(vidFile)
-                                restoredVideos[msgId] = "file://${vidFile.absolutePath}"
-                            }
-                        }
-
-                        // Update message entities with restored image paths
-                        val finalMsgEntities = msgEntities.map { msg ->
-                            val imgs = restoredImages[msg.id]
-                            var updated = if (imgs != null) msg.copy(images = imgs) else msg
-                            // Update attachmentMeta originalUri for videos
-                            val videoPath = restoredVideos[msg.id]
-                            val attachmentMeta = updated.attachmentMeta
-                            if (videoPath != null && attachmentMeta != null) {
-                                try {
-                                    val meta = importJson.decodeFromString<AttachmentMeta>(attachmentMeta)
-                                    val adjustedItems = meta.items.map { item ->
-                                        if (item.type == "video") item.copy(originalUri = videoPath) else item
-                                    }
-                                    updated = updated.copy(attachmentMeta = Json.encodeToString(AttachmentMeta(items = adjustedItems)))
-                                } catch (e: Exception) { DebugLog.e("DataImporter", "Failed to parse attachment metadata", e) }
-                            }
-                            updated
-                        }
-
-                        if (convDecision == ImportStrategy.REPLACE) {
-                            chatDao.replaceImportedConversations(
-                                tasks = taskEntities,
-                                conversations = convEntities,
-                                messages = finalMsgEntities,
-                                loops = loopEntities,
-                            )
-                            conversationsImported = data.conversations.size
-                            tasksImported = taskEntities.size
-                            loopsImported = loopEntities.size
-                        } else {
-                            chatDao.mergeImportedConversations(
-                                tasks = taskEntities,
-                                conversations = convEntities,
-                                messages = finalMsgEntities,
-                                loops = loopEntities,
-                            )
-                            conversationsImported = data.conversations.size
-                            tasksImported = taskEntities.size
-                            loopsImported = loopEntities.size
-                        }
-                    }
+                    val headers = archive.stream("conversations.json")?.use { stream ->
+                        readConversationGraphHeaders(stream, convDecision)
+                    } ?: error("conversations.json is missing")
+                    restoredMedia = restoreConversationMedia(archive)
+                    importConversationGraph(
+                        archive = archive,
+                        strategy = convDecision,
+                        headers = headers,
+                        restoredMedia = restoredMedia,
+                    )
+                    conversationsImported = headers.conversations.size
+                    tasksImported = headers.tasks.size
+                    loopsImported = headers.loops.size
                 } catch (e: Exception) {
-                    // Clean up restored video files on error
-                    for (f in videoCleanupList) { try { f.delete() } catch (_: Exception) {} }
+                    restoredMedia?.createdFiles?.forEach { runCatching { it.delete() } }
                     errors.add("Conversations: ${e.localizedMessage ?: "Unknown error"}")
                 }
                 step()
@@ -559,10 +806,11 @@ class DataImporter(
                     // Restore custom font file
                     for (path in archive.names()) {
                         if (!path.startsWith("custom_font/")) continue
-                        val bytes = archive.bytes(path) ?: continue
                         val fileName = path.removePrefix("custom_font/")
                         val fontFile = java.io.File(context.filesDir, "custom_font_$fileName")
-                        fontFile.writeBytes(bytes)
+                        archive.stream(path)?.use { input ->
+                            fontFile.outputStream().buffered().use { output -> input.copyTo(output) }
+                        } ?: continue
                         // Update the font path to point to the restored file
                         settingsManager.saveCustomFontPath(fontFile.absolutePath)
                         // Re-read font name from the restored file
@@ -657,14 +905,6 @@ class DataImporter(
 
     // Internal data classes for parsing export files
     @Serializable
-    private data class ExportConversations(
-        val conversations: List<ExportChatEntity>,
-        val messages: List<ExportMessageEntity>,
-        val tasks: List<ExportTaskEntity> = emptyList(),
-        val loops: List<ExportLoopEntity> = emptyList()
-    )
-
-    @Serializable
     private data class ExportChatEntity(
         val id: String,
         val title: String,
@@ -685,6 +925,8 @@ class DataImporter(
         val systemPrompt: String? = null,
         val modelId: String? = null,
         val cronExpr: String,
+        /** One-shot fire instant; null for a recurring (cron) task. */
+        val runAt: Long? = null,
         /** Informational only; import always clears this device-local schedule epoch. */
         val nextRunAt: Long = 0L,
         val enabled: Boolean = true,

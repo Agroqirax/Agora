@@ -14,12 +14,14 @@ import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.automation.AutomationExecutionGate
 import com.newoether.agora.tool.AutomationToolProvider
 import com.newoether.agora.data.local.ChatDao
+import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.sandbox.SandboxManagerFactory
 
 class ChatViewModelFactory(
     private val application: Application,
+    private val database: ChatDatabase,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager,
@@ -40,7 +42,7 @@ class ChatViewModelFactory(
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return ChatViewModel(
-                application, chatDao, settingsManager, memoryManager, context, sandboxFactory,
+                application, database, chatDao, settingsManager, memoryManager, context, sandboxFactory,
                 autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
                 taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
                 automationExecutionGate

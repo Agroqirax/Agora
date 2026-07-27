@@ -156,7 +156,7 @@ class RagManager(
         scope.launch(Dispatchers.IO) {
             settings.setActiveEmbeddingModelId(id)
             val model = settings.embeddingModels.value.find { it.id == id } ?: return@launch
-            val total = conversations.getAllMessagesForIndexing().count { it.text.isNotBlank() }
+            val total = conversations.getIndexableMessageCount()
             val cached = conversations.getEmbeddingCountByModel(id)
             val notCached = (total - cached).coerceAtLeast(0)
             if (notCached > 0) {
@@ -212,87 +212,88 @@ class RagManager(
         if (recache) {
             conversations.deleteEmbeddingsByModel(modelId)
         }
-        val allMessages = conversations.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
-        val total = allMessages.size
+        val total = conversations.getIndexableMessageCount()
         if (total == 0) {
             if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_messages_to_cache)))
             refreshCacheCounts()
             return
         }
-        val existingIds = conversations.getEmbeddedMessageIdsByModel(modelId).toSet()
-        val toProcess = allMessages.filter { it.id !in existingIds }
-        if (toProcess.isEmpty()) {
+        val alreadyDone = conversations.getEmbeddingCountByModel(modelId).coerceAtMost(total)
+        if (alreadyDone >= total) {
             if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_already_cached, total)))
             refreshCacheCounts()
             return
         }
-        val alreadyDone = total - toProcess.size
+
         var succeeded = 0
         var attempted = 0
+        val batchSize = model.batchSize.coerceIn(1, 100)
+        val remoteConfig = if (model.type == EmbeddingModelType.LOCAL) {
+            if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.local_model_not_found)))
+                return
+            }
+            null
+        } else {
+            val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
+            if (apiKey.isBlank()) {
+                if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
+                return
+            }
+            apiKey to model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
+        }
+
         _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
         try {
-            val batchSize = model.batchSize.coerceIn(1, 100)
-            if (model.type == EmbeddingModelType.LOCAL) {
-                if (!LlamaEngine.isModelReady(model.localFilePath)) {
-                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.local_model_not_found)))
-                    return
-                }
-                toProcess.chunked(batchSize).forEach { batch ->
-                    if (settings.embeddingModels.value.none { it.id == modelId }) return
-                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
-                    val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
+            var afterMessageId: String? = null
+            while (true) {
+                if (settings.embeddingModels.value.none { it.id == modelId }) return
+                val batch = conversations.getUnembeddedMessagesPage(
+                    modelId = modelId,
+                    afterId = afterMessageId,
+                    limit = batchSize,
+                )
+                if (batch.isEmpty()) break
+                afterMessageId = batch.last().id
+
+                val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
+                val embeddings = if (model.type == EmbeddingModelType.LOCAL) {
+                    LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
                         localProvider.releaseEngineBlocking()
                     }
-                    batch.zip(embeddings).forEach { (msg, embd) ->
-                        attempted++
-                        if (embd != null) {
-                            conversations.upsertEmbedding(EmbeddingEntity(
-                                messageId = msg.id, modelId = modelId,
-                                embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
-                            ))
-                            succeeded++
-                        }
-                    }
-                    _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
-                }
-            } else {
-                val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
-                if (apiKey.isBlank()) {
-                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
-                    return
-                }
-                val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                toProcess.chunked(batchSize).forEach { batch ->
-                    if (settings.embeddingModels.value.none { it.id == modelId }) return
-                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
-                    val embeddings = EmbeddingClient.computeEmbeddings(
+                } else {
+                    val (apiKey, baseUrl) = requireNotNull(remoteConfig)
+                    EmbeddingClient.computeEmbeddings(
                         texts, apiKey, model.remoteModelName, baseUrl
                     )
-                    batch.zip(embeddings).forEach { (msg, embd) ->
-                        attempted++
-                        if (embd != null) {
-                            conversations.upsertEmbedding(EmbeddingEntity(
-                                messageId = msg.id, modelId = modelId,
-                                embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
-                            ))
-                            succeeded++
-                        }
-                    }
-                    _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
                 }
+
+                attempted += batch.size
+                batch.zip(embeddings).forEach { (message, embedding) ->
+                    if (embedding != null) {
+                        conversations.upsertEmbedding(EmbeddingEntity(
+                            messageId = message.id,
+                            modelId = modelId,
+                            embedding = EmbeddingIndexer.floatsToBytes(embedding),
+                            chunkText = message.text.take(Constants.MAX_CHUNK_TEXT_LENGTH),
+                            dimension = embedding.size,
+                        ))
+                        succeeded++
+                    }
+                }
+                val completed = (alreadyDone + attempted).coerceAtMost(total)
+                _cachingProgress.update { it + (modelId to (completed to total)) }
             }
         } finally {
             _cachingProgress.update { it - modelId }
         }
-        val failed = toProcess.size - succeeded
+        val failed = attempted - succeeded
         if (!silent) {
             if (failed == 0) {
                 emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_cached, total)))
             } else {
                 emitSnackbar(SnackbarEvent(
-                    appContext.getString(R.string.cached_partial_failed, succeeded, toProcess.size, failed),
+                    appContext.getString(R.string.cached_partial_failed, succeeded, attempted, failed),
                     appContext.getString(R.string.retry)
                 ) { cacheMessagesForModel(modelId) })
             }

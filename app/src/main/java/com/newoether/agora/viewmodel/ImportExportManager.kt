@@ -11,6 +11,7 @@ import com.newoether.agora.data.GptChatImporter
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.local.ChatDao
+import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
@@ -45,6 +46,7 @@ private inline fun <reified T : Enum<T>> safeValueOf(name: String): T? =
 class ImportExportManager(
     private val app: Application,
     private val conversations: ConversationRepository,
+    private val database: ChatDatabase,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager,
@@ -108,7 +110,7 @@ class ImportExportManager(
     fun previewImport(uri: Uri) {
         scope.launch(Dispatchers.IO) {
             try {
-                val importer = DataImporter(app, chatDao, settingsManager, memoryManager)
+                val importer = DataImporter(app, database, chatDao, settingsManager, memoryManager)
                 val manifest = importer.readManifest(uri)
                 if (manifest == null) {
                     emitSnackbar(SnackbarEvent(app.getString(R.string.import_invalid_file)))
@@ -378,7 +380,7 @@ class ImportExportManager(
     fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) {
         scope.launch(Dispatchers.IO) {
             try {
-                val importer = DataImporter(app, chatDao, settingsManager, memoryManager)
+                val importer = DataImporter(app, database, chatDao, settingsManager, memoryManager)
                 suspend fun performImport() = importer.import(uri, decisions) { progress ->
                     _importProgress.value = progress
                 }

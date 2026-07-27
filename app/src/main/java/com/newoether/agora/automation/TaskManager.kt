@@ -124,8 +124,8 @@ class TaskManager(
         // queued Worker harmless, but cancelling here also frees the running slot promptly.
         withTaskLock(task.id) {
             val previous = taskRepository.getTask(task.id)
-            val scheduleChanged = !task.enabled || task.cronExpr.isBlank() ||
-                (previous != null && previous.cronExpr != task.cronExpr)
+            val scheduleChanged = !task.enabled || !task.hasSchedule() ||
+                (previous != null && (previous.cronExpr != task.cronExpr || previous.runAt != task.runAt))
             if (scheduleChanged) cancelExecutions(task.id)
             saveTaskLocked(task)
         }
@@ -136,9 +136,9 @@ class TaskManager(
         val now = System.currentTimeMillis()
         val previous = taskRepository.getTask(task.id)
         val nextRunAt = when {
-            !task.enabled || task.cronExpr.isBlank() -> 0L
+            !task.enabled || !task.hasSchedule() -> 0L
             previous != null && previous.enabled && previous.cronExpr == task.cronExpr &&
-                previous.nextRunAt > now -> previous.nextRunAt
+                previous.runAt == task.runAt && previous.nextRunAt > now -> previous.nextRunAt
             else -> nextRunFor(task, now)
         }
         taskRepository.upsertTask(
@@ -237,12 +237,14 @@ class TaskManager(
         taskRepository.deleteTask(task.id)
     }
 
-    fun nextRunFor(task: TaskEntity, now: Long): Long =
-        if (task.enabled && task.cronExpr.isNotBlank()) {
-            CronExpression.parse(task.cronExpr)?.next(now) ?: 0L
-        } else {
-            0L
-        }
+    fun nextRunFor(task: TaskEntity, now: Long): Long = when {
+        !task.enabled -> 0L
+        // One-shot: its instant IS the next run, and only while still in the future. Returning 0
+        // once it has passed is what retires the task after it fires (see finishScheduledRun).
+        task.runAt != null -> task.runAt.takeIf { it > now } ?: 0L
+        task.cronExpr.isNotBlank() -> CronExpression.parse(task.cronExpr)?.next(now) ?: 0L
+        else -> 0L
+    }
 
     /** Starts one exclusive manual run. A second tap while queued/running is ignored. */
     fun runNow(task: TaskEntity) {
@@ -292,7 +294,7 @@ class TaskManager(
                     "Task is incomplete and was disabled", advancesSchedule = true,
                 )
             }
-            if (!task.enabled || task.cronExpr.isBlank()) {
+            if (!task.enabled || !task.hasSchedule()) {
                 return@withTaskLock ExecutionResult.Skipped("Task is disabled", advancesSchedule = true)
             }
             if (expectedRunAt > 0L && task.nextRunAt != expectedRunAt) {
@@ -338,7 +340,12 @@ class TaskManager(
                 // instead of leaving the task permanently un-armed (the old H4 silent-death path).
                 else -> nextRunFor(fresh, now)
             }
-            if (next != fresh.nextRunAt) {
+            // A one-shot has no "next": once its instant is behind us the task retires itself, so
+            // it can never re-arm (and the editor shows it as un-armed rather than silently idle).
+            val retireOneShot = fresh.runAt != null && next <= 0L
+            if (retireOneShot) {
+                taskRepository.upsertTask(fresh.copy(lastRunAt = now, nextRunAt = 0L, enabled = false))
+            } else if (next != fresh.nextRunAt) {
                 taskRepository.upsertTask(fresh.copy(lastRunAt = now, nextRunAt = next))
             } else if (fresh.lastRunAt != now) {
                 taskRepository.upsertTask(fresh.copy(lastRunAt = now))

@@ -22,17 +22,29 @@
     <string name="task_last_run_at">Last run %1$s</string>
     <string name="task_never_run">Never run</string>
     <string name="task_empty">No tasks yet. Create one to run a saved prompt on demand.</string>
-    <string name="task_execution_log">Execution log</string>
+    <string name="task_execution_log">History</string>
     <string name="task_no_executions">No runs yet</string>
     <string name="task_running">Running…</string>
     <string name="task_last_run">Last run %1$s</string>
     <string name="task_from_banner">From task: %1$s</string>
     <string name="task_schedule">Schedule</string>
     <string name="task_schedule_manual">Manual only</string>
-    <string name="task_schedule_hourly">Every hour</string>
-    <string name="task_schedule_daily">Every day at 9:00</string>
-    <string name="task_schedule_weekly">Mondays at 9:00</string>
     <string name="task_schedule_custom">Custom (cron)</string>
+    <string name="task_repeat">Repeat</string>
+    <string name="task_repeat_once">Once</string>
+    <string name="task_repeat_daily">Daily</string>
+    <string name="task_repeat_weekly">Weekly</string>
+    <string name="task_repeat_monthly">Monthly</string>
+    <string name="task_repeat_yearly">Yearly</string>
+    <string name="task_on">On</string>
+    <string name="task_at">At</string>
+    <string name="task_save">Save</string>
+    <!-- Multi-select of Sun..Sat. NOT "Weekdays": in English that idiomatically means Mon-Fri,
+         which is one possible selection here, so it would read as a filter rather than a picker. -->
+    <string name="task_days_of_week">Days of week</string>
+    <string name="task_day_of_month">Day of month</string>
+    <string name="task_day_ordinal">Day %1$d</string>
+    <string name="task_once_past">That time has already passed.</string>
     <string name="task_cron_hint">min hour day month weekday</string>
     <string name="task_cron_invalid">Invalid cron expression</string>
     <string name="task_next_run">Next run: %1$s</string>

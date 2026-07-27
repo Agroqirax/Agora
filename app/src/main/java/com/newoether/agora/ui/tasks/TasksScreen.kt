@@ -17,15 +17,25 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,13 +56,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.automation.CronExpression
+import com.newoether.agora.automation.ScheduleType
+import com.newoether.agora.automation.TaskSchedule
+import com.newoether.agora.automation.hasSchedule
 import com.newoether.agora.data.local.TaskEntity
+import java.util.Calendar
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
@@ -269,12 +284,12 @@ private fun TaskCard(
                     )
                 }
                 Spacer(Modifier.height(5.dp))
-                // Armed → recurrence + live countdown. Not armed → "Manual only": the switch is
-                // the single place that state is expressed, so the recurrence isn't shown as if
-                // it were about to fire.
-                val scheduleText = if (task.enabled && task.cronExpr.isNotBlank()) {
+                // Armed → recurrence summary + live countdown. Not armed → "Manual only": the
+                // switch is the single place that state is expressed, so the recurrence isn't
+                // shown as if it were about to fire.
+                val scheduleText = if (task.enabled && task.hasSchedule()) {
                     listOfNotNull(
-                        scheduleLabelFor(task.cronExpr),
+                        taskRepeatSummary(task),
                         if (task.nextRunAt > 0L) {
                             stringResource(R.string.task_next_run, formatTaskCountdown(task.nextRunAt - now))
                         } else null,
@@ -393,6 +408,7 @@ private fun TaskDetailPage(
     var prompt by rememberSaveable(task.id) { mutableStateOf(task.prompt) }
     var modelId by rememberSaveable(task.id) { mutableStateOf(task.modelId) }
     var cronExpr by rememberSaveable(task.id) { mutableStateOf(task.cronExpr) }
+    var runAt by rememberSaveable(task.id) { mutableStateOf(task.runAt) }
     var enabled by rememberSaveable(task.id) { mutableStateOf(task.enabled) }
     var showModelPicker by remember { mutableStateOf(false) }
 
@@ -402,12 +418,15 @@ private fun TaskDetailPage(
     val cronValid = cronExpr.isBlank() || CronExpression.isValid(cronExpr)
     val isComplete = name.isNotBlank() && prompt.isNotBlank() && cronValid
 
-    fun current() = task.copy(name = name.trim(), prompt = prompt, modelId = modelId, cronExpr = cronExpr, enabled = enabled)
-    // Persist on the way out, unless this is an untouched new draft (nothing meaningful entered).
-    fun leave() {
-        if (isComplete) viewModel.saveTask(current())
-        onBack()
-    }
+    fun current() = task.copy(
+        name = name.trim(), prompt = prompt, modelId = modelId,
+        cronExpr = cronExpr, runAt = runAt, enabled = enabled,
+    )
+    val saved = current() == task
+    fun save() { if (isComplete) viewModel.saveTask(current()) }
+    // Back still saves — an editor that silently discards work on the system back gesture is a
+    // trap. The explicit Save button exists to make the commit point visible, not to gate it.
+    fun leave() { save(); onBack() }
 
     BackHandler { leave() }
 
@@ -415,20 +434,35 @@ private fun TaskDetailPage(
         title = name.ifBlank { stringResource(if (isNew) R.string.task_new else R.string.task_edit) },
         onBack = { leave() },
         actions = {
-            IconButton(
-                enabled = isComplete && !isRunning,
+            IconButton(enabled = isComplete && !saved, onClick = { save() }) {
+                Icon(Icons.Default.Check, contentDescription = stringResource(R.string.task_save))
+            }
+        },
+        floatingActionButton = {
+            // Run is the page's primary action, so it gets the FAB; Save is the confirming
+            // secondary action in the bar.
+            FloatingActionButton(
                 onClick = {
+                    if (!isComplete || isRunning) return@FloatingActionButton
                     viewModel.saveTask(current())
                     viewModel.runTaskNow(current())
-                }
+                },
+                containerColor = if (isComplete && !isRunning) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = if (isComplete && !isRunning) MaterialTheme.colorScheme.onPrimaryContainer
+                else MaterialTheme.colorScheme.onSurfaceVariant,
             ) {
                 if (isRunning) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(22.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.task_run_now))
                 }
             }
-        }
+        },
     ) {
         item {
             SettingsGroup(
@@ -437,6 +471,7 @@ private fun TaskDetailPage(
                     {
                         LabeledField(
                             label = stringResource(R.string.task_name),
+                            icon = Icons.Default.Label,
                             value = name,
                             onValueChange = { name = it },
                             placeholder = stringResource(R.string.task_name_hint),
@@ -446,6 +481,7 @@ private fun TaskDetailPage(
                     {
                         LabeledField(
                             label = stringResource(R.string.task_prompt),
+                            icon = Icons.Default.Psychology,
                             value = prompt,
                             onValueChange = { prompt = it },
                             placeholder = stringResource(R.string.task_prompt_hint),
@@ -461,6 +497,9 @@ private fun TaskDetailPage(
                                     modelId?.let { modelAliases[it] ?: ModelId.parse(it).apiModelName }
                                         ?: stringResource(R.string.task_model_default)
                                 )
+                            },
+                            leadingContent = {
+                                Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary)
                             },
                             trailingContent = {
                                 Icon(
@@ -479,7 +518,8 @@ private fun TaskDetailPage(
         item {
             ScheduleGroup(
                 cronExpr = cronExpr,
-                onCronChange = { cronExpr = it },
+                runAt = runAt,
+                onScheduleChange = { newCron, newRunAt -> cronExpr = newCron; runAt = newRunAt },
                 enabled = enabled,
                 onEnabledChange = { enabled = it },
             )
@@ -544,16 +584,23 @@ private fun LabeledField(
     onValueChange: (String) -> Unit,
     placeholder: String,
     singleLine: Boolean,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
     isError: Boolean = false,
     supporting: String? = null,
     supportingIsError: Boolean = false,
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
-        Text(
-            label,
-            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(16.dp))
+            }
+            Text(
+                label,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = value,
@@ -578,93 +625,226 @@ private fun LabeledField(
     }
 }
 
-/**
- * Recurrence presets. Deliberately NO "manual only" entry: manual is the absence of an armed
- * schedule, expressed once by the [R.string.task_enabled] switch. Having both a "Manual only"
- * preset and an off switch meant two controls for one state.
- */
-private val SCHEDULE_PRESETS: List<Pair<String, Int>> = listOf(
-    "0 * * * *" to R.string.task_schedule_hourly,
-    "0 9 * * *" to R.string.task_schedule_daily,
-    "0 9 * * 1" to R.string.task_schedule_weekly,
-)
-
-/** Human-readable recurrence: preset name, raw cron, or "Not set". */
-@Composable
-private fun scheduleLabelFor(cronExpr: String): String {
-    if (cronExpr.isBlank()) return stringResource(R.string.task_schedule_not_set)
-    val preset = SCHEDULE_PRESETS.firstOrNull { it.first == cronExpr }
-    return if (preset != null) stringResource(preset.second) else cronExpr
-}
-
 private fun formatDateTime(millis: Long): String =
     java.text.DateFormat.getDateTimeInstance(
         java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT
     ).format(java.util.Date(millis))
 
+private fun formatTimeOfDay(hour: Int, minute: Int): String =
+    String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+
+/** One-line recurrence summary for a task card ("Daily", "Weekly", a raw cron, …). */
+@Composable
+private fun taskRepeatSummary(task: TaskEntity): String {
+    val schedule = TaskSchedule.parse(task.cronExpr, task.runAt)
+    return if (schedule != null) repeatLabel(schedule.type)
+    else task.cronExpr.ifBlank { stringResource(R.string.task_schedule_not_set) }
+}
+
+@Composable
+private fun repeatLabel(type: ScheduleType): String = stringResource(
+    when (type) {
+        ScheduleType.ONCE -> R.string.task_repeat_once
+        ScheduleType.DAILY -> R.string.task_repeat_daily
+        ScheduleType.WEEKLY -> R.string.task_repeat_weekly
+        ScheduleType.MONTHLY -> R.string.task_repeat_monthly
+        ScheduleType.YEARLY -> R.string.task_repeat_yearly
+    }
+)
+
+/** Short weekday names in the user's locale, indexed 0=Sunday..6=Saturday to match cron. */
+@Composable
+private fun weekdayNames(): List<String> {
+    val locale = Locale.getDefault()
+    return remember(locale) {
+        val cal = Calendar.getInstance()
+        val fmt = java.text.SimpleDateFormat("EEE", locale)
+        (0..6).map { dow ->
+            cal.set(Calendar.DAY_OF_WEEK, Calendar.SUNDAY + dow)
+            fmt.format(cal.time)
+        }
+    }
+}
+
 /**
- * Schedule group: WHEN it recurs (a picker row) and WHETHER that recurrence is armed (a switch).
- * The two answer different questions, so neither restates the other — and "manual only" is simply
- * the switch being off. Custom cron reveals its field inline under the picker row, with live
- * validation and the resolved next-run time.
+ * Schedule group: WHAT recurrence (Repeat), WHICH date within it (On), and WHAT time (At) — plus
+ * whether the whole thing is armed (the switch). "Manual only" is not a repeat option; it is the
+ * switch being off, so no two controls express the same state.
+ *
+ * The On row's editor depends on the repeat type, because "which date" means something different
+ * for each: daily has no On row at all, weekly picks weekdays, monthly picks a day number, yearly
+ * and once pick a calendar date. Once additionally stores an absolute epoch instead of a cron —
+ * a 5-field cron has no year, so "once on March 3rd" would silently repeat every year.
+ *
+ * A cron this model cannot express (a legacy hourly preset, a hand-written step expression) is
+ * left untouched and shown as a custom expression until the user picks a repeat type.
  */
 @Composable
 private fun ScheduleGroup(
     cronExpr: String,
-    onCronChange: (String) -> Unit,
+    runAt: Long?,
+    onScheduleChange: (cron: String, runAt: Long?) -> Unit,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
 ) {
-    val presetValues = SCHEDULE_PRESETS.map { it.first }
-    var customMode by rememberSaveable { mutableStateOf(cronExpr.isNotBlank() && cronExpr !in presetValues) }
-    var showPicker by remember { mutableStateOf(false) }
-    val parsed = remember(cronExpr) { CronExpression.parse(cronExpr) }
-    val invalid = cronExpr.isNotBlank() && parsed == null
-    val armable = cronExpr.isNotBlank() && !invalid
+    val context = LocalContext.current
+    val parsedSchedule = remember(cronExpr, runAt) { TaskSchedule.parse(cronExpr, runAt) }
+    val cronOnlyValid = cronExpr.isNotBlank() && CronExpression.isValid(cronExpr)
+    // Unmappable but valid cron: keep it, don't rewrite it behind the user's back.
+    val isCustomCron = parsedSchedule == null && cronOnlyValid
+    val schedule = parsedSchedule ?: TaskSchedule.default()
+
+    var showRepeatMenu by remember { mutableStateOf(false) }
+    var showWeekdayDialog by remember { mutableStateOf(false) }
+    var showDayOfMonthDialog by remember { mutableStateOf(false) }
+
+    fun apply(next: TaskSchedule) = onScheduleChange(next.toCron(), next.toRunAt())
+
+    val armable = cronExpr.isNotBlank() || (runAt != null && runAt > 0L)
+    val oncePast = schedule.type == ScheduleType.ONCE &&
+        (runAt ?: 0L) in 1 until System.currentTimeMillis()
 
     SettingsGroup(
         title = stringResource(R.string.task_schedule),
         items = buildList {
+            // ── Repeat ──
             add {
-                SettingsItem(
-                    modifier = Modifier.clickable { showPicker = true },
-                    headlineContent = { Text(stringResource(R.string.task_schedule)) },
-                    supportingContent = {
-                        Text(if (customMode) stringResource(R.string.task_schedule_custom) else scheduleLabelFor(cronExpr))
-                    },
-                    leadingContent = {
-                        Icon(
-                            Icons.Default.Schedule,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    },
-                    trailingContent = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
+                Box {
+                    SettingsItem(
+                        modifier = Modifier.clickable { showRepeatMenu = true },
+                        headlineContent = { Text(stringResource(R.string.task_repeat)) },
+                        supportingContent = {
+                            Text(
+                                if (isCustomCron) stringResource(R.string.task_schedule_custom)
+                                else repeatLabel(schedule.type)
+                            )
+                        },
+                        leadingContent = {
+                            Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.Default.ArrowDropDown,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                    DropdownMenu(
+                        expanded = showRepeatMenu,
+                        onDismissRequest = { showRepeatMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        ScheduleType.entries.forEach { type ->
+                            DropdownMenuItem(
+                                text = { Text(repeatLabel(type)) },
+                                trailingIcon = {
+                                    if (!isCustomCron && schedule.type == type) {
+                                        Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
+                                    }
+                                },
+                                onClick = {
+                                    showRepeatMenu = false
+                                    apply(schedule.switchedTo(type))
+                                },
+                            )
+                        }
+                    }
+                }
             }
-            if (customMode) {
+
+            // ── On (absent for DAILY, which has no date to choose) ──
+            if (!isCustomCron && schedule.type != ScheduleType.DAILY) {
                 add {
-                    LabeledField(
-                        label = stringResource(R.string.task_schedule_custom),
-                        value = cronExpr,
-                        onValueChange = onCronChange,
-                        placeholder = stringResource(R.string.task_cron_hint),
-                        singleLine = true,
-                        isError = invalid,
-                        supporting = if (invalid) stringResource(R.string.task_cron_invalid) else null,
-                        supportingIsError = invalid,
+                    val names = weekdayNames()
+                    val onValue = when (schedule.type) {
+                        ScheduleType.WEEKLY ->
+                            if (schedule.daysOfWeek.isEmpty()) stringResource(R.string.task_schedule_not_set)
+                            else schedule.daysOfWeek.sorted().joinToString(", ") { names[it] }
+                        ScheduleType.MONTHLY -> stringResource(R.string.task_day_ordinal, schedule.dayOfMonth)
+                        ScheduleType.YEARLY, ScheduleType.ONCE -> schedule.formatOnDate()
+                        ScheduleType.DAILY -> ""
+                    }
+                    SettingsItem(
+                        modifier = Modifier.clickable {
+                            when (schedule.type) {
+                                ScheduleType.WEEKLY -> showWeekdayDialog = true
+                                ScheduleType.MONTHLY -> showDayOfMonthDialog = true
+                                ScheduleType.YEARLY, ScheduleType.ONCE ->
+                                    showDatePicker(context, schedule) { apply(it) }
+                                ScheduleType.DAILY -> Unit
+                            }
+                        },
+                        headlineContent = {
+                            Text(
+                                when (schedule.type) {
+                                    ScheduleType.WEEKLY -> stringResource(R.string.task_days_of_week)
+                                    ScheduleType.MONTHLY -> stringResource(R.string.task_day_of_month)
+                                    else -> stringResource(R.string.task_on)
+                                }
+                            )
+                        },
+                        supportingContent = { Text(onValue) },
+                        leadingContent = {
+                            Icon(Icons.Default.CalendarMonth, null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
                     )
                 }
             }
+
+            // ── At ──
+            if (!isCustomCron) {
+                add {
+                    SettingsItem(
+                        modifier = Modifier.clickable { showTimePicker(context, schedule) { apply(it) } },
+                        headlineContent = { Text(stringResource(R.string.task_at)) },
+                        supportingContent = { Text(formatTimeOfDay(schedule.hour, schedule.minute)) },
+                        leadingContent = {
+                            Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                }
+            }
+
+            // ── Custom cron passthrough ──
+            if (isCustomCron) {
+                add {
+                    LabeledField(
+                        label = stringResource(R.string.task_schedule_custom),
+                        icon = Icons.Default.Code,
+                        value = cronExpr,
+                        onValueChange = { onScheduleChange(it, null) },
+                        placeholder = stringResource(R.string.task_cron_hint),
+                        singleLine = true,
+                    )
+                }
+            }
+
+            // ── Armed switch ──
             add {
-                val nextRun = remember(cronExpr, enabled) {
-                    if (enabled && !invalid) parsed?.next(System.currentTimeMillis()) else null
+                val nextRun = remember(cronExpr, runAt, enabled) {
+                    when {
+                        !enabled -> null
+                        runAt != null && runAt > System.currentTimeMillis() -> runAt
+                        cronExpr.isNotBlank() ->
+                            CronExpression.parse(cronExpr)?.next(System.currentTimeMillis())
+                        else -> null
+                    }
                 }
                 SettingsItem(
                     modifier = Modifier.clickable(enabled = armable) { onEnabledChange(!enabled) },
@@ -679,9 +859,12 @@ private fun ScheduleGroup(
                         Text(
                             when {
                                 !armable -> stringResource(R.string.task_enabled_needs_schedule)
+                                oncePast -> stringResource(R.string.task_once_past)
                                 nextRun != null -> stringResource(R.string.task_next_run, formatDateTime(nextRun))
                                 else -> stringResource(R.string.task_enabled_desc)
-                            }
+                            },
+                            color = if (oncePast) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     },
                     trailingContent = {
@@ -696,52 +879,137 @@ private fun ScheduleGroup(
         },
     )
 
-    if (showPicker) {
-        SchedulePickerDialog(
-            cronExpr = cronExpr,
-            customMode = customMode,
-            onPreset = { value -> customMode = false; onCronChange(value); showPicker = false },
-            onCustom = {
-                customMode = true
-                if (cronExpr in presetValues) onCronChange("")
-                showPicker = false
-            },
-            onDismiss = { showPicker = false },
+    if (showWeekdayDialog) {
+        WeekdayDialog(
+            selected = schedule.daysOfWeek,
+            onConfirm = { days -> apply(schedule.copy(daysOfWeek = days)); showWeekdayDialog = false },
+            onDismiss = { showWeekdayDialog = false },
+        )
+    }
+    if (showDayOfMonthDialog) {
+        DayOfMonthDialog(
+            selected = schedule.dayOfMonth,
+            onSelect = { day -> apply(schedule.copy(dayOfMonth = day)); showDayOfMonthDialog = false },
+            onDismiss = { showDayOfMonthDialog = false },
         )
     }
 }
 
+/** Native date picker. YEARLY ignores the picked year (cron has no year field); ONCE keeps it. */
+private fun showDatePicker(
+    context: android.content.Context,
+    schedule: TaskSchedule,
+    onPicked: (TaskSchedule) -> Unit,
+) {
+    val cal = Calendar.getInstance().apply {
+        if (schedule.type == ScheduleType.ONCE && schedule.onceAtMillis > 0L) {
+            timeInMillis = schedule.onceAtMillis
+        } else {
+            set(Calendar.MONTH, schedule.month - 1)
+            set(Calendar.DAY_OF_MONTH, schedule.dayOfMonth)
+        }
+    }
+    android.app.DatePickerDialog(
+        context,
+        { _, year, month, day ->
+            val next = schedule.copy(dayOfMonth = day, month = month + 1)
+            onPicked(
+                if (schedule.type == ScheduleType.ONCE) next.withOnceAt(year, month + 1, day)
+                else next
+            )
+        },
+        cal.get(Calendar.YEAR),
+        cal.get(Calendar.MONTH),
+        cal.get(Calendar.DAY_OF_MONTH),
+    ).apply {
+        // A one-shot in the past can never fire.
+        if (schedule.type == ScheduleType.ONCE) {
+            datePicker.minDate = System.currentTimeMillis() - 60_000L
+        }
+    }.show()
+}
+
+private fun showTimePicker(
+    context: android.content.Context,
+    schedule: TaskSchedule,
+    onPicked: (TaskSchedule) -> Unit,
+) {
+    android.app.TimePickerDialog(
+        context,
+        { _, hour, minute -> onPicked(schedule.withTime(hour, minute)) },
+        schedule.hour,
+        schedule.minute,
+        android.text.format.DateFormat.is24HourFormat(context),
+    ).show()
+}
+
 @Composable
-private fun SchedulePickerDialog(
-    cronExpr: String,
-    customMode: Boolean,
-    onPreset: (String) -> Unit,
-    onCustom: () -> Unit,
+private fun WeekdayDialog(
+    selected: Set<Int>,
+    onConfirm: (Set<Int>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val names = weekdayNames()
+    var working by remember { mutableStateOf(selected) }
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.task_days_of_week), fontWeight = FontWeight.Bold) },
+        text = {
+            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                items(7) { dow ->
+                    val checked = dow in working
+                    SettingsItem(
+                        modifier = Modifier.clickable {
+                            working = if (checked) working - dow else working + dow
+                        },
+                        headlineContent = {
+                            Text(names[dow], fontWeight = if (checked) FontWeight.Bold else FontWeight.Normal)
+                        },
+                        leadingContent = {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = { working = if (checked) working - dow else working + dow },
+                            )
+                        },
+                    )
+                }
+            }
+        },
+        // Multi-select needs an explicit commit — unlike the single-choice pickers, one tap here
+        // is not the final answer.
+        confirmButton = {
+            TextButton(enabled = working.isNotEmpty(), onClick = { onConfirm(working) }) {
+                Text(stringResource(R.string.provider_save))
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
+}
+
+@Composable
+private fun DayOfMonthDialog(
+    selected: Int,
+    onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
-        title = { Text(stringResource(R.string.task_schedule_pick), fontWeight = FontWeight.Bold) },
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.task_day_of_month), fontWeight = FontWeight.Bold) },
         text = {
-            Column {
-                SCHEDULE_PRESETS.forEach { (value, labelRes) ->
+            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                items(31) { index ->
+                    val day = index + 1
                     ChoiceRow(
-                        label = stringResource(labelRes),
+                        label = stringResource(R.string.task_day_ordinal, day),
                         sub = null,
-                        selected = !customMode && cronExpr == value,
-                        onClick = { onPreset(value) },
+                        selected = day == selected,
+                        onClick = { onSelect(day) },
                     )
                 }
-                ChoiceRow(
-                    label = stringResource(R.string.task_schedule_custom),
-                    sub = stringResource(R.string.task_cron_hint),
-                    selected = customMode,
-                    onClick = onCustom,
-                )
             }
         },
-        // Close, not Cancel: a tap applies immediately, so there is nothing to cancel.
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.provider_close)) } },
     )
 }
