@@ -2,6 +2,7 @@ package com.newoether.agora.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.*
@@ -18,6 +19,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 fun SettingsHtmlWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val enabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val networkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
+    val themeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.settings_html_widgets),
@@ -46,6 +48,18 @@ fun SettingsHtmlWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             Switch(checked = networkEnabled, onCheckedChange = { viewModel.settings.setHtmlWidgetsNetworkEnabled(it) })
                         },
                         modifier = Modifier.clickable { viewModel.settings.setHtmlWidgetsNetworkEnabled(!networkEnabled) }
+                    )
+                }))
+
+                SettingsGroup(title = stringResource(R.string.html_widgets_theme_enable), items = listOf({
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.html_widgets_theme_enable)) },
+                        supportingContent = { Text(stringResource(R.string.html_widgets_theme_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = {
+                            Switch(checked = themeEnabled, onCheckedChange = { viewModel.settings.setHtmlWidgetsThemeEnabled(it) })
+                        },
+                        modifier = Modifier.clickable { viewModel.settings.setHtmlWidgetsThemeEnabled(!themeEnabled) }
                     )
                 }))
             }

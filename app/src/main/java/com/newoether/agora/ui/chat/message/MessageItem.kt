@@ -54,6 +54,7 @@ fun MessageItem(
     onHeightChanged: (Int) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
     htmlWidgetsNetworkEnabled: Boolean = false,
+    htmlWidgetsThemeEnabled: Boolean = false,
     onWidgetClick: (String) -> Unit = {},
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
@@ -214,6 +215,7 @@ fun MessageItem(
                 },
                 setThoughtBlockHeight = { currentThoughtBlockHeight = it },
                 htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+                htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
                 onWidgetClick = onWidgetClick,
             )
         }

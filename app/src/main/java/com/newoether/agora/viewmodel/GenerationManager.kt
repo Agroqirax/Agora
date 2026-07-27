@@ -98,6 +98,7 @@ data class GenerationContext(
     val imageGenSize: String = "1024x1024",
     val htmlWidgetsEnabled: Boolean = false,
     val htmlWidgetsNetworkEnabled: Boolean = false,
+    val htmlWidgetsThemeEnabled: Boolean = false,
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val deviceInfoEnabled: Boolean = true,

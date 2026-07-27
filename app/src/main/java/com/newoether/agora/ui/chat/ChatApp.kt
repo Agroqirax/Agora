@@ -119,6 +119,7 @@ fun ChatApp(
     val totalTokens by viewModel.totalTokens.collectAsState()
     val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
     val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
+    val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
     val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
     val globalCodeExecution by viewModel.settings.codeExecutionEnabled.collectAsState()
     val globalGoogleSearch by viewModel.settings.googleSearchEnabled.collectAsState()
@@ -597,6 +598,7 @@ fun ChatApp(
                                 onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
                                 thoughtExpandedStates = thoughtExpandedStates,
                                 htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+                                htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
                                 onWidgetClick = onWidgetClick,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,

@@ -213,6 +213,8 @@
     <string name="html_widgets_enable_desc">Let the model render interactive widgets in a sandboxed WebView</string>
     <string name="html_widgets_network_enable">Allow Network Access</string>
     <string name="html_widgets_network_enable_desc">Let widgets load remote images, fonts, and scripts. Off by default for safety.</string>
+    <string name="html_widgets_theme_enable">Match App Theme</string>
+    <string name="html_widgets_theme_enable_desc">Transparent background and Material You colors exposed as CSS variables the model can use. If a widget doesn\'t use them, text or controls may be invisible.</string>
     <string name="image_gen_size">Default Size</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Show all models</string>

@@ -1174,9 +1174,11 @@ fun MainNavigation(
                 }
                 val html = lastHtml ?: return@AnimatedVisibility
                 val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
+                val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
                 com.newoether.agora.ui.chat.FullScreenHtmlViewer(
                     html = html,
                     allowNetwork = htmlWidgetsNetworkEnabled,
+                    matchAppTheme = htmlWidgetsThemeEnabled,
                     onClose = { fullScreenHtml = null }
                 )
             }

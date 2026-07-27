@@ -99,6 +99,7 @@ internal fun AssistantMessageContent(
     onSegmentSelected: (List<Int>) -> Unit,
     setThoughtBlockHeight: (Int) -> Unit,
     htmlWidgetsNetworkEnabled: Boolean = false,
+    htmlWidgetsThemeEnabled: Boolean = false,
     onWidgetClick: (String) -> Unit = {},
 ) {
     @Suppress("DEPRECATION")
@@ -632,8 +633,8 @@ internal fun AssistantMessageContent(
                                     HtmlWidgetCard(
                                         html = html,
                                         allowNetwork = htmlWidgetsNetworkEnabled,
-                                        onExpand = { onWidgetClick(html) },
-                                        onLongPress = { haptics.longPress() }
+                                        matchAppTheme = htmlWidgetsThemeEnabled,
+                                        onExpand = { onWidgetClick(html) }
                                     )
                                 }
                             }

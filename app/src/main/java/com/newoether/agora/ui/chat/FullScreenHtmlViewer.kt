@@ -31,12 +31,14 @@ import com.newoether.agora.R
 fun FullScreenHtmlViewer(
     html: String,
     allowNetwork: Boolean,
+    matchAppTheme: Boolean,
     onClose: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.9f))) {
         FullScreenHtmlWebView(
             html = html,
             allowNetwork = allowNetwork,
+            matchAppTheme = matchAppTheme,
             modifier = Modifier.fillMaxSize()
         )
         Surface(

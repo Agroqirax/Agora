@@ -21,13 +21,24 @@ class WidgetToolProvider : ToolProvider {
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.htmlWidgetsEnabled) return emptyList()
+        val themeNote = if (ctx.htmlWidgetsThemeEnabled) {
+            " The widget's background is transparent and renders on the user's actual app background, and the following " +
+                "Material 3 color scheme is available as CSS custom properties: --md-primary, --md-on-primary, --md-secondary, " +
+                "--md-on-secondary, --md-background, --md-on-background, --md-surface, --md-on-surface, --md-surface-variant, " +
+                "--md-on-surface-variant, --md-outline, --md-error, --md-on-error (e.g. `color: var(--md-on-surface)`). " +
+                "Use these instead of hardcoded colors so the widget matches the user's light/dark theme and stays legible — " +
+                "text or controls that assume an opaque white background may be invisible."
+        } else {
+            " The widget renders on an opaque background (not transparent, no theme color variables available)."
+        }
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = RENDER_WIDGET,
                 description = "Render an interactive HTML/CSS/JS widget inline in the chat, shown to the user automatically. " +
                     "Use this for visualizations, small interactive tools, mini-games, or UI mockups the user can directly interact with. " +
                     "Provide a complete, self-contained HTML document (inline <style>/<script> only — remote resources such as CDN scripts, " +
-                    "web fonts, or remote images are blocked unless the user has enabled network access for widgets in settings).",
+                    "web fonts, or remote images are blocked unless the user has enabled network access for widgets in settings)." +
+                    themeNote,
                 parameters = ToolParameters(
                     properties = mapOf(
                         "html" to ToolProperty("string", "A complete, self-contained HTML document to render."),

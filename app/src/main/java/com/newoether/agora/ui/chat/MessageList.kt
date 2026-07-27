@@ -54,6 +54,7 @@ fun MessageList(
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
     htmlWidgetsNetworkEnabled: Boolean = false,
+    htmlWidgetsThemeEnabled: Boolean = false,
     onWidgetClick: (String) -> Unit = {},
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
@@ -140,6 +141,7 @@ fun MessageList(
                     onHeightChanged = { height -> messageHeights[message.id] = height },
                     thoughtExpandedStates = thoughtExpandedStates,
                     htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+                    htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
                     onWidgetClick = onWidgetClick,
                 )
                 }
