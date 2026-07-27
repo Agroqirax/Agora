@@ -7,9 +7,12 @@ import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.local.MessageStreamCheckpoint
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ChatConversation
+import com.newoether.agora.model.MessagePersistenceGuard
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -84,6 +87,38 @@ class ConversationRepository(
         chatDao.getLastMessageForConversation(conversationId)
 
     suspend fun upsertMessage(entity: MessageEntity) = chatDao.upsertMessage(entity)
+
+    /**
+     * Persist the mutable portion of an in-flight model message without creating a missing row.
+     * Returns false when the placeholder was deleted while generation was still unwinding.
+     */
+    suspend fun updateStreamingMessageCheckpoint(message: ChatMessage): Boolean {
+        val segments = message.segments?.takeIf { it.isNotEmpty() } ?: message.toolCall?.let {
+            listOf(
+                MessageSegment(
+                    type = "tool",
+                    toolName = it.toolName,
+                    toolArgs = it.arguments,
+                    toolResult = it.result,
+                    signature = it.signature,
+                    toolCallId = it.toolCallId,
+                )
+            )
+        }
+        return chatDao.updateMessageCheckpoint(
+            MessageStreamCheckpoint(
+                id = message.id,
+                text = MessagePersistenceGuard.clipText(message.text),
+                images = message.images,
+                thoughts = message.thoughts,
+                thoughtTitle = message.thoughtTitle,
+                tokenCount = message.tokenCount,
+                status = message.status,
+                thoughtTimeMs = message.thoughtTimeMs,
+                toolCallJson = MessagePersistenceGuard.encodeSegmentsBounded(segments),
+            )
+        ) > 0
+    }
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 

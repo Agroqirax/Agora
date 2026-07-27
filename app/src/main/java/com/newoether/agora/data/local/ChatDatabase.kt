@@ -171,6 +171,25 @@ data class MessageEntity(
     val attachmentMeta: String? = null
 )
 
+/**
+ * Partial Room entity used for durable streaming checkpoints.
+ *
+ * Keeping only fields that can change while a model is generating prevents a checkpoint from
+ * overwriting stable relationship/model metadata. [ChatDao.updateMessageCheckpoint] is an UPDATE,
+ * not an upsert: if a concurrent delete removed the placeholder, streaming must not resurrect it.
+ */
+data class MessageStreamCheckpoint(
+    val id: String,
+    val text: String,
+    val images: List<String>,
+    val thoughts: String?,
+    val thoughtTitle: String?,
+    val tokenCount: Int,
+    val status: MessageStatus,
+    val thoughtTimeMs: Long?,
+    val toolCallJson: String?,
+)
+
 /** Attachment-only projection used by sweeps and media export.
  *
  * These callers do not need message bodies, thoughts, or tool payloads. Returning a full
@@ -218,6 +237,9 @@ interface ChatDao {
 
     @Upsert
     suspend fun upsertMessage(message: MessageEntity)
+
+    @Update(entity = MessageEntity::class)
+    suspend fun updateMessageCheckpoint(checkpoint: MessageStreamCheckpoint): Int
 
     @Query("DELETE FROM conversations WHERE id = :conversationId")
     suspend fun deleteConversation(conversationId: String)

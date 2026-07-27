@@ -149,7 +149,7 @@ class TranscriptionManager(
         generationJob: Job?,
         modelMessageId: String,
         startTime: Long,
-        onProgress: (ChatMessage) -> Unit
+        onProgress: suspend (ChatMessage) -> Unit
     ): Pair<List<MessageSegment>, String?> {
         // Fail closed: a missing provider must never silently reroute the user's images
         // to an arbitrary other provider (wrong API key/model, and a privacy leak).

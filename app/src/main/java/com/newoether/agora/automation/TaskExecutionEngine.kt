@@ -8,7 +8,6 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.sandbox.SandboxManagerFactory
@@ -22,9 +21,7 @@ import com.newoether.agora.viewmodel.RagManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -81,70 +78,6 @@ class TaskExecutionEngine(
     ).also {
         // A headless worker cannot ask the user to approve a remote mutation. Fail closed.
         it.onConfirmShellCommand = { _, _ -> false }
-    }
-
-    /**
-     * Headless callbacks for one execution: no UI sink, always persist (this run owns the message).
-     *
-     * A headless run has no in-memory UI mirror, so Room IS its only observable surface. With an
-     * empty [GenerationCallbacks.onStreamUpdate] the row was written once, at the terminal upsert —
-     * so opening a running execution showed a bare SENDING placeholder until it finished. Streaming
-     * snapshots are persisted as they arrive (GenerationManager already throttles them to ~500ms),
-     * which is what makes the conversation stream live for anyone watching it.
-     *
-     * Snapshots go through a CONFLATED channel drained by ONE writer coroutine: they are
-     * cumulative, so dropping intermediate ones is lossless, while a single consumer keeps the
-     * writes ordered — parallel launches could otherwise commit an older snapshot last and leave
-     * truncated text on screen. [close] must be called when the generation returns.
-     */
-    private class HeadlessStreamSink(
-        scope: CoroutineScope,
-        private val convRepo: ConversationRepository,
-        private val conversationId: String,
-        private val parentId: String,
-        private val startTime: Long,
-        private val modelName: String?,
-    ) {
-        private val snapshots = Channel<ChatMessage>(Channel.CONFLATED)
-
-        private val writer = scope.launch {
-            for (message in snapshots) {
-                runCatching {
-                    convRepo.upsertMessage(
-                        MessageEntity(
-                            id = message.id,
-                            conversationId = conversationId,
-                            parentId = parentId,
-                            text = message.text,
-                            thoughts = message.thoughts,
-                            thoughtTitle = message.thoughtTitle,
-                            status = message.status,
-                            participant = Participant.MODEL,
-                            timestamp = startTime,
-                            thoughtTimeMs = message.thoughtTimeMs,
-                            modelName = modelName,
-                            toolCallJson = message.segments?.let {
-                                MessagePersistenceGuard.encodeSegmentsBounded(it)
-                            },
-                        )
-                    )
-                }
-            }
-        }
-
-        val callbacks = GenerationCallbacks(
-            onStreamUpdate = { snapshots.trySend(it) },
-            onLoadingChange = {},
-            onStreamClear = {},
-            isLatestPersist = { true },
-        )
-
-        /** Stops accepting snapshots and waits for the in-flight write, so the partial row can
-         *  never land after GenerationManager's terminal upsert and resurrect a SENDING status. */
-        suspend fun close() {
-            snapshots.close()
-            writer.join()
-        }
     }
 
     /**
@@ -324,34 +257,26 @@ class TaskExecutionEngine(
             // LocalModelSerializer; remote generations run concurrently. A headless turn
             // therefore starts immediately and a Stop releases it without waiting on a
             // process-wide mutex.
-            // Stream snapshots into Room for the duration of this generation, so the execution is
-            // watchable live instead of appearing frozen on its SENDING placeholder.
-            // appScope, not this coroutine: a cancelled execution must still be able to flush its
-            // last snapshot from the NonCancellable close() below.
-            val streamSink = HeadlessStreamSink(
-                scope = appScope,
-                convRepo = convRepo,
+            // GenerationManager owns ordered, throttled Room checkpoints for both foreground and
+            // headless runs. The callback remains UI-only, which avoids an asynchronous writer
+            // racing a stale SENDING snapshot over the manager's terminal upsert.
+            generationManager.generate(
                 conversationId = conversationId,
-                parentId = userMessageId,
+                modelMessageId = modelMessageId,
                 startTime = startTime,
-                modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                isRegenerate = false,
+                replaceMessageId = null,
+                modelName = effectiveModelId,
+                config = config,
+                ctx = genCtx,
+                generationJob = null,
+                callbacks = GenerationCallbacks(
+                    onStreamUpdate = {},
+                    onLoadingChange = {},
+                    onStreamClear = {},
+                    isLatestPersist = { true },
+                ),
             )
-            try {
-                generationManager.generate(
-                    conversationId = conversationId,
-                    modelMessageId = modelMessageId,
-                    startTime = startTime,
-                    isRegenerate = false,
-                    replaceMessageId = null,
-                    modelName = effectiveModelId,
-                    config = config,
-                    ctx = genCtx,
-                    generationJob = null,
-                    callbacks = streamSink.callbacks,
-                )
-            } finally {
-                withContext(NonCancellable) { streamSink.close() }
-            }
             val finalMsg = convRepo.getMessagesForConversationSnapshot(conversationId)
                 .find { it.id == modelMessageId }
             if (finalMsg != null && finalMsg.status == MessageStatus.SUCCESS) {

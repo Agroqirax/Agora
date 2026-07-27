@@ -47,6 +47,29 @@ import java.util.UUID
 internal fun <T> requireRegisteredProvider(providers: Map<String, T>, name: String): T =
     requireNotNull(providers[name]) { "Provider is not registered: $name" }
 
+/**
+ * Throttles durable stream snapshots while allowing lifecycle boundaries to force a write.
+ * The first snapshot is always accepted, including when the clock moves backwards.
+ */
+internal class StreamingCheckpointGate(
+    private val intervalMs: Long = 1_000L,
+) {
+    private var lastCheckpointAt: Long? = null
+
+    init {
+        require(intervalMs > 0)
+    }
+
+    fun shouldCheckpoint(nowMs: Long, force: Boolean = false): Boolean {
+        val previous = lastCheckpointAt
+        if (!force && previous != null && nowMs >= previous && nowMs - previous < intervalMs) {
+            return false
+        }
+        lastCheckpointAt = nowMs
+        return true
+    }
+}
+
 data class GenerationConfig(
     val providerName: String,
     val modelId: String,
@@ -466,6 +489,39 @@ class GenerationManager(
         var currentThoughtSignature: String? = null
         var parentId: String? = null
         var toolPath = emptyList<ChatMessage>()
+        var latestTranscriptionSnapshot: ChatMessage? = null
+        var transcriptionReturned = false
+        var checkpointTargetExists = true
+        val checkpointGate = StreamingCheckpointGate()
+
+        suspend fun persistStreamingCheckpoint(message: ChatMessage, force: Boolean = false) {
+            if (!checkpointTargetExists || !isLatestPersist()) return
+            val now = System.currentTimeMillis()
+            if (!checkpointGate.shouldCheckpoint(now, force)) return
+            try {
+                checkpointTargetExists = conversations.updateStreamingMessageCheckpoint(message)
+            } catch (e: Exception) {
+                // A checkpoint is best-effort and must never interrupt the provider stream.
+                // The gate already advanced, so a transient failure retries on the next interval
+                // instead of logging once per token.
+                DebugLog.e("AgoraVM", "Failed to persist streaming checkpoint", e)
+            }
+        }
+
+        fun adoptIncompleteTranscriptionSnapshot() {
+            if (transcriptionReturned) return
+            latestTranscriptionSnapshot?.let { snapshot ->
+                totalText = snapshot.text
+                totalThoughts = snapshot.thoughts.orEmpty()
+                totalThoughtTitle = snapshot.thoughtTitle
+                totalTokenCount = snapshot.tokenCount
+                totalThoughtTimeMs = snapshot.thoughtTimeMs
+                generatedImages.clear()
+                generatedImages.addAll(snapshot.images)
+                segments.clear()
+                segments.addAll(snapshot.segments.orEmpty())
+            }
+        }
 
         fun liveThoughtDurationMs(): Long? {
             val liveElapsed = currentThoughtStartMs?.let { System.currentTimeMillis() - it } ?: 0L
@@ -510,14 +566,26 @@ class GenerationManager(
                         ctx.transcriptionProviderName, ctx.transcriptionModelId,
                         ctx.transcriptionApiKey, ctx.transcriptionBaseUrl,
                         ctx.imageTranscriptionPrompt,
-                        generationJob, modelMessageId, startTime, onStreamUpdate
-                    )
+                        generationJob, modelMessageId, startTime
+                    ) { snapshot ->
+                        latestTranscriptionSnapshot = snapshot
+                        onStreamUpdate(snapshot)
+                        persistStreamingCheckpoint(snapshot)
+                    }
+                    transcriptionReturned = true
+                    latestTranscriptionSnapshot?.let {
+                        // The last chunk may arrive inside the throttle window and then be followed
+                        // by a long provider pause, so seal the transcription stage explicitly.
+                        persistStreamingCheckpoint(it, force = true)
+                    }
+                    if (transcriptionSegments.isNotEmpty()) {
+                        segments.addAll(0, transcriptionSegments)
+                    }
                     if (transcriptionError != null) {
                         totalText = transcriptionError
                         currentStatus = MessageStatus.ERROR
                         transcriptionPerformed = true
                     } else {
-                        segments.addAll(0, transcriptionSegments)
                         transcriptionPerformed = true
                     }
                 }
@@ -550,6 +618,12 @@ class GenerationManager(
                 ),
                 retryText = retryText
             )
+
+            suspend fun publishStreamUpdate(forceCheckpoint: Boolean = false) {
+                val snapshot = modelMessage()
+                onStreamUpdate(snapshot)
+                persistStreamingCheckpoint(snapshot, force = forceCheckpoint)
+            }
 
             fun flushAnswerSegment() {
                 if (currentAnswerBuf.isNotEmpty()) {
@@ -635,7 +709,7 @@ class GenerationManager(
                         val ts = MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = null, toolCallId = event.id, signature = event.signature)
                         appendMergedSegment(segments, ts)
                         currentStatus = MessageStatus.TOOL_CALLING
-                        onStreamUpdate(modelMessage())
+                        publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
                         val result = executeTool(event.name, event.arguments, ctx)
                         generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
@@ -649,7 +723,7 @@ class GenerationManager(
                         if (toolCallData == null) toolCallData = tcd
                         toolCallDataList = toolCallDataList + tcd
                         currentStatus = MessageStatus.SENDING
-                        onStreamUpdate(modelMessage())
+                        publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
                     }
                     is StreamEvent.ToolCallsRequest -> {
@@ -659,7 +733,7 @@ class GenerationManager(
                             appendMergedSegment(segments, MessageSegment(type = "tool", toolName = call.name, toolArgs = call.arguments, toolResult = null, toolCallId = call.id, signature = call.signature))
                         }
                         currentStatus = MessageStatus.TOOL_CALLING
-                        onStreamUpdate(modelMessage())
+                        publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
                         val tcds = event.calls.map { call ->
                             val result = executeTool(call.name, call.arguments, ctx)
@@ -675,7 +749,7 @@ class GenerationManager(
                         toolCallData = tcds.firstOrNull()
                         toolCallDataList = tcds
                         currentStatus = MessageStatus.SENDING
-                        onStreamUpdate(modelMessage())
+                        publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
                     }
                 }
@@ -683,7 +757,7 @@ class GenerationManager(
                 val now = System.currentTimeMillis()
                 val isSignificant = event is StreamEvent.Error
                 if (now - lastEmitMs >= 500 || isSignificant) {
-                    onStreamUpdate(modelMessage())
+                    publishStreamUpdate(forceCheckpoint = isSignificant)
                     lastEmitMs = now
                 }
             }
@@ -696,7 +770,7 @@ class GenerationManager(
             finishCurrentThoughtTiming()
             // Always emit final state after collection completes
             if (generationJob?.isCancelled != true) {
-                onStreamUpdate(modelMessage())
+                publishStreamUpdate(forceCheckpoint = true)
             }
 
             // Multi-tool loop
@@ -782,7 +856,7 @@ class GenerationManager(
                 }
                 finishCurrentThoughtTiming()
                 // Always emit final state after tool round completes
-                onStreamUpdate(modelMessage())
+                publishStreamUpdate(forceCheckpoint = true)
             }
 
             if (!currentCoroutineContext().isActive) {
@@ -819,9 +893,14 @@ class GenerationManager(
             }
             } // else { // called buildApiPath when currentStatus == ERROR
         } catch (e: CancellationException) {
+            // transcribe() owns its mutable segment list until it returns. If cancellation lands
+            // mid-transcription, copy the latest durable/UI snapshot into the terminal accumulator
+            // so the final upsert does not overwrite that checkpoint with empty content.
+            adoptIncompleteTranscriptionSnapshot()
             currentStatus = MessageStatus.STOPPED
             throw e
         } catch (e: Exception) {
+            adoptIncompleteTranscriptionSnapshot()
             val isCancelled = generationJob?.isCancelled == true
             currentStatus = if (isCancelled) MessageStatus.STOPPED else MessageStatus.ERROR
             if (!isCancelled) {
