@@ -573,6 +573,7 @@ fun MainNavigation(
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
     var fullScreenMediaIndex by remember { mutableIntStateOf(0) }
+    var fullScreenHtml by remember { mutableStateOf<String?>(null) }
     var pdfViewerSelection by remember { mutableStateOf(setOf<Int>()) }
     val onTogglePdfSelection: (Int) -> Unit = { page ->
         pdfViewerSelection = if (page in pdfViewerSelection) pdfViewerSelection - page else pdfViewerSelection + page
@@ -594,7 +595,7 @@ fun MainNavigation(
     // Full-screen media viewer (and settings) drop the snackbar to the bottom (nav-bar inset only);
     // in chat it floats above the bottom bar. The animateDpAsState below turns the change into a
     // rise/fall animation as the viewer opens/closes.
-    val targetSnackbarPadding = if (showSettings || fullScreenMediaUrls != null) navBarPadding else chatSnackbarOffset
+    val targetSnackbarPadding = if (showSettings || fullScreenMediaUrls != null || fullScreenHtml != null) navBarPadding else chatSnackbarOffset
     val snackbarBottomPadding by animateDpAsState(
         targetValue = targetSnackbarPadding,
         animationSpec = spring(dampingRatio = 1.0f, stiffness = 1000f),
@@ -1086,6 +1087,10 @@ fun MainNavigation(
                     fullScreenMediaUrls = urls
                     fullScreenMediaIndex = index
                 },
+                onWidgetClick = { html ->
+                    focusManager.clearFocus()
+                    fullScreenHtml = html
+                },
                 onFileContentClick = { name, content ->
                     focusManager.clearFocus()
                     viewModel.showFilePreview(name, content)
@@ -1154,6 +1159,25 @@ fun MainNavigation(
                     onNavigate = { idx -> fullScreenMediaIndex = idx },
                     onMessage = { viewModel.emitSnackbar(it) },
                     hapticsEnabled = hapticsEnabled
+                )
+            }
+
+            // Full screen HTML widget
+            AnimatedVisibility(
+                visible = fullScreenHtml != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                var lastHtml by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(fullScreenHtml) {
+                    if (fullScreenHtml != null) lastHtml = fullScreenHtml
+                }
+                val html = lastHtml ?: return@AnimatedVisibility
+                val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
+                com.newoether.agora.ui.chat.FullScreenHtmlViewer(
+                    html = html,
+                    allowNetwork = htmlWidgetsNetworkEnabled,
+                    onClose = { fullScreenHtml = null }
                 )
             }
 

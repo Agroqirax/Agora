@@ -78,6 +78,7 @@ fun ChatApp(
     viewModel: ChatViewModel,
     onOpenSettings: () -> Unit,
     onMediaClick: (List<String>, Int) -> Unit,
+    onWidgetClick: (String) -> Unit = {},
     onFileContentClick: ((String, String) -> Unit)? = null,
     onPdfPagesClick: ((List<String>, Int) -> Unit)? = null,
     onPdfPreviewSelect: ((List<String>, Int) -> Unit)? = null,
@@ -117,6 +118,7 @@ fun ChatApp(
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
     val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
+    val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
     val globalCodeExecution by viewModel.settings.codeExecutionEnabled.collectAsState()
     val globalGoogleSearch by viewModel.settings.googleSearchEnabled.collectAsState()
@@ -594,6 +596,8 @@ fun ChatApp(
                                 onFileContentClick = onFileContentClick,
                                 onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
                                 thoughtExpandedStates = thoughtExpandedStates,
+                                htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+                                onWidgetClick = onWidgetClick,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,
                                     end = 8.dp,

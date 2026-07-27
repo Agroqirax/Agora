@@ -52,7 +52,9 @@ fun MessageItem(
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
     onHeightChanged: (Int) -> Unit = {},
-    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
+    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
+    htmlWidgetsNetworkEnabled: Boolean = false,
+    onWidgetClick: (String) -> Unit = {},
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
@@ -211,6 +213,8 @@ fun MessageItem(
                     showSegmentDetail = true
                 },
                 setThoughtBlockHeight = { currentThoughtBlockHeight = it },
+                htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+                onWidgetClick = onWidgetClick,
             )
         }
     }
