@@ -61,7 +61,10 @@ internal fun AttachmentPreviewRow(
         modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp, start = 8.dp, end = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        items(composer.selectedAttachments.size) { index ->
+        items(
+            count = composer.selectedAttachments.size,
+            key = { index -> composer.selectedAttachments[index].localId },
+        ) { index ->
             val attachment = composer.selectedAttachments[index]
             val uriStr = attachment.uri
             val isVideo = attachment.type == "video"

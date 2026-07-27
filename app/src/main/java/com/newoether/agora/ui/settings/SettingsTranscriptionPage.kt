@@ -238,7 +238,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.transcription_select_model), fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(enabledModelsList) { model ->
+                    items(enabledModelsList, key = { it }) { model ->
                         val alias = modelAliases[model]
                         val dialogParsed = com.newoether.agora.model.ModelId.parse(model)
                         val displayName = alias ?: dialogParsed.apiModelName
@@ -272,7 +272,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.transcription_add_model), fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(availableList) { model ->
+                    items(availableList, key = { it }) { model ->
                         val alias = modelAliases[model]
                         val addParsed = com.newoether.agora.model.ModelId.parse(model)
                         val displayName = alias ?: addParsed.apiModelName

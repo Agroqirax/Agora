@@ -478,6 +478,10 @@
     <string name="transcription_add_model">Добавить модель</string>
     <string name="transcription_ellipsis">Транскрипция изображений…</string>
     <string name="transcription_progress">Транскрипция изображений %1$d/%2$d…</string>
+    <string name="generating_response">Генерация ответа…</string>
+    <string name="transcription_label">Транскрипция изображения</string>
+    <string name="transcription_label_numbered">Транскрипция изображения %1$d</string>
+    <string name="provider_vision_badge">Зрение</string>
     <string name="prompt_content">Промпт</string>
 
     <!-- Settings - Memory Page -->
@@ -819,6 +823,8 @@
     <string name="file_unknown_type">Неизвестный тип файла</string>
     <string name="file_unsupported_type">Неподдерживаемый тип файла: %1$s</string>
     <string name="file_too_large">Файл слишком большой (макс. 20 МБ)</string>
+    <string name="attachment_copy_failed_image">Не удалось загрузить изображение</string>
+    <string name="attachment_copy_failed_file">Не удалось загрузить файл</string>
     <string name="pdf_render_failed">Не удалось отрисовать PDF</string>
     <string name="pdf_selected">Выбрано</string>
 

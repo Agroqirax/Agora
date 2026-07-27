@@ -17,22 +17,15 @@ import com.newoether.agora.util.AttachmentSourceReader
  */
 class MessagePayloadBuilder(
     private val generationManager: GenerationManager,
-    // buildMessagePayload 里有一处 _snackbarMessage.emit(...) 用于 PDF 渲染失败提示。
-    // 用一个挂起回调把它传进来,避免 MessagePayloadBuilder 依赖 ChatViewModel 的 SharedFlow。
+    // Suspend callback for the PDF-render-failure notice, so this class doesn't
+    // depend on ChatViewModel's SharedFlow.
     private val onSnackbar: suspend (String) -> Unit,
 ) {
-    /** 见原 ChatViewModel.MessagePayload */
     data class MessagePayload(
         val allImages: List<String>,
         val attachmentMeta: AttachmentMeta?
     )
 
-    // ↓↓↓ 原样粘贴 buildMessagePayload 方法体 ↓↓↓
-    // 把可见性 private 改成 (无修饰=public 或 internal)。
-    // 方法体里唯一需要改的一行:
-    //   原:  _snackbarMessage.emit(SnackbarEvent(app.getString(R.string.pdf_render_failed)))
-    //   改:  onSnackbar(app.getString(R.string.pdf_render_failed))
-    // 其余每一行(包括所有注释、那段 uriToResultMap 的复杂索引重算逻辑)逐字保留,一个字都不要改。
     suspend fun buildMessagePayload(
         app: Application,
         images: List<String>,

@@ -23,8 +23,6 @@ class GenerationRequestBuilder(
     private val providerRegistry: ProviderRegistry,
     private val ragManager: RagManager,
     private val appContext: Context,
-    // currentActiveModel 是一个 StateFlow,buildGenerationPair / buildEffectiveSystemPrompt 用到它的 .value
-    private val currentActiveModel: StateFlow<String>,
     // _pendingConversationSettings 也是 StateFlow,buildEffectiveConversationSettings 读它的 .value
     private val pendingConversationSettings: StateFlow<ConversationSettings?>,
     // resolveProviderKey 需要 emit snackbar
@@ -156,7 +154,9 @@ class GenerationRequestBuilder(
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
             shellDevices = settings.shellDevices.value,
             sandboxEnabled = settings.sandboxEnabled.value,
-            imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(currentActiveModel.value),
+            // Keyed on THIS generation's model, not the UI's currently-selected one — a queued
+            // or parallel-conversation generation must not inherit another conversation's model.
+            imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(modelId),
             imageTranscriptionModel = settings.imageTranscriptionModel.value,
             imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,
             imageTranscriptionPrompt = settings.imageTranscriptionPrompt.value,
@@ -174,13 +174,14 @@ class GenerationRequestBuilder(
         val userPostpend: String?
     )
 
-    internal suspend fun buildEffectiveSystemPrompt(currentId: String): ResolvedPrompt {
+    /** [activeModel] is the full "provider:model" string of the generation being built. */
+    internal suspend fun buildEffectiveSystemPrompt(currentId: String, activeModel: String): ResolvedPrompt {
         val conversation = convRepo.getConversation(currentId)
         val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
         val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
         val activeMemory = memoryManager.getActiveMemory()
         val includeActiveMemory = settings.accessActiveMemory.value
-        val modelId = ModelId.parse(currentActiveModel.value).modelName
+        val modelId = ModelId.parse(activeModel).modelName
 
         val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
         val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)

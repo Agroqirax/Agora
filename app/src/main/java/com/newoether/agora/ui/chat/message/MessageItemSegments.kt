@@ -15,6 +15,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 
@@ -34,7 +36,12 @@ internal fun mergeAdjacentSegments(segs: List<MessageSegment>): List<MessageSegm
             merged.add(seg)
         }
     }
-    return merged
+    // Drop content-less thought segments AFTER merging (a streamed thought arrives as blank
+    // fragments that concatenate into real content). Models that signal thinking without
+    // emitting a summary would otherwise render an empty "Thinking" block — and because every
+    // renderer funnels through here, dropping them keeps the block keys, timeline dots, and
+    // detail sheet indices all consistent with what is actually drawn.
+    return merged.filterNot { it.type == "thought" && it.content.isBlank() }
 }
 
 private fun mergeDurationMs(first: Long?, second: Long?): Long? {
@@ -55,7 +62,7 @@ internal fun MessageSegment.isVisibleAnswerSegment(): Boolean =
     type == "answer" && content.isNotBlank()
 
 internal fun MessageSegment.isInfoSegment(): Boolean =
-    type == "thought" || type == "tool" || type == "transcription"
+    (type == "thought" && content.isNotBlank()) || type == "tool" || type == "transcription"
 
 internal fun ChatMessage.hasActiveAnswerSegment(): Boolean {
     val lastVisibleSegment = segments?.lastOrNull { !it.isBlankAnswerSegment() }
@@ -140,9 +147,10 @@ internal fun AnimatedTimelineBlockAppearance(
 
 // Label a transcription segment; numbers them ("Image Transcription 1/2/…") only
 // when more than one is present, so a single image keeps the clean unnumbered name.
+@Composable
 internal fun transcriptionLabel(segs: List<MessageSegment>, index: Int): String {
     val total = segs.count { it.type == "transcription" }
-    if (total <= 1) return "Image Transcription"
+    if (total <= 1) return stringResource(R.string.transcription_label)
     val ordinal = segs.take(index + 1).count { it.type == "transcription" }
-    return "Image Transcription $ordinal"
+    return stringResource(R.string.transcription_label_numbered, ordinal)
 }

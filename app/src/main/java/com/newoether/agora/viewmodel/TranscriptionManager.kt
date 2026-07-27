@@ -107,7 +107,7 @@ class TranscriptionManager(
                             AttachmentItem(
                                 type = "image",
                                 fileName = File(imagePath).name,
-                                mimeType = if (imagePath.endsWith(".png", true)) "image/png" else "image/jpeg",
+                                mimeType = com.newoether.agora.api.util.imageMimeType(imagePath),
                                 imageIndex = imageIndex
                             )
                         )
@@ -151,7 +151,10 @@ class TranscriptionManager(
         startTime: Long,
         onProgress: (ChatMessage) -> Unit
     ): Pair<List<MessageSegment>, String?> {
-        val provider = providers[providerName] ?: providers.values.first()
+        // Fail closed: a missing provider must never silently reroute the user's images
+        // to an arbitrary other provider (wrong API key/model, and a privacy leak).
+        val provider = providers[providerName]
+            ?: return Pair(emptyList(), "Transcription provider \"$providerName\" is not available. Check the image transcription settings.")
         val transcriptionConfig = ProviderConfig(
             apiKey = apiKey,
             modelId = modelId,
@@ -174,13 +177,16 @@ class TranscriptionManager(
                 AgoraForegroundService.updateText(context.getString(R.string.transcription_progress, processed + 1, total))
             }
 
-            val currentSegment = MessageSegment(type = "transcription", content = "Transcribing...")
+            val currentSegment = MessageSegment(
+                type = "transcription",
+                content = context.getString(R.string.transcription_ellipsis),
+            )
             transcriptionSegments.add(currentSegment)
             onProgress(ChatMessage(
                 id = modelMessageId, parentId = parentId, text = "",
                 participant = Participant.MODEL, status = MessageStatus.TRANSCRIBING, timestamp = startTime,
                 retryText = "${processed + 1}/$total",
-                thoughtTitle = "Image Transcription",
+                thoughtTitle = context.getString(R.string.transcription_label),
                 // Trailing empty answer segment keeps the timeline renderer active during
                 // transcription (it keys on the presence of an "answer" segment), so the
                 // block morphs in place into the thought block instead of disappearing.
@@ -204,7 +210,7 @@ class TranscriptionManager(
                             id = modelMessageId, parentId = parentId, text = "",
                             participant = Participant.MODEL, status = MessageStatus.TRANSCRIBING, timestamp = startTime,
                             retryText = "${processed + 1}/$total",
-                            thoughtTitle = "Image Transcription",
+                            thoughtTitle = context.getString(R.string.transcription_label),
                             // Trailing empty answer segment keeps the timeline renderer active during
                 // transcription (it keys on the presence of an "answer" segment), so the
                 // block morphs in place into the thought block instead of disappearing.

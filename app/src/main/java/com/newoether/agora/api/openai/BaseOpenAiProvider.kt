@@ -66,9 +66,28 @@ abstract class BaseOpenAiProvider : LlmProvider {
             }
         }
         delta.content?.let { content ->
-            if (content.isNotEmpty()) emit(StreamEvent.TextChunk(content))
+            if (content.isNotEmpty()) {
+                if (parseInlineThinkTags) {
+                    thinkParser.feed(
+                        content = content,
+                        thinkingEnabled = config.thinkingEnabled,
+                        onText = { emit(StreamEvent.TextChunk(it)) },
+                        onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+                    )
+                } else {
+                    emit(StreamEvent.TextChunk(content))
+                }
+            }
         }
     }
+
+    /**
+     * When true, inline `<think>…</think>` in the content stream is parsed into thought chunks.
+     * Enabled only for self-hosted OpenAI-compatible servers (llama.cpp/vLLM render reasoning
+     * inline via the chat template); official cloud endpoints keep content literal so an answer
+     * that MENTIONS a think tag is never misclassified.
+     */
+    protected open val parseInlineThinkTags: Boolean = false
 
     protected open val retryableStatusCodes: Set<Int> = setOf(429, 502, 503, 504)
 
@@ -191,13 +210,22 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
         var structuredToolCallsEmitted = false
 
+        // Read timeouts are tolerated for long thinking pauses (read timeout = 5 min), but a
+        // silently-dead connection (NAT drop with no RST) must not hang forever: give up after
+        // 3 consecutive timeouts (~15 min without a single byte).
+        var consecutiveReadTimeouts = 0
         while (currentCoroutineContext().isActive) {
             val line = try {
                 handle.readLine()
             } catch (e: SocketTimeoutException) {
                 if (!currentCoroutineContext().isActive) break
+                if (++consecutiveReadTimeouts >= 3) {
+                    emit(StreamEvent.Error(GenerationError.Timeout))
+                    break
+                }
                 continue
             } ?: break
+            consecutiveReadTimeouts = 0
 
             if (!line.startsWith("data: ")) continue
             val jsonStr = line.substring(6).trim()
@@ -248,7 +276,8 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
         thinkParser.flush(
             onText = { emitAndAccumulate(StreamEvent.TextChunk(it)) },
-            onThought = { emitAndAccumulate(StreamEvent.ThoughtChunk(it)) }
+            onThought = { emitAndAccumulate(StreamEvent.ThoughtChunk(it)) },
+            thinkingEnabled = config.thinkingEnabled
         )
 
         // Fallback (#33 path B): some OpenAI-compatible servers (llama.cpp et al.) finish with

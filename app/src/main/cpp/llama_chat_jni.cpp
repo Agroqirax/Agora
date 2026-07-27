@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <algorithm>
 #include <string>
 #include <vector>
 #include <cstring>
@@ -123,7 +124,11 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatLoadModel(
 
     llama_context_params ctx_params = llama_context_default_params();
     ctx_params.n_ctx   = n_ctx;
-    ctx_params.n_batch = n_ctx;
+    // n_batch bounds the LOGITS/EMBEDDINGS buffers llama.cpp allocates up front, so tying it to
+    // n_ctx made memory grow with the square of the context — the OOM on large-context local
+    // models (#53). 512 is llama.cpp's own default and prefill is chunked to match; on-device
+    // prompt-eval throughput is unaffected because it is compute-bound well below 512 tokens.
+    ctx_params.n_batch = std::min(512, n_ctx);
 
     handle->ctx = llama_init_from_model(handle->model, ctx_params);
     if (!handle->ctx) {
@@ -326,16 +331,29 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatGenerate(
         return -1;
     }
 
-    // Prefill all prompt tokens in one batch (n_batch == n_ctx, so this always fits)
+    // Prefill in n_batch-sized chunks: a single batch larger than n_batch is rejected by
+    // llama_decode now that n_batch is capped at 512.
     // llama_batch_get_one returns a lightweight batch that borrows the tokens pointer —
     // it does NOT allocate, so do NOT call llama_batch_free on it (would free vector memory)
-    llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
-    if (llama_decode(handle->ctx, batch) != 0) {
-        LOGE("Prefill decode failed");
-        llama_sampler_free(smpl);
-        env->CallVoidMethod(callback, on_error, env->NewStringUTF("Prefill decode failed"));
-        env->DeleteLocalRef(cb_class);
-        return -1;
+    const int32_t n_batch = static_cast<int32_t>(llama_n_batch(handle->ctx));
+    for (int32_t off = 0; off < n_tokens; off += n_batch) {
+        // Cancellation is checked per chunk so Stop no longer has to wait out the whole prefill
+        // of a long prompt (previously one uninterruptible decode).
+        if (handle->cancelled) {
+            LOGD("Cancelled during prefill at %d/%d tokens", off, n_tokens);
+            llama_sampler_free(smpl);
+            env->DeleteLocalRef(cb_class);
+            return 0;
+        }
+        const int32_t chunk = std::min(n_batch, n_tokens - off);
+        llama_batch batch = llama_batch_get_one(tokens.data() + off, chunk);
+        if (llama_decode(handle->ctx, batch) != 0) {
+            LOGE("Prefill decode failed at offset %d (chunk=%d)", off, chunk);
+            llama_sampler_free(smpl);
+            env->CallVoidMethod(callback, on_error, env->NewStringUTF("Prefill decode failed"));
+            env->DeleteLocalRef(cb_class);
+            return -1;
+        }
     }
 
     // Generation loop
@@ -561,8 +579,11 @@ Java_com_newoether_agora_api_LlamaChatEngine_nativeChatGenerateWithImages(
 
     llama_pos n_past = 0;
     int32_t n_ctx = llama_n_ctx(handle->ctx);
+    // The 6th argument is the helper's BATCH size, not the context size: passing n_ctx made it
+    // build batches larger than the context's n_batch, which llama_decode rejects.
     int32_t eval_ret = mtmd_helper_eval_chunks(handle->mtmd_ctx, handle->ctx,
-                                                chunks, n_past, 0, n_ctx,
+                                                chunks, n_past, 0,
+                                                static_cast<int32_t>(llama_n_batch(handle->ctx)),
                                                 true, &n_past);
     // Free bitmaps and chunks after evaluation
     for (auto & b : bitmaps) if (b) mtmd_bitmap_free(b);

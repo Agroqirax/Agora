@@ -158,10 +158,19 @@ class OllamaProvider : LlmProvider {
             entries
         })
 
+        // Generation settings previously never reached Ollama (the options field stayed null,
+        // silently ignoring the user's temperature/top_p/max-tokens configuration).
+        val options = buildMap<String, kotlinx.serialization.json.JsonElement> {
+            config.temperature?.let { put("temperature", kotlinx.serialization.json.JsonPrimitive(it)) }
+            config.topP?.let { put("top_p", kotlinx.serialization.json.JsonPrimitive(it)) }
+            config.maxTokens?.let { put("num_predict", kotlinx.serialization.json.JsonPrimitive(it)) }
+        }.takeIf { it.isNotEmpty() }?.let { JsonObject(it) }
+
         val requestBody = OllamaChatRequest(
             model = config.modelId,
             messages = apiMessages,
             stream = true,
+            options = options,
             tools = config.tools
         )
 
@@ -189,12 +198,20 @@ class OllamaProvider : LlmProvider {
                     val thinkParser = StreamingThinkTagParser()
                     var receivedStructuredThinking = false
 
+                    // Tolerate long thinking pauses, but not a silently-dead connection:
+                    // 3 consecutive read timeouts (~15 min without a byte) → give up.
+                    var consecutiveReadTimeouts = 0
                     while (currentCoroutineContext().isActive) {
                         try {
                             line = handle.readLine()
                             if (line == null) break
+                            consecutiveReadTimeouts = 0
                         } catch (e: java.net.SocketTimeoutException) {
                             if (!currentCoroutineContext().isActive) break
+                            if (++consecutiveReadTimeouts >= 3) {
+                                emit(StreamEvent.Error(GenerationError.Timeout))
+                                break
+                            }
                             continue
                         }
                         try {
@@ -239,7 +256,8 @@ class OllamaProvider : LlmProvider {
                             if (response.done) {
                                 thinkParser.flush(
                                     onText = { emit(StreamEvent.TextChunk(it)) },
-                                    onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+                                    onThought = { emit(StreamEvent.ThoughtChunk(it)) },
+                                    thinkingEnabled = config.thinkingEnabled
                                 )
                                 val total = (response.promptEvalCount ?: 0) + (response.evalCount ?: 0)
                                 emit(StreamEvent.UsageUpdate(total))

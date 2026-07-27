@@ -84,17 +84,24 @@ private class PlatformAgoraHaptics(
         if (!isAllowed() || answeringTextureActive) return
         val vibrator = vibrator?.takeIf { it.hasVibrator() } ?: return
         answeringTextureActive = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasAmplitudeControl()) {
+            // Grain, not a beat. Three short pulses of UNEQUAL strength and spacing per ~43ms
+            // cycle read as a texture; the previous single 16ms pulse every 48ms read as a
+            // metronome tick. Amplitudes are deliberately near the low end of perceptible
+            // (5-8 of 255) so it stays at the edge of awareness.
             vibrator.vibrate(
                 VibrationEffect.createWaveform(
-                    longArrayOf(16L, 32L),
-                    intArrayOf(12, 0),
+                    longArrayOf(5L, 9L, 4L, 11L, 6L, 8L),
+                    intArrayOf(8, 0, 5, 0, 7, 0),
                     0
                 )
             )
         } else {
+            // Without amplitude control the amplitude array is ignored and every pulse fires at
+            // full strength, so lightness has to come from duration alone — 3ms pulses are about
+            // as soft as a timing-only pattern gets.
             @Suppress("DEPRECATION")
-            vibrator.vibrate(longArrayOf(0L, 16L, 32L), 0)
+            vibrator.vibrate(longArrayOf(0L, 3L, 12L, 3L, 14L, 3L, 10L), 0)
         }
     }
 

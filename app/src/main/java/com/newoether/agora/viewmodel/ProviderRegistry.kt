@@ -77,6 +77,10 @@ class ProviderRegistry(
         "Provider is not registered: $name"
     }
 
+    /** Null-tolerant lookup for UI reads: a settings page can recompose one frame after
+     *  its provider was deleted, which must render gracefully, not crash. */
+    fun getInstanceOrNull(name: String): LlmProvider? = providers[name]
+
     fun getEffectiveBaseUrl(providerName: String): String? =
         settings.providerBaseUrls.value[providerName]?.takeIf { it.isNotBlank() }
             ?: providers[providerName]?.takeIf { !isBuiltIn(providerName) }?.defaultBaseUrl

@@ -76,7 +76,14 @@
     <string name="task_delete">删除任务</string>
     <string name="task_delete_confirm">删除“%1$s”及其未接管的执行记录？你已接管的会话会保留。</string>
     <string name="import_conversation_graph_counts">对话（%1$d） · 任务（%2$d） · 循环（%3$d）</string>
-    <string name="task_enabled">启用</string>
+    <string name="task_enabled">按计划运行</string>
+    <string name="task_enabled_desc">关闭后，仅在你点击「立即运行」时执行。</string>
+    <string name="task_enabled_needs_schedule">请先选择计划。</string>
+    <string name="task_section_details">详情</string>
+    <string name="task_schedule_not_set">未设置</string>
+    <string name="task_schedule_pick">选择计划</string>
+    <string name="task_last_run_at">上次运行 %1$s</string>
+    <string name="task_never_run">从未运行</string>
     <string name="task_empty">还没有任务。新建一个，随手运行保存好的提示词。</string>
     <string name="task_execution_log">执行记录</string>
     <string name="task_no_executions">还没有运行过</string>
@@ -459,6 +466,10 @@
     <string name="transcription_add_model">添加模型</string>
     <string name="transcription_ellipsis">正在转述图片…</string>
     <string name="transcription_progress">正在转述图片 %1$d/%2$d…</string>
+    <string name="generating_response">正在生成回复…</string>
+    <string name="transcription_label">图片转述</string>
+    <string name="transcription_label_numbered">图片转述 %1$d</string>
+    <string name="provider_vision_badge">视觉</string>
     <string name="prompt_content">Prompt</string>
 
     <!-- Settings - Memory Page -->
@@ -786,6 +797,8 @@
     <string name="file_unknown_type">未知文件类型</string>
     <string name="file_unsupported_type">不支持的文件类型: %1$s</string>
     <string name="file_too_large">文件过大 (最大 20 MB)</string>
+    <string name="attachment_copy_failed_image">图片加载失败</string>
+    <string name="attachment_copy_failed_file">文件加载失败</string>
     <string name="pdf_render_failed">PDF 渲染失败</string>
     <string name="pdf_selected">已选择</string>
 

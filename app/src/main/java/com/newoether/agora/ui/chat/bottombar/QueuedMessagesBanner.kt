@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,7 +24,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,18 +34,19 @@ import com.newoether.agora.R
 import com.newoether.agora.viewmodel.QueuedSend
 
 /**
- * Queued messages waiting behind an in-progress generation, shown as a compact gray banner that
- * hugs the top of the text field — styled to match [LoopControlBar] (the cron banner): full-width,
- * secondaryContainer, asymmetric corners (rounded top, near-flat bottom so it sits flush on the
- * input). The Column grows one compact row per queued message; each row is a read-only text
- * preview + optional attachment-count badge + an X to remove it. A "Clear all" action appears only
- * when more than one is queued (a lone item's X already clears the queue).
+ * Queued messages waiting behind an in-progress generation (or behind a Stop that is still
+ * winding down), shown as a compact gray banner that hugs the top of the text field — styled to
+ * match [LoopControlBar] (the cron banner): full-width, secondaryContainer, asymmetric corners
+ * (rounded top, near-flat bottom so it sits flush on the input). The Column grows one compact row
+ * per queued message; each row is a read-only text preview + optional attachment-count badge + an
+ * X to remove it. They flush together as consecutive bubbles when the slot frees, so there is no
+ * "clear all" — per-item X is the only removal (bulk-discarding a typed message is too destructive
+ * for a single tap).
  */
 @Composable
 internal fun QueuedMessagesBanner(
     queuedSends: List<QueuedSend>,
     onRemove: (String) -> Unit,
-    onClearAll: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     AnimatedVisibility(
@@ -102,18 +101,6 @@ internal fun QueuedMessagesBanner(
                                 modifier = Modifier.size(16.dp),
                             )
                         }
-                    }
-                }
-                if (queuedSends.size > 1) {
-                    TextButton(
-                        onClick = onClearAll,
-                        modifier = Modifier.align(Alignment.End),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.queue_clear_all),
-                            style = MaterialTheme.typography.labelMedium,
-                        )
                     }
                 }
             }

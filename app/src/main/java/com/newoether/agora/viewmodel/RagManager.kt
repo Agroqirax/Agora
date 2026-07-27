@@ -6,6 +6,7 @@ import com.newoether.agora.api.EmbeddingClient
 import com.newoether.agora.api.LlamaEngine
 import com.newoether.agora.api.ProviderDefaults
 import com.newoether.agora.api.local.LocalProvider
+import com.newoether.agora.data.EmbeddingCacheLocks
 import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.EmbeddingModelType
@@ -29,7 +30,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
@@ -49,8 +49,8 @@ internal fun messagesEligibleForRagBackfill(messages: List<MessageEntity>): List
  *
  * Extracted out of [ChatViewModel] (Phase E4). The whole subsystem moves together
  * because embedding-model deletion and caching coordinate on the same per-model
- * lock ([cacheMutexes]) and cancellation handle ([cacheJobs]). ChatViewModel keeps
- * thin delegating wrappers for the UI-facing API.
+ * lock ([EmbeddingCacheLocks]) and cancellation handle ([cacheJobs]). ChatViewModel
+ * keeps thin delegating wrappers for the UI-facing API.
  */
 class RagManager(
     private val conversations: ConversationRepository,
@@ -67,7 +67,6 @@ class RagManager(
 
     private val _cachingProgress = MutableStateFlow<Map<String, Pair<Int, Int>>>(emptyMap())
     val cachingProgress: StateFlow<Map<String, Pair<Int, Int>>> = _cachingProgress.asStateFlow()
-    private val cacheMutexes = ConcurrentHashMap<String, Mutex>()
     // In-app caching coroutine per model, so deleteEmbeddingModel can cancel an
     // in-flight cache instead of queueing behind it on the mutex.
     private val cacheJobs = ConcurrentHashMap<String, Job>()
@@ -112,8 +111,8 @@ class RagManager(
 
         scope.launch(Dispatchers.IO) {
             // Stop the in-app caching coroutine and wait for it to fully unwind (it
-            // holds cacheMutexes[id] for its whole loop, so cancel+join — not the lock —
-            // is what actually halts it before we take the mutex ourselves).
+            // holds the model's cache lock for its whole loop, so cancel+join — not the
+            // lock — is what actually halts it before we take the mutex ourselves).
             cacheJobs.remove(id)?.let { it.cancel(); it.join() }
 
             // Deterministically wait until the worker has reached a finished state
@@ -125,8 +124,7 @@ class RagManager(
                     .first { infos -> infos.all { it.state.isFinished } }
             }
 
-            val mutex = cacheMutexes.computeIfAbsent(id) { Mutex() }
-            mutex.withLock {
+            EmbeddingCacheLocks.forModel(id).withLock {
                 val model = settings.embeddingModels.value.find { it.id == id }
                 if (model?.type == EmbeddingModelType.LOCAL && model.localFilePath.isNotBlank()) {
                     java.io.File(model.localFilePath).delete()
@@ -140,7 +138,7 @@ class RagManager(
                 _cachingProgress.update { it - id }
                 refreshCacheCounts()
             }
-            cacheMutexes.remove(id)
+            EmbeddingCacheLocks.remove(id)
         }
     }
 
@@ -177,114 +175,29 @@ class RagManager(
     // ── RAG cache ─────────────────────────────────────────────────
 
     fun cacheMessagesForModel(modelId: String, recache: Boolean = false, silent: Boolean = false) {
-        // Enqueue WorkManager backup — survives process death if user leaves app
-        val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.newoether.agora.service.EmbeddingCacheWorker>()
-            .setInputData(androidx.work.Data.Builder()
-                .putString(com.newoether.agora.service.EmbeddingCacheWorker.KEY_MODEL_ID, modelId)
-                .build())
-            .addTag(com.newoether.agora.service.EmbeddingCacheWorker.TAG)
-            .build()
-        androidx.work.WorkManager.getInstance(appContext)
-            .enqueueUniqueWork(
-                com.newoether.agora.service.EmbeddingCacheWorker.workNameFor(modelId),
-                androidx.work.ExistingWorkPolicy.REPLACE,
-                workRequest
-            )
-
+        val workManager = androidx.work.WorkManager.getInstance(appContext)
+        val workName = com.newoether.agora.service.EmbeddingCacheWorker.workNameFor(modelId)
         val job = scope.launch(Dispatchers.IO) {
-            val mutex = cacheMutexes.computeIfAbsent(modelId) { Mutex() }
-            mutex.withLock {
-                val model = settings.embeddingModels.value.find { it.id == modelId } ?: return@launch
-                if (recache) {
-                    conversations.deleteEmbeddingsByModel(modelId)
-                }
-                val allMessages = conversations.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
-                val total = allMessages.size
-                if (total == 0) {
-                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_messages_to_cache)))
-                    refreshCacheCounts()
-                    return@launch
-                }
-                val existingIds = conversations.getEmbeddedMessageIdsByModel(modelId).toSet()
-                val toProcess = allMessages.filter { it.id !in existingIds }
-                if (toProcess.isEmpty()) {
-                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_already_cached, total)))
-                    refreshCacheCounts()
-                    return@launch
-                }
-                val alreadyDone = total - toProcess.size
-                var succeeded = 0
-                var attempted = 0
-                _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
+            EmbeddingCacheLocks.forModel(modelId).withLock {
+                // Process-death continuation: enqueued AFTER this runner holds the lock, so
+                // the worker can never outrace it (it blocks on the same process-wide lock).
+                // It only does real work if the process dies mid-cache and WorkManager
+                // restarts it in a fresh process; every in-process exit cancels it below.
+                val workRequest = androidx.work.OneTimeWorkRequestBuilder<com.newoether.agora.service.EmbeddingCacheWorker>()
+                    .setInputData(androidx.work.Data.Builder()
+                        .putString(com.newoether.agora.service.EmbeddingCacheWorker.KEY_MODEL_ID, modelId)
+                        .build())
+                    .addTag(com.newoether.agora.service.EmbeddingCacheWorker.TAG)
+                    .build()
+                workManager.enqueueUniqueWork(workName, androidx.work.ExistingWorkPolicy.REPLACE, workRequest)
                 try {
-                    val batchSize = model.batchSize.coerceIn(1, 100)
-                    if (model.type == EmbeddingModelType.LOCAL) {
-                        if (!LlamaEngine.isModelReady(model.localFilePath)) {
-                            if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.local_model_not_found)))
-                            return@launch
-                        }
-                        toProcess.chunked(batchSize).forEach { batch ->
-                            if (settings.embeddingModels.value.none { it.id == modelId }) return@launch
-                            val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
-                            val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
-                                localProvider.releaseEngineBlocking()
-                            }
-                            batch.zip(embeddings).forEach { (msg, embd) ->
-                                attempted++
-                                if (embd != null) {
-                                    conversations.upsertEmbedding(EmbeddingEntity(
-                                        messageId = msg.id, modelId = modelId,
-                                        embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                        chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
-                                    ))
-                                    succeeded++
-                                }
-                            }
-                            _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
-                        }
-                    } else {
-                        val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
-                        if (apiKey.isBlank()) {
-                            if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
-                            return@launch
-                        }
-                        val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
-                        toProcess.chunked(batchSize).forEach { batch ->
-                            if (settings.embeddingModels.value.none { it.id == modelId }) return@launch
-                            val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
-                            val embeddings = EmbeddingClient.computeEmbeddings(
-                                texts, apiKey, model.remoteModelName, baseUrl
-                            )
-                            batch.zip(embeddings).forEach { (msg, embd) ->
-                                attempted++
-                                if (embd != null) {
-                                    conversations.upsertEmbedding(EmbeddingEntity(
-                                        messageId = msg.id, modelId = modelId,
-                                        embedding = EmbeddingIndexer.floatsToBytes(embd),
-                                        chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
-                                    ))
-                                    succeeded++
-                                }
-                            }
-                            _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
-                        }
-                    }
+                    runCacheLoop(modelId, recache, silent)
                 } finally {
-                    _cachingProgress.update { it - modelId }
+                    // Every in-process exit (done, early return, error, cancellation) makes the
+                    // continuation worker redundant. Process death skips finally — exactly the
+                    // one case where the worker must survive and resume.
+                    workManager.cancelUniqueWork(workName)
                 }
-                val failed = toProcess.size - succeeded
-                if (!silent) {
-                    if (failed == 0) {
-                        emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_cached, total)))
-                    } else {
-                        emitSnackbar(SnackbarEvent(
-                            appContext.getString(R.string.cached_partial_failed, succeeded, toProcess.size, failed),
-                            appContext.getString(R.string.retry)
-                        ) { cacheMessagesForModel(modelId) })
-                    }
-                }
-                conversations.deleteOrphanedEmbeddings()
-                refreshCacheCounts()
             }
         }
         // Track the job so deleteEmbeddingModel can cancel an in-flight cache; self-remove
@@ -293,9 +206,116 @@ class RagManager(
         job.invokeOnCompletion { cacheJobs.remove(modelId, job) }
     }
 
+    /** The cache loop proper. Caller must hold [EmbeddingCacheLocks] for [modelId]. */
+    private suspend fun runCacheLoop(modelId: String, recache: Boolean, silent: Boolean) {
+        val model = settings.embeddingModels.value.find { it.id == modelId } ?: return
+        if (recache) {
+            conversations.deleteEmbeddingsByModel(modelId)
+        }
+        val allMessages = conversations.getAllMessagesForIndexing().filter { it.text.isNotBlank() }
+        val total = allMessages.size
+        if (total == 0) {
+            if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_messages_to_cache)))
+            refreshCacheCounts()
+            return
+        }
+        val existingIds = conversations.getEmbeddedMessageIdsByModel(modelId).toSet()
+        val toProcess = allMessages.filter { it.id !in existingIds }
+        if (toProcess.isEmpty()) {
+            if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_already_cached, total)))
+            refreshCacheCounts()
+            return
+        }
+        val alreadyDone = total - toProcess.size
+        var succeeded = 0
+        var attempted = 0
+        _cachingProgress.update { it + (modelId to (alreadyDone to total)) }
+        try {
+            val batchSize = model.batchSize.coerceIn(1, 100)
+            if (model.type == EmbeddingModelType.LOCAL) {
+                if (!LlamaEngine.isModelReady(model.localFilePath)) {
+                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.local_model_not_found)))
+                    return
+                }
+                toProcess.chunked(batchSize).forEach { batch ->
+                    if (settings.embeddingModels.value.none { it.id == modelId }) return
+                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
+                    val embeddings = LlamaEngine.computeEmbeddings(texts, model.localFilePath) {
+                        localProvider.releaseEngineBlocking()
+                    }
+                    batch.zip(embeddings).forEach { (msg, embd) ->
+                        attempted++
+                        if (embd != null) {
+                            conversations.upsertEmbedding(EmbeddingEntity(
+                                messageId = msg.id, modelId = modelId,
+                                embedding = EmbeddingIndexer.floatsToBytes(embd),
+                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
+                            ))
+                            succeeded++
+                        }
+                    }
+                    _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
+                }
+            } else {
+                val apiKey = model.remoteApiKey.ifBlank { resolveEmbeddingApiKey() ?: "" }
+                if (apiKey.isBlank()) {
+                    if (!silent) emitSnackbar(SnackbarEvent(appContext.getString(R.string.no_api_key_configured)))
+                    return
+                }
+                val baseUrl = model.remoteBaseUrl.ifBlank { resolveEmbeddingBaseUrl() }
+                toProcess.chunked(batchSize).forEach { batch ->
+                    if (settings.embeddingModels.value.none { it.id == modelId }) return
+                    val texts = batch.map { it.text.take(Constants.MAX_EMBEDDING_TEXT_LENGTH) }
+                    val embeddings = EmbeddingClient.computeEmbeddings(
+                        texts, apiKey, model.remoteModelName, baseUrl
+                    )
+                    batch.zip(embeddings).forEach { (msg, embd) ->
+                        attempted++
+                        if (embd != null) {
+                            conversations.upsertEmbedding(EmbeddingEntity(
+                                messageId = msg.id, modelId = modelId,
+                                embedding = EmbeddingIndexer.floatsToBytes(embd),
+                                chunkText = msg.text.take(Constants.MAX_CHUNK_TEXT_LENGTH), dimension = embd.size
+                            ))
+                            succeeded++
+                        }
+                    }
+                    _cachingProgress.update { it + (modelId to (alreadyDone + attempted to total)) }
+                }
+            }
+        } finally {
+            _cachingProgress.update { it - modelId }
+        }
+        val failed = toProcess.size - succeeded
+        if (!silent) {
+            if (failed == 0) {
+                emitSnackbar(SnackbarEvent(appContext.getString(R.string.all_messages_cached, total)))
+            } else {
+                emitSnackbar(SnackbarEvent(
+                    appContext.getString(R.string.cached_partial_failed, succeeded, toProcess.size, failed),
+                    appContext.getString(R.string.retry)
+                ) { cacheMessagesForModel(modelId) })
+            }
+        }
+        conversations.deleteOrphanedEmbeddings()
+        refreshCacheCounts()
+    }
+
     // ── Single-message indexing ───────────────────────────────────
 
+    /**
+     * The single gate for incremental indexing: the user's "Caching" switch plus a configured
+     * embedding model. Deliberately NOT gated on the active search method — the setting reads
+     * "automatically index new messages", and gating on `searchMethod == RAG` meant the default
+     * ("keyword") silently indexed nothing, so switching to RAG later found an empty cache.
+     * Caching is what makes RAG *available*; it must not depend on RAG already being selected.
+     */
+    private val autoIndexEnabled: Boolean
+        get() = settings.autoCacheEnabled.value && activeEmbeddingModel.value != null
+
+    /** Index one message if [autoIndexEnabled]. Safe to call from any persist path. */
     fun indexMessageForRag(messageId: String, text: String) {
+        if (!autoIndexEnabled) return
         scope.launch(Dispatchers.IO) {
             indexMessageForRagNow(messageId, text)
         }
@@ -307,12 +327,8 @@ class RagManager(
      * indexing path. Processing is sequential to avoid concurrent local-engine work per message.
      */
     fun backfillConversationForRag(conversationId: String) {
+        if (!autoIndexEnabled) return
         scope.launch(Dispatchers.IO) {
-            val ragEnabled = settings.autoCacheEnabled.value &&
-                (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG ||
-                    settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)
-            if (!ragEnabled) return@launch
-
             val messages = messagesEligibleForRagBackfill(
                 conversations.getMessagesForConversationSnapshot(conversationId)
             )

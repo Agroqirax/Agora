@@ -55,7 +55,18 @@ class ConversationStateRegistry {
 
     /** Remove and cancel a conversation's state. Called when the conversation is deleted. */
     fun remove(conversationId: String) {
-        states.remove(conversationId)?.cancelScope()
+        states.remove(conversationId)?.also {
+            // stop() first: cancelScope alone cancels the coroutines but cannot interrupt a
+            // blocking OkHttp read — the socket would linger until its read timeout. stop()
+            // severs this conversation's in-flight streams immediately.
+            it.stop()
+            it.cancelScope()
+            // Queued sends die with the conversation; they hold the only reference to their
+            // copied attachment files, which would otherwise orphan.
+            it.takeQueuedSends().forEach { queued ->
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
+            }
+        }
         markIdle(conversationId)
     }
 
@@ -67,7 +78,10 @@ class ConversationStateRegistry {
 
     /** Cancel every conversation's state (e.g. on ViewModel cleared). */
     fun cancelAll() {
-        states.values.forEach { it.cancelScope() }
+        states.values.forEach {
+            it.streamScope.cancelAll()
+            it.cancelScope()
+        }
         states.clear()
         _activeConversationIds.value = emptySet()
     }

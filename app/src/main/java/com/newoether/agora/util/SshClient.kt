@@ -104,7 +104,8 @@ class SshClient(
 
     suspend fun executeCommand(
         command: String,
-        workdir: String = ""
+        workdir: String = "",
+        execTimeoutMs: Int = timeoutMs
     ): CommandResult = withContext(Dispatchers.IO) {
         val sess = getSession()
         val cmd = if (workdir.isNotBlank()) "cd ${escapeBash(workdir)} && $command" else command
@@ -115,12 +116,23 @@ class SshClient(
         channel.setOutputStream(stdoutStream)
         channel.setErrStream(stderrStream)
         channel.connect(timeoutMs)
-        // Wait for completion (channel closes when the remote command exits)
+        // Wait for completion (channel closes when the remote command exits), bounded by a
+        // wall-clock deadline so a non-terminating remote command (`sleep infinity`, an
+        // interactive prompt) cannot pin this IO thread and the generation forever.
+        val deadline = System.currentTimeMillis() + execTimeoutMs.coerceAtLeast(1_000)
+        var timedOut = false
         while (!channel.isClosed) {
+            if (System.currentTimeMillis() >= deadline) {
+                timedOut = true
+                break
+            }
             try { Thread.sleep(100) } catch (_: InterruptedException) { break }
         }
-        val exitCode = channel.exitStatus
+        val exitCode = if (channel.isClosed) channel.exitStatus else -1
         channel.disconnect()
+        if (timedOut) {
+            throw IllegalStateException("Command timed out after ${execTimeoutMs}ms")
+        }
         CommandResult(
             stdout = stdoutStream.toString("UTF-8"),
             stderr = stderrStream.toString("UTF-8"),
@@ -270,7 +282,10 @@ class SshClient(
             val grepCmd = buildString {
                 // -I skips binary files (matches the local-fallback NUL heuristic below).
                 append("grep -rnI ")
-                if (fileGlob.isNotBlank()) append("--include='$fileGlob' ")
+                // The glob is model-supplied input on a non-confirmed (read-only) tool path, so it
+                // must be shell-escaped exactly like pattern/base — otherwise it is a command
+                // injection vector that bypasses the remote-mutation confirmation gate.
+                if (fileGlob.isNotBlank()) append("--include=${escapeBash(fileGlob)} ")
                 append("-- ")
                 append(escapeBash(pattern))
                 append(" ")

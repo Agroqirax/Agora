@@ -391,6 +391,10 @@
     <string name="transcription_add_model">新增模型</string>
     <string name="transcription_ellipsis">正在轉述圖片…</string>
     <string name="transcription_progress">正在轉述圖片 %1$d/%2$d…</string>
+    <string name="generating_response">正在產生回覆…</string>
+    <string name="transcription_label">圖片轉述</string>
+    <string name="transcription_label_numbered">圖片轉述 %1$d</string>
+    <string name="provider_vision_badge">視覺</string>
     <string name="prompt_content">Prompt</string>
 
     <!-- Settings - Memory Page -->
@@ -713,6 +717,8 @@
     <string name="file_unknown_type">未知檔案類型</string>
     <string name="file_unsupported_type">不支援的檔案類型: %1$s</string>
     <string name="file_too_large">檔案過大 (最大 20 MB)</string>
+    <string name="attachment_copy_failed_image">圖片載入失敗</string>
+    <string name="attachment_copy_failed_file">檔案載入失敗</string>
     <string name="pdf_render_failed">PDF 渲染失敗</string>
     <string name="pdf_selected">已選擇</string>
 

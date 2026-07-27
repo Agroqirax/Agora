@@ -56,6 +56,11 @@ class ConversationGenerationState(val conversationId: String) {
     val isLoading = MutableStateFlow(false)
     /** True while this conversation has an active generation. Drives the Stop-button visibility. */
     val generating = MutableStateFlow(false)
+    /** True from a user Stop until the stopped generation coroutine has fully unwound (its
+     *  finally released the slot). Drives the composer's gray "stopping…" spinner: while set,
+     *  new sends enqueue (visible in the queue banner) instead of claiming the slot — and the
+     *  moment it clears, the send form is back and a send launches immediately. */
+    val stopping = MutableStateFlow(false)
 
     /** Queued sends waiting for the current generation to finish. Per-conversation. */
     val queuedSends = MutableStateFlow<List<QueuedSend>>(emptyList())
@@ -63,6 +68,10 @@ class ConversationGenerationState(val conversationId: String) {
     // ── Ownership tokens ──
     private val genLock = Any()
     private var uiGenToken = 0L
+    /** Token of the generation currently holding the slot; 0 = slot free. Unlike [uiGenToken]
+     *  (advanced on every stop to gate late UI writes), this only changes on acquire/release,
+     *  so a stopped-but-still-unwinding coroutine can still release the slot it owns. */
+    private var slotOwnerToken = 0L
     private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -89,6 +98,7 @@ class ConversationGenerationState(val conversationId: String) {
     fun acquireForSend(): Long? = synchronized(genLock) {
         if (generating.value) return null
         uiGenToken += 1
+        slotOwnerToken = uiGenToken
         generating.value = true
         onActive?.invoke(conversationId)
         uiGenToken
@@ -102,6 +112,7 @@ class ConversationGenerationState(val conversationId: String) {
     fun tryAcquireForReplacement(): Long? = synchronized(genLock) {
             if (generating.value) return null
             uiGenToken += 1
+            slotOwnerToken = uiGenToken
             isLoading.value = true
             generating.value = true
             onActive?.invoke(conversationId)
@@ -109,15 +120,18 @@ class ConversationGenerationState(val conversationId: String) {
     }
 
     /**
-     * Token-gated release of the slot when a generation coroutine finishes (or dies before
-     * reaching [GenerationManager]'s tail). Only the still-current owner clears the slot, so a
-     * superseded/stopped coroutine's finally is a no-op. Returns true if this call actually
-     * released (i.e. the caller may now drain the queue).
+     * Owner-token-gated release of the slot when a generation coroutine finishes (normally OR
+     * after a Stop — [stop] deliberately does not free the slot, see there). Only the owning
+     * coroutine's finally releases, so a coroutine superseded in an earlier era is a no-op.
+     * Returns true if this call actually released (i.e. the caller may now drain the queue —
+     * the release point is by construction the moment the conversation lock is free again).
      */
     fun endGeneration(uiToken: Long): Boolean = synchronized(genLock) {
-        if (uiGenToken != uiToken) return false
+        if (slotOwnerToken != uiToken) return false
+        slotOwnerToken = 0L
         isLoading.value = false
         generating.value = false
+        stopping.value = false
         onIdle?.invoke(conversationId)
         true
     }
@@ -157,6 +171,9 @@ class ConversationGenerationState(val conversationId: String) {
         onLoadingChange = { loadingChange(uiToken, it) },
         onStreamClear = { streamClear(uiToken) },
         isLatestPersist = { isLatestPersist(persistId) },
+        // Steering: lets the tool loop see a mid-generation queued send and end at the next
+        // round boundary, so the queue flushes without waiting out the whole tool loop.
+        hasQueuedSends = { queuedSends.value.isNotEmpty() },
     )
 
     // ── Stop / finalization ───────────────────────────────────────────────
@@ -177,11 +194,50 @@ class ConversationGenerationState(val conversationId: String) {
             isLoading.value = false
             val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
             streamingMessage.value = s
-            generating.value = false
-            onIdle?.invoke(conversationId)
+            // The slot stays HELD until the cancelled coroutine's finally releases it via
+            // [endGeneration] (slot ownership is keyed to slotOwnerToken, which stop does NOT
+            // advance). Freeing it here would let a new send claim the slot and then block
+            // invisibly on the conversation lock the dying coroutine may still hold (e.g. a
+            // tool stuck in non-cancellable IO) — no bubble, no queue chip, nothing. Instead:
+            // while stopping, sends enqueue (visible), the composer shows the stopping
+            // spinner, and the release drains the whole queue the moment the old coroutine
+            // has fully unwound.
+            //
+            // Unless nothing is actually running: with no live coroutine no finally will ever
+            // fire, so holding the slot would strand the composer in the stopping state
+            // forever. Release it here instead — the historical immediate-release behavior,
+            // correct precisely when there is nothing left to wind down.
+            if (generating.value) {
+                // isCompleted, NOT isActive: previousJob was just cancelled, so isActive is
+                // already false while the coroutine is still unwinding — and an unwinding
+                // coroutine WILL run its finally and release the slot.
+                if (previousJob != null && !previousJob.isCompleted) {
+                    stopping.value = true
+                } else {
+                    slotOwnerToken = 0L
+                    generating.value = false
+                    stopping.value = false
+                    onIdle?.invoke(conversationId)
+                }
+            }
             s
         }
         return StopResult(stoppedMsg, conversationId)
+    }
+
+    /**
+     * Clears a lingering STOPPED streaming snapshot. [stop] deliberately leaves the STOPPED
+     * overlay in place until Room has persisted it (see [streamClear]); this is the matching
+     * release, invoked once stop-finalization has written the row. Without it the stale overlay
+     * survives indefinitely and [ConversationUiState.resolvePath] can re-append it as a ghost
+     * after the persisted message is deleted.
+     */
+    fun clearStoppedOverlay() {
+        synchronized(genLock) {
+            if (streamingMessage.value?.status == MessageStatus.STOPPED) {
+                streamingMessage.value = null
+            }
+        }
     }
 
     /** Cancel this conversation's scope (called when the conversation is deleted). */
@@ -195,14 +251,6 @@ class ConversationGenerationState(val conversationId: String) {
     }
 
     /**
-     * Atomically pop the head of the queue. Uses [getAndUpdate] so the returned item is derived
-     * from the exact pre-update snapshot that won the CAS — no mutable side-effect var that a
-     * retried update lambda could re-assign.
-     */
-    fun dequeueSend(): QueuedSend? =
-        queuedSends.getAndUpdate { if (it.isEmpty()) it else it.drop(1) }.firstOrNull()
-
-    /**
      * Remove a queued send by id (X button). Returns the removed item (or null) so the caller can
      * delete its now-orphaned attachment files — the composer already cleared its own reference on
      * enqueue, so the QueuedSend holds the only handle to those copied files.
@@ -212,8 +260,14 @@ class ConversationGenerationState(val conversationId: String) {
         return before.firstOrNull { it.id == id }
     }
 
-    /** Clear the whole queue, returning the removed items for orphan-file cleanup. */
-    fun clearQueuedSends(): List<QueuedSend> = queuedSends.getAndUpdate { emptyList() }
+    /** Atomically take the whole queue for a batch drain (each item becomes its own bubble). */
+    fun takeQueuedSends(): List<QueuedSend> = queuedSends.getAndUpdate { emptyList() }
+
+    /** Push [items] back to the FRONT in order (a batch drain lost the slot race to a manual
+     *  send — nothing is lost, the batch just waits for the next release). */
+    fun requeueFront(items: List<QueuedSend>) {
+        queuedSends.update { items + it }
+    }
 
     data class StopResult(val stoppedMessage: ChatMessage?, val conversationId: String)
 
@@ -233,6 +287,8 @@ data class QueuedSend(
     /** Model selected in the originating conversation when Send was tapped. */
     val modelId: String,
     val attachments: List<SelectedAttachment>,
+    /** Legacy bare-image paths (kept so a queued send rebuilds the identical payload). */
+    val images: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
 )
 

@@ -95,7 +95,12 @@ class LocalProvider(
             // former global GenerationQueue for the local path (remote generation no
             // longer takes any global slot). Held only across the native sampling loop,
             // not the whole generation, and withLock is cancellable so Stop releases it
-            // immediately. Each tool round re-acquires per turn.
+            // immediately.
+            // INVARIANT: local models never emit tool calls (no tool definitions are sent,
+            // and this provider parses none), so one generation acquires this mutex exactly
+            // once. If local tool-calling is ever added, the release between rounds would
+            // let another conversation's model load interleave — revisit the locking scope
+            // (see the matching note on LocalModelSerializer).
             com.newoether.agora.api.LocalModelSerializer.mutex.withLock {
                 tokenFlow.collect { token ->
                     if (!coroutineContext.isActive) {

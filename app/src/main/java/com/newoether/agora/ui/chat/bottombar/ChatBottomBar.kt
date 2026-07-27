@@ -54,9 +54,6 @@ import com.newoether.agora.ui.common.ThinkingControlPanel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -106,7 +103,6 @@ fun ChatBottomBar(
     modifier: Modifier = Modifier,
     textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() },
     composerState: ChatComposerState = rememberChatComposerState(),
-    onDraftChanged: ((String, List<com.newoether.agora.model.SelectedAttachment>) -> Unit)? = null,
     focusRequester: FocusRequester = FocusRequester(),
     isExpanded: Boolean = false,
     isExpandAnimating: Boolean = false,
@@ -117,7 +113,7 @@ fun ChatBottomBar(
     onAdvancedClick: () -> Unit = {},
     queuedSends: List<QueuedSend> = emptyList(),
     onRemoveQueuedSend: (String) -> Unit = {},
-    onClearQueuedSends: () -> Unit = {},
+    isStopping: Boolean = false,
 ) {
     val scrollState = rememberScrollState()
     BackHandler(enabled = isExpanded) { onCollapse() }
@@ -127,18 +123,8 @@ fun ChatBottomBar(
 
     val composer = composerState
 
-    // Persist draft on text / attachment changes with 300ms debounce.
-    if (onDraftChanged != null) {
-        @OptIn(FlowPreview::class)
-        LaunchedEffect(Unit) {
-            snapshotFlow { textFieldState.text.toString() to composer.selectedAttachments }
-                .distinctUntilChanged()
-                .debounce(300L)
-                .collect { (text, attachments) ->
-                    onDraftChanged(text, attachments)
-                }
-        }
-    }
+    // Draft persistence lives in ChatApp, keyed by conversation id (the id must be captured at
+    // edit time, not at debounce-fire time — see the draft effect there).
 
     val context = LocalContext.current
     val haptics = LocalAgoraHaptics.current
@@ -182,7 +168,9 @@ fun ChatBottomBar(
                 LoopControlBar(loop = loop, isRunning = loopRunning, onStop = onStopLoop)
             }
         }
-        if (composer.selectedAttachments.isNotEmpty() && !isExpanded) {
+        // Also shown while expanded: hiding it there meant a full-screen composer gave no sign
+        // that attachments were about to be sent.
+        if (composer.selectedAttachments.isNotEmpty()) {
             AttachmentPreviewRow(
                 composer = composer,
                 onAllMediaClick = onAllMediaClick,
@@ -195,7 +183,6 @@ fun ChatBottomBar(
         QueuedMessagesBanner(
             queuedSends = queuedSends,
             onRemove = onRemoveQueuedSend,
-            onClearAll = onClearQueuedSends,
         )
 
         Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).noOpBringIntoView()) {
@@ -384,7 +371,18 @@ fun ChatBottomBar(
                                 enabled = false
                             )
                         } else {
-                            enabledModels.forEach { model ->
+                            // Grouped by provider, then alphabetical. enabledModels is a Set whose
+                            // iteration order is insertion order (i.e. whenever each model was
+                            // enabled), which scrambles providers together in the picker.
+                            val sortedModels = remember(enabledModels) {
+                                enabledModels.sortedWith(
+                                    compareBy(
+                                        { com.newoether.agora.model.ModelId.parse(it).providerName.lowercase() },
+                                        { com.newoether.agora.model.ModelId.parse(it).apiModelName.lowercase() },
+                                    )
+                                )
+                            }
+                            sortedModels.forEach { model ->
                                 DropdownMenuItem(
                                     text = {
                                         val parsed = com.newoether.agora.model.ModelId.parse(model)
@@ -566,6 +564,7 @@ fun ChatBottomBar(
                 composer = composer,
                 isLoading = isLoading,
                 isSwitching = isSwitching,
+                isStopping = isStopping,
                 isModelValid = isModelValid,
                 onSendMessage = onSendMessage,
                 onStopGeneration = onStopGeneration,
@@ -580,7 +579,7 @@ fun ChatBottomBar(
             modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 4.dp)
         ) {
             val elevatedSurface = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-            IconButton(onClick = { if (!isExpandAnimating) onCollapse() }, modifier = Modifier.size(40.dp).background(Brush.radialGradient(listOf(elevatedSurface, elevatedSurface.copy(alpha = 0.5f), Color.Transparent)), CircleShape)) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
+            IconButton(onClick = { if (!isExpandAnimating) { haptics.action(); onCollapse() } }, modifier = Modifier.size(40.dp).background(Brush.radialGradient(listOf(elevatedSurface, elevatedSurface.copy(alpha = 0.5f), Color.Transparent)), CircleShape)) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
         }
     }
 

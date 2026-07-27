@@ -126,7 +126,9 @@ fun SettingsProviderDetailPage(
             SettingsGroupColumn {
                 // Base URL (non-Local only)
                 if (!isLocal) {
-                val providerInstance = viewModel.getProviderInstance(providerName)
+                // Nullable: after deleting a custom provider this page recomposes once more
+                // before navigation pops it — render with an empty placeholder, don't crash.
+                val providerInstance = viewModel.getProviderInstanceOrNull(providerName)
                 val savedUrl = providerBaseUrls[providerName]
                 // Don't key remember on savedUrl — that causes TextFieldState to be recreated
                 // every time the debounced save writes back to DataStore, overwriting user input.
@@ -165,7 +167,7 @@ fun SettingsProviderDetailPage(
                                     Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                         OutlinedTextField(
                                             state = baseUrlState,
-                                            placeholder = { Text(providerInstance.defaultBaseUrl, style = MaterialTheme.typography.bodyMedium) },
+                                            placeholder = { Text(providerInstance?.defaultBaseUrl ?: "", style = MaterialTheme.typography.bodyMedium) },
                                             shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier.fillMaxWidth(),
                                             textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -222,7 +224,7 @@ fun SettingsProviderDetailPage(
                                                     Row(modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                                                         Icon(Icons.Default.Visibility, null, modifier = Modifier.size(10.dp))
                                                         Spacer(Modifier.width(3.dp))
-                                                        Text("Vision", style = MaterialTheme.typography.labelSmall)
+                                                        Text(stringResource(R.string.provider_vision_badge), style = MaterialTheme.typography.labelSmall)
                                                     }
                                                 }
                                             }

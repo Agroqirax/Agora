@@ -478,6 +478,10 @@
     <string name="transcription_add_model">モデルを追加</string>
     <string name="transcription_ellipsis">画像を文字起こし中…</string>
     <string name="transcription_progress">画像を文字起こし中 %1$d/%2$d…</string>
+    <string name="generating_response">応答を生成中…</string>
+    <string name="transcription_label">画像の文字起こし</string>
+    <string name="transcription_label_numbered">画像の文字起こし %1$d</string>
+    <string name="provider_vision_badge">ビジョン</string>
     <string name="prompt_content">プロンプト</string>
 
     <!-- Settings - Memory Page -->
@@ -819,6 +823,8 @@
     <string name="file_unknown_type">不明なファイル形式</string>
     <string name="file_unsupported_type">非対応のファイル形式: %1$s</string>
     <string name="file_too_large">ファイルが大きすぎます（最大 20 MB）</string>
+    <string name="attachment_copy_failed_image">画像の読み込みに失敗しました</string>
+    <string name="attachment_copy_failed_file">ファイルの読み込みに失敗しました</string>
     <string name="pdf_render_failed">PDF のレンダリングに失敗しました</string>
     <string name="pdf_selected">選択済み</string>
 

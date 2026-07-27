@@ -22,6 +22,11 @@ data class AttachmentItem(
 /** Used for passing attachment metadata from ChatBottomBar to ViewModel. */
 @Serializable
 data class SelectedAttachment(
+    /** Stable identity for list keys. The same file can be picked twice (identical [uri]), and a
+     *  pick is mutated in place as it processes — an index or uri key would recycle the wrong row
+     *  and cross-wire its thumbnail/progress. Generated per pick; persisted with drafts so a
+     *  restored draft keeps its keys. */
+    val localId: String = java.util.UUID.randomUUID().toString(),
     val uri: String,
     val type: String,               // "image", "video", "file", "pdf"
     val frameCount: Int? = null,

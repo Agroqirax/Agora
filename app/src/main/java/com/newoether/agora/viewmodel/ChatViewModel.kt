@@ -213,26 +213,53 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             convRepo.deleteOrphanedEmbeddings()
         }
-        // Sweep orphaned PDF render files (pdf_* / pdf_preview_*) left in filesDir by a
-        // process death while the page-select dialog was open. At startup nothing is
-        // rendering and no dialog is open, so any pdf_*.jpg not referenced by a stored
-        // message's images is junk and gets deleted.
+        // Sweep orphaned attachment files (att_/vid_/img_/pdf_*) left in filesDir by a
+        // process death mid-composition or mid-render. A file is junk only when nothing
+        // references it: a stored message's images, its attachmentMeta originalUri (the
+        // video-playback / file-open source), or any conversation draft's private copies.
+        // The 1h age guard means a copy racing this sweep at startup is never deleted.
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val referenced = convRepo.getAllMessagesList()
-                    .asSequence()
-                    .flatMap { it.images.asSequence() }
-                    .map { it.removePrefix("file://") }
-                    .toHashSet()
-                getApplication<Application>().filesDir.listFiles { f ->
-                    f.isFile && f.name.startsWith("pdf_") && f.name.endsWith(".jpg")
-                }?.forEach { f ->
-                    if (f.absolutePath !in referenced) runCatching { f.delete() }
+                val referenced = HashSet<String>()
+                convRepo.getAllMessagesList().forEach { msg ->
+                    msg.images.forEach { referenced.add(it.removePrefix("file://")) }
+                    msg.attachmentMeta?.let { json ->
+                        runCatching { Json.decodeFromString<AttachmentMeta>(json) }.getOrNull()
+                            ?.items?.forEach { item ->
+                                item.originalUri?.takeIf { it.startsWith("file://") }
+                                    ?.let { referenced.add(it.removePrefix("file://")) }
+                            }
+                    }
                 }
-            } catch (e: Exception) { DebugLog.d("ChatViewModel", "PDF thumbnail cleanup error", e) }
+                convRepo.getAllConversationsList().forEach { conv ->
+                    conv.draftAttachments?.let { json ->
+                        runCatching { Json.decodeFromString<List<SelectedAttachment>>(json) }.getOrNull()
+                            ?.forEach { att ->
+                                att.localPath?.let { referenced.add(it) }
+                                att.processedFrames?.forEach { referenced.add(it) }
+                                att.preRenderedPaths?.forEach { referenced.add(it) }
+                            }
+                    }
+                }
+                val minAgeMs = 60 * 60 * 1000L
+                val now = System.currentTimeMillis()
+                val prefixes = arrayOf("att_", "vid_", "img_", "pdf_")
+                getApplication<Application>().filesDir.listFiles { f ->
+                    f.isFile && prefixes.any { p -> f.name.startsWith(p) }
+                }?.forEach { f ->
+                    if (f.absolutePath !in referenced && now - f.lastModified() > minAgeMs) {
+                        runCatching { f.delete() }
+                    }
+                }
+            } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
         }
         // ── Auto Backup ──────────────────────────────────────────
-        try { AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
+        try {
+            AutoBackupWorker.schedule(getApplication())
+        } catch (e: Exception) {
+            // Losing periodic backups silently would be data-loss-adjacent — log it.
+            DebugLog.e("ChatViewModel", "AutoBackupWorker.schedule failed", e)
+        }
         viewModelScope.launch(Dispatchers.IO) {
             try { autoBackupManager.checkAndBackup() } catch (e: Exception) { DebugLog.e("ChatViewModel", "Auto backup check failed", e) }
         }
@@ -272,11 +299,8 @@ class ChatViewModel(
             sandboxFactory = sandboxFactory,
             additionalToolProviders = listOf(automationToolProvider),
         ).also { gm ->
-            gm.onMessagePersisted = { messageId, text ->
-                if (settings.autoCacheEnabled.value && (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG || settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)) {
-                    indexMessageForRag(messageId, text)
-                }
-            }
+            // Gate lives in RagManager.indexMessageForRag (autoCacheEnabled + active model).
+            gm.onMessagePersisted = { messageId, text -> ragManager.indexMessageForRag(messageId, text) }
             gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
         }
     }
@@ -293,7 +317,9 @@ class ChatViewModel(
         autoBackupManager.destroy()
     }
 
-    fun getProviderInstance(name: String): LlmProvider = providerRegistry.getInstance(name)
+    /** Nullable on purpose: the provider settings page recomposes one frame after a custom
+     *  provider is deleted and must render gracefully instead of crashing. */
+    fun getProviderInstanceOrNull(name: String): LlmProvider? = providerRegistry.getInstanceOrNull(name)
 
 
 
@@ -404,7 +430,14 @@ class ChatViewModel(
     private val _isSyncingModels = MutableStateFlow(false)
     val isSyncingModels: StateFlow<Boolean> = _isSyncingModels.asStateFlow()
 
-    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>(replay = 1)
+    // replay=0: with replay=1 an Activity recreation (rotation) re-collected the flow and
+    // re-showed the last snackbar. The 1-slot buffer keeps tryEmit lossless for slow collectors;
+    // events emitted during the brief recreation gap are dropped rather than replayed stale.
+    private val _snackbarMessage = MutableSharedFlow<SnackbarEvent>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
     val snackbarMessage = _snackbarMessage.asSharedFlow()
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
@@ -504,7 +537,7 @@ class ChatViewModel(
 
     /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
     private val generationFinalizer by lazy {
-        GenerationFinalizer(convRepo, settings, ::indexMessageForRag)
+        GenerationFinalizer(convRepo, ragManager::indexMessageForRag)
     }
 
     private val _isSwitching = MutableStateFlow(false)
@@ -550,7 +583,6 @@ class ChatViewModel(
         providerRegistry = providerRegistry,
         ragManager = ragManager,
         appContext = appContext,
-        currentActiveModel = currentActiveModel,
         pendingConversationSettings = _pendingConversationSettings,
         onSnackbar = { msg -> emitSnackbar(msg) },
     )
@@ -584,6 +616,7 @@ class ChatViewModel(
             onPersistSelectedChildren = { convId, map -> persistSelectedChildren(convId, map) },
             onConversationCreatedBySend = { suppressNextOpenScroll = true },
             onConversationGraduated = ragManager::backfillConversationForRag,
+            onUserMessagePersisted = ragManager::indexMessageForRag,
         )
     }
 
@@ -635,17 +668,12 @@ class ChatViewModel(
                         val switchScope = this
                         val state = generationRegistry.getOrCreate(id)
                         // Fix stuck sending states when loading a conversation. Read THIS conversation's
-                        // own slot (state.generating), not the global _isLoading mirror: at switch time
-                        // the mirror still reflects the previous conversation, so a background
-                        // generation in the target conversation would be misread as idle and its
-                        // in-flight SENDING message wrongly marked STOPPED.
+                        // own slot (state.generating), not the _isLoading mirror of the open
+                        // conversation: at switch time the mirror still reflects the previous
+                        // conversation, so a background generation in the target conversation would
+                        // be misread as idle and its in-flight SENDING message wrongly marked STOPPED.
                         if (!state.generating.value) {
-                            val stuckMessages = convRepo.getMessagesForConversation(id).first()
-                                .filter { it.status == MessageStatus.SENDING || it.status == MessageStatus.THINKING || it.status == MessageStatus.TOOL_CALLING || it.status == MessageStatus.TRANSCRIBING }
-
-                            stuckMessages.forEach { msg ->
-                                convRepo.upsertMessage(msg.copy(status = MessageStatus.STOPPED))
-                            }
+                            convRepo.fixStuckMessages(id)
                         }
 
                         // Restore selected branches
@@ -991,6 +1019,16 @@ class ChatViewModel(
         }
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
 
+    /** True while the open conversation's Stop is still winding down (slot held until the
+     *  cancelled coroutine fully unwinds). Drives the composer's gray stopping spinner. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val isStopping: StateFlow<Boolean> = _currentConversationId
+        .flatMapLatest { id ->
+            if (id == null) kotlinx.coroutines.flow.flowOf(false)
+            else generationRegistry.getOrCreate(id).stopping
+        }
+        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
+
     fun removeQueuedSend(id: String) {
         val removed = _currentConversationId.value?.let {
             generationRegistry.getOrCreate(it).removeQueuedSend(id)
@@ -998,13 +1036,6 @@ class ChatViewModel(
         // The queued send held the only reference to its copied attachment files (the composer
         // cleared its own on enqueue). It was never sent → delete them so they don't orphan.
         com.newoether.agora.util.AttachmentFiles.deleteBacking(removed.attachments)
-    }
-
-    fun clearQueuedSends() {
-        val removed = _currentConversationId.value?.let {
-            generationRegistry.getOrCreate(it).clearQueuedSends()
-        } ?: return
-        removed.forEach { com.newoether.agora.util.AttachmentFiles.deleteBacking(it.attachments) }
     }
 
     fun stopGeneration() {
@@ -1030,7 +1061,13 @@ class ChatViewModel(
             }
         }
         if (messages.isNotEmpty()) {
-            generationFinalizer.launchStopFinalization(state.scope, result.conversationId, messages)
+            // Release the STOPPED overlay once the terminal row is in Room — otherwise the stale
+            // snapshot lives on in the state and resolvePath resurrects it as a ghost bubble
+            // after the persisted message is later deleted.
+            generationFinalizer.launchStopFinalization(
+                state.scope, result.conversationId, messages,
+                onFinalized = state::clearStoppedOverlay,
+            )
         }
     }
 
@@ -1065,21 +1102,6 @@ class ChatViewModel(
 
     fun editMessage(messageId: String, newText: String) = generationController.editMessage(messageId, newText)
 
-    private fun getFileName(context: android.content.Context, uri: android.net.Uri): String {
-        return try {
-            val cursor = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) it.getString(idx) ?: uri.lastPathSegment ?: "unknown"
-                    else uri.lastPathSegment ?: "unknown"
-                } else uri.lastPathSegment ?: "unknown"
-            } ?: (uri.lastPathSegment ?: "unknown")
-        } catch (_: Exception) {
-            uri.lastPathSegment ?: "unknown"
-        }
-    }
-
     fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
         val sent = generationController.sendMessage(text, images, attachments)
         if (sent) {
@@ -1090,7 +1112,7 @@ class ChatViewModel(
                 viewModelScope.launch {
                     runCatching { convRepo.updateDraft(id, "", null) }
                     // Reset the anti-loop snapshot so the next real edit writes through.
-                    lastLoadedDraft = "" to emptyList()
+                    lastLoadedDraft = Triple(id, "", emptyList())
                 }
             }
         }
@@ -1204,16 +1226,18 @@ class ChatViewModel(
 
     // ── Per-conversation draft persistence ─────────────────────
 
-    /** Snapshot of the last loaded draft; used to suppress write-back of unchanged values
-     *  (anti-loop: loading from DB must not trigger a write back to DB). */
+    /** Snapshot of the last loaded draft, TAGGED with its conversation id; used to suppress
+     *  write-back of unchanged values (anti-loop: loading from DB must not trigger a write back).
+     *  The id tag matters: a global snapshot let conversation A's debounced clear be skipped
+     *  because it happened to equal conversation B's freshly-loaded draft. */
     @Volatile
-    var lastLoadedDraft: Pair<String, List<SelectedAttachment>>? = null
+    var lastLoadedDraft: Triple<String, String, List<SelectedAttachment>>? = null
 
     /** Persist the composer text and attachment list for a conversation. Fire-and-forget on
      *  viewModelScope; the UI call site handles debouncing before calling this. */
     fun updateDraft(conversationId: String, text: String, attachments: List<SelectedAttachment>) {
         val last = lastLoadedDraft
-        if (last != null && last.first == text && last.second == attachments) return
+        if (last != null && last.first == conversationId && last.second == text && last.third == attachments) return
         viewModelScope.launch(Dispatchers.IO) {
             val json = if (attachments.isEmpty()) null
             else Json.encodeToString(attachments)
@@ -1226,7 +1250,7 @@ class ChatViewModel(
      *  mutating UI fields with the result, to suppress the write-back snapshotFlow. */
     suspend fun loadDraft(conversationId: String): Pair<String, List<SelectedAttachment>> {
         val entity = convRepo.getConversation(conversationId) ?: run {
-            lastLoadedDraft = "" to emptyList()
+            lastLoadedDraft = Triple(conversationId, "", emptyList())
             return "" to emptyList()
         }
         val attachments: List<SelectedAttachment> = try {
@@ -1235,8 +1259,7 @@ class ChatViewModel(
             DebugLog.w("ChatViewModel", "Failed to deserialize draft attachments for $conversationId", e)
             emptyList()
         }
-        val draft = entity.draftText to attachments
-        lastLoadedDraft = draft
-        return draft
+        lastLoadedDraft = Triple(conversationId, entity.draftText, attachments)
+        return entity.draftText to attachments
     }
 }

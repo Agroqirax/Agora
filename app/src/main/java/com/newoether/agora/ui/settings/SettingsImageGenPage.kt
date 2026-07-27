@@ -211,7 +211,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         Text(stringResource(R.string.transcription_no_models_hint), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                            items(pickList) { model ->
+                            items(pickList, key = { it }) { model ->
                             val parsed = ModelId.parse(model)
                             val displayName = modelAliases[model] ?: parsed.apiModelName
                             SettingsItem(

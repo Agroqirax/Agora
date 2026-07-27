@@ -37,6 +37,9 @@ internal fun ComposerSendButton(
     composer: ChatComposerState,
     isLoading: Boolean,
     isSwitching: Boolean,
+    /** A Stop was pressed and the generation is still unwinding. The FAB goes gray + spinner:
+     *  the send form returning is the contract that the next message launches immediately. */
+    isStopping: Boolean = false,
     isModelValid: Boolean,
     onSendMessage: (String, List<SelectedAttachment>) -> Boolean,
     onStopGeneration: () -> Unit,
@@ -57,11 +60,14 @@ internal fun ComposerSendButton(
     }
     val textIsEmpty = textFieldState.text.isBlank()
     val attachmentsIsEmpty = composer.selectedAttachments.isEmpty()
-    val showStop = isLoading && textIsEmpty && attachmentsIsEmpty
+    // While stopping, Stop is already spent — the FAB reports "winding down" instead of offering
+    // a second Stop. Sends stay allowed: they enqueue and show up in the queue banner, so a
+    // message is never accepted invisibly.
+    val showStop = isLoading && !isStopping && textIsEmpty && attachmentsIsEmpty
 
     val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching
             && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
-    val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching
+    val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching && !isStopping
     FloatingActionButton(
         onClick = {
             if (isSwitching) return@FloatingActionButton
@@ -92,6 +98,7 @@ internal fun ComposerSendButton(
         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
     ) {
         val fabIcon = when {
+            isStopping -> "stopping"
             composer.pendingSend -> "pending"
             showStop -> "stop"
             else -> "send"
@@ -102,6 +109,11 @@ internal fun ComposerSendButton(
             label = "fabIcon"
         ) { state ->
             when (state) {
+                "stopping" -> CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 "pending" -> CircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,

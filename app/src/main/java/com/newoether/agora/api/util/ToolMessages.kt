@@ -6,12 +6,35 @@ import com.newoether.agora.util.Constants
 
 /**
  * Full message preparation pipeline: context window truncation, consecutive
- * same-role merge, then tool message validation. All providers MUST call this
- * before converting messages to their API format.
+ * same-role merge, empty-turn stripping, then tool message validation. All providers MUST
+ * call this before converting messages to their API format.
  */
 fun prepareMessages(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMessage> {
-    return validateToolMessages(mergeConsecutiveSameRole(limitContext(messages, maxUserMessages)))
+    return validateToolMessages(
+        stripEmptyTurns(mergeConsecutiveSameRole(limitContext(messages, maxUserMessages)))
+    )
 }
+
+/**
+ * Drops turns that would serialize to an empty/whitespace-only content block.
+ *
+ * Anthropic hard-rejects those with `400 messages: text content blocks must contain
+ * non-whitespace text`, and other providers silently degrade on them. Such turns are
+ * routine in practice: a generation stopped before its first token, an interrupted turn
+ * that emitted only a newline, or two blank messages merged with "\n".
+ *
+ * A turn survives if it carries anything else of substance — images, or tool protocol
+ * payload (tool_/result_ rows, whose content lives in segments/toolCall, not text).
+ * Runs AFTER the merge so a blank fragment absorbed into a non-blank neighbor is kept.
+ */
+fun stripEmptyTurns(messages: List<ChatMessage>): List<ChatMessage> =
+    messages.filter { msg ->
+        msg.text.isNotBlank() ||
+            msg.images.isNotEmpty() ||
+            msg.isToolProtocolMessage() ||
+            msg.toolCall != null ||
+            msg.segments?.any { it.type == "tool" } == true
+    }
 
 /**
  * Builds an API-only view where assistant-generated images remain available for
@@ -67,7 +90,7 @@ private fun ChatMessage.isNormalUserMessage(): Boolean =
 private fun ChatMessage.isNormalAssistantMessage(): Boolean =
     participant == Participant.MODEL && !isToolProtocolMessage()
 
-private fun ChatMessage.isToolProtocolMessage(): Boolean =
+internal fun ChatMessage.isToolProtocolMessage(): Boolean =
     id.startsWith(Constants.TOOL_MSG_PREFIX) || id.startsWith(Constants.RESULT_MSG_PREFIX)
 
 private fun addGeneratedImageContextNote(text: String, imageCount: Int): String {
@@ -172,6 +195,8 @@ fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
 /**
  * Fixes toolCallId mismatches between a tool_ message's tool-use segments and
  * the following result_ messages. Match is by position: Nth result_ → Nth tool-use.
+ * Result rows beyond the tool-use count are dropped — a tool_result pointing at a
+ * nonexistent tool_use fails the whole request (Anthropic/OpenAI reject it with 400).
  */
 private fun fixToolIds(
     toolMsg: ChatMessage,
@@ -182,8 +207,7 @@ private fun fixToolIds(
     val useIds = toolSegments.mapNotNull { it.toolCallId }
     if (useIds.size != toolSegments.size) return resultMessages
 
-    return resultMessages.mapIndexed { idx, resultMsg ->
-        if (idx >= useIds.size) return@mapIndexed resultMsg
+    return resultMessages.take(useIds.size).mapIndexed { idx, resultMsg ->
         val correctId = useIds[idx]
 
         val fixedSegments = resultMsg.segments?.map { seg ->

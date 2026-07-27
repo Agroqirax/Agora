@@ -109,7 +109,7 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             }
                         )
                     }
-                    items(enabledModelsList) { model ->
+                    items(enabledModelsList, key = { it }) { model ->
                         val alias = modelAliases[model]
                         val titleParsed = com.newoether.agora.model.ModelId.parse(model)
                         val displayName = alias ?: titleParsed.apiModelName

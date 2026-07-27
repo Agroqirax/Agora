@@ -27,6 +27,12 @@ class CronExpression private constructor(
      * The first instant strictly after [afterMillis] that matches this expression, evaluated
      * in [zone]. Returns null if no match is found within the search horizon (8 years — covers
      * Feb-29-only schedules). Seconds/millis of the result are zeroed.
+     *
+     * Walks day → hour → minute, skipping whole days/hours whose date/hour fields cannot
+     * match (they are constant across the skipped span, so no minute inside can match).
+     * Worst case is ~3k day probes instead of the 4.2M minute steps a naive walk needs for
+     * a Feb-29-only schedule. Minute stepping inside a matching hour keeps the walk exact
+     * across DST gaps/repeats — instants advance monotonically, wall-clock fields decide.
      */
     fun next(afterMillis: Long, zone: TimeZone = TimeZone.getDefault()): Long? {
         val cal = Calendar.getInstance(zone).apply {
@@ -35,28 +41,39 @@ class CronExpression private constructor(
             set(Calendar.MILLISECOND, 0)
             add(Calendar.MINUTE, 1) // strictly after
         }
-        // 8 years of minutes is the cap; a valid expression always resolves far sooner.
-        repeat(MAX_SEARCH_MINUTES) {
-            if (matches(cal)) return cal.timeInMillis
+        val deadline = cal.timeInMillis + HORIZON_MILLIS
+        while (cal.timeInMillis <= deadline) {
+            if (!dayMatches(cal)) {
+                cal.add(Calendar.DAY_OF_MONTH, 1)
+                cal.set(Calendar.HOUR_OF_DAY, 0)
+                cal.set(Calendar.MINUTE, 0)
+                continue
+            }
+            if (cal.get(Calendar.HOUR_OF_DAY) !in hours) {
+                cal.add(Calendar.HOUR_OF_DAY, 1)
+                cal.set(Calendar.MINUTE, 0)
+                continue
+            }
+            if (cal.get(Calendar.MINUTE) in minutes) return cal.timeInMillis
             cal.add(Calendar.MINUTE, 1)
         }
         return null
     }
 
-    private fun matches(cal: Calendar): Boolean {
-        if (cal.get(Calendar.MINUTE) !in minutes) return false
-        if (cal.get(Calendar.HOUR_OF_DAY) !in hours) return false
+    /** Whether the civil day under [cal] satisfies the month + dom/dow constraints. */
+    private fun dayMatches(cal: Calendar): Boolean {
         if (cal.get(Calendar.MONTH) + 1 !in months) return false
         val dom = cal.get(Calendar.DAY_OF_MONTH) in daysOfMonth
         val dow = (cal.get(Calendar.DAY_OF_WEEK) - 1) in daysOfWeek // Calendar SUNDAY=1 → 0
         return when {
-            domRestricted && dowRestricted -> dom || dow
+            domRestricted && dowRestricted -> dom || dow // standard Vixie-cron OR rule
             else -> dom && dow
         }
     }
 
     companion object {
-        private const val MAX_SEARCH_MINUTES = 366 * 24 * 60 * 8
+        // 8 years expressed in wall time; a valid expression always resolves far sooner.
+        private const val HORIZON_MILLIS = 366L * 24 * 60 * 8 * 60_000L
 
         /** Parses [expr]; returns null if it is not a well-formed 5-field expression. */
         fun parse(expr: String): CronExpression? {

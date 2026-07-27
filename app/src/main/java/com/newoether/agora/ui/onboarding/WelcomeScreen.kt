@@ -64,6 +64,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -699,27 +700,34 @@ private fun TypeInText(text: String, modifier: Modifier = Modifier, style: TextS
     var started by remember(text) { mutableStateOf(false) }
     var visible by remember(text, animate) { mutableStateOf(if (animate) 0 else text.length) }
     var done by remember(text, animate) { mutableStateOf(!animate) }
+    // Type by CODE POINT, not by char: a surrogate pair (emoji) or a combining sequence cut in
+    // half renders as tofu for one frame. The count is over code points, and the prefix is
+    // resolved back to a char offset only when slicing.
+    val codePointCount = remember(text) { text.codePointCount(0, text.length) }
     LaunchedEffect(text, animate) {
-        if (!animate) { visible = text.length; done = true; return@LaunchedEffect }
+        if (!animate) { visible = codePointCount; done = true; return@LaunchedEffect }
         visible = 0
         done = false
         if (!started) { startMs = System.currentTimeMillis() + initialDelayMs; started = true }
-        while (visible < text.length) {
+        while (visible < codePointCount) {
+            // withFrameNanos ties each reveal to a real frame instead of a drifting 16ms sleep.
+            withFrameNanos { }
             val elapsed = System.currentTimeMillis() - startMs
-            val target = if (elapsed < 0) 0 else (elapsed / speedMs).toInt().coerceAtMost(text.length)
+            val target = if (elapsed < 0) 0 else (elapsed / speedMs).toInt().coerceAtMost(codePointCount)
             if (target != visible) visible = target
-            if (visible >= text.length) break
-            kotlinx.coroutines.delay(16)
         }
         done = true
         onDone()
+    }
+    val typed = remember(text, visible) {
+        if (visible >= codePointCount) text else text.substring(0, text.offsetByCodePoints(0, visible))
     }
     Box(modifier.fillMaxWidth()) {
         // Invisible full text anchors layout — always present
         Text(text = text, style = style, fontWeight = fontWeight, color = Color.Transparent, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
         // Visible typed text — only when showText is true
         if (showText) {
-            Text(text = text.take(visible) + if (!done) "|" else "", style = style, fontWeight = fontWeight, color = color, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
+            Text(text = typed + if (!done) "|" else "", style = style, fontWeight = fontWeight, color = color, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
         }
     }
 }

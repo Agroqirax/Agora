@@ -5,6 +5,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -66,6 +67,8 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -114,9 +117,9 @@ fun ChatApp(
     val allMessages by viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val queuedSends by viewModel.queuedSends.collectAsState()
+    val isStopping by viewModel.isStopping.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val currentConversation by viewModel.currentConversation.collectAsState()
-    val automationTasks by viewModel.tasks.collectAsState()
     val currentLoop by viewModel.currentLoop.collectAsState()
     val runningLoopIds by viewModel.runningLoopConversationIds.collectAsState()
     val generatingInConversationId by viewModel.generatingInConversationId.collectAsState()
@@ -167,41 +170,23 @@ fun ChatApp(
     var showPromptDialog by remember { mutableStateOf(false) }
     var showAdvancedDialog by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
-    var outerSpacerStartNanos by remember { mutableLongStateOf(0L) }
-    var outerSpacerTickNanos by remember { mutableLongStateOf(0L) }
-    val spacerDurationMs = 400f
+    // Composer-expand spacer collapse (44dp → 0). An Animatable driven from an effect replaces the
+    // former hand-rolled clock, which wrote animation state DURING composition (Compose forbids
+    // that — it makes the frame's output depend on when it happened to be composed) and ticked on
+    // a fixed 16ms sleep that drifts against the real refresh rate.
+    val spacerProgress = remember { Animatable(0f) }
     val spacerEasing = remember { CubicBezierEasing(0.15f, 0.5f, 0.25f, 1.0f) }
-
-    // Start timing synchronously on the first expand frame; never reset
-    if (isExpanded && outerSpacerStartNanos == 0L) {
-        outerSpacerStartNanos = System.nanoTime()
-    }
-    if (!isExpanded) {
-        outerSpacerStartNanos = 0L
-        outerSpacerTickNanos = 0L
-    }
-
-    val spacerElapsedMs = if (outerSpacerStartNanos > 0L) {
-        val tick = if (outerSpacerTickNanos > 0L) outerSpacerTickNanos else outerSpacerStartNanos
-        ((tick - outerSpacerStartNanos) / 1_000_000f).coerceIn(0f, spacerDurationMs)
-    } else 0f
-
-    val isExpandAnimating = outerSpacerStartNanos > 0L && spacerElapsedMs < spacerDurationMs
-
     LaunchedEffect(isExpanded) {
         if (isExpanded) {
-            while (true) {
-                outerSpacerTickNanos = System.nanoTime()
-                if ((outerSpacerTickNanos - outerSpacerStartNanos) / 1_000_000f >= spacerDurationMs) break
-                delay(16L)
-            }
+            spacerProgress.snapTo(0f)
+            spacerProgress.animateTo(1f, tween(400, easing = spacerEasing))
+        } else {
+            spacerProgress.snapTo(0f)
         }
     }
-
-    val outerSpacerHeightPx: Float = if (outerSpacerStartNanos > 0L) {
-        val easedFraction = spacerEasing.transform(spacerElapsedMs / spacerDurationMs)
-        with(density) { 44.dp.toPx() } * (1f - easedFraction)
-    } else 0f
+    val isExpandAnimating = spacerProgress.isRunning
+    val outerSpacerHeightPx: Float =
+        if (isExpanded) with(density) { 44.dp.toPx() } * (1f - spacerProgress.value) else 0f
 
     val configuration = LocalConfiguration.current
     val drawerWidth = configuration.screenWidthDp.dp * 0.8f
@@ -230,7 +215,12 @@ fun ChatApp(
     val composer = com.newoether.agora.ui.chat.bottombar.rememberChatComposerState()
     val inputFocusRequester = remember { FocusRequester() }
 
-    val messageHeights = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+    // Keyed per conversation: message ids are unique, but the map is also summed wholesale
+    // (see the scroll math below), so entries left behind by a previous conversation would
+    // inflate those totals and misplace the scroll.
+    val messageHeights = remember(currentConversationId) {
+        androidx.compose.runtime.mutableStateMapOf<String, Int>()
+    }
     var viewportHeightPx by remember { mutableIntStateOf(0) }
 
     var showLaunchContent by remember { mutableStateOf(false) }
@@ -289,6 +279,17 @@ fun ChatApp(
                 }
             }
         }
+    }
+
+    // Second beat of the conversation-switch feedback: the tap tick fires at the drawer item,
+    // this one lands when the target conversation has finished loading and is on screen.
+    // Edge-triggered on true→false so it never fires on first composition. New Chat is exempt
+    // (it lands on the empty composer, with nothing to "finish loading") — and it is exactly the
+    // case where currentConversationId is null once the switch settles.
+    var wasSwitching by remember { mutableStateOf(false) }
+    LaunchedEffect(isSwitching) {
+        if (wasSwitching && !isSwitching && currentConversationId != null) haptics.success()
+        wasSwitching = isSwitching
     }
 
     val branchSwitchTrigger by viewModel.branchSwitchTrigger.collectAsState()
@@ -420,6 +421,24 @@ fun ChatApp(
         }
         composer.selectedAttachments = draftAttachments
         viewModel.loadingDraft = false
+    }
+
+    // Draft write-back, debounced. Keyed by conversation id and the id is CAPTURED when the
+    // effect starts — a debounced write can therefore never attribute text typed in conversation
+    // A to conversation B after a fast switch (the old bottom-bar effect read the live id at
+    // fire time). Switching restarts the effect, dropping ≤300ms of pending tail — acceptable.
+    // Declared AFTER the draft-load effect above so loadingDraft is already set when this runs.
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    LaunchedEffect(currentConversationId) {
+        val draftId = currentConversationId ?: return@LaunchedEffect
+        snapshotFlow { textFieldState.text.toString() to composer.selectedAttachments }
+            .distinctUntilChanged()
+            .debounce(300L)
+            .collect { (text, attachments) ->
+                if (!viewModel.loadingDraft) {
+                    viewModel.updateDraft(draftId, text, attachments)
+                }
+            }
     }
 
     LaunchedEffect(Unit) {
@@ -577,11 +596,10 @@ fun ChatApp(
                                 allMessages = StableMessageList(allMessages),
                                 modifier = messageListModifier,
                                 state = listState,
-                                // Global generation gate: while ANY generation is in
-                                // progress, all per-message actions (edit / delete /
-                                // regenerate / branch-switch) are disabled. Bound to the
-                                // global isLoading so there is no per-conversation timing
-                                // window (generatingInConversationId is set asynchronously).
+                                // Per-conversation generation gate: isLoading mirrors the OPEN
+                                // conversation's slot only (ConversationGenerationState.onActive
+                                // gates on current == id), so message actions freeze while THIS
+                                // conversation generates — background conversations don't affect it.
                                 isLoading = isLoading,
                                 isSwitching = isSwitching,
                                 visualizeContextRollout = visualizeContextRollout,
@@ -592,6 +610,9 @@ fun ChatApp(
                                 viewportHeight = viewportHeightPx,
                                 messageHeights = messageHeights,
                                 onEditMessage = { id, text ->
+                                    // Same feel as the composer's Send: an edit re-sends, so it
+                                    // gets the identical single confirmation tap.
+                                    haptics.action()
                                     val isFirstMessage = messages.isEmpty()
                                     viewModel.editMessage(id, text)
                                     scope.launch {
@@ -625,35 +646,6 @@ fun ChatApp(
                                     bottom = bottomBarHeight + 8.dp
                                 )
                             )
-                            val taskId = currentConversation?.taskId
-                            if (taskId != null) {
-                                val taskName = automationTasks.firstOrNull { it.id == taskId }?.name
-                                    ?: currentConversation?.title.orEmpty()
-                                Surface(
-                                    modifier = Modifier
-                                        .align(Alignment.TopCenter)
-                                        .padding(
-                                            top = padding.calculateTopPadding() + 8.dp,
-                                            start = 16.dp,
-                                            end = 16.dp,
-                                        )
-                                        .fillMaxWidth()
-                                        .clickable { onOpenTasks(taskId) },
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    shape = RoundedCornerShape(14.dp),
-                                    tonalElevation = 2.dp,
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.task_from_banner, taskName),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        fontWeight = FontWeight.Medium,
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
                             }
                         } else if (targetShowLaunch) {
                             Box(
@@ -840,16 +832,13 @@ fun ChatApp(
                         modifier = Modifier,
                         textFieldState = textFieldState,
                         composerState = composer,
-                        onDraftChanged = { text, attachments ->
-                            val id = currentConversationId
-                            if (id != null && !viewModel.loadingDraft) {
-                                viewModel.updateDraft(id, text, attachments)
-                            }
-                        },
                         focusRequester = inputFocusRequester,
                         isExpanded = isExpanded,
                         isExpandAnimating = isExpandAnimating,
-                        onCollapse = { haptics.action(); isExpanded = false },
+                        // No haptic here: onCollapse also fires on back gesture and — the reason
+                        // Send felt like a double tap — automatically after a successful send.
+                        // The collapse BUTTON does its own haptic, where a press actually happened.
+                        onCollapse = { isExpanded = false },
                         onExpand = { haptics.action(); isExpanded = true },
                         showWebSearch = globalWebSearch,
                         showShell = shellDevices.isNotEmpty() && globalShell,
@@ -862,7 +851,7 @@ fun ChatApp(
                         onAdvancedClick = { showAdvancedDialog = true },
                         queuedSends = queuedSends,
                         onRemoveQueuedSend = viewModel::removeQueuedSend,
-                        onClearQueuedSends = viewModel::clearQueuedSends,
+                        isStopping = isStopping,
                     )
                 }
             }

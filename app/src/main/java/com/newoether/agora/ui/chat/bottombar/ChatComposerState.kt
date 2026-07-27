@@ -157,7 +157,10 @@ class ChatComposerState(
                         paths.add(file.absolutePath)
                     }
                     timeUs += intervalUs
-                    processingStates = processingStates + (videoUri to (i + 1).toFloat() / frameCount)
+                    // Snapshot-map read-modify-write must stay main-confined (see onPickImages).
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        processingStates = processingStates + (videoUri to (i + 1).toFloat() / frameCount)
+                    }
                 }
                 } finally { retriever.release() }
             } catch (c: CancellationException) {
@@ -165,7 +168,9 @@ class ChatComposerState(
                 paths.forEach { runCatching { java.io.File(it).delete() } }
                 throw c
             } catch (e: Exception) { DebugLog.e("ChatComposer", "Video frame extraction failed", e) }
-            processingStates = processingStates - videoUri
+            withContext(kotlinx.coroutines.Dispatchers.Main) {
+                processingStates = processingStates - videoUri
+            }
             paths
         }
     }
@@ -184,7 +189,11 @@ class ChatComposerState(
         for ((uriObj, att) in uris.zip(newAttachments)) {
             val uriStr = uriObj.toString()
             processingStates = processingStates + (uriStr to 0f)
-            scope.launch(Dispatchers.IO) {
+            // Launch on the scope's Main dispatcher: copyToPrivate hops to IO internally, so every
+            // read-modify-write of the snapshot lists below runs main-confined. Launching the whole
+            // block on IO made N parallel completions race each other's list assignment (lost
+            // update → a localPath silently reverted to null → attachment dropped at send).
+            scope.launch {
                 val localPath = copyToPrivate(uriObj, "img")
                 if (localPath != null) {
                     selectedAttachments = selectedAttachments.map { a ->
@@ -196,7 +205,7 @@ class ChatComposerState(
                     if (idx >= 0) {
                         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(idx) }
                     }
-                    rejectedMessage = "Failed to copy image to local storage"
+                    rejectedMessage = context.getString(com.newoether.agora.R.string.attachment_copy_failed_image)
                 }
                 processingStates = processingStates - uriStr
             }
@@ -254,11 +263,14 @@ class ChatComposerState(
                     showPdfPageDialog = true
                     // Initialize selection to first 5 pages
                     onInitPdfSelection?.invoke((0 until minOf(pageCount, 5)).toSet())
-                    pdfRenderJob = scope.launch(Dispatchers.IO) {
-                        val paths = PdfPageRenderer.renderAllPages(
-                            context, uri, maxPages = pageCount,
-                            onProgress = { cur, total -> pendingPdfRenderProgress = cur to total }
-                        )
+                    pdfRenderJob = scope.launch {
+                        val paths = withContext(Dispatchers.IO) {
+                            PdfPageRenderer.renderAllPages(
+                                context, uri, maxPages = pageCount,
+                                // Progress callback fires on IO — post the state write to main.
+                                onProgress = { cur, total -> scope.launch { pendingPdfRenderProgress = cur to total } }
+                            )
+                        }
                         pendingPdfRenderedPaths = paths
                         pendingPdfIsRendering = false
                     }
@@ -281,12 +293,13 @@ class ChatComposerState(
         if (validAttachments.isNotEmpty()) haptics.selection()
         selectedAttachments = selectedAttachments + validAttachments
 
-        // Copy generic files to app-private storage immediately
+        // Copy generic files to app-private storage immediately. Main-confined mutations —
+        // copyToPrivate does its own IO hop (see onPickImages for the race rationale).
         for ((uri, att) in fileCopySources) {
             val uriStr = uri.toString()
             val ext = att.fileName?.substringAfterLast('.', "bin") ?: "bin"
             processingStates = processingStates + (uriStr to 0f)
-            scope.launch(Dispatchers.IO) {
+            scope.launch {
                 val localPath = copyToPrivate(uri, ext)
                 if (localPath != null) {
                     selectedAttachments = selectedAttachments.map { a ->
@@ -297,7 +310,7 @@ class ChatComposerState(
                     if (idx >= 0) {
                         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(idx) }
                     }
-                    rejectedMessage = "Failed to copy file to local storage"
+                    rejectedMessage = context.getString(com.newoether.agora.R.string.attachment_copy_failed_file)
                 }
                 processingStates = processingStates - uriStr
             }
@@ -329,7 +342,8 @@ class ChatComposerState(
 
         // Start frame extraction and store result paths; track job so an X-delete while
         // extracting can cancel it (extractVideoFrames cleans up partial files on cancel).
-        val job = scope.launch(Dispatchers.IO) {
+        // Main-launched: extraction hops to IO internally; list/map mutations stay main-confined.
+        val job = scope.launch {
             val framePaths = extractVideoFrames(vidUri, frameCount, intervalMs)
             selectedAttachments = selectedAttachments.map { a ->
                 if (a.uri == vidUri) a.copy(processedFrames = framePaths) else a

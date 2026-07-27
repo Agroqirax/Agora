@@ -26,6 +26,16 @@ import kotlinx.serialization.json.JsonPrimitive
 import java.io.File
 import java.util.UUID
 
+// Gemini thought summaries carry their headline as **bold** or a markdown heading.
+// Hoisted to file level: extraction runs on every streamed thought chunk, and Regex
+// construction (Pattern.compile) is far too expensive to repeat per chunk.
+private val THOUGHT_TITLE_BOLD = Regex("\\*\\*(.*?)\\*\\*")
+private val THOUGHT_TITLE_HEADING = Regex("(?m)^#+\\s*(.*)$")
+
+private fun extractThoughtTitle(content: String): String? =
+    THOUGHT_TITLE_BOLD.find(content)?.groupValues?.get(1)
+        ?: THOUGHT_TITLE_HEADING.find(content)?.groupValues?.get(1)
+
 @Serializable
 internal data class ApiGenerateContentRequest(
     val contents: List<ApiRequestContent>,
@@ -237,8 +247,7 @@ class GeminiProvider : LlmProvider {
                     if (file.exists()) {
                         val bytes = file.readBytes()
                         val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                        val mimeType = if (imagePath.endsWith(".png", true)) "image/png" else "image/jpeg"
-                        parts.add(ApiRequestPart(inlineData = ApiInlineData(mimeType = mimeType, data = base64)))
+                        parts.add(ApiRequestPart(inlineData = ApiInlineData(mimeType = com.newoether.agora.api.util.imageMimeType(imagePath), data = base64)))
                     }
                 } catch (e: Exception) {
                     DebugLog.e("AgoraAPI", "Failed to encode image: $imagePath", e)
@@ -368,12 +377,20 @@ class GeminiProvider : LlmProvider {
                     var line: String? = null
                     var currentThoughtSignature: String? = null
                     var inThoughtBlock = false
+                    // Tolerate long thinking pauses, but not a silently-dead connection:
+                    // 3 consecutive read timeouts (~15 min without a byte) → give up.
+                    var consecutiveReadTimeouts = 0
                     while (currentCoroutineContext().isActive) {
                         try {
                             line = handle.readLine()
                             if (line == null) break
+                            consecutiveReadTimeouts = 0
                         } catch (e: java.net.SocketTimeoutException) {
                             if (!currentCoroutineContext().isActive) break
+                            if (++consecutiveReadTimeouts >= 3) {
+                                emit(StreamEvent.Error(GenerationError.Timeout))
+                                break
+                            }
                             continue
                         }
                         if (line.startsWith("data: ")) {
@@ -390,9 +407,7 @@ class GeminiProvider : LlmProvider {
                                             if (thoughtElement is JsonPrimitive) {
                                                 if (thoughtElement.isString) {
                                                     val content = thoughtElement.content
-                                                    val title = Regex("\\*\\*(.*?)\\*\\*").find(content)?.groupValues?.get(1)
-                                                              ?: Regex("(?m)^#+\\s*(.*)$").find(content)?.groupValues?.get(1)
-                                                    emit(StreamEvent.ThoughtChunk(content, title, currentThoughtSignature))
+                                                    emit(StreamEvent.ThoughtChunk(content, extractThoughtTitle(content), currentThoughtSignature))
                                                     isPartOfThought = true
                                                     inThoughtBlock = true
                                                 } else if (thoughtElement.content == "true") {
@@ -403,9 +418,7 @@ class GeminiProvider : LlmProvider {
                                         }
 
                                         part.reasoningContent?.let {
-                                            val title = Regex("\\*\\*(.*?)\\*\\*").find(it)?.groupValues?.get(1)
-                                                      ?: Regex("(?m)^#+\\s*(.*)$").find(it)?.groupValues?.get(1)
-                                            emit(StreamEvent.ThoughtChunk(it, title, currentThoughtSignature))
+                                            emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
                                             isPartOfThought = true
                                             inThoughtBlock = true
                                         }
@@ -421,9 +434,7 @@ class GeminiProvider : LlmProvider {
                                             // inThoughtBlock: carry-over from a preceding boolean {thought: true} part in an earlier event
                                             val inThought = isPartOfThought || inThoughtBlock
                                             if (inThought) {
-                                                val title = Regex("\\*\\*(.*?)\\*\\*").find(it)?.groupValues?.get(1)
-                                                          ?: Regex("(?m)^#+\\s*(.*)$").find(it)?.groupValues?.get(1)
-                                                emit(StreamEvent.ThoughtChunk(it, title, currentThoughtSignature))
+                                                emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
                                                 inThoughtBlock = false
                                             } else {
                                                 emit(StreamEvent.TextChunk(it))

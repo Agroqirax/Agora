@@ -236,7 +236,6 @@ class TaskExecutionEngine(
                 providerRegistry = providerRegistry,
                 ragManager = ragManager,
                 appContext = appContext,
-                currentActiveModel = MutableStateFlow(effectiveModelId),
                 pendingConversationSettings = MutableStateFlow(null),
                 onSnackbar = {},
             )
@@ -247,7 +246,7 @@ class TaskExecutionEngine(
                     null,
                 )
             } else {
-                builder.buildEffectiveSystemPrompt(conversationId)
+                builder.buildEffectiveSystemPrompt(conversationId, effectiveModelId)
             }
             val effectiveSettings = builder.buildEffectiveConversationSettings(conversationId)
             val (config, baseGenCtx) = builder.buildGenerationPair(

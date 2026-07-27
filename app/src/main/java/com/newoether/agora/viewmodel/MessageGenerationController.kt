@@ -36,23 +36,20 @@ import java.util.UUID
 
 /**
  * Owns the message lifecycle (send / regenerate / edit / delete) and the
- * race-free generation handshake. Extracted VERBATIM from ChatViewModel.
- * Holds references to the SAME MutableStateFlow instances that ChatViewModel
- * exposes — do NOT create new ones here.
+ * race-free generation handshake.
  *
  * Generation state is held per-conversation in [ConversationGenerationState]
- * (obtained from [ConversationStateRegistry]); the global StateFlows
- * ChatViewModel exposes to the UI are a mirror of whichever conversation is
- * currently open. Synchronous writes to the global flows inside the generation
- * coroutines are gated on the open conversation via [ifOpenOn] so a background
- * generation can't clobber the visible conversation's UI.
+ * (obtained from [ConversationStateRegistry]); the StateFlows ChatViewModel
+ * exposes to the UI are a mirror of whichever conversation is currently open.
+ * Synchronous writes to those flows inside the generation coroutines are gated
+ * on the open conversation via [ifOpenOn] so a background generation can't
+ * clobber the visible conversation's UI.
  */
 class MessageGenerationController(
-    // ── 协程作用域(用 viewModelScope 传进来)──
     private val viewModelScope: CoroutineScope,
     private val application: Application,
     private val appContext: Context,
-    // ── 单例协作者 ──
+    // ── Process-scoped collaborators ──
     private val convRepo: ConversationRepository,
     private val settings: SettingsRepository,
     private val registry: ConversationStateRegistry,
@@ -63,19 +60,19 @@ class MessageGenerationController(
     private val providerRegistry: ProviderRegistry,
     private val localProvider: LocalProvider,
     private val executionCoordinator: ConversationExecutionCoordinator,
-    // ── 共享 UI 状态:必须是 ChatViewModel 里的同一个实例 ──
-    private val allMessages: MutableStateFlow<List<ChatMessage>>,          // = _allMessages
-    private val selectedChildren: MutableStateFlow<Map<String?, String>>,  // = _selectedChildren
-    private val currentConversationId: MutableStateFlow<String?>,          // = _currentConversationId
-    private val isNewChatMode: MutableStateFlow<Boolean>,                  // = _isNewChatMode
-    private val pendingConversationSettings: MutableStateFlow<ConversationSettings?>, // = _pendingConversationSettings
-    private val pendingSystemPromptId: MutableStateFlow<String?>,          // = _pendingSystemPromptId
-    private val currentActiveModel: StateFlow<String>,                     // = currentActiveModel(只读)
-    private val messages: StateFlow<List<ChatMessage>>,                    // = messages(只读)
-    // ── 回调:替换掉方法体里对 ChatViewModel 私有成员/方法的调用 ──
-    private val onScrollToMessage: (String?) -> Unit,    // 替换 triggerScrollToMessage(...)
-    private val onSnackbar: (String) -> Unit,            // 替换 emitSnackbar(...)
-    private val onSnackbarSuspend: suspend (String) -> Unit,  // generateTitle 内的顺序 emit(等价原版 _snackbarMessage.emit）
+    // ── Shared UI state: the SAME instances ChatViewModel exposes — never recreate ──
+    private val allMessages: MutableStateFlow<List<ChatMessage>>,
+    private val selectedChildren: MutableStateFlow<Map<String?, String>>,
+    private val currentConversationId: MutableStateFlow<String?>,
+    private val isNewChatMode: MutableStateFlow<Boolean>,
+    private val pendingConversationSettings: MutableStateFlow<ConversationSettings?>,
+    private val pendingSystemPromptId: MutableStateFlow<String?>,
+    private val currentActiveModel: StateFlow<String>,
+    private val messages: StateFlow<List<ChatMessage>>,
+    // ── Callbacks into ChatViewModel-owned side effects ──
+    private val onScrollToMessage: (String?) -> Unit,
+    private val onSnackbar: (String) -> Unit,
+    private val onSnackbarSuspend: suspend (String) -> Unit,  // sequential emit inside generateTitle
     private val onPersistSelectedChildren: suspend (String, Map<String?, String>) -> Unit,
     // Called when sendMessage creates a NEW conversation, so the UI can suppress the
     // conversation-open auto-scroll (the send's own scroll-to-message handles it) and
@@ -84,6 +81,11 @@ class MessageGenerationController(
     // Called once when a hidden task/loop execution becomes searchable. The callback
     // only enqueues background work; embedding computation must not run under the send lock.
     private val onConversationGraduated: (String) -> Unit = {},
+    // Called after a USER message row is persisted (send / edit), so incremental RAG
+    // indexing covers the user's side too — the model reply is indexed at generation end
+    // via GenerationManager.onMessagePersisted, and without this hook user messages only
+    // ever entered the cache through a manual full re-cache. Enqueues background work only.
+    private val onUserMessagePersisted: (messageId: String, text: String) -> Unit = { _, _ -> },
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
 
@@ -130,8 +132,16 @@ class MessageGenerationController(
             // Delete inside the generating conversation is a terminal stop: fully release the slot.
             val r = state.stop()
             val msgs = listOfNotNull(r.stoppedMessage)
-            if (msgs.isNotEmpty()) finalizer.launchStopFinalization(state.scope, r.conversationId, msgs) else null
+            if (msgs.isNotEmpty()) {
+                finalizer.launchStopFinalization(
+                    state.scope, r.conversationId, msgs,
+                    onFinalized = state::clearStoppedOverlay,
+                )
+            } else null
         } else {
+            // Not generating — but a STALE stopped overlay from an earlier stop may still hold the
+            // message being deleted; clear it so resolvePath can't re-append the deleted bubble.
+            registry.get(currentId)?.clearStoppedOverlay()
             null
         }
 
@@ -323,19 +333,19 @@ class MessageGenerationController(
         state: ConversationGenerationState,
         callerTag: String
     ) {
-        val resolved = requestBuilder.buildEffectiveSystemPrompt(currentId)
+        val resolved = requestBuilder.buildEffectiveSystemPrompt(currentId, modelId)
         val effectiveSettings = requestBuilder.buildEffectiveConversationSettings(currentId)
         // Re-resolve the key against on-disk settings here (the suspend convergence
         // point for all entry paths). The synchronous [activeKey] resolved by the
         // callers can be blank if DataStore had not finished loading when Send was
         // tapped, which would build the request with an empty key → 401.
         val freshKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() } ?: activeKey
-        val (config, genCtx) = requestBuilder.buildGenerationPair(
-            providerName, modelId, freshKey,
-            resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-            effectiveSettings, currentId
-        )
         try {
+            val (config, genCtx) = requestBuilder.buildGenerationPair(
+                providerName, modelId, freshKey,
+                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
+                effectiveSettings, currentId
+            )
             // No global slot: remote generations run concurrently (only the per-conversation
             // lock above serializes same-conversation work); local model work is serialized
             // inside LocalProvider via LocalModelSerializer. Stop therefore releases
@@ -349,7 +359,10 @@ class MessageGenerationController(
                 modelName = modelId,
                 config = config,
                 ctx = genCtx,
-                generationJob = state.generationJob,
+                // The coroutine's own Job — reading state.generationJob here races the caller's
+                // assignment (the coroutine can start before `state.generationJob = launch{…}`
+                // completes and observe the PREVIOUS job).
+                generationJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job],
                 callbacks = state.callbacksFor(uiToken, persistId),
                 streamScope = state.streamScope
             )
@@ -357,6 +370,21 @@ class MessageGenerationController(
             throw e
         } catch (e: Exception) {
             DebugLog.e("AgoraVM", "Generation failed in $callerTag", e)
+            // A pre-stream failure (prompt/config build — e.g. RAG key resolution) would otherwise
+            // strand the SENDING placeholder row + streaming overlay until the conversation is
+            // reopened. Persist a terminal ERROR row and clear this generation's overlay.
+            runCatching {
+                val existing = convRepo.getMessagesForConversationSnapshot(currentId)
+                    .find { it.id == modelMessageId }
+                if (existing != null && existing.status == MessageStatus.SENDING) {
+                    convRepo.upsertMessage(existing.copy(
+                        status = MessageStatus.ERROR,
+                        text = "Error: ${e.localizedMessage ?: "Failed to build the request."}",
+                    ))
+                }
+            }
+            state.streamClear(uiToken)
+            state.loadingChange(uiToken, false)
         }
     }
 
@@ -387,6 +415,7 @@ class MessageGenerationController(
                 id = newUserMessageId, conversationId = genId, parentId = messageToEdit.parentId,
                 text = newText, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis()
             ))
+            if (newText.isNotBlank()) onUserMessagePersisted(newUserMessageId, newText)
             val newMap = selectedAtStart.toMutableMap()
             newMap[messageToEdit.parentId] = newUserMessageId
             val selectedAfterUserEdit = newMap.toMap()
@@ -464,31 +493,130 @@ class MessageGenerationController(
         return sendInto(genId, wasNewChat, text, images, attachments, selectedModelId)
     }
 
-    /** Release [uiToken]'s slot and, only if this call actually released it, drain the next queued
-     *  send into its originating conversation. */
+    /** Release [uiToken]'s slot and, only if this call actually released it, flush the WHOLE
+     *  queue into its originating conversation (never re-reading currentConversationId, so a
+     *  message queued in conversation A can't land in B after the user switches chats): every
+     *  queued message becomes its own consecutive user bubble and ONE generation answers them. */
     private fun releaseAndDrain(state: ConversationGenerationState, uiToken: Long, genId: String) {
         if (state.endGeneration(uiToken)) {
-            state.dequeueSend()?.let { queued ->
-                // Re-enter with the ORIGINATING genId (never re-reading currentConversationId), so a
-                // message queued in conversation A can't land in B after the user switches chats.
-                sendInto(
-                    genId = genId,
-                    wasNewChat = false,
-                    text = queued.text,
-                    images = emptyList(),
-                    attachments = queued.attachments,
-                    modelId = queued.modelId,
-                )
+            val batch = state.takeQueuedSends()
+            if (batch.isNotEmpty()) sendQueuedBatch(genId, batch)
+        }
+    }
+
+    /**
+     * Batch drain: persists each queued send as its own user message, chained consecutively onto
+     * the conversation leaf, then launches a single generation replying to all of them (providers
+     * with strict role alternation see them merged by mergeConsecutiveSameRole). The batch answers
+     * with the model of the most recent queued send.
+     */
+    private fun sendQueuedBatch(genId: String, batch: List<QueuedSend>) {
+        val state = registry.getOrCreate(genId)
+        val myUiToken = state.acquireForSend() ?: run {
+            // Lost the slot race to a manual send that claimed it between release and here —
+            // nothing is lost: the batch goes back to the queue head and the winner's own
+            // release drains it.
+            state.requeueFront(batch)
+            return
+        }
+        val modelId = batch.last().modelId
+        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
+            batch.forEach { com.newoether.agora.util.AttachmentFiles.deleteBacking(it.attachments) }
+            releaseAndDrain(state, myUiToken, genId); return
+        }
+        if (providerName == Constants.PROVIDER_LOCAL) {
+            val localModelId = modelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
+            val config = settings.localChatModels.value.find { it.modelId == localModelId }
+            if (config == null || !java.io.File(config.localFilePath).exists()) {
+                onSnackbar(application.getString(R.string.local_model_not_found))
+                batch.forEach { com.newoether.agora.util.AttachmentFiles.deleteBacking(it.attachments) }
+                releaseAndDrain(state, myUiToken, genId); return
+            }
+        }
+        state.loadingChange(myUiToken, true)
+
+        state.generationJob = state.scope.launch {
+            try {
+                val myPersistId = state.nextPersistId()
+                val payloads = batch.map { payloadBuilder.buildMessagePayload(application, it.images, it.attachments) }
+                executionCoordinator.withConversationLock(genId) {
+                    if (convRepo.graduateConversation(genId)) {
+                        onConversationGraduated(genId)
+                    }
+                    val snapshotEntities = convRepo.getMessagesForConversationSnapshot(genId)
+                    val selectedBeforeSend = convRepo.restoreBranchSelections(genId)
+                    val path = ConversationUiState.resolvePath(
+                        allMessages = snapshotEntities.map {
+                            ChatMessage(
+                                id = it.id, parentId = it.parentId, text = it.text,
+                                participant = it.participant, timestamp = it.timestamp, status = it.status,
+                            )
+                        },
+                        streamingMsg = null,
+                        selectedChildren = selectedBeforeSend,
+                    )
+                    var parentId: String? = path.lastOrNull()?.id
+                    val newChildren = selectedBeforeSend.toMutableMap()
+                    val now = System.currentTimeMillis()
+                    batch.forEachIndexed { index, queued ->
+                        val (allImages, attachmentMeta) = payloads[index]
+                        val userMessageId = UUID.randomUUID().toString()
+                        convRepo.upsertMessage(MessageEntity(
+                            id = userMessageId, conversationId = genId, parentId = parentId,
+                            text = queued.text, images = allImages, thoughts = null,
+                            status = MessageStatus.SUCCESS, participant = Participant.USER,
+                            timestamp = now + index,
+                            attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
+                        ))
+                        if (queued.text.isNotBlank()) onUserMessagePersisted(userMessageId, queued.text)
+                        settings.incrementMessagesSent()
+                        newChildren[parentId] = userMessageId
+                        parentId = userMessageId
+                    }
+                    val lastUserMessageId = parentId
+                    val modelMessageId = UUID.randomUUID().toString()
+                    val startTime = now + batch.size
+                    convRepo.upsertMessage(MessageEntity(
+                        id = modelMessageId, conversationId = genId, parentId = lastUserMessageId,
+                        text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL,
+                        timestamp = startTime, modelName = modelId
+                    ))
+                    convRepo.getConversation(genId)?.let { conv ->
+                        convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
+                    }
+                    val placeholder = ChatMessage(
+                        id = modelMessageId, parentId = lastUserMessageId, text = "", participant = Participant.MODEL,
+                        status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId
+                    )
+                    state.streamUpdate(myUiToken, placeholder)
+                    ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
+                    newChildren[lastUserMessageId] = modelMessageId
+                    onPersistSelectedChildren(genId, newChildren)
+                    ifOpenOn(genId) { selectedChildren.value = newChildren }
+                    ifOpenOn(genId) { onScrollToMessage(lastUserMessageId) }
+
+                    launchGeneration(
+                        genId, modelMessageId, startTime,
+                        isRegenerate = false, replaceMessageId = null,
+                        providerName, modelId, activeKey, myUiToken, myPersistId,
+                        state, callerTag = "queueDrain"
+                    )
+                }
+            } finally {
+                releaseAndDrain(state, myUiToken, genId)
             }
         }
     }
+
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
-     * background/drained send lands in its own conversation). Atomically claims the generation slot
-     * via [ConversationGenerationState.acquireForSend]: if a generation is already running the
-     * message is enqueued (carrying its full attachment list) and this returns true; otherwise the
-     * slot is held, generating is set synchronously, and the generation launches. The finally
-     * releases the slot (token-gated) and drains the next queued send.
+     * background send lands in its own conversation). Atomically claims the generation slot
+     * via [ConversationGenerationState.acquireForSend]: if a generation is already running (or
+     * still winding down after a Stop) the message is enqueued (carrying its full attachment
+     * list) and this returns true; otherwise the slot is held, generating is set synchronously,
+     * and the generation launches. The finally releases the slot (owner-gated) and batch-drains
+     * the queue. Validation failures after the claim release via [releaseAndDrain] too — a plain
+     * endGeneration would strand queued sends behind an idle slot until the next manual send.
      */
     private fun sendInto(
         genId: String,
@@ -507,18 +635,19 @@ class MessageGenerationController(
                 text = text,
                 modelId = modelId,
                 attachments = attachments,
+                images = images,
             ))
             return true
         }
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
-            state.endGeneration(myUiToken); return false
+            releaseAndDrain(state, myUiToken, genId); return false
         }
         if (providerName == Constants.PROVIDER_LOCAL) {
             val localModelId = modelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
             val config = settings.localChatModels.value.find { it.modelId == localModelId }
             if (config == null || !java.io.File(config.localFilePath).exists()) {
                 onSnackbar(application.getString(R.string.local_model_not_found))
-                state.endGeneration(myUiToken); return false
+                releaseAndDrain(state, myUiToken, genId); return false
             }
         }
         // Set loading immediately so the UI shows the sending state during attachment processing.
@@ -563,6 +692,7 @@ class MessageGenerationController(
                 text = text, images = allImages, thoughts = null, status = MessageStatus.SUCCESS, participant = Participant.USER, timestamp = System.currentTimeMillis(),
                 attachmentMeta = attachmentMeta?.let { kotlinx.serialization.json.Json.encodeToString(it) }
             ))
+            if (text.isNotBlank()) onUserMessagePersisted(userMessageId, text)
             settings.incrementMessagesSent()
             val modelMessageId = UUID.randomUUID().toString()
             val startTime = System.currentTimeMillis() + 1
@@ -597,9 +727,10 @@ class MessageGenerationController(
             )
 
             // Check the persisted status from the DB — allMessages.value reflects the OPEN
-            // conversation, which may not be this one for a background send.
+            // conversation, which may not be this one for a background send. isActive is this
+            // coroutine's own liveness (a Stop cancels it), not the racy state.generationJob.
             val lastMsg = convRepo.getMessagesForConversationSnapshot(currentId).find { it.id == modelMessageId }
-            if (wasNewChat && settings.titleGenerationEnabled.value && state.generationJob?.isActive == true && lastMsg?.status != MessageStatus.ERROR) {
+            if (wasNewChat && settings.titleGenerationEnabled.value && kotlinx.coroutines.currentCoroutineContext().isActive && lastMsg?.status != MessageStatus.ERROR) {
                 generateTitle(currentId)
             }
             }

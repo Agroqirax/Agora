@@ -207,7 +207,8 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE NOT EXISTS (SELECT 1 FROM messages WHERE messages.id = embeddings.messageId)")
     suspend fun deleteOrphanedEmbeddings()
 
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND (m.text LIKE '%' || :query || '%' OR c.title LIKE '%' || :query || '%') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
+    /** [query] must be pre-escaped for LIKE (see ConversationRepository.escapeLikePattern). */
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")

@@ -17,32 +17,47 @@ object HttpClient {
     // Header names that carry secret credentials across the providers.
     private val CREDENTIAL_HEADERS = setOf("authorization", "x-api-key", "x-goog-api-key", "api-key")
 
-    /** True for loopback / RFC-1918 / link-local hosts and bare LAN hostnames
-     *  (e.g. "ollama", "nas.local"). Public FQDNs like api.openai.com return false. */
-    private fun isLocalHost(host: String): Boolean {
+    /** True for loopback / RFC-1918 / link-local hosts, bare LAN hostnames
+     *  (e.g. "ollama", "nas.local"), and Tailscale tailnet addresses. Public FQDNs like
+     *  api.openai.com return false.
+     *
+     *  Tailscale counts as local because the tailnet is itself an encrypted WireGuard overlay:
+     *  cleartext HTTP inside it is not cleartext on any wire. Recognizing it specifically is
+     *  what lets a self-hosted provider work over http:// WITHOUT having to disable the
+     *  credential guard for every public host as well. */
+    internal fun isLocalHost(host: String): Boolean {
         if (host.isBlank()) return false
         val h = host.lowercase().trim('[', ']')
         if (h == "localhost" || h == "::1" || h.endsWith(".local") || h.endsWith(".lan") ||
             h.endsWith(".home") || h.endsWith(".internal")) return true
+        // Tailscale MagicDNS: <machine>.<tailnet>.ts.net
+        if (h == "ts.net" || h.endsWith(".ts.net")) return true
+        // Tailscale IPv6 ULA range fd7a:115c:a1e0::/48
+        if (h.startsWith("fd7a:115c:a1e0")) return true
         // Bare hostname with no dot → LAN name, not a public domain.
         if (!h.contains('.')) return true
         val o = h.split('.')
         if (o.size == 4 && o.all { it.toIntOrNull() in 0..255 }) {
             val a = o[0].toInt(); val b = o[1].toInt()
             return a == 127 || a == 10 || (a == 192 && b == 168) ||
-                (a == 172 && b in 16..31) || (a == 169 && b == 254)
+                (a == 172 && b in 16..31) || (a == 169 && b == 254) ||
+                // Tailscale hands out 100.64.0.0/10 (RFC 6598 CGNAT space) to tailnet nodes.
+                (a == 100 && b in 64..127)
         }
         return false
     }
 
     /** Fail-closed guard: never transmit API credentials over cleartext HTTP to a
-     *  non-local host. LAN/loopback endpoints (Ollama, self-hosted) stay allowed. */
+     *  non-local host. LAN / loopback / Tailscale endpoints (Ollama, self-hosted) stay allowed. */
     private fun guardCleartextCredentials(url: String, headers: Map<String, String>) {
         if (!url.startsWith("http://", ignoreCase = true)) return
         val host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
         if (isLocalHost(host)) return
         if (headers.keys.any { it.lowercase() in CREDENTIAL_HEADERS }) {
-            throw IOException("Refusing to send API credentials over cleartext HTTP to \"$host\". Use an https:// endpoint.")
+            throw IOException(
+                "Refusing to send API credentials over cleartext HTTP to \"$host\". " +
+                    "Use an https:// endpoint, or reach the host over LAN/Tailscale."
+            )
         }
     }
 

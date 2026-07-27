@@ -1,20 +1,9 @@
 package com.newoether.agora.ui.tasks
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,22 +12,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -61,20 +53,25 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.automation.CronExpression
 import com.newoether.agora.data.local.TaskEntity
-import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.settings.CollapsingSettingsLazyScaffold
+import com.newoether.agora.ui.settings.GuardedAnimatedContent
+import com.newoether.agora.ui.settings.SettingsGroup
+import com.newoether.agora.ui.settings.SettingsItem
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.util.Locale
 import java.util.UUID
 
 /**
- * Tasks feature root: a saved prompt + model you can run on demand. List ↔ detail is an
- * in-overlay switch (no nav graph), mirroring how Settings drives its sub-pages. Opening
- * an execution hands the conversation id up to the host to close the overlay and select it.
+ * Tasks feature root: a saved prompt + model you can run on demand or on a schedule.
+ *
+ * List ↔ detail is an in-overlay switch driven by [GuardedAnimatedContent] — the SAME transition
+ * Settings uses for its sub-pages, so entering the Tasks page and entering a task feel identical.
+ * The open task is tracked by ID (not entity) so live Room updates — countdown, run status — flow
+ * into the detail page without restarting the transition.
  */
 @Composable
 fun TasksScreen(
@@ -85,58 +82,59 @@ fun TasksScreen(
     onOpenConversation: (String) -> Unit,
 ) {
     val tasks by viewModel.tasks.collectAsState()
-    // The task currently open in the detail editor; null = list view. A brand-new task is a
-    // draft that only persists once it has a prompt (or is run), so backing out leaves no junk.
-    var editing by remember { mutableStateOf<TaskEntity?>(null) }
-    var isNewDraft by remember { mutableStateOf(false) }
+    var openTaskId by remember { mutableStateOf<String?>(null) }
+    // A brand-new task only reaches Room once it has a name + prompt, so backing out of an
+    // untouched draft leaves nothing behind. Until then it lives here.
+    var draft by remember { mutableStateOf<TaskEntity?>(null) }
 
     LaunchedEffect(initialTaskId) {
         val id = initialTaskId ?: return@LaunchedEffect
-        viewModel.getTask(id)?.let { target ->
-            editing = target
-            isNewDraft = false
+        viewModel.getTask(id)?.let {
+            draft = null
+            openTaskId = it.id
         }
         onInitialTaskHandled()
     }
 
-    AnimatedContent(
-        targetState = editing,
-        transitionSpec = {
-            if (targetState != null) {
-                (slideInHorizontally(tween(280)) { it / 6 } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(tween(280)) { -it / 12 } + fadeOut(tween(180)))
-            } else {
-                (slideInHorizontally(tween(280)) { -it / 12 } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(tween(280)) { it / 6 } + fadeOut(tween(180)))
-            }
-        },
-        label = "tasksListDetail"
-    ) { current ->
-        if (current == null) {
+    GuardedAnimatedContent(
+        targetState = openTaskId,
+        forward = openTaskId != null,
+    ) { taskId ->
+        if (taskId == null) {
             TasksListPage(
                 viewModel = viewModel,
                 tasks = tasks,
                 onBack = onBack,
                 onNewTask = {
-                    editing = TaskEntity(
+                    val newTask = TaskEntity(
                         id = UUID.randomUUID().toString(),
                         name = "", prompt = "", cronExpr = "", nextRunAt = 0L
                     )
-                    isNewDraft = true
+                    draft = newTask
+                    openTaskId = newTask.id
                 },
-                onOpenTask = { editing = it; isNewDraft = false },
+                onOpenTask = { draft = null; openTaskId = it.id },
             )
         } else {
-            TaskDetailPage(
-                viewModel = viewModel,
-                task = current,
-                isNew = isNewDraft,
-                onBack = { editing = null },
-                onOpenConversation = onOpenConversation,
-            )
+            val task = tasks.firstOrNull { it.id == taskId } ?: draft?.takeIf { it.id == taskId }
+            if (task == null) {
+                // Deleted (or never persisted) while open — fall back to the list instead of
+                // rendering an empty editor.
+                LaunchedEffect(taskId) { openTaskId = null }
+            } else {
+                TaskDetailPage(
+                    viewModel = viewModel,
+                    task = task,
+                    isNew = draft?.id == taskId,
+                    onBack = { openTaskId = null },
+                    onOpenConversation = onOpenConversation,
+                )
+            }
         }
     }
 }
+
+// ── List ────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun TasksListPage(
@@ -174,34 +172,40 @@ private fun TasksListPage(
                 }
             }
         } else {
-            items(tasks, key = { it.id }) { task ->
+            itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
                 val executions by viewModel.executionSummariesForTask(task.id)
                     .collectAsState(initial = emptyList())
                 TaskCard(
                     task = task,
                     isRunning = task.id in running,
-                    latestStatus = executions.firstOrNull()?.status,
+                    lastRunAt = executions.firstOrNull()?.timestamp?.takeIf { it > 0L },
+                    shape = stackedShape(index, tasks.size),
                     onClick = { onOpenTask(task) },
                     onRun = { viewModel.runTaskNow(task) },
                     onToggleEnabled = { enabled -> viewModel.saveTask(task.copy(enabled = enabled)) },
                     onDelete = { pendingDelete = task },
                 )
-                Spacer(Modifier.height(10.dp))
+                if (index < tasks.lastIndex) Spacer(Modifier.height(STACK_GAP))
             }
         }
     }
 
     pendingDelete?.let { task ->
         val displayName = task.name.ifBlank { stringResource(R.string.task_name_hint) }
+        // Identical shape to MessageDeleteDialog — the app's one destructive-confirm style.
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { pendingDelete = null },
-            title = { Text(stringResource(R.string.task_delete)) },
+            title = { Text(stringResource(R.string.task_delete), fontWeight = FontWeight.Bold) },
             text = { Text(stringResource(R.string.task_delete_confirm, displayName)) },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteTask(task.id)
-                    pendingDelete = null
-                }) { Text(stringResource(R.string.task_delete), color = MaterialTheme.colorScheme.error) }
+                TextButton(
+                    onClick = {
+                        viewModel.deleteTask(task.id)
+                        pendingDelete = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(stringResource(R.string.delete)) }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.cancel)) }
@@ -214,7 +218,8 @@ private fun TasksListPage(
 private fun TaskCard(
     task: TaskEntity,
     isRunning: Boolean,
-    latestStatus: MessageStatus?,
+    lastRunAt: Long?,
+    shape: RoundedCornerShape,
     onClick: () -> Unit,
     onRun: () -> Unit,
     onToggleEnabled: (Boolean) -> Unit,
@@ -230,10 +235,15 @@ private fun TaskCard(
             }
         }
     }
+    // Same surface language as a SettingsGroup card: surface + 1dp tonal elevation, stacked corners.
+    // Surface(onClick=) — NOT Modifier.clickable on the passed-in modifier, which sits outside the
+    // Surface's own clip and lets the ripple bleed out to a rectangle.
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 18.dp, end = 6.dp, top = 14.dp, bottom = 14.dp),
@@ -259,19 +269,19 @@ private fun TaskCard(
                     )
                 }
                 Spacer(Modifier.height(5.dp))
-                val presetLabel = SCHEDULE_PRESETS.firstOrNull { it.first == task.cronExpr }
-                    ?.second
-                    ?.let { stringResource(it) }
-                val scheduleLabel = presetLabel ?: task.cronExpr
-                val nextRunLabel = if (task.enabled && task.nextRunAt > 0L) {
-                    stringResource(
-                        R.string.task_next_run,
-                        formatTaskCountdown(task.nextRunAt - now),
-                    )
-                } else null
-                val scheduleText = listOfNotNull(scheduleLabel, nextRunLabel)
-                    .filter { it.isNotBlank() }
-                    .joinToString(" · ")
+                // Armed → recurrence + live countdown. Not armed → "Manual only": the switch is
+                // the single place that state is expressed, so the recurrence isn't shown as if
+                // it were about to fire.
+                val scheduleText = if (task.enabled && task.cronExpr.isNotBlank()) {
+                    listOfNotNull(
+                        scheduleLabelFor(task.cronExpr),
+                        if (task.nextRunAt > 0L) {
+                            stringResource(R.string.task_next_run, formatTaskCountdown(task.nextRunAt - now))
+                        } else null,
+                    ).joinToString(" · ")
+                } else {
+                    stringResource(R.string.task_schedule_manual)
+                }
                 Text(
                     text = scheduleText,
                     style = MaterialTheme.typography.labelMedium,
@@ -279,28 +289,19 @@ private fun TaskCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                val statusText = when {
-                    isRunning -> stringResource(R.string.task_running)
-                    latestStatus == MessageStatus.SUCCESS -> stringResource(R.string.task_status_success)
-                    latestStatus == MessageStatus.ERROR -> stringResource(R.string.task_status_failed)
-                    latestStatus == MessageStatus.STOPPED -> stringResource(R.string.task_status_stopped)
-                    else -> null
-                }
-                if (statusText != null) {
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        text = if (isRunning) statusText else stringResource(R.string.task_last_run, statusText),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = when {
-                            isRunning -> MaterialTheme.colorScheme.primary
-                            latestStatus == MessageStatus.ERROR -> MaterialTheme.colorScheme.error
-                            latestStatus == MessageStatus.SUCCESS -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = when {
+                        isRunning -> stringResource(R.string.task_running)
+                        lastRunAt != null -> stringResource(R.string.task_last_run_at, formatDateTime(lastRunAt))
+                        else -> stringResource(R.string.task_never_run)
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (isRunning) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             Spacer(Modifier.width(8.dp))
             if (isRunning) {
@@ -342,6 +343,20 @@ private fun TaskCard(
     }
 }
 
+/**
+ * Corner treatment for a vertically stacked list of cards — identical to what [SettingsGroup]
+ * applies to its items (24dp on the outer edges, 5dp where two cards meet, 2dp between them),
+ * so task rows and execution rows read as the same component as every settings card.
+ */
+private fun stackedShape(index: Int, count: Int): RoundedCornerShape = when {
+    count <= 1 -> RoundedCornerShape(24.dp)
+    index == 0 -> RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 5.dp, bottomEnd = 5.dp)
+    index == count - 1 -> RoundedCornerShape(topStart = 5.dp, topEnd = 5.dp, bottomStart = 24.dp, bottomEnd = 24.dp)
+    else -> RoundedCornerShape(5.dp)
+}
+
+private val STACK_GAP = 2.dp
+
 internal fun formatTaskCountdown(remainingMs: Long): String {
     val clampedMs = remainingMs.coerceAtLeast(0L)
     val totalSeconds = clampedMs / 1_000L + if (clampedMs % 1_000L == 0L) 0L else 1L
@@ -355,6 +370,13 @@ internal fun formatTaskCountdown(remainingMs: Long): String {
     }
 }
 
+// ── Detail ──────────────────────────────────────────────────────────────────
+
+/**
+ * Task editor, structured as three Settings-style groups — Details / Schedule / Execution log —
+ * so a task reads top-to-bottom as "what it says, when it fires, what it did". Everything a run
+ * depends on lives above the log; nothing is hidden behind a dialog except the model list.
+ */
 @Composable
 private fun TaskDetailPage(
     viewModel: ChatViewModel,
@@ -377,24 +399,24 @@ private fun TaskDetailPage(
     val isRunning = task.id in running
     val executions by viewModel.executionSummariesForTask(task.id).collectAsState(initial = emptyList())
 
-    // Persist on the way out, unless this is an untouched new draft (nothing meaningful entered).
+    val cronValid = cronExpr.isBlank() || CronExpression.isValid(cronExpr)
+    val isComplete = name.isNotBlank() && prompt.isNotBlank() && cronValid
+
     fun current() = task.copy(name = name.trim(), prompt = prompt, modelId = modelId, cronExpr = cronExpr, enabled = enabled)
-    fun persistIfMeaningful() {
-        val validCron = cronExpr.isBlank() || CronExpression.isValid(cronExpr)
-        if (prompt.isNotBlank() && name.isNotBlank() && validCron) viewModel.saveTask(current())
+    // Persist on the way out, unless this is an untouched new draft (nothing meaningful entered).
+    fun leave() {
+        if (isComplete) viewModel.saveTask(current())
+        onBack()
     }
-    fun leave() { persistIfMeaningful(); onBack() }
 
     BackHandler { leave() }
 
     CollapsingSettingsLazyScaffold(
-        title = if (isNew) stringResource(R.string.task_new) else stringResource(R.string.task_edit),
+        title = name.ifBlank { stringResource(if (isNew) R.string.task_new else R.string.task_edit) },
         onBack = { leave() },
         actions = {
-            val canRun = name.isNotBlank() && prompt.isNotBlank() &&
-                (cronExpr.isBlank() || CronExpression.isValid(cronExpr)) && !isRunning
             IconButton(
-                enabled = canRun,
+                enabled = isComplete && !isRunning,
                 onClick = {
                     viewModel.saveTask(current())
                     viewModel.runTaskNow(current())
@@ -409,86 +431,95 @@ private fun TaskDetailPage(
         }
     ) {
         item {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text(stringResource(R.string.task_name)) },
-                placeholder = { Text(stringResource(R.string.task_name_hint)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
+            SettingsGroup(
+                title = stringResource(R.string.task_section_details),
+                items = listOf(
+                    {
+                        LabeledField(
+                            label = stringResource(R.string.task_name),
+                            value = name,
+                            onValueChange = { name = it },
+                            placeholder = stringResource(R.string.task_name_hint),
+                            singleLine = true,
+                        )
+                    },
+                    {
+                        LabeledField(
+                            label = stringResource(R.string.task_prompt),
+                            value = prompt,
+                            onValueChange = { prompt = it },
+                            placeholder = stringResource(R.string.task_prompt_hint),
+                            singleLine = false,
+                        )
+                    },
+                    {
+                        SettingsItem(
+                            modifier = Modifier.clickable { showModelPicker = true },
+                            headlineContent = { Text(stringResource(R.string.task_model)) },
+                            supportingContent = {
+                                Text(
+                                    modelId?.let { modelAliases[it] ?: ModelId.parse(it).apiModelName }
+                                        ?: stringResource(R.string.task_model_default)
+                                )
+                            },
+                            trailingContent = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                        )
+                    },
+                ),
             )
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(
-                value = prompt,
-                onValueChange = { prompt = it },
-                label = { Text(stringResource(R.string.task_prompt)) },
-                placeholder = { Text(stringResource(R.string.task_prompt_hint)) },
-                minLines = 4,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                keyboardOptions = KeyboardOptions.Default,
-            )
-            Spacer(Modifier.height(14.dp))
-            // Model selector row
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable { showModelPicker = true },
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.task_model), style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.weight(1f))
-                    val display = modelId?.let { modelAliases[it] ?: ModelId.parse(it).apiModelName }
-                        ?: stringResource(R.string.task_model_default)
-                    Text(display, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Spacer(Modifier.height(14.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable { enabled = !enabled },
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(stringResource(R.string.task_enabled), style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.weight(1f))
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                }
-            }
             Spacer(Modifier.height(24.dp))
-            ScheduleSection(
+        }
+
+        item {
+            ScheduleGroup(
                 cronExpr = cronExpr,
                 onCronChange = { cronExpr = it },
+                enabled = enabled,
+                onEnabledChange = { enabled = it },
             )
-            Spacer(Modifier.height(28.dp))
+            Spacer(Modifier.height(24.dp))
+        }
+
+        item {
             Text(
                 stringResource(R.string.task_execution_log),
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
-
         if (executions.isEmpty()) {
             item {
-                Text(
-                    stringResource(R.string.task_no_executions),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
+                ) {
+                    SettingsItem(
+                        headlineContent = {
+                            Text(
+                                stringResource(R.string.task_no_executions),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                    )
+                }
             }
         } else {
-            items(executions, key = { it.conversation.id }) { execution ->
-                ExecutionRow(execution = execution, onClick = { onOpenConversation(execution.conversation.id) })
-                Spacer(Modifier.height(8.dp))
+            itemsIndexed(executions, key = { _, e -> e.conversation.id }) { index, execution ->
+                ExecutionRow(
+                    execution = execution,
+                    shape = stackedShape(index, executions.size),
+                    onClick = { onOpenConversation(execution.conversation.id) },
+                )
+                if (index < executions.lastIndex) Spacer(Modifier.height(STACK_GAP))
             }
         }
     }
@@ -504,115 +535,243 @@ private fun TaskDetailPage(
     }
 }
 
-/** Maps a preset cron to its label; order here is the chip order. "" = manual (no schedule). */
+/** A group row whose value is typed in place — label on top, field below (the same shape the
+ *  provider detail page uses for Base URL), so text entry doesn't break the card rhythm. */
+@Composable
+private fun LabeledField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    singleLine: Boolean,
+    isError: Boolean = false,
+    supporting: String? = null,
+    supportingIsError: Boolean = false,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = value,
+            onValueChange = onValueChange,
+            placeholder = { Text(placeholder, style = MaterialTheme.typography.bodyMedium) },
+            singleLine = singleLine,
+            minLines = if (singleLine) 1 else 4,
+            isError = isError,
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+        )
+        if (supporting != null) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                supporting,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (supportingIsError) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * Recurrence presets. Deliberately NO "manual only" entry: manual is the absence of an armed
+ * schedule, expressed once by the [R.string.task_enabled] switch. Having both a "Manual only"
+ * preset and an off switch meant two controls for one state.
+ */
 private val SCHEDULE_PRESETS: List<Pair<String, Int>> = listOf(
-    "" to R.string.task_schedule_manual,
     "0 * * * *" to R.string.task_schedule_hourly,
     "0 9 * * *" to R.string.task_schedule_daily,
     "0 9 * * 1" to R.string.task_schedule_weekly,
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Human-readable recurrence: preset name, raw cron, or "Not set". */
 @Composable
-private fun ScheduleSection(cronExpr: String, onCronChange: (String) -> Unit) {
+private fun scheduleLabelFor(cronExpr: String): String {
+    if (cronExpr.isBlank()) return stringResource(R.string.task_schedule_not_set)
+    val preset = SCHEDULE_PRESETS.firstOrNull { it.first == cronExpr }
+    return if (preset != null) stringResource(preset.second) else cronExpr
+}
+
+private fun formatDateTime(millis: Long): String =
+    java.text.DateFormat.getDateTimeInstance(
+        java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT
+    ).format(java.util.Date(millis))
+
+/**
+ * Schedule group: WHEN it recurs (a picker row) and WHETHER that recurrence is armed (a switch).
+ * The two answer different questions, so neither restates the other — and "manual only" is simply
+ * the switch being off. Custom cron reveals its field inline under the picker row, with live
+ * validation and the resolved next-run time.
+ */
+@Composable
+private fun ScheduleGroup(
+    cronExpr: String,
+    onCronChange: (String) -> Unit,
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
     val presetValues = SCHEDULE_PRESETS.map { it.first }
     var customMode by rememberSaveable { mutableStateOf(cronExpr.isNotBlank() && cronExpr !in presetValues) }
+    var showPicker by remember { mutableStateOf(false) }
+    val parsed = remember(cronExpr) { CronExpression.parse(cronExpr) }
+    val invalid = cronExpr.isNotBlank() && parsed == null
+    val armable = cronExpr.isNotBlank() && !invalid
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text(
-            stringResource(R.string.task_schedule),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 10.dp),
-        )
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SCHEDULE_PRESETS.forEach { (value, labelRes) ->
-                val selected = !customMode && cronExpr == value
-                FilterChip(
-                    selected = selected,
-                    onClick = { customMode = false; onCronChange(value) },
-                    label = { Text(stringResource(labelRes)) },
+    SettingsGroup(
+        title = stringResource(R.string.task_schedule),
+        items = buildList {
+            add {
+                SettingsItem(
+                    modifier = Modifier.clickable { showPicker = true },
+                    headlineContent = { Text(stringResource(R.string.task_schedule)) },
+                    supportingContent = {
+                        Text(if (customMode) stringResource(R.string.task_schedule_custom) else scheduleLabelFor(cronExpr))
+                    },
+                    leadingContent = {
+                        Icon(
+                            Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    },
+                    trailingContent = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
                 )
             }
-            FilterChip(
-                selected = customMode,
-                onClick = {
-                    customMode = true
-                    if (cronExpr in presetValues) onCronChange("")
-                },
-                label = { Text(stringResource(R.string.task_schedule_custom)) },
-            )
-        }
-
-        if (customMode) {
-            Spacer(Modifier.height(12.dp))
-            val parsed = remember(cronExpr) { CronExpression.parse(cronExpr) }
-            val invalid = cronExpr.isNotBlank() && parsed == null
-            OutlinedTextField(
-                value = cronExpr,
-                onValueChange = onCronChange,
-                label = { Text(stringResource(R.string.task_schedule_custom)) },
-                placeholder = { Text(stringResource(R.string.task_cron_hint)) },
-                singleLine = true,
-                isError = invalid,
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-            )
-            Spacer(Modifier.height(6.dp))
-            when {
-                invalid -> Text(
-                    stringResource(R.string.task_cron_invalid),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(start = 4.dp),
-                )
-                parsed != null -> {
-                    val next = remember(cronExpr) { parsed.next(System.currentTimeMillis()) }
-                    if (next != null) {
-                        val formatted = remember(next) {
-                            java.text.DateFormat.getDateTimeInstance(
-                                java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT
-                            ).format(java.util.Date(next))
-                        }
-                        Text(
-                            stringResource(R.string.task_next_run, formatted),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 4.dp),
-                        )
-                    }
+            if (customMode) {
+                add {
+                    LabeledField(
+                        label = stringResource(R.string.task_schedule_custom),
+                        value = cronExpr,
+                        onValueChange = onCronChange,
+                        placeholder = stringResource(R.string.task_cron_hint),
+                        singleLine = true,
+                        isError = invalid,
+                        supporting = if (invalid) stringResource(R.string.task_cron_invalid) else null,
+                        supportingIsError = invalid,
+                    )
                 }
             }
-        }
+            add {
+                val nextRun = remember(cronExpr, enabled) {
+                    if (enabled && !invalid) parsed?.next(System.currentTimeMillis()) else null
+                }
+                SettingsItem(
+                    modifier = Modifier.clickable(enabled = armable) { onEnabledChange(!enabled) },
+                    headlineContent = {
+                        Text(
+                            stringResource(R.string.task_enabled),
+                            color = if (armable) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                        )
+                    },
+                    supportingContent = {
+                        Text(
+                            when {
+                                !armable -> stringResource(R.string.task_enabled_needs_schedule)
+                                nextRun != null -> stringResource(R.string.task_next_run, formatDateTime(nextRun))
+                                else -> stringResource(R.string.task_enabled_desc)
+                            }
+                        )
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = enabled && armable,
+                            enabled = armable,
+                            onCheckedChange = onEnabledChange,
+                        )
+                    },
+                )
+            }
+        },
+    )
+
+    if (showPicker) {
+        SchedulePickerDialog(
+            cronExpr = cronExpr,
+            customMode = customMode,
+            onPreset = { value -> customMode = false; onCronChange(value); showPicker = false },
+            onCustom = {
+                customMode = true
+                if (cronExpr in presetValues) onCronChange("")
+                showPicker = false
+            },
+            onDismiss = { showPicker = false },
+        )
     }
 }
 
 @Composable
-private fun ExecutionRow(execution: com.newoether.agora.automation.TaskManager.ExecutionSummary, onClick: () -> Unit) {
+private fun SchedulePickerDialog(
+    cronExpr: String,
+    customMode: Boolean,
+    onPreset: (String) -> Unit,
+    onCustom: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        title = { Text(stringResource(R.string.task_schedule_pick), fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                SCHEDULE_PRESETS.forEach { (value, labelRes) ->
+                    ChoiceRow(
+                        label = stringResource(labelRes),
+                        sub = null,
+                        selected = !customMode && cronExpr == value,
+                        onClick = { onPreset(value) },
+                    )
+                }
+                ChoiceRow(
+                    label = stringResource(R.string.task_schedule_custom),
+                    sub = stringResource(R.string.task_cron_hint),
+                    selected = customMode,
+                    onClick = onCustom,
+                )
+            }
+        },
+        // Close, not Cancel: a tap applies immediately, so there is nothing to cancel.
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.provider_close)) } },
+    )
+}
+
+@Composable
+private fun ExecutionRow(
+    execution: com.newoether.agora.automation.TaskManager.ExecutionSummary,
+    shape: RoundedCornerShape,
+    onClick: () -> Unit,
+) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                val statusText = when (execution.status) {
-                    MessageStatus.SUCCESS -> stringResource(R.string.task_status_success)
-                    MessageStatus.ERROR -> stringResource(R.string.task_status_failed)
-                    MessageStatus.SENDING, MessageStatus.THINKING,
-                    MessageStatus.TOOL_CALLING, MessageStatus.TRANSCRIBING -> stringResource(R.string.task_running)
-                    MessageStatus.STOPPED -> stringResource(R.string.task_status_stopped)
-                    else -> stringResource(R.string.task_status_unknown)
-                }
-                val formattedTime = remember(execution.timestamp) {
-                    if (execution.timestamp == 0L) "" else java.text.DateFormat.getDateTimeInstance(
-                        java.text.DateFormat.SHORT,
-                        java.text.DateFormat.SHORT,
-                    ).format(java.util.Date(execution.timestamp))
-                }
+        val statusText = when (execution.status) {
+            MessageStatus.SUCCESS -> stringResource(R.string.task_status_success)
+            MessageStatus.ERROR -> stringResource(R.string.task_status_failed)
+            MessageStatus.SENDING, MessageStatus.THINKING,
+            MessageStatus.TOOL_CALLING, MessageStatus.TRANSCRIBING -> stringResource(R.string.task_running)
+            MessageStatus.STOPPED -> stringResource(R.string.task_status_stopped)
+            else -> stringResource(R.string.task_status_unknown)
+        }
+        val formattedTime = remember(execution.timestamp) {
+            if (execution.timestamp == 0L) "" else formatDateTime(execution.timestamp)
+        }
+        SettingsItem(
+            headlineContent = {
                 Text(
                     text = listOf(statusText, formattedTime).filter { it.isNotBlank() }.joinToString(" · "),
                     style = MaterialTheme.typography.labelMedium,
@@ -622,18 +781,24 @@ private fun ExecutionRow(execution: com.newoether.agora.automation.TaskManager.E
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                 )
-                if (execution.preview.isNotBlank()) {
-                    Spacer(Modifier.height(3.dp))
+            },
+            supportingContent = if (execution.preview.isNotBlank()) {
+                {
                     Text(
                         text = execution.preview,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-            }
-        }
+            } else null,
+            trailingContent = {
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+        )
     }
 }
 
@@ -645,49 +810,55 @@ private fun ModelPickerDialog(
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    androidx.compose.material3.AlertDialog(
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.task_model), fontWeight = FontWeight.Bold) },
         text = {
-            androidx.compose.foundation.lazy.LazyColumn {
+            androidx.compose.foundation.lazy.LazyColumn(modifier = Modifier.fillMaxWidth()) {
                 item {
-                    DropdownRow(
+                    ChoiceRow(
                         label = stringResource(R.string.task_model_default),
                         sub = null,
-                        bold = selected == null,
+                        selected = selected == null,
                         onClick = { onSelect(null) },
                     )
                 }
-                items(enabledModels) { model ->
+                items(enabledModels, key = { it }) { model ->
                     val parsed = ModelId.parse(model)
-                    DropdownRow(
+                    ChoiceRow(
                         label = modelAliases[model] ?: parsed.apiModelName,
                         sub = parsed.providerName,
-                        bold = selected == model,
+                        selected = selected == model,
                         onClick = { onSelect(model) },
                     )
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        // Close, not Cancel: a tap applies immediately, so there is nothing to cancel.
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.provider_close)) } },
     )
 }
 
+/** The app's standard selection row (Settings model/prompt dialogs): a [SettingsItem] whose
+ *  leading slot is the radio, with the selected label in bold. Shared by both Task pickers so
+ *  they are indistinguishable from every other picker in the app. */
 @Composable
-private fun DropdownRow(label: String, sub: String?, bold: Boolean, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .background(
-                if (bold) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f) else androidx.compose.ui.graphics.Color.Transparent,
-                RoundedCornerShape(10.dp),
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Text(label, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal)
-        if (sub != null) {
-            Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-        }
-    }
+private fun ChoiceRow(label: String, sub: String?, selected: Boolean, onClick: () -> Unit) {
+    SettingsItem(
+        modifier = Modifier.clickable(onClick = onClick),
+        headlineContent = {
+            Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        },
+        supportingContent = sub?.let {
+            {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+        },
+        leadingContent = { RadioButton(selected = selected, onClick = onClick) },
+    )
 }

@@ -39,9 +39,15 @@ import kotlinx.coroutines.flow.first
 class AppContainer(private val appContext: Context) {
     private val application = appContext.applicationContext as Application
 
-    /** App-lifetime scope that backs the shared settings StateFlows. */
+    /** App-lifetime scope that backs the shared settings StateFlows.
+     *  The handler is the last line of defense: children launched directly on this scope
+     *  (settings sync, scheduler, task runners) have no other parent to report to, and an
+     *  uncaught exception here would otherwise kill the whole process. */
     private val appScope = kotlinx.coroutines.CoroutineScope(
-        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+                com.newoether.agora.util.DebugLog.e("AppContainer", "Uncaught in appScope", e)
+            }
     )
 
     // ── Data Layer ────────────────────────────────────────────

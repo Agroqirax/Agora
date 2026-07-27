@@ -1,12 +1,10 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.repository.ConversationRepository
-import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
-import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -25,17 +23,19 @@ import kotlinx.serialization.json.Json
  */
 class GenerationFinalizer(
     private val convRepo: ConversationRepository,
-    private val settings: SettingsRepository,
     private val onIndexMessageForRag: (messageId: String, text: String) -> Unit,
 ) {
     /**
      * Persist [messages] as STOPPED into [conversationId] on [scope]. Returns the launched job
      * (or null if nothing to persist). The caller may chain a subsequent generation onto this job.
+     * [onFinalized] runs after the persist attempt (success or not) — used to release the STOPPED
+     * streaming overlay now that Room owns the terminal row.
      */
     fun launchStopFinalization(
         scope: CoroutineScope,
         conversationId: String?,
         messages: List<ChatMessage>,
+        onFinalized: () -> Unit = {},
     ): Job? {
         if (conversationId == null) return null
         val distinct = messages.distinctBy { it.id }
@@ -45,15 +45,13 @@ class GenerationFinalizer(
                 if (convRepo.getConversation(conversationId) == null) return@launch
                 for (message in distinct) {
                     convRepo.upsertMessage(message.toStoppedEntity(conversationId))
-                    if (message.text.isNotBlank() && settings.autoCacheEnabled.value &&
-                        (settings.modelSearchMethod.value == Constants.SEARCH_METHOD_RAG ||
-                            settings.manualSearchMethod.value == Constants.SEARCH_METHOD_RAG)
-                    ) {
-                        onIndexMessageForRag(message.id, message.text)
-                    }
+                    // Gate lives in RagManager.indexMessageForRag (single source of truth).
+                    if (message.text.isNotBlank()) onIndexMessageForRag(message.id, message.text)
                 }
             } catch (e: Exception) {
                 DebugLog.e("AgoraVM", "Failed to persist stopped generation", e)
+            } finally {
+                onFinalized()
             }
         }
     }

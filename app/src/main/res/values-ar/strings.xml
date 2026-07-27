@@ -478,6 +478,10 @@
     <string name="transcription_add_model">إضافة نموذج</string>
     <string name="transcription_ellipsis">جارٍ نسخ الصور…</string>
     <string name="transcription_progress">جارٍ نسخ الصور %1$d/%2$d…</string>
+    <string name="generating_response">جارٍ إنشاء الرد…</string>
+    <string name="transcription_label">نسخ الصورة</string>
+    <string name="transcription_label_numbered">نسخ الصورة %1$d</string>
+    <string name="provider_vision_badge">الرؤية</string>
     <string name="prompt_content">الموجّه</string>
 
     <!-- Settings - Memory Page -->
@@ -819,6 +823,8 @@
     <string name="file_unknown_type">نوع ملف غير معروف</string>
     <string name="file_unsupported_type">نوع ملف غير مدعوم: %1$s</string>
     <string name="file_too_large">الملف كبير جدًا (بحد أقصى 20 ميجابايت)</string>
+    <string name="attachment_copy_failed_image">فشل تحميل الصورة</string>
+    <string name="attachment_copy_failed_file">فشل تحميل الملف</string>
     <string name="pdf_render_failed">فشل عرض ملف PDF</string>
     <string name="pdf_selected">محدد</string>
 

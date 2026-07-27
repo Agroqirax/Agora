@@ -20,7 +20,6 @@ import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.util.Constants
-import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.tool.ImageGenToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
 import com.newoether.agora.tool.RagToolProvider
@@ -28,8 +27,11 @@ import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -145,6 +147,10 @@ data class GenerationCallbacks(
     val onLoadingChange: (Boolean) -> Unit,
     val onStreamClear: () -> Unit,
     val isLatestPersist: () -> Boolean,
+    /** True when the user queued a send behind this generation. The tool loop checks it at
+     *  each round boundary and ends the generation there so the queue can flush immediately
+     *  (steering) instead of waiting out the entire loop. Headless runs keep the default. */
+    val hasQueuedSends: () -> Boolean = { false },
 )
 
 class GenerationManager(
@@ -226,10 +232,21 @@ class GenerationManager(
             for (provider in toolProviders) {
                 if (provider.handles(name)) {
                     // Tools run inline on the stream-consuming coroutine, so a tool that blocks
-                    // forever hangs the whole generation. Bound it; on timeout return a tool error
-                    // so the tool loop continues instead of hanging (#49).
-                    return withTimeout(ctx.toolTimeoutMs) {
+                    // forever hangs the whole generation. withTimeout alone cannot bound a
+                    // provider stuck in non-cancellable blocking IO (it only requests
+                    // cancellation, then waits for the block to finish) — so the attempt runs
+                    // under a detached Job and the deadline waits only on await(), which is
+                    // always promptly cancellable. On timeout the attempt is cancelled and
+                    // abandoned (it dies at its next suspension point or IO-layer timeout) and
+                    // the tool loop continues with an error instead of hanging (#49).
+                    val attemptJob = Job()
+                    val attempt = CoroutineScope(currentCoroutineContext() + attemptJob).async {
                         provider.execute(name, arguments, ctx)
+                    }
+                    try {
+                        return withTimeout(ctx.toolTimeoutMs) { attempt.await() }
+                    } finally {
+                        attemptJob.cancel()
                     }
                 }
             }
@@ -374,7 +391,9 @@ class GenerationManager(
             val hasTranscription = ctx.imageTranscriptionEnabled && meta != null && meta.items.any { item -> !item.transcription.isNullOrBlank() }
             val effectiveImages = if (hasTranscription) emptyList() else it.images
             ChatMessage(id = it.id, parentId = it.parentId, text = combinedText, images = effectiveImages, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = segs, toolCall = toolCall)
-        }.filter { it.participant != Participant.ERROR }
+            // ERROR rows are synthetic client-side text ("Error: …"), never real model output —
+            // replaying them as assistant turns would pollute the API context on retry.
+        }.filter { it.participant != Participant.ERROR && it.status != MessageStatus.ERROR }
             .let { path ->
                 if (isRegenerate && replaceMessageId != null) {
                     val oldIdx = path.indexOfFirst { it.id == replaceMessageId }
@@ -427,6 +446,8 @@ class GenerationManager(
         val (onStreamUpdate, onLoadingChange, onStreamClear, isLatestPersist) = callbacks
 
         var foregroundLeaseAcquired = false
+        // Set when the tool loop ends early because a send was queued behind this generation.
+        var interruptedForQueuedSend = false
         var totalText = ""
         var totalThoughts = ""
         var thinkingPlaceholder = ""
@@ -701,10 +722,13 @@ class GenerationManager(
                 val allSegmentsJson = MessagePersistenceGuard.encodeSegmentsBounded(allSegments)
                 val resultMsgs = tcds.map { tcData ->
                     val rid = "${Constants.RESULT_MSG_PREFIX}${UUID.randomUUID()}"
-                    val displayText = SearchResultFormatter.format(tcData.result, context)
+                    // API-facing message: carry the RAW tool result, matching the persisted row
+                    // below. Display formatting (SearchResultFormatter) is applied in the UI
+                    // layer only — a localized pretty-print here would mean the model sees
+                    // different context in-flight vs after a reload.
                     rid to ChatMessage(
                         id = rid, parentId = toolMsgId,
-                        text = displayText,
+                        text = tcData.result,
                         participant = Participant.USER, status = MessageStatus.SUCCESS,
                         toolCall = tcData
                     )
@@ -738,6 +762,16 @@ class GenerationManager(
 
                 toolCallData = null
                 toolCallDataList = emptyList()
+
+                // Steering: a send queued mid-generation is delivered at this round boundary.
+                // The round's tool/result rows are already persisted above, so ending here is
+                // clean — the slot release drains the queue (each message its own bubble) and
+                // the NEXT generation's path continues from these tool results plus the new
+                // user turns, instead of making the user wait out the whole tool loop.
+                if (callbacks.hasQueuedSends()) {
+                    interruptedForQueuedSend = true
+                    break
+                }
 
                 lastEmitMs = 0L
 
@@ -773,7 +807,12 @@ class GenerationManager(
             }
 
             if (currentStatus != MessageStatus.ERROR) {
-                currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty()) MessageStatus.SUCCESS else MessageStatus.ERROR
+                // A queue-steered interruption is a SUCCESSFUL turn even with no answer text —
+                // its value is the persisted tool activity; marking it ERROR would exclude the
+                // row from future API paths (see buildApiPath's ERROR filter).
+                currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty() || interruptedForQueuedSend) {
+                    MessageStatus.SUCCESS
+                } else MessageStatus.ERROR
             }
             if (generationJob?.isCancelled == true && currentStatus != MessageStatus.ERROR) {
                 currentStatus = MessageStatus.STOPPED

@@ -171,7 +171,12 @@ class ConversationRepository(
     // ── Search ────────────────────────────────────────────────
 
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity> =
-        chatDao.searchMessages(query, limit)
+        chatDao.searchMessages(escapeLikePattern(query), limit)
+
+    /** Escapes LIKE wildcards so a literal "%"/"_" in the user's query matches itself
+     *  instead of matching everything (paired with ESCAPE '\' in the DAO query). */
+    private fun escapeLikePattern(query: String): String =
+        query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
     suspend fun getAllConversationsList(): List<ChatEntity> =
         chatDao.getAllConversationsList()

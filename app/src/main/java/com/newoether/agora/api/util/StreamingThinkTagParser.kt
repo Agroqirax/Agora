@@ -64,11 +64,15 @@ class StreamingThinkTagParser {
 
     suspend fun flush(
         onText: suspend (String) -> Unit,
-        onThought: suspend (String) -> Unit
+        onThought: suspend (String) -> Unit,
+        thinkingEnabled: Boolean = true
     ) {
         if (pendingBuffer.isNotEmpty()) {
-            if (inThinkingBlock) onThought(pendingBuffer)
-            else onText(pendingBuffer)
+            if (inThinkingBlock) {
+                if (thinkingEnabled) onThought(pendingBuffer)
+            } else {
+                onText(pendingBuffer)
+            }
             pendingBuffer = ""
         }
     }

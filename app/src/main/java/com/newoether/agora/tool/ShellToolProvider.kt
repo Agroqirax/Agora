@@ -90,6 +90,8 @@ class ShellToolProvider(
     // ── Backend sealed interface ───────────────────────────
 
     private sealed interface Backend {
+        /** The remote device this backend targets, or null for the local sandbox (never gated). */
+        val device: ShellDeviceConfig?
         suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String
         suspend fun fileRead(path: String, offset: Long, limit: Long): String
         suspend fun fileWrite(path: String, content: String): String?
@@ -98,7 +100,7 @@ class ShellToolProvider(
         fun close()
     }
 
-    private inner class ConchBackend(device: ShellDeviceConfig) : Backend {
+    private inner class ConchBackend(override val device: ShellDeviceConfig) : Backend {
         private val url = device.serverUrl.trimEnd('/')
         private val apiKey = device.apiKey
         private val pubKey = device.conchPublicKey
@@ -172,7 +174,7 @@ class ShellToolProvider(
         override fun close() {}
     }
 
-    private inner class SshBackend(device: ShellDeviceConfig) : Backend {
+    private inner class SshBackend(override val device: ShellDeviceConfig) : Backend {
         private val host = device.sshHost
         private val port = device.sshPort
         private val user = device.sshUser
@@ -193,7 +195,7 @@ class ShellToolProvider(
         override suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String {
             if (host.isBlank()) return jsonError("execute_shell_command", "SSH device \"$deviceName\" has no host configured.")
             return try {
-                val result = client.executeCommand(cmd, workdir)
+                val result = client.executeCommand(cmd, workdir, timeoutMs)
                 buildJsonObject {
                     put("type", "execute_shell_command"); put("server", deviceName); put("command", cmd)
                     put("exit_code", result.exitCode)
@@ -231,6 +233,7 @@ class ShellToolProvider(
     }
 
     private inner class SandboxBackend : Backend {
+        override val device: ShellDeviceConfig? get() = null
         private val mgr = sandbox ?: throw IllegalStateException("Sandbox not available")
 
         override suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String {
@@ -471,7 +474,9 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("execute_shell_command", serverNotFoundMessage(serverName, ctx))
         try {
-            if (!confirmRemote(resolveShellDevice(serverName, ctx), "$ $command")) {
+            // Gate on the backend's ACTUAL target: with a blank server name the sandbox wins
+            // resolution, while resolveShellDevice() would name an unrelated remote device.
+            if (!confirmRemote(backend.device, "$ $command")) {
                 return jsonError("execute_shell_command", "denied_by_user: the user declined to run this command", server = serverName, command = command)
             }
             return backend.executeCommand(command, workdir, timeoutMs)
@@ -510,7 +515,7 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_write", serverNotFoundMessage(serverName, ctx))
         try {
-            if (!confirmRemote(resolveShellDevice(serverName, ctx), "write file: $path")) {
+            if (!confirmRemote(backend.device, "write file: $path")) {
                 return jsonError("file_write", "denied_by_user: the user declined to write this file", server = serverName)
             }
             val error = backend.fileWrite(path, content)
@@ -536,7 +541,7 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_edit", serverNotFoundMessage(serverName, ctx))
         try {
-            if (!confirmRemote(resolveShellDevice(serverName, ctx), "edit file: $path")) {
+            if (!confirmRemote(backend.device, "edit file: $path")) {
                 return jsonError("file_edit", "denied_by_user: the user declined to edit this file", server = serverName)
             }
             // Read the file

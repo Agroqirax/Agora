@@ -8,6 +8,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Collections
 
 /**
@@ -31,23 +33,33 @@ class ShellConfirmationController(private val settings: SettingsRepository) {
     // Servers the user chose to trust for the rest of this app session.
     private val sessionAllowedServers = Collections.synchronizedSet(mutableSetOf<String>())
 
+    // One prompt on screen at a time. Without this, parallel conversations overwrite each
+    // other's pending prompt: the loser's dialog never renders and its confirm() silently
+    // times out refused.
+    private val promptMutex = Mutex()
+
     /** Suspends until the user resolves the prompt; returns whether the command may run. */
     suspend fun confirm(server: String, summary: String): Boolean {
         if (!settings.shellConfirmEnabled.value) return true
         if (sessionAllowedServers.contains(server)) return true
-        val deferred = CompletableDeferred<Boolean>()
-        _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
-        return try {
-            // Bound the wait. The dialog renders only while the Activity is composing, so if it is
-            // backgrounded/rebuilt (or this is a headless automation run with no UI) the deferred
-            // would never resolve and the inline-blocking stream coroutine would hang forever
-            // (#49). Fail safe — refuse the command — after the timeout, and let the finally
-            // below clear the stale prompt so a late user tap can't resurrect a dead request.
-            withTimeout(Constants.SHELL_CONFIRM_TIMEOUT_MS) { deferred.await() }
-        } catch (e: TimeoutCancellationException) {
-            false
-        } finally {
-            if (_pendingShellCommand.value?.deferred === deferred) _pendingShellCommand.value = null
+        return promptMutex.withLock {
+            // Re-check after the wait — the user may have trusted this server while an
+            // earlier conversation's prompt was up.
+            if (sessionAllowedServers.contains(server)) return@withLock true
+            val deferred = CompletableDeferred<Boolean>()
+            _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
+            try {
+                // Bound the wait. The dialog renders only while the Activity is composing, so if it is
+                // backgrounded/rebuilt (or this is a headless automation run with no UI) the deferred
+                // would never resolve and the inline-blocking stream coroutine would hang forever
+                // (#49). Fail safe — refuse the command — after the timeout, and let the finally
+                // below clear the stale prompt so a late user tap can't resurrect a dead request.
+                withTimeout(Constants.SHELL_CONFIRM_TIMEOUT_MS) { deferred.await() }
+            } catch (e: TimeoutCancellationException) {
+                false
+            } finally {
+                if (_pendingShellCommand.value?.deferred === deferred) _pendingShellCommand.value = null
+            }
         }
     }
 

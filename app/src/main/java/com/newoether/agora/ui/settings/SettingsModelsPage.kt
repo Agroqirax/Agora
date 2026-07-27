@@ -255,7 +255,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.models_select_default), fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
-                    items(enabledModels.toList()) { model ->
+                    items(enabledModels.toList(), key = { it }) { model ->
                         val alias = modelAliases[model]
                         val parsed = com.newoether.agora.model.ModelId.parse(model)
                         val displayName = alias ?: parsed.apiModelName

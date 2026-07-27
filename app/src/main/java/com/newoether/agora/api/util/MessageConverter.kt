@@ -20,14 +20,22 @@ fun buildToolCallId(toolName: String, arguments: String, prefix: String = Consta
     return "$prefix${toolName}_$shortHash"
 }
 
+/** Maps an image file path to its MIME type. Providers reject a mislabeled payload
+ *  (e.g. a webp sent as image/jpeg), so cover every format the pickers accept. */
+fun imageMimeType(imagePath: String): String = when {
+    imagePath.endsWith(".png", ignoreCase = true) -> "image/png"
+    imagePath.endsWith(".webp", ignoreCase = true) -> "image/webp"
+    imagePath.endsWith(".gif", ignoreCase = true) -> "image/gif"
+    else -> "image/jpeg"
+}
+
 fun encodeImageToBase64(imagePath: String): Pair<String, String>? {
     return try {
         val file = File(imagePath)
         if (!file.exists()) return null
         val bytes = file.readBytes()
         val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-        val mimeType = if (imagePath.endsWith(".png", ignoreCase = true)) "image/png" else "image/jpeg"
-        mimeType to base64
+        imageMimeType(imagePath) to base64
     } catch (e: Exception) {
         DebugLog.e("AgoraAPI", "Failed to encode image: $imagePath", e)
         null

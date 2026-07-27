@@ -21,6 +21,11 @@ import kotlinx.coroutines.sync.Mutex
  *
  * [Mutex.withLock] is cancellable, so a Stop releases the slot immediately and the
  * next local generation can proceed without waiting for the cancelled one to unwind.
+ *
+ * INVARIANT: local models never emit tool calls, so each local generation acquires
+ * the mutex exactly once (no release/re-acquire between tool rounds). If local
+ * tool-calling is ever added, holders must be re-audited — an inter-round release
+ * would let another conversation's model load interleave mid-generation.
  */
 object LocalModelSerializer {
     val mutex: Mutex = Mutex()

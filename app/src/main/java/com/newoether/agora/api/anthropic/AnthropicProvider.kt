@@ -126,6 +126,29 @@ internal data class AnthropicUsage(
     @SerialName("output_tokens") val outputTokens: Int? = null
 )
 
+/** Request-shape generations of the Claude model line. Only the LEGACY sets are enumerated;
+ *  anything unmatched (opus-5, sonnet-5, fable, mythos, every future family) is
+ *  [CURRENT_ADAPTIVE] and must never receive `budget_tokens` or sampling params (400 on 4.7+). */
+internal enum class ClaudeFamily { NO_THINKING, BUDGET_THINKING, TRANSITIONAL_4_6, CURRENT_ADAPTIVE }
+
+internal fun classifyClaudeFamily(modelName: String): ClaudeFamily {
+    val m = modelName.lowercase()
+    if (!m.startsWith("claude")) return ClaudeFamily.CURRENT_ADAPTIVE
+    // 3.0 / 3.5 predate extended thinking entirely.
+    if (listOf("claude-3-opus", "claude-3-sonnet", "claude-3-haiku", "claude-3-5-")
+            .any { m.startsWith(it) }
+    ) return ClaudeFamily.NO_THINKING
+    // 4.6: adaptive preferred; deprecated `budget_tokens` still functional (transitional).
+    // Checked before the dated-4.x markers so a dated 4.6 id can't fall into the budget list.
+    if (m.contains("4-6") || m.contains("4.6")) return ClaudeFamily.TRANSITIONAL_4_6
+    // Closed list of budget_tokens generations: 3.7, 4.0 (incl. dated claude-*-4-2025xxxx),
+    // 4.1, and the 4.5 tier (opus/sonnet/haiku).
+    if (listOf("claude-3-7", "-4-0", "-4-1", "-4-5", "4.0", "4.1", "4.5", "-4-2025")
+            .any { m.contains(it) }
+    ) return ClaudeFamily.BUDGET_THINKING
+    return ClaudeFamily.CURRENT_ADAPTIVE
+}
+
 class AnthropicProvider : LlmProvider {
     override val name: String = Constants.PROVIDER_ANTHROPIC
     override val defaultBaseUrl: String = "https://api.anthropic.com/v1"
@@ -174,31 +197,34 @@ class AnthropicProvider : LlmProvider {
             }
         }
 
-        // Claude thinking logic - all Claude models support thinking except the 3 legacy ones
-        val isLegacyClaude = modelName == "claude-3-opus-20240229" ||
-            modelName == "claude-3-sonnet-20240229" ||
-            modelName == "claude-3-haiku-20240307"
-        val supportsAdaptiveThinking = modelName.contains("4-6") ||
-            modelName.contains("4.6") ||
-            modelName.contains("4-7") ||
-            modelName.contains("4.7") ||
-            modelName.contains("4-8") ||
-            modelName.contains("4.8") ||
-            modelName.contains("fable", ignoreCase = true) ||
-            modelName.contains("mythos", ignoreCase = true)
+        // ── Model-generation classification ─────────────────────────────────
+        // The legacy sets are CLOSED lists; every model NOT matched below — including
+        // claude-opus-5 / claude-sonnet-5 / fable / mythos and all FUTURE families — is
+        // treated as current-generation: adaptive thinking only, and no sampling params.
+        // Rationale (API contract): `budget_tokens` and `temperature`/`top_p` are REMOVED
+        // from Opus 4.7 onward (sending either returns a hard 400), so an unknown new
+        // model must never fall back onto the legacy request shape.
+        val family = classifyClaudeFamily(modelName)
         val thinkingBudget = (
             if (config.thinkingBudgetEnabled) config.thinkingBudgetTokens else ThinkingLevels.DefaultBudgetTokens
         ).coerceIn(1024, 128000)
-        val thinking = if (config.thinkingEnabled && modelName.startsWith("claude") && !isLegacyClaude) {
-            if (supportsAdaptiveThinking && !config.thinkingBudgetEnabled) {
-                AnthropicThinking(type = "adaptive", display = "summarized")
-            } else {
+        val thinking = when {
+            !config.thinkingEnabled || !modelName.startsWith("claude") -> null
+            family == ClaudeFamily.NO_THINKING -> null
+            family == ClaudeFamily.BUDGET_THINKING ->
                 AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
-            }
-        } else null
-        val outputConfig = if (config.thinkingEnabled && !config.thinkingBudgetEnabled && modelName.startsWith("claude") && !isLegacyClaude && supportsAdaptiveThinking) {
+            // 4.6: adaptive preferred; the deprecated budget form is still functional there,
+            // so honor an explicit user-enabled budget as the documented transitional escape hatch.
+            family == ClaudeFamily.TRANSITIONAL_4_6 && config.thinkingBudgetEnabled ->
+                AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
+            else -> AnthropicThinking(type = "adaptive", display = "summarized")
+        }
+        val outputConfig = if (thinking?.type == "adaptive") {
             AnthropicOutputConfig(effort = ThinkingLevels.anthropicEffort(config.thinkingLevel))
         } else null
+        // temperature/top_p are rejected with a 400 on Opus 4.7+ / Sonnet 5 / Fable — only the
+        // legacy and transitional families may carry user sampling overrides.
+        val allowsSamplingParams = family != ClaudeFamily.CURRENT_ADAPTIVE
 
         // Convert ToolDefinition to Anthropic format
         val anthropicTools = config.tools?.map { td ->
@@ -239,10 +265,17 @@ class AnthropicProvider : LlmProvider {
             system = config.systemPrompt,
             thinking = thinking,
             outputConfig = outputConfig,
-            maxTokens = config.maxTokens ?: if (thinking?.budgetTokens != null) maxOf(thinking.budgetTokens + 1024, 4096) else 4096,
+            // On always-on/adaptive-thinking models max_tokens caps thinking + answer TOGETHER,
+            // so the legacy 4096 default truncates mid-answer once the model thinks. Streaming is
+            // always on here, so a generous default costs nothing (it is a cap, not a target).
+            maxTokens = config.maxTokens ?: when {
+                thinking?.budgetTokens != null -> maxOf(thinking.budgetTokens + 1024, 4096)
+                thinking?.type == "adaptive" -> 16384
+                else -> 4096
+            },
             tools = anthropicTools,
-            temperature = config.temperature,
-            topP = config.topP
+            temperature = config.temperature.takeIf { allowsSamplingParams },
+            topP = config.topP.takeIf { allowsSamplingParams }
         )
 
         try {
@@ -272,12 +305,20 @@ class AnthropicProvider : LlmProvider {
                     var thinkingSignature: String? = null
                     var messageInputTokens = 0
 
+                    // Tolerate long thinking pauses, but not a silently-dead connection:
+                    // 3 consecutive read timeouts (~15 min without a byte) → give up.
+                    var consecutiveReadTimeouts = 0
                     while (currentCoroutineContext().isActive) {
                         try {
                             line = handle.readLine()
                             if (line == null) break
+                            consecutiveReadTimeouts = 0
                         } catch (e: java.net.SocketTimeoutException) {
                             if (!currentCoroutineContext().isActive) break
+                            if (++consecutiveReadTimeouts >= 3) {
+                                emit(StreamEvent.Error(GenerationError.Timeout))
+                                break
+                            }
                             continue
                         }
                         if (line.startsWith("event: ")) {
@@ -383,16 +424,24 @@ class AnthropicProvider : LlmProvider {
     // ── Message conversion helpers ──
 
     private fun buildAssistantToolUse(msg: ChatMessage): AnthropicMessage {
+        // With thinking enabled, Anthropic requires the assistant turn that carries tool_use to
+        // replay its thinking block(s) unchanged (content + signature) — a bare tool_use turn is
+        // rejected on the follow-up request. Unsigned thoughts cannot be replayed, so only signed
+        // segments are included; when none exist (thinking off) the turn stays tool_use-only.
+        val thinkingParts = msg.segments
+            ?.filter { it.type == "thought" && it.content.isNotEmpty() && !it.signature.isNullOrBlank() }
+            ?.map { AnthropicContentPart(type = "thinking", thinking = it.content, signature = it.signature) }
+            .orEmpty()
         val toolSegs = msg.segments?.filter { it.type == "tool" }
         if (!toolSegs.isNullOrEmpty()) {
             val blocks = toolSegs.map { seg -> buildToolUseBlock(seg.toolCallId, seg.toolName, seg.toolArgs) }
-            return AnthropicMessage(role = "assistant", content = blocks)
+            return AnthropicMessage(role = "assistant", content = thinkingParts + blocks)
         }
         val tc = msg.toolCall ?: return AnthropicMessage(role = "assistant", content = listOf(
             AnthropicContentPart(type = "text", text = "Continue")
         ))
         val block = buildToolUseBlock(tc.toolCallId, tc.toolName, tc.arguments)
-        return AnthropicMessage(role = "assistant", content = listOf(block))
+        return AnthropicMessage(role = "assistant", content = thinkingParts + listOf(block))
     }
 
     private fun buildToolUseBlock(id: String?, name: String?, args: String?): AnthropicContentPart {
@@ -429,7 +478,11 @@ class AnthropicProvider : LlmProvider {
                 ))
             }
         }
-        if (msg.text.isNotEmpty()) {
+        // isNotBlank, NOT isNotEmpty: Anthropic rejects a whitespace-only text block with
+        // 400 "text content blocks must contain non-whitespace text". Whitespace-only turns
+        // are real — a stopped generation that emitted one newline, a tool-only assistant
+        // turn, or mergeConsecutiveSameRole joining two blank messages with "\n".
+        if (msg.text.isNotBlank()) {
             parts.add(AnthropicContentPart(type = "text", text = msg.text))
         }
         if (parts.isEmpty()) parts.add(AnthropicContentPart(type = "text", text = "Continue"))
@@ -440,14 +493,26 @@ class AnthropicProvider : LlmProvider {
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
             val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
-            val responseText = HttpClient.fetchModels(
-                "$effectiveBaseUrl/models",
-                mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
-            ) ?: run {
-                DebugLog.e("AgoraAPI", "Failed to fetch Anthropic models: empty response")
-                return@withContext emptyList()
+            val headers = mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+            // /v1/models is paginated (default page ~20); follow has_more/last_id so accounts
+            // with long model lists aren't silently truncated to the first page.
+            val all = mutableListOf<String>()
+            var afterId: String? = null
+            var pages = 0
+            while (pages < 10) {
+                val url = buildString {
+                    append(effectiveBaseUrl).append("/models?limit=100")
+                    afterId?.let { append("&after_id=").append(java.net.URLEncoder.encode(it, "UTF-8")) }
+                }
+                val responseText = HttpClient.fetchModels(url, headers) ?: break
+                val page = json.decodeFromString<AnthropicModelsResponse>(responseText)
+                all += page.data.map { it.id }
+                if (!page.hasMore || page.data.isEmpty()) break
+                afterId = page.lastId ?: page.data.last().id
+                pages++
             }
-            json.decodeFromString<AnthropicModelsResponse>(responseText).data.map { it.id }
+            if (all.isEmpty()) DebugLog.e("AgoraAPI", "Failed to fetch Anthropic models: empty response")
+            all
         } catch (e: Exception) {
             DebugLog.e("AgoraAPI", "Failed to fetch Anthropic models", e)
             emptyList()
@@ -458,7 +523,8 @@ class AnthropicProvider : LlmProvider {
 @Serializable
 internal data class AnthropicModelsResponse(
     val data: List<AnthropicModelInfo>,
-    @SerialName("has_more") val hasMore: Boolean = false
+    @SerialName("has_more") val hasMore: Boolean = false,
+    @SerialName("last_id") val lastId: String? = null
 )
 
 @Serializable

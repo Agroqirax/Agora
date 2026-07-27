@@ -12,5 +12,7 @@ class CustomOpenAiProvider(
     override fun retryDelayMillis(statusCode: Int, attempt: Int): Long =
         if (statusCode == 401) 5000L else super.retryDelayMillis(statusCode, attempt)
 
-    // Reasoning/content parsing uses BaseOpenAiProvider's default (reasoning_content + content).
+    // Reasoning arrives either as reasoning_content deltas (vLLM, DeepSeek-compatible servers)
+    // or inline <think> tags in content (llama.cpp server, LM Studio) — parse both.
+    override val parseInlineThinkTags: Boolean = true
 }

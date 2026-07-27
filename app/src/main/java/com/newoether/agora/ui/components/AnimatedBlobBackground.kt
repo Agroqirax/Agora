@@ -11,6 +11,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
@@ -20,7 +21,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -88,10 +88,15 @@ fun AnimatedBlobBackground(
     // static, which also avoids the per-frame RenderEffect layer that triggered the HWC overlay bug.
     LaunchedEffect(Unit, blurEnabled) {
         if (!blurEnabled) return@LaunchedEffect
-        val startNanos = System.nanoTime()
+        // withFrameNanos, not delay(16): the clock ticks once per real vsync, so the value the
+        // Canvas reads is the one for the frame being composed. A fixed 16ms sleep drifts against
+        // the display refresh (and is simply wrong at 90/120Hz), producing visible judder.
+        var startNanos = 0L
         while (true) {
-            timeSec = (System.nanoTime() - startNanos) / 1_000_000_000.0
-            delay(16L)
+            withFrameNanos { frameNanos ->
+                if (startNanos == 0L) startNanos = frameNanos
+                timeSec = (frameNanos - startNanos) / 1_000_000_000.0
+            }
         }
     }
 

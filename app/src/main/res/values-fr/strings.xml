@@ -478,6 +478,10 @@
     <string name="transcription_add_model">Ajouter un modèle</string>
     <string name="transcription_ellipsis">Transcription des images…</string>
     <string name="transcription_progress">Transcription des images %1$d/%2$d…</string>
+    <string name="generating_response">Génération de la réponse…</string>
+    <string name="transcription_label">Transcription d’image</string>
+    <string name="transcription_label_numbered">Transcription d’image %1$d</string>
+    <string name="provider_vision_badge">Vision</string>
     <string name="prompt_content">Prompt</string>
 
     <!-- Settings - Memory Page -->
@@ -819,6 +823,8 @@
     <string name="file_unknown_type">Type de fichier inconnu</string>
     <string name="file_unsupported_type">Type de fichier non pris en charge : %1$s</string>
     <string name="file_too_large">Fichier trop volumineux (max 20 Mo)</string>
+    <string name="attachment_copy_failed_image">Échec du chargement de l\'image</string>
+    <string name="attachment_copy_failed_file">Échec du chargement du fichier</string>
     <string name="pdf_render_failed">Échec du rendu du PDF</string>
     <string name="pdf_selected">Sélectionné</string>
 

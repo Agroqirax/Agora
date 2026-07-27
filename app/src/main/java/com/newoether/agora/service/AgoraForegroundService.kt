@@ -199,7 +199,9 @@ class AgoraForegroundService : Service() {
         }
     }
 
-    @Volatile private var currentText: String = "Generating response…"
+    // Null until the first updateText; the localized default resolves lazily because
+    // getString needs an attached Context (not available at field-init time).
+    @Volatile private var currentText: String? = null
     private var foregroundStarted: Boolean = false
 
     override fun onCreate() {
@@ -207,7 +209,7 @@ class AgoraForegroundService : Service() {
         instance = this
         CrashReporter.note("FGS.onCreate")
         createChannel(this)
-        val notification = buildGenerationNotification(currentText)
+        val notification = buildGenerationNotification(currentText ?: getString(R.string.generating_response))
         // Must NOT catch exceptions here: if startForeground() fails, the real
         // exception (SecurityException, ForegroundServiceStartNotAllowed, etc.)
         // must propagate so Crashlytics/logs capture it. Catching + stopSelf()
