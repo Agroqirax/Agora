@@ -26,11 +26,7 @@ data class ConversationUiState(
             // incorrectly rendering its in-flight status as a terminal warning. Once the Pass
             // releases (or Stop/recovery clears the overlay), the durable input becomes visible.
             val messagesForPath = if (streamingMsg != null) {
-                allMessages.filterNot {
-                    it.participant == Participant.USER &&
-                        !it.runId.isNullOrBlank() &&
-                        it.consumedAtPass == null
-                }
+                allMessages.filterNot(::isPendingVisibleIntervention)
             } else {
                 allMessages
             }
@@ -43,9 +39,7 @@ data class ConversationUiState(
                 if (siblings.isEmpty()) break
 
                 val selectedId = selectedChildren[cursor]
-                val visibleSiblings = siblings.filter {
-                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                }
+                val visibleSiblings = siblings.filterNot(::isSynthetic)
                 var selected = if (visibleSiblings.isNotEmpty()) {
                     visibleSiblings.find { it.id == selectedId } ?: visibleSiblings.last()
                 } else {
@@ -55,8 +49,7 @@ data class ConversationUiState(
                 if (streamingMsg != null && selected.id == streamingMsg.id) {
                     selected = streamingMsg
                 }
-                val isSynthetic = selected.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
-                    selected.id.startsWith(Constants.RESULT_MSG_PREFIX)
+                val isSynthetic = isSynthetic(selected)
                 if (!isSynthetic || (streamingMsg != null && selected.id == streamingMsg.id)) {
                     path.add(selected)
                 }
@@ -71,5 +64,20 @@ data class ConversationUiState(
             }
             return path
         }
+
+        /**
+         * Only a real user intervention can be queue-only while a Pass is streaming. Tool-result
+         * rows also use Participant.USER and consumedAtPass=null, but they are durable protocol
+         * edges: filtering one severs every visible descendant after that tool round.
+         */
+        private fun isPendingVisibleIntervention(message: ChatMessage): Boolean =
+            message.participant == Participant.USER &&
+                !isSynthetic(message) &&
+                !message.runId.isNullOrBlank() &&
+                message.consumedAtPass == null
+
+        private fun isSynthetic(message: ChatMessage): Boolean =
+            message.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
+                message.id.startsWith(Constants.RESULT_MSG_PREFIX)
     }
 }

@@ -63,6 +63,32 @@ sealed interface SendAcceptance {
 }
 
 /**
+ * Regenerate creates a sibling Run from the source Run's original boundary input. Interventions
+ * accepted during later Passes belong only to the source execution and must never be replayed into
+ * the regenerated branch.
+ */
+internal object RunRegenerationPolicy {
+    fun selectBoundaryInput(
+        messages: List<MessageEntity>,
+        runId: String,
+    ): MessageEntity? = messages
+        .asSequence()
+        .filter {
+            it.runId == runId &&
+                it.participant == Participant.USER &&
+                !it.id.startsWith(Constants.RESULT_MSG_PREFIX) &&
+                !it.id.startsWith(Constants.TOOL_MSG_PREFIX)
+        }
+        .minWithOrNull(
+            compareBy<MessageEntity> {
+                it.runSequence.takeIf { sequence -> sequence >= 0L } ?: Long.MAX_VALUE
+            }
+                .thenBy { it.timestamp }
+                .thenBy { it.id }
+        )
+}
+
+/**
  * Owns the message lifecycle (send / regenerate / edit / delete) and the
  * race-free generation handshake.
  *
@@ -360,17 +386,10 @@ class MessageGenerationController(
                 val persistedTarget = persistedMessages.find { it.id == messageId } ?: return@lock
                 if (persistedTarget.runId != sourceRunId) return@lock
                 val sourceRun = convRepo.getRun(sourceRunId) ?: return@lock
-                val sourceInputs = persistedMessages
-                    .filter {
-                        it.runId == sourceRunId &&
-                            it.participant == Participant.USER &&
-                            !it.id.startsWith(Constants.RESULT_MSG_PREFIX) &&
-                            !it.id.startsWith(Constants.TOOL_MSG_PREFIX)
-                    }
-                    .sortedBy { it.runSequence }
-                if (sourceInputs.isEmpty()) return@lock
-
-                val clonedInputs = cloneRunInputs(sourceInputs, runId)
+                val sourceInput =
+                    RunRegenerationPolicy.selectBoundaryInput(persistedMessages, sourceRunId)
+                        ?: return@lock
+                val clonedInputs = cloneRunInputs(listOf(sourceInput), runId)
                 val modelMessageId = UUID.randomUUID().toString()
                 setupModelMessageId = modelMessageId
                 val startTime = clonedInputs.last().timestamp + 1

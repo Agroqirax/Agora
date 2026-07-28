@@ -157,4 +157,77 @@ class ConversationUiStateTest {
         assertEquals("latest partial", whileQueued.last().text)
         assertEquals(listOf("u1", "m1", "u2"), afterRelease.map { it.id })
     }
+
+    @Test
+    fun toolResultBeforeError_remainsTraversableWhileNextRunStreams() {
+        val initial = ChatMessage(
+            id = "u1",
+            text = "initial",
+            participant = Participant.USER,
+            runId = "failed-run",
+            runSequence = 0,
+            consumedAtPass = 0,
+        )
+        val firstModel = ChatMessage(
+            id = "m1",
+            parentId = initial.id,
+            text = "working",
+            participant = Participant.MODEL,
+            runId = "failed-run",
+            runSequence = 1,
+        )
+        val tool = ChatMessage(
+            id = "${Constants.TOOL_MSG_PREFIX}call",
+            parentId = firstModel.id,
+            text = "",
+            participant = Participant.MODEL,
+            runId = "failed-run",
+            runSequence = 2,
+        )
+        val result = ChatMessage(
+            id = "${Constants.RESULT_MSG_PREFIX}call",
+            parentId = tool.id,
+            text = "tool result",
+            participant = Participant.USER,
+            runId = "failed-run",
+            runSequence = 3,
+            consumedAtPass = null,
+        )
+        val error = ChatMessage(
+            id = "error",
+            parentId = result.id,
+            text = "provider error",
+            participant = Participant.MODEL,
+            status = MessageStatus.ERROR,
+            runId = "failed-run",
+            runSequence = 4,
+        )
+        val nextUser = ChatMessage(
+            id = "u2",
+            parentId = error.id,
+            text = "continue",
+            participant = Participant.USER,
+            runId = "next-run",
+            runSequence = 0,
+            consumedAtPass = 0,
+        )
+        val streaming = ChatMessage(
+            id = "m2",
+            parentId = nextUser.id,
+            text = "",
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+            runId = "next-run",
+            runSequence = 1,
+        )
+
+        val path = ConversationUiState.resolvePath(
+            allMessages = listOf(initial, firstModel, tool, result, error, nextUser),
+            streamingMsg = streaming,
+            selectedChildren = emptyMap(),
+        )
+
+        assertEquals(listOf("u1", "m1", "error", "u2", "m2"), path.map { it.id })
+        assertEquals(MessageStatus.ERROR, path[2].status)
+    }
 }

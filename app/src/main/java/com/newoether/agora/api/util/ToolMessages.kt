@@ -1,6 +1,7 @@
 package com.newoether.agora.api.util
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
 
@@ -13,6 +14,98 @@ fun prepareMessages(messages: List<ChatMessage>, maxUserMessages: Int): List<Cha
     return validateToolMessages(
         stripEmptyTurns(mergeConsecutiveSameRole(limitContext(messages, maxUserMessages)))
     )
+}
+
+/**
+ * Converts durable terminal generation rows into model-visible status events without presenting
+ * client/provider failures as genuine assistant output.
+ *
+ * The database/UI message remains untouched. In the API-only path, ERROR and STOPPED rows become
+ * user-role status text with all assistant/tool payload removed. When the next row is a normal user
+ * message, the status is prepended to it so context-window truncation cannot retain the follow-up
+ * while silently dropping the immediately preceding status.
+ */
+fun projectGenerationStatusesForApi(messages: List<ChatMessage>): List<ChatMessage> {
+    if (messages.none(ChatMessage::isGenerationStatusMessage)) return messages
+
+    val projected = mutableListOf<ChatMessage>()
+    val pendingStatuses = mutableListOf<ChatMessage>()
+
+    fun flushPending() {
+        projected.addAll(pendingStatuses.map(ChatMessage::asGenerationStatusEvent))
+        pendingStatuses.clear()
+    }
+
+    messages.forEach { message ->
+        when {
+            message.isGenerationStatusMessage() -> pendingStatuses += message
+            pendingStatuses.isNotEmpty() &&
+                message.participant == Participant.USER &&
+                !message.isToolProtocolMessage() -> {
+                val statusText = pendingStatuses.joinToString("\n\n") {
+                    it.generationStatusEventText()
+                }
+                projected += message.copy(
+                    text = listOf(statusText, message.text)
+                        .filter(String::isNotBlank)
+                        .joinToString("\n\n")
+                )
+                pendingStatuses.clear()
+            }
+            else -> {
+                flushPending()
+                projected += message
+            }
+        }
+    }
+    flushPending()
+    return projected
+}
+
+private fun ChatMessage.isGenerationStatusMessage(): Boolean =
+    !isToolProtocolMessage() &&
+        (participant == Participant.ERROR ||
+            status == MessageStatus.ERROR ||
+            status == MessageStatus.STOPPED)
+
+private fun ChatMessage.asGenerationStatusEvent(): ChatMessage = copy(
+    text = generationStatusEventText(),
+    images = emptyList(),
+    thoughts = null,
+    thoughtTitle = null,
+    tokenCount = 0,
+    status = MessageStatus.SUCCESS,
+    participant = Participant.USER,
+    thoughtTimeMs = null,
+    modelName = null,
+    toolCall = null,
+    segments = null,
+    attachmentMeta = null,
+    retryText = null,
+)
+
+private fun ChatMessage.generationStatusEventText(): String {
+    val detail = text.trim()
+    return when {
+        participant == Participant.ERROR || status == MessageStatus.ERROR ->
+            buildString {
+                append("[Generation status: ERROR]\n")
+                append("The previous assistant generation failed before completing.")
+                if (detail.isNotEmpty()) {
+                    append("\nDetails:\n")
+                    append(detail)
+                }
+            }
+        else ->
+            buildString {
+                append("[Generation status: STOPPED]\n")
+                append("The previous assistant generation was stopped before completing.")
+                if (detail.isNotEmpty()) {
+                    append("\nPartial output:\n")
+                    append(detail)
+                }
+            }
+    }
 }
 
 /**

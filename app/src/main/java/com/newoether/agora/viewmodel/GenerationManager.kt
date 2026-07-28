@@ -19,6 +19,7 @@ import com.newoether.agora.R
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
+import com.newoether.agora.api.util.projectGenerationStatusesForApi
 import com.newoether.agora.util.Constants
 import com.newoether.agora.tool.ImageGenToolProvider
 import com.newoether.agora.tool.MemoryToolProvider
@@ -431,9 +432,7 @@ class GenerationManager(
                 runSequence = it.runSequence,
                 consumedAtPass = it.consumedAtPass,
             )
-            // ERROR rows are synthetic client-side text ("Error: …"), never real model output —
-            // replaying them as assistant turns would pollute the API context on retry.
-        }.filter { it.participant != Participant.ERROR && it.status != MessageStatus.ERROR }
+        }.let(::projectGenerationStatusesForApi)
             .let { path ->
                 if (isRegenerate && replaceMessageId != null) {
                     val oldIdx = path.indexOfFirst { it.id == replaceMessageId }
@@ -903,8 +902,7 @@ class GenerationManager(
 
             if (currentStatus != MessageStatus.ERROR) {
                 // A queue-steered interruption is a SUCCESSFUL turn even with no answer text —
-                // its value is the persisted tool activity; marking it ERROR would exclude the
-                // row from future API paths (see buildApiPath's ERROR filter).
+                // its value is the persisted tool activity.
                 currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty() || interruptedForQueuedSend) {
                     MessageStatus.SUCCESS
                 } else MessageStatus.ERROR
