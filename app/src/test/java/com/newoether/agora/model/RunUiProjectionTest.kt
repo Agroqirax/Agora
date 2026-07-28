@@ -20,10 +20,12 @@ class RunUiProjectionTest {
 
         assertTrue(projected.getValue("u0").showActions)
         assertEquals("start", projected.getValue("u0").copyText)
+        assertEquals("u0", projected.getValue("u0").deleteTargetMessageId)
         assertFalse(projected.getValue("m0").showActions)
         assertFalse(projected.getValue("u1").showActions)
         assertTrue(projected.getValue("m1").showActions)
         assertEquals("final", projected.getValue("m1").copyText)
+        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
     }
 
     @Test
@@ -40,7 +42,7 @@ class RunUiProjectionTest {
     }
 
     @Test
-    fun branchSelector_isOnBothRunBoundaries_andTargetsSiblingBoundaryInput() {
+    fun editBranch_isOnlyOnUser_andRegenerationBranchIsOnlyOnAssistant() {
         val left = listOf(
             message("u-left", "left", Participant.USER, "run-left", 0, parentId = "parent"),
             message("m-left", "answer", Participant.MODEL, "run-left", 1, parentId = "u-left"),
@@ -49,8 +51,20 @@ class RunUiProjectionTest {
             message("u-right", "right", Participant.USER, "run-right", 0, parentId = "parent", timestamp = 2),
             message("m-right", "answer", Participant.MODEL, "run-right", 1, parentId = "u-right", timestamp = 3),
         )
+        val regenerated = message(
+            "m-regenerated",
+            "new answer",
+            Participant.MODEL,
+            "run-regenerated",
+            0,
+            parentId = "u-right",
+            timestamp = 4,
+        )
 
-        val projected = RunUiProjection.project(right, left + right)
+        val projected = RunUiProjection.project(
+            visibleMessages = listOf(right.first(), regenerated),
+            allMessages = left + right + regenerated,
+        )
 
         val input = projected.getValue("u-right")
         assertTrue(input.showBranchSelector)
@@ -58,12 +72,71 @@ class RunUiProjectionTest {
         assertEquals(2, input.totalBranches)
         assertEquals("parent", input.branchAnchorParentId)
         assertEquals("u-right", input.branchAnchorMessageId)
-        val output = projected.getValue("m-right")
+        assertEquals("u-right", input.deleteTargetMessageId)
+        val output = projected.getValue("m-regenerated")
         assertTrue(output.showBranchSelector)
         assertEquals(1, output.branchIndex)
         assertEquals(2, output.totalBranches)
-        assertEquals("parent", output.branchAnchorParentId)
-        assertEquals("u-right", output.branchAnchorMessageId)
+        assertEquals("u-right", output.branchAnchorParentId)
+        assertEquals("m-regenerated", output.branchAnchorMessageId)
+        assertEquals("m-regenerated", output.deleteTargetMessageId)
+    }
+
+    @Test
+    fun regenerationAlone_doesNotCreateAnEditSelectorOnSharedUser() {
+        val input = message("u0", "prompt", Participant.USER, "source", 0)
+        val original = message("m0", "answer", Participant.MODEL, "source", 1, parentId = "u0")
+        val regenerated = message(
+            "m1",
+            "new answer",
+            Participant.MODEL,
+            "regeneration",
+            0,
+            parentId = "u0",
+            timestamp = 2,
+        )
+
+        val projected = RunUiProjection.project(
+            visibleMessages = listOf(input, regenerated),
+            allMessages = listOf(input, original, regenerated),
+        )
+
+        assertFalse(projected.getValue("u0").showBranchSelector)
+        assertTrue(projected.getValue("m1").showBranchSelector)
+    }
+
+    @Test
+    fun legacyAssistantSiblingsInOneRun_remainIndependentRegenerationBranches() {
+        val input = message("u0", "prompt", Participant.USER, "legacy-run", 0)
+        val original = message(
+            "m0",
+            "answer",
+            Participant.MODEL,
+            "legacy-run",
+            1,
+            parentId = "u0",
+            timestamp = 1,
+        )
+        val regenerated = message(
+            "m1",
+            "new answer",
+            Participant.MODEL,
+            "legacy-run",
+            2,
+            parentId = "u0",
+            timestamp = 2,
+        )
+
+        val projected = RunUiProjection.project(
+            visibleMessages = listOf(input, regenerated),
+            allMessages = listOf(input, original, regenerated),
+        )
+        val output = projected.getValue("m1")
+
+        assertTrue(output.showBranchSelector)
+        assertEquals(1, output.branchIndex)
+        assertEquals(2, output.totalBranches)
+        assertEquals("m1", output.branchAnchorMessageId)
     }
 
     @Test

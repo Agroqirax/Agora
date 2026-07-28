@@ -223,11 +223,11 @@ class ChatViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             convRepo.deleteOrphanedEmbeddings()
         }
-        // Sweep orphaned attachment files (att_/vid_/img_/pdf_*) left in filesDir by a
-        // process death mid-composition or mid-render. A file is junk only when nothing
-        // references it: a stored message's images, its attachmentMeta originalUri (the
-        // video-playback / file-open source), or any conversation draft's private copies.
-        // The 1h age guard means a copy racing this sweep at startup is never deleted.
+        // Sweep orphaned attachment files left in filesDir or run-inputs by a process death,
+        // interrupted Edit, or the v18 removal of v17's cloned Regenerate inputs. A file is junk
+        // only when nothing references it: a stored message's images, its attachmentMeta
+        // originalUri (the video-playback / file-open source), or any conversation draft's
+        // private copies. The 1h age guard means a copy racing this sweep is never deleted.
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val referenced = HashSet<String>()
@@ -278,6 +278,17 @@ class ChatViewModel(
                 }?.forEach { f ->
                     if (f.absolutePath !in referenced && now - f.lastModified() > minAgeMs) {
                         runCatching { f.delete() }
+                    }
+                }
+                java.io.File(
+                    getApplication<Application>().filesDir,
+                    "run-inputs",
+                ).listFiles { file -> file.isFile }?.forEach { file ->
+                    if (
+                        file.absolutePath !in referenced &&
+                        now - file.lastModified() > minAgeMs
+                    ) {
+                        runCatching { file.delete() }
                     }
                 }
             } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
@@ -1164,7 +1175,16 @@ class ChatViewModel(
         val conversationId = _currentConversationId.value ?: return
         val state = generationRegistry.getOrCreate(conversationId)
         if (state.generating.value) return
-        val siblings = _allMessages.value.filter { it.parentId == parentId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }.sortedBy { it.timestamp }
+        val currentAnchor = _allMessages.value.firstOrNull { it.id == currentMessageId }
+            ?: return
+        // Edit branches are USER siblings; Regenerate branches are MODEL siblings. Never mix
+        // another structural edge that happens to share the same parent into this selector.
+        val siblings = _allMessages.value.filter {
+            it.parentId == parentId &&
+                it.participant == currentAnchor.participant &&
+                !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
+                !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
+        }.sortedWith(compareBy<ChatMessage> { it.timestamp }.thenBy { it.id })
         if (siblings.size < 2) return
         var currentIndex = siblings.indexOfFirst { it.id == currentMessageId }
         if (currentIndex == -1) {

@@ -9,7 +9,7 @@ import org.junit.Test
 class RunRegenerationPolicyTest {
 
     @Test
-    fun selectBoundaryInput_returnsOnlyFirstUserAndIgnoresLaterInterventions() {
+    fun selectBoundaryInput_returnsOwnedBoundaryAndIgnoresLaterInterventions() {
         val messages = listOf(
             message("${Constants.RESULT_MSG_PREFIX}tool", sequence = 1),
             message("later", sequence = 4, timestamp = 1),
@@ -24,15 +24,22 @@ class RunRegenerationPolicyTest {
     }
 
     @Test
-    fun selectBoundaryInput_usesTimestampForLegacyUnassignedRows() {
+    fun selectBoundaryInput_forRegenerationRun_resolvesSharedParentUser() {
         val messages = listOf(
-            message("later", sequence = -1, timestamp = 20),
-            message("first", sequence = -1, timestamp = 10),
+            message("anchor", sequence = 0, runId = "source"),
+            message(
+                id = "regenerated-output",
+                sequence = 0,
+                runId = "regeneration",
+                participant = Participant.MODEL,
+                parentId = "anchor",
+            ),
+            message("later-intervention", sequence = 1, runId = "regeneration"),
         )
 
-        val boundary = RunRegenerationPolicy.selectBoundaryInput(messages, "run")
+        val boundary = RunRegenerationPolicy.selectBoundaryInput(messages, "regeneration")
 
-        assertEquals("first", boundary?.id)
+        assertEquals("anchor", boundary?.id)
     }
 
     private fun message(
@@ -40,11 +47,14 @@ class RunRegenerationPolicyTest {
         sequence: Long,
         timestamp: Long = sequence,
         runId: String = "run",
+        participant: Participant = Participant.USER,
+        parentId: String? = null,
     ) = MessageEntity(
         id = id,
         conversationId = "conversation",
+        parentId = parentId,
         text = id,
-        participant = Participant.USER,
+        participant = participant,
         timestamp = timestamp,
         runId = runId,
         runSequence = sequence,

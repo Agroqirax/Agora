@@ -50,6 +50,7 @@ fun MessageItem(
     totalBranches: Int = 1,
     onSwitchBranch: (Int) -> Unit = {},
     onRegenerate: (String) -> Unit = {},
+    deleteTargetMessageId: String = message.id,
     onDelete: (String) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
@@ -94,7 +95,7 @@ fun MessageItem(
             onConfirm = {
                 showDeleteConfirm = false
                 haptics.reject()
-                onDelete(message.id)
+                onDelete(deleteTargetMessageId)
             },
             onDismiss = { showDeleteConfirm = false }
         )

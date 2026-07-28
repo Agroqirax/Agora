@@ -11,6 +11,8 @@ import com.newoether.agora.model.repairSelectionsAfterQueuedRemoval
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.data.local.migration.MIGRATION_16_17
+import com.newoether.agora.data.local.migration.MIGRATION_17_18
+import com.newoether.agora.data.local.migration.MIGRATION_18_19
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -316,23 +318,26 @@ interface ChatDao {
     ): Int
 
     /**
-     * Atomically removes a Run subtree (via the self-referencing CASCADE), its embeddings, and
-     * every branch-selection reference that the caller repaired from the same locked snapshot.
+     * Atomically removes one structural message subtree and only those Runs that become wholly
+     * empty. [rootRunIdsToDelete] must be CASCADE-safe roots planned from the same locked
+     * snapshot; a partially retained Run continues to own its shared boundary USER.
      * Attachment files are intentionally deleted only after this transaction commits.
      */
     @Transaction
-    suspend fun deleteRunGraph(
+    suspend fun deleteMessageSubtree(
         conversationId: String,
-        rootRunId: String,
+        rootMessageId: String,
         staleMessageIds: List<String>,
+        rootRunIdsToDelete: List<String>,
         selectedBranchesJson: String,
         selectedRunBranchesJson: String,
         at: Long,
     ): Boolean {
-        val root = getRun(rootRunId) ?: return false
+        val root = getMessage(rootMessageId) ?: return false
         require(root.conversationId == conversationId) {
-            "Run $rootRunId does not belong to conversation $conversationId"
+            "Message $rootMessageId does not belong to conversation $conversationId"
         }
+        require(rootMessageId in staleMessageIds)
         if (staleMessageIds.isNotEmpty()) {
             deleteEmbeddingsByMessageIds(staleMessageIds)
         }
@@ -343,8 +348,15 @@ interface ChatDao {
                 selectedRunBranchesJson,
                 at,
             ) == 1
-        ) { "Conversation $conversationId disappeared during Run deletion" }
-        check(deleteRun(rootRunId) == 1) { "Run $rootRunId disappeared during deletion" }
+        ) { "Conversation $conversationId disappeared during branch deletion" }
+        for (runId in rootRunIdsToDelete) {
+            val run = getRun(runId) ?: continue
+            require(run.conversationId == conversationId) {
+                "Run $runId does not belong to conversation $conversationId"
+            }
+            check(deleteRun(runId) == 1) { "Run $runId disappeared during deletion" }
+        }
+        deleteMessagesByIds(staleMessageIds)
         return true
     }
 
@@ -901,7 +913,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 17
+        const val CURRENT_VERSION = 19
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -1031,6 +1043,8 @@ abstract class ChatDatabase : RoomDatabase() {
                 }
             },
             MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19,
         )
 
         fun getStoredVersion(context: Context): Int {

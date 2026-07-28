@@ -49,7 +49,6 @@ internal fun ComposerSendButton(
     isStopping: Boolean = false,
     isModelValid: Boolean,
     onSendMessage: suspend (String, List<SelectedAttachment>) -> SendAcceptance?,
-    onDirectSendCommitted: (String) -> Unit,
     onStopGeneration: () -> Unit,
     onCollapse: () -> Unit,
 ) {
@@ -73,9 +72,6 @@ internal fun ComposerSendButton(
                         textFieldState.edit { replace(0, length, "") }
                     }
                     onCollapse()
-                    if (acceptance is SendAcceptance.Direct) {
-                        onDirectSendCommitted(acceptance.messageId)
-                    }
                 }
             } finally {
                 isSubmitting = false
@@ -122,9 +118,6 @@ internal fun ComposerSendButton(
                                     textFieldState.edit { replace(0, length, "") }
                                 }
                                 onCollapse()
-                                if (acceptance is SendAcceptance.Direct) {
-                                    onDirectSendCommitted(acceptance.messageId)
-                                }
                             }
                         } finally {
                             isSubmitting = false

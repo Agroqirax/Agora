@@ -141,17 +141,19 @@ class ConversationRepository(
     suspend fun getMessagesForRuns(runIds: List<String>): List<MessageEntity> =
         if (runIds.isEmpty()) emptyList() else chatDao.getMessagesForRuns(runIds)
 
-    suspend fun deleteRunGraph(
+    suspend fun deleteMessageSubtree(
         conversationId: String,
-        rootRunId: String,
+        rootMessageId: String,
         staleMessageIds: List<String>,
+        rootRunIdsToDelete: List<String>,
         messageSelections: Map<String?, String>,
         runSelections: Map<String?, String>,
         at: Long = System.currentTimeMillis(),
-    ): Boolean = chatDao.deleteRunGraph(
+    ): Boolean = chatDao.deleteMessageSubtree(
         conversationId = conversationId,
-        rootRunId = rootRunId,
+        rootMessageId = rootMessageId,
         staleMessageIds = staleMessageIds,
+        rootRunIdsToDelete = rootRunIdsToDelete,
         selectedBranchesJson = Json.encodeToString(messageSelections.mapKeys { it.key ?: "null" }),
         selectedRunBranchesJson = Json.encodeToString(runSelections.mapKeys { it.key ?: "null" }),
         at = at,

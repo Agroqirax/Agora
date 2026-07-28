@@ -51,9 +51,9 @@ private sealed interface SendPlacement {
 /**
  * Durable acceptance result returned to the composer.
  *
- * A direct send enters the visible conversation and scrolls only after the composer has cleared
- * and settled. A queued send remains exclusively in the queue banner until the next Pass claims
- * it, so it deliberately has no immediate chat-scroll target.
+ * A direct send enters the visible conversation. Its Controller-owned UI commit also requests the
+ * scroll; the composer only uses this result to decide whether it may clear the submitted draft.
+ * A queued send remains exclusively in the queue banner until the next Pass claims it.
  */
 sealed interface SendAcceptance {
     val messageId: String
@@ -63,29 +63,53 @@ sealed interface SendAcceptance {
 }
 
 /**
- * Regenerate creates a sibling Run from the source Run's original boundary input. Interventions
- * accepted during later Passes belong only to the source execution and must never be replayed into
- * the regenerated branch.
+ * Resolves the shared user anchor for regeneration.
+ *
+ * A normal/edit Run owns its boundary user at sequence 0. A regeneration Run intentionally owns
+ * only its assistant branch (plus any later queued interventions), so its anchor is the parent of
+ * its earliest ordinary model row. This keeps repeated regeneration under the same user message
+ * instead of cloning or progressively nesting user inputs.
  */
 internal object RunRegenerationPolicy {
     fun selectBoundaryInput(
         messages: List<MessageEntity>,
         runId: String,
-    ): MessageEntity? = messages
-        .asSequence()
-        .filter {
-            it.runId == runId &&
+    ): MessageEntity? {
+        val runMessages = messages.filter { it.runId == runId }
+        val ownedBoundary = runMessages
+            .asSequence()
+            .filter {
+                it.participant == Participant.USER &&
+                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX) &&
+                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX)
+            }
+            .minWithOrNull(messageOrder)
+            ?.takeIf { it.runSequence == 0L }
+        if (ownedBoundary != null) return ownedBoundary
+
+        val rootOutput = runMessages
+            .asSequence()
+            .filter {
+                it.participant == Participant.MODEL &&
+                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX) &&
+                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX)
+            }
+            .minWithOrNull(messageOrder)
+            ?: return null
+        return messages.firstOrNull {
+            it.id == rootOutput.parentId &&
                 it.participant == Participant.USER &&
                 !it.id.startsWith(Constants.RESULT_MSG_PREFIX) &&
                 !it.id.startsWith(Constants.TOOL_MSG_PREFIX)
         }
-        .minWithOrNull(
-            compareBy<MessageEntity> {
-                it.runSequence.takeIf { sequence -> sequence >= 0L } ?: Long.MAX_VALUE
-            }
-                .thenBy { it.timestamp }
-                .thenBy { it.id }
-        )
+    }
+
+    private val messageOrder =
+        compareBy<MessageEntity> {
+            it.runSequence.takeIf { sequence -> sequence >= 0L } ?: Long.MAX_VALUE
+        }
+            .thenBy { it.timestamp }
+            .thenBy { it.id }
 }
 
 /**
@@ -193,18 +217,17 @@ class MessageGenerationController(
     // ════════════════════════════════════════════════════════════════════
 
     /**
-     * Deletes the target Run and its complete descendant-Run subtree. ACTIVE and STOPPING both
-     * reject deletion; Stop is never an implicit side effect of a tree mutation.
+     * Deletes one structural message branch. A USER target removes its complete edit subtree; a
+     * MODEL target removes its regeneration subtree while retaining the shared boundary USER.
+     * ACTIVE and STOPPING both reject deletion; Stop is never an implicit side effect.
      */
     fun deleteMessage(messageId: String): Int {
         val currentId = currentConversationId.value ?: return 0
         val state = registry.getOrCreate(currentId)
         if (state.generating.value) return 0
         val snapshot = allMessages.value
-        val targetMsg = snapshot.find { it.id == messageId } ?: return 0
-        val targetRunId = targetMsg.runId ?: return 0
-        val previewRunIds = inferRunDescendants(snapshot, targetRunId)
-        val previewIds = snapshot.filter { it.runId in previewRunIds }.mapTo(mutableSetOf()) { it.id }
+        if (snapshot.none { it.id == messageId }) return 0
+        val previewIds = structuralDescendantIds(snapshot, messageId)
 
         viewModelScope.launch(Dispatchers.IO) {
             onTreeMutationStart()
@@ -217,54 +240,30 @@ class MessageGenerationController(
                         if (convRepo.getLiveRun(currentId) != null) return@lock
 
                         val runs = convRepo.getRunsForConversationSnapshot(currentId)
-                        if (runs.none { it.id == targetRunId }) return@lock
-                        val staleRunIds = descendantRunIds(runs, targetRunId)
-                        val staleList = convRepo.getMessagesForRuns(staleRunIds.toList())
-                        val staleIds = staleList.mapTo(mutableSetOf()) { it.id }
                         val allMsgs = convRepo.getMessagesForConversationSnapshot(currentId)
-                        val remainingMsgs = allMsgs.filter { it.id !in staleIds }
                         val previousSelected = convRepo.restoreBranchSelections(currentId)
-                        val newSelected = previousSelected.toMutableMap()
-                        for ((parentId, childId) in previousSelected) {
-                            if (parentId != null && parentId in staleIds) {
-                                newSelected.remove(parentId)
-                                continue
-                            }
-                            if (childId in staleIds) {
-                                val siblings = remainingMsgs.filter {
-                                    it.parentId == parentId &&
-                                        !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                                        !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                                }.sortedBy { it.timestamp }
-                                if (siblings.isNotEmpty()) {
-                                    newSelected[parentId] = siblings.last().id
-                                } else {
-                                    newSelected.remove(parentId)
-                                }
-                            }
-                        }
-                        val remainingRuns = runs.filter { it.id !in staleRunIds }
-                        val runSelections = convRepo.restoreRunBranchSelections(currentId).toMutableMap()
-                        for ((parentRunId, selectedRunId) in runSelections.toMap()) {
-                            if (parentRunId != null && parentRunId in staleRunIds) {
-                                runSelections.remove(parentRunId)
-                            } else if (selectedRunId in staleRunIds) {
-                                val sibling = remainingRuns
-                                    .filter { it.parentRunId == parentRunId }
-                                    .maxWithOrNull(compareBy<RunEntity> { it.startedAt }.thenBy { it.id })
-                                if (sibling != null) runSelections[parentRunId] = sibling.id
-                                else runSelections.remove(parentRunId)
-                            }
-                        }
+                        val previousRunSelections =
+                            convRepo.restoreRunBranchSelections(currentId)
+                        val plan = BranchDeletionPlanner.plan(
+                            rootMessageId = messageId,
+                            messages = allMsgs,
+                            runs = runs,
+                            messageSelections = previousSelected,
+                            runSelections = previousRunSelections,
+                        )
+                        val staleList = allMsgs.filter { it.id in plan.deletedMessageIds }
+                        val remainingMsgs =
+                            allMsgs.filter { it.id !in plan.deletedMessageIds }
                         check(
-                            convRepo.deleteRunGraph(
+                            convRepo.deleteMessageSubtree(
                                 conversationId = currentId,
-                                rootRunId = targetRunId,
-                                staleMessageIds = staleIds.toList(),
-                                messageSelections = newSelected,
-                                runSelections = runSelections,
+                                rootMessageId = messageId,
+                                staleMessageIds = plan.deletedMessageIds.toList(),
+                                rootRunIdsToDelete = plan.rootRunIdsToDelete.toList(),
+                                messageSelections = plan.messageSelections,
+                                runSelections = plan.runSelections,
                             )
-                        ) { "Run $targetRunId disappeared during delete" }
+                        ) { "Message $messageId disappeared during delete" }
 
                         // Files are external to Room, so remove them only after graph commit.
                         convRepo.deleteMessageFiles(staleList)
@@ -272,18 +271,18 @@ class MessageGenerationController(
                         val targetAfterDelete = ConversationUiState.resolvePath(
                             allMessages = remainingChatMessages,
                             streamingMsg = null,
-                            selectedChildren = newSelected,
+                            selectedChildren = plan.messageSelections,
                         ).lastOrNull { it.participant == Participant.USER }?.id
                         ifOpenOn(currentId) {
                             allMessages.value = remainingChatMessages
-                            selectedChildren.value = newSelected
+                            selectedChildren.value = plan.messageSelections
                         }
                         committed = true
                         onTreeMutationSettling(targetAfterDelete)
                     }
                 }
             } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Failed to delete Run $targetRunId", e)
+                DebugLog.e("AgoraVM", "Failed to delete message branch $messageId", e)
             } finally {
                 if (!committed) onTreeMutationFailed()
             }
@@ -292,52 +291,18 @@ class MessageGenerationController(
         return previewIds.size
     }
 
-    private fun inferRunDescendants(
+    private fun structuralDescendantIds(
         messages: List<ChatMessage>,
-        targetRunId: String,
+        rootMessageId: String,
     ): Set<String> {
-        val messagesById = messages.associateBy { it.id }
-        val parentRunByRun = messages
-            .filter { !it.runId.isNullOrBlank() }
-            .groupBy { checkNotNull(it.runId) }
-            .mapValues { (_, runMessages) ->
-                val boundary = runMessages
-                    .filter {
-                        it.participant == Participant.USER &&
-                            !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                            !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                    }
-                    .minWithOrNull(
-                        compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-                            .thenBy { it.timestamp }
-                            .thenBy { it.id }
-                    )
-                    ?: runMessages.minBy { it.timestamp }
-                boundary.parentId?.let(messagesById::get)?.runId
+        val childrenByParent = messages.groupBy { it.parentId }
+        val descendants = linkedSetOf(rootMessageId)
+        val pending = ArrayDeque<String>().apply { add(rootMessageId) }
+        while (pending.isNotEmpty()) {
+            for (child in childrenByParent[pending.removeFirst()].orEmpty()) {
+                if (descendants.add(child.id)) pending.add(child.id)
             }
-        val descendants = linkedSetOf(targetRunId)
-        var changed: Boolean
-        do {
-            changed = false
-            for ((runId, parentRunId) in parentRunByRun) {
-                if (parentRunId in descendants && descendants.add(runId)) changed = true
-            }
-        } while (changed)
-        return descendants
-    }
-
-    private fun descendantRunIds(
-        runs: List<RunEntity>,
-        targetRunId: String,
-    ): Set<String> {
-        val descendants = linkedSetOf(targetRunId)
-        var changed: Boolean
-        do {
-            changed = false
-            for (run in runs) {
-                if (run.parentRunId in descendants && descendants.add(run.id)) changed = true
-            }
-        } while (changed)
+        }
         return descendants
     }
 
@@ -385,18 +350,18 @@ class MessageGenerationController(
                 val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
                 val persistedTarget = persistedMessages.find { it.id == messageId } ?: return@lock
                 if (persistedTarget.runId != sourceRunId) return@lock
-                val sourceRun = convRepo.getRun(sourceRunId) ?: return@lock
+                convRepo.getRun(sourceRunId) ?: return@lock
                 val sourceInput =
                     RunRegenerationPolicy.selectBoundaryInput(persistedMessages, sourceRunId)
                         ?: return@lock
-                val clonedInputs = cloneRunInputs(listOf(sourceInput), runId)
+                val inputRunId = sourceInput.runId
                 val modelMessageId = UUID.randomUUID().toString()
                 setupModelMessageId = modelMessageId
-                val startTime = clonedInputs.last().timestamp + 1
+                val startTime = maxOf(System.currentTimeMillis(), persistedTarget.timestamp + 1)
                 val modelEntity = MessageEntity(
                     id = modelMessageId,
                     conversationId = genId,
-                    parentId = clonedInputs.last().id,
+                    parentId = sourceInput.id,
                     text = "",
                     thoughts = null,
                     thoughtTitle = null,
@@ -405,36 +370,37 @@ class MessageGenerationController(
                     timestamp = startTime,
                     modelName = modelId,
                     runId = runId,
-                    runSequence = clonedInputs.size.toLong(),
+                    runSequence = 0,
                 )
                 convRepo.createRunWithMessages(
                     RunEntity(
                         id = runId,
                         conversationId = genId,
-                        parentRunId = sourceRun.parentRunId,
+                        parentRunId = inputRunId,
                         status = RunStatus.ACTIVE,
                         activeSlot = 1,
-                        startedAt = clonedInputs.first().timestamp,
+                        startedAt = startTime,
                         lastCheckpointAt = startTime,
                     ),
-                    clonedInputs + modelEntity,
+                    listOf(modelEntity),
                 )
-                convRepo.selectRunBranch(genId, sourceRun.parentRunId, runId)
-                clonedInputs.filter { it.text.isNotBlank() }.forEach {
-                    onUserMessagePersisted(it.id, it.text)
-                }
                 val placeholder = modelEntity.toChatMessage()
-                val selectedAfterRegenerate = selectedChildren.value.toMutableMap().apply {
-                    clonedInputs.forEach { put(it.parentId, it.id) }
-                    put(modelEntity.parentId, modelEntity.id)
+                val selectedAfterRegenerate =
+                    convRepo.restoreBranchSelections(genId).toMutableMap().apply {
+                    put(sourceInput.id, modelEntity.id)
                 }.toMap()
-                onPersistSelectedChildren(genId, selectedAfterRegenerate)
+                convRepo.selectRunBranch(
+                    conversationId = genId,
+                    parentRunId = inputRunId,
+                    runId = runId,
+                    messageSelections = selectedAfterRegenerate,
+                )
                 ifOpenOn(genId) {
                     allMessages.update { existing ->
-                        existing + clonedInputs.map { it.toChatMessage() } + placeholder
+                        existing + placeholder
                     }
                     selectedChildren.value = selectedAfterRegenerate
-                    onScrollToMessage(clonedInputs.first().id)
+                    onScrollToMessage(sourceInput.id)
                 }
                 state.streamUpdate(myUiToken, placeholder)
                 convRepo.getConversation(genId)?.let { conv ->
@@ -606,7 +572,7 @@ class MessageGenerationController(
             val persistedSource = persistedMessages.find { it.id == messageId } ?: return@lock
             if (persistedSource.runId != sourceRunId) return@lock
             val sourceRun = convRepo.getRun(sourceRunId) ?: return@lock
-            val newUser = cloneRunInputs(
+            val newUser = cloneEditedRunInputs(
                 sourceInputs = listOf(persistedSource),
                 destinationRunId = runId,
                 textOverrides = mapOf(persistedSource.id to newText),
@@ -631,7 +597,17 @@ class MessageGenerationController(
                 ),
                 listOf(newUser, modelEntity),
             )
-            convRepo.selectRunBranch(genId, sourceRun.parentRunId, runId)
+            val selectedAfterModelEdit =
+                convRepo.restoreBranchSelections(genId).toMutableMap().apply {
+                    put(newUser.parentId, newUser.id)
+                    put(newUser.id, modelMessageId)
+                }.toMap()
+            convRepo.selectRunBranch(
+                conversationId = genId,
+                parentRunId = sourceRun.parentRunId,
+                runId = runId,
+                messageSelections = selectedAfterModelEdit,
+            )
             onUserMessagePersisted(newUser.id, newText)
             convRepo.getConversation(genId)?.let { conv ->
                 convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
@@ -646,14 +622,9 @@ class MessageGenerationController(
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) {
                 allMessages.update { it + newUser.toChatMessage() + placeholder }
+                selectedChildren.value = selectedAfterModelEdit
                 onScrollToMessage(newUser.id)
             }
-            val editChildren = selectedChildren.value.toMutableMap()
-            editChildren[newUser.parentId] = newUser.id
-            editChildren[newUser.id] = modelMessageId
-            val selectedAfterModelEdit = editChildren.toMap()
-            onPersistSelectedChildren(genId, selectedAfterModelEdit)
-            ifOpenOn(genId) { selectedChildren.value = selectedAfterModelEdit }
             launchGeneration(
                 genId, modelMessageId, startTime,
                 isRegenerate = false, replaceMessageId = null,
@@ -1028,7 +999,12 @@ class MessageGenerationController(
                     put(userEntity.id, modelEntity.id)
                 }
                 onPersistSelectedChildren(genId, newChildren)
-                ifOpenOn(genId) { selectedChildren.value = newChildren }
+                ifOpenOn(genId) {
+                    selectedChildren.value = newChildren
+                    // The bubble commit owns its scroll request. A callback issued later by the
+                    // composer's coroutine can be lost when new-chat UI leaves composition.
+                    onScrollToMessage(userMessageId)
+                }
             }
         } catch (e: Exception) {
             failGenerationSetup(
@@ -1117,7 +1093,7 @@ class MessageGenerationController(
     // generateTitle
     // ════════════════════════════════════════════════════════════════════
 
-    private suspend fun cloneRunInputs(
+    private suspend fun cloneEditedRunInputs(
         sourceInputs: List<MessageEntity>,
         destinationRunId: String,
         textOverrides: Map<String, String> = emptyMap(),
@@ -1145,34 +1121,15 @@ class MessageGenerationController(
             val now = System.currentTimeMillis()
             var parentId = sourceInputs.first().parentId
             sourceInputs.mapIndexed { index, source ->
-                val clonedMeta = source.attachmentMeta?.let { raw ->
-                    val meta = Json.decodeFromString<AttachmentMeta>(raw)
-                    Json.encodeToString(
-                        meta.copy(
-                            items = meta.items.map { item ->
-                                val uri = item.originalUri
-                                if (uri != null && uri.startsWith("file://")) {
-                                    item.copy(
-                                        originalUri = "file://${cloneBackingPath(uri.removePrefix("file://"))}"
-                                    )
-                                } else {
-                                    item
-                                }
-                            }
-                        )
-                    )
-                }
-                val cloned = source.copy(
+                val cloned = EditedRunInputFactory.create(
+                    source = source,
                     id = UUID.randomUUID().toString(),
                     parentId = parentId,
                     text = textOverrides[source.id] ?: source.text,
-                    images = source.images.map(::cloneBackingPath),
-                    status = MessageStatus.SUCCESS,
                     timestamp = now + index,
-                    attachmentMeta = clonedMeta,
-                    runId = destinationRunId,
+                    destinationRunId = destinationRunId,
                     runSequence = index.toLong(),
-                    consumedAtPass = 0,
+                    cloneBackingPath = ::cloneBackingPath,
                 )
                 parentId = cloned.id
                 cloned
@@ -1180,6 +1137,50 @@ class MessageGenerationController(
         } catch (e: Exception) {
             createdFiles.forEach { runCatching { it.delete() } }
             throw e
+        }
+    }
+
+    internal object EditedRunInputFactory {
+        fun create(
+            source: MessageEntity,
+            id: String,
+            parentId: String?,
+            text: String,
+            timestamp: Long,
+            destinationRunId: String,
+            runSequence: Long,
+            cloneBackingPath: (String) -> String,
+        ): MessageEntity {
+            val clonedMeta = source.attachmentMeta?.let { raw ->
+                val meta = Json.decodeFromString<AttachmentMeta>(raw)
+                Json.encodeToString(
+                    meta.copy(
+                        items = meta.items.map { item ->
+                            val uri = item.originalUri
+                            if (uri != null && uri.startsWith("file://")) {
+                                item.copy(
+                                    originalUri =
+                                        "file://${cloneBackingPath(uri.removePrefix("file://"))}"
+                                )
+                            } else {
+                                item
+                            }
+                        }
+                    )
+                )
+            }
+            return source.copy(
+                id = id,
+                parentId = parentId,
+                text = text,
+                images = source.images.map(cloneBackingPath),
+                status = MessageStatus.SUCCESS,
+                timestamp = timestamp,
+                attachmentMeta = clonedMeta,
+                runId = destinationRunId,
+                runSequence = runSequence,
+                consumedAtPass = 0,
+            )
         }
     }
 

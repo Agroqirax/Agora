@@ -349,7 +349,7 @@ fun ChatApp(
     suspend fun settleCoveredTransition(targetMessageId: String?): Boolean =
         withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
             var stableSamples = 0
-            var previousSignature: List<Int>? = null
+            var previousSignature: List<Any>? = null
             while (stableSamples < STABLE_LAYOUT_SAMPLES) {
                 delay(LAYOUT_SAMPLE_INTERVAL_MS)
                 val currentMessages = messages
@@ -364,6 +364,27 @@ fun ChatApp(
                 }
                 val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
                 if (targetIndex == -1 || viewportHeightPx <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                // A MODEL branch scrolls relative to its parent USER, but the new assistant bubble
+                // itself must exist and stabilize before the cover may disappear. Otherwise two
+                // regeneration branches with the same user anchor can appear "settled" before the
+                // newly selected output has entered layout.
+                val requestedTarget = targetMessageId?.let { id ->
+                    currentMessages.firstOrNull { it.id == id }
+                }
+                if (targetMessageId != null && requestedTarget == null) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val requestedTargetHeight = requestedTarget?.let { messageHeights[it.id] }
+                if (
+                    requestedTarget != null &&
+                    (requestedTargetHeight == null || requestedTargetHeight <= 0)
+                ) {
                     stableSamples = 0
                     previousSignature = null
                     continue
@@ -396,6 +417,9 @@ fun ChatApp(
                     targetInfo.size,
                     measuredHeight,
                     viewportHeightPx,
+                    currentMessages.size,
+                    requestedTarget?.id.orEmpty(),
+                    requestedTargetHeight ?: 0,
                 )
                 if (signature == previousSignature) stableSamples += 1
                 else {
@@ -838,7 +862,6 @@ fun ChatApp(
                         onSendMessage = { text, attachments ->
                             viewModel.sendMessage(text, attachments = attachments)
                         },
-                        onDirectSendCommitted = viewModel::triggerScrollToMessage,
                         onStopGeneration = {
                             haptics.generationStopped()
                             viewModel.stopGeneration()

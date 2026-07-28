@@ -65,7 +65,6 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun ChatBottomBar(
     onSendMessage: suspend (String, List<com.newoether.agora.model.SelectedAttachment>) -> SendAcceptance?,
-    onDirectSendCommitted: (String) -> Unit = {},
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
     isSwitching: Boolean = false,
@@ -569,7 +568,6 @@ fun ChatBottomBar(
                 isStopping = isStopping,
                 isModelValid = isModelValid,
                 onSendMessage = onSendMessage,
-                onDirectSendCommitted = onDirectSendCommitted,
                 onStopGeneration = onStopGeneration,
                 onCollapse = onCollapse,
             )

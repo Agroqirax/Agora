@@ -136,6 +136,8 @@ fun MessageList(
                         }
                     },
                     onRegenerate = onRegenerate,
+                    deleteTargetMessageId =
+                        presentation?.deleteTargetMessageId ?: message.id,
                     onDelete = onDelete,
                     onMediaClick = onMediaClick,
                     onFileContentClick = onFileContentClick,

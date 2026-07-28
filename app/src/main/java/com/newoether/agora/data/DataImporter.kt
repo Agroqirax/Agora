@@ -17,6 +17,10 @@ import com.newoether.agora.data.local.TaskEntity
 import com.newoether.agora.data.local.migration.LegacyMessageRecord
 import com.newoether.agora.data.local.migration.LegacyRunBackfillPlanner
 import com.newoether.agora.data.local.migration.PlannedMessageAssignment
+import com.newoether.agora.data.local.migration.RegenerationTreeRepairPlanner
+import com.newoether.agora.data.local.migration.V17MessageRecord
+import com.newoether.agora.data.local.migration.V17RunRecord
+import com.newoether.agora.data.local.migration.regenerationInputFingerprint
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -78,6 +82,17 @@ internal fun sanitizeImportedLoop(loop: LoopEntity): LoopEntity {
         nextFireAt = 0L,
     )
 }
+
+private fun decodeStoredSelections(raw: String?): Map<String?, String> {
+    if (raw.isNullOrBlank()) return emptyMap()
+    return runCatching {
+        Json.decodeFromString<Map<String, String>>(raw)
+            .mapKeys { if (it.key == "null") null else it.key }
+    }.getOrDefault(emptyMap())
+}
+
+private fun encodeStoredSelections(selections: Map<String?, String>): String =
+    Json.encodeToString(selections.mapKeys { it.key ?: "null" })
 
 /** Prevents a missing Task row from making an imported execution permanently unreachable. */
 internal fun sanitizeImportedConversation(
@@ -226,6 +241,9 @@ class DataImporter(
         val assignments: Map<String, PlannedMessageAssignment>,
         val recoveredRunIds: Set<String> = emptySet(),
         val legacyRunSelections: Map<String, Map<String?, String>> = emptyMap(),
+        val messageSelectionOverrides: Map<String, Map<String?, String>> = emptyMap(),
+        val deletedMessageIds: Set<String> = emptySet(),
+        val messageParentOverrides: Map<String, String> = emptyMap(),
     )
 
     /** Reads one JSON value only; callers retain at most one exported entity at a time. */
@@ -541,6 +559,8 @@ class DataImporter(
         restoredMedia: RestoredMedia,
         assignments: Map<String, PlannedMessageAssignment>,
         recoveredRunIds: Set<String>,
+        deletedMessageIds: Set<String>,
+        messageParentOverrides: Map<String, String>,
     ) {
         val batch = mutableListOf<MessageEntity>()
 
@@ -572,15 +592,18 @@ class DataImporter(
                         readJsonElement(reader)
                     )
                     if (exported.conversationId in availableConversationIds) {
-                        batch.add(
-                            exported.toMessageEntity(
+                        if (exported.id in deletedMessageIds) continue
+                        var message = exported.toMessageEntity(
                                 restoredMedia,
                                 checkNotNull(assignments[exported.id]) {
                                     "Message ${exported.id} has no planned Run assignment"
                                 },
                                 recoveredRunIds,
                             )
-                        )
+                        messageParentOverrides[exported.id]?.let { repairedParentId ->
+                            message = message.copy(parentId = repairedParentId)
+                        }
+                        batch.add(message)
                         if (batch.size >= IMPORT_MESSAGE_BATCH_SIZE) {
                             flushBatch()
                         }
@@ -598,6 +621,8 @@ class DataImporter(
         headers: ConversationGraphHeaders,
     ): PlannedNativeRunGraph {
         val messagesByConversation = mutableMapOf<String, MutableList<LegacyMessageRecord>>()
+        val repairMessagesByConversation =
+            mutableMapOf<String, MutableList<V17MessageRecord>>()
         val archivedOwnership = mutableListOf<ArchivedMessageRunOwnership>()
         JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
             reader.beginObject()
@@ -612,6 +637,16 @@ class DataImporter(
                         readJsonElement(reader)
                     )
                     if (exported.conversationId in headers.availableConversationIds) {
+                        val participant = try {
+                            Participant.valueOf(exported.participant)
+                        } catch (_: Exception) {
+                            Participant.MODEL
+                        }
+                        val status = try {
+                            MessageStatus.valueOf(exported.status)
+                        } catch (_: Exception) {
+                            MessageStatus.SUCCESS
+                        }
                         archivedOwnership += ArchivedMessageRunOwnership(
                             messageId = exported.id,
                             conversationId = exported.conversationId,
@@ -624,19 +659,36 @@ class DataImporter(
                                 LegacyMessageRecord(
                                     id = exported.id,
                                     parentId = exported.parentId,
-                                    participant = try {
-                                        Participant.valueOf(exported.participant)
-                                    } catch (_: Exception) {
-                                        Participant.MODEL
-                                    },
-                                    status = try {
-                                        MessageStatus.valueOf(exported.status)
-                                    } catch (_: Exception) {
-                                        MessageStatus.SUCCESS
-                                    },
+                                    participant = participant,
+                                    status = status,
                                     timestamp = exported.timestamp,
                                 )
                             )
+                        val runId = exported.runId
+                        val runSequence = exported.runSequence
+                        if (runId != null && runSequence != null) {
+                            repairMessagesByConversation
+                                .getOrPut(exported.conversationId) { mutableListOf() }
+                                .add(
+                                    V17MessageRecord(
+                                        id = exported.id,
+                                        parentId = exported.parentId,
+                                        participant = participant,
+                                        timestamp = exported.timestamp,
+                                        runId = runId,
+                                        runSequence = runSequence,
+                                        inputFingerprint = if (participant == Participant.USER) {
+                                            regenerationInputFingerprint(
+                                                exported.text,
+                                                exported.images.size,
+                                                exported.attachmentMeta,
+                                            )
+                                        } else {
+                                            ""
+                                        },
+                                    )
+                                )
+                        }
                     }
                 }
                 reader.endArray()
@@ -650,20 +702,68 @@ class DataImporter(
             sourceRunIdsWereUnique = headers.sourceRunIdsWereUnique,
         )
         if (archiveOwnershipIsComplete) {
-            val assignments = archivedOwnership.associate { ownership ->
+            val runsByConversation = headers.runs.groupBy { it.conversationId }
+            val conversationsById = headers.conversations.associateBy { it.id }
+            val runParentUpdates = mutableMapOf<String, String>()
+            val deletedMessageIds = mutableSetOf<String>()
+            val messageParentOverrides = mutableMapOf<String, String>()
+            val runSequenceOverrides = mutableMapOf<String, Long>()
+            val messageSelectionOverrides =
+                mutableMapOf<String, Map<String?, String>>()
+            val runSelectionOverrides =
+                mutableMapOf<String, Map<String?, String>>()
+
+            for (conversationId in headers.availableConversationIds) {
+                val conversation = conversationsById[conversationId] ?: continue
+                val repair = RegenerationTreeRepairPlanner.plan(
+                    runs = runsByConversation[conversationId].orEmpty().map {
+                        V17RunRecord(it.id, it.parentRunId, it.startedAt)
+                    },
+                    messages = repairMessagesByConversation[conversationId].orEmpty(),
+                    messageSelections = decodeStoredSelections(conversation.selectedBranchesJson),
+                    runSelections = decodeStoredSelections(conversation.selectedRunBranchesJson),
+                )
+                if (repair.inferredRunIds.isEmpty()) continue
+                runParentUpdates += repair.runParentUpdates
+                deletedMessageIds += repair.deletedMessageIds
+                messageParentOverrides += repair.messageParentUpdates
+                runSequenceOverrides += repair.runSequenceUpdates
+                messageSelectionOverrides[conversationId] = repair.messageSelections
+                runSelectionOverrides[conversationId] = repair.runSelections
+            }
+
+            val repairedRuns = NativeRunArchivePolicy.orderByParent(
+                headers.runs.map { run ->
+                    runParentUpdates[run.id]?.let { parentRunId ->
+                        run.copy(
+                            parentRunId = parentRunId,
+                            legacyAmbiguous = true,
+                        )
+                    } ?: run
+                }
+            )
+            val assignments = archivedOwnership
+                .asSequence()
+                .filter { it.messageId !in deletedMessageIds }
+                .associate { ownership ->
                 ownership.messageId to PlannedMessageAssignment(
                     messageId = ownership.messageId,
                     runId = checkNotNull(ownership.runId),
-                    runSequence = checkNotNull(ownership.runSequence),
+                    runSequence = runSequenceOverrides[ownership.messageId]
+                        ?: checkNotNull(ownership.runSequence),
                     consumedAtPass = ownership.consumedAtPass,
                 )
             }
             return PlannedNativeRunGraph(
-                runs = headers.runs,
+                runs = repairedRuns,
                 assignments = assignments,
-                recoveredRunIds = headers.runs
+                recoveredRunIds = repairedRuns
                     .filter { it.endReason == RunEndReason.PROCESS_RECOVERED }
                     .mapTo(mutableSetOf()) { it.id },
+                legacyRunSelections = runSelectionOverrides,
+                messageSelectionOverrides = messageSelectionOverrides,
+                deletedMessageIds = deletedMessageIds,
+                messageParentOverrides = messageParentOverrides,
             )
         }
 
@@ -730,21 +830,18 @@ class DataImporter(
             }
             headers.tasks.forEach { chatDao.upsertTask(it) }
             headers.conversations.forEach { conversation ->
-                val derivedSelections = plannedRunGraph.legacyRunSelections[conversation.id]
+                val derivedRunSelections = plannedRunGraph.legacyRunSelections[conversation.id]
+                val derivedMessageSelections =
+                    plannedRunGraph.messageSelectionOverrides[conversation.id]
                 chatDao.upsertConversation(
-                    if (derivedSelections != null) {
-                        conversation.copy(
-                            selectedRunBranchesJson = derivedSelections
-                                .takeIf { it.isNotEmpty() }
-                                ?.let { selections ->
-                                    Json.encodeToString(
-                                        selections.mapKeys { it.key ?: "null" }
-                                    )
-                                }
-                        )
-                    } else {
-                        conversation
-                    }
+                    conversation.copy(
+                        selectedBranchesJson = derivedMessageSelections
+                            ?.let(::encodeStoredSelections)
+                            ?: conversation.selectedBranchesJson,
+                        selectedRunBranchesJson = derivedRunSelections
+                            ?.let(::encodeStoredSelections)
+                            ?: conversation.selectedRunBranchesJson,
+                    )
                 )
             }
             for (run in plannedRunGraph.runs) {
@@ -758,6 +855,8 @@ class DataImporter(
                     restoredMedia = restoredMedia,
                     assignments = plannedRunGraph.assignments,
                     recoveredRunIds = plannedRunGraph.recoveredRunIds,
+                    deletedMessageIds = plannedRunGraph.deletedMessageIds,
+                    messageParentOverrides = plannedRunGraph.messageParentOverrides,
                 )
             } ?: error("conversations.json is missing")
             headers.loops.forEach { chatDao.upsertLoop(it) }
