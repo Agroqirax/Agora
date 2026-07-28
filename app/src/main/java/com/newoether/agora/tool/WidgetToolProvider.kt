@@ -22,26 +22,31 @@ class WidgetToolProvider : ToolProvider {
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.htmlWidgetsEnabled) return emptyList()
         val themeNote = if (ctx.htmlWidgetsThemeEnabled) {
-            " The widget's background is transparent and renders on the user's actual app background, and the following " +
-                "Material 3 color scheme is available as CSS custom properties: --md-primary, --md-on-primary, --md-secondary, " +
-                "--md-on-secondary, --md-background, --md-on-background, --md-surface, --md-on-surface, --md-surface-variant, " +
-                "--md-on-surface-variant, --md-outline, --md-error, --md-on-error (e.g. `color: var(--md-on-surface)`). " +
-                "Use these instead of hardcoded colors so the widget matches the user's light/dark theme and stays legible — " +
-                "text or controls that assume an opaque white background may be invisible."
+            " The app already provides Material 3 styling. Use the following CSS variables: such as: --md-primary, --md-on-primary, --md-secondary, --md-on-secondary, --md-background, --md-on-background, --md-surface, --md-on-surface, --md-surface-variant, --md-on-surface-variant, --md-outline, --md-error, --md-on-error. Prefer these variables over hardcoded colors."
         } else {
-            " The widget renders on an opaque background (not transparent, no theme color variables available)."
+            " The widget is shown on an opaque background. No theme CSS variables are available."
         }
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = RENDER_WIDGET,
-                description = "Render an interactive HTML/CSS/JS widget inline in the chat, shown to the user automatically. " +
-                    "Use this for visualizations, small interactive tools, mini-games, or UI mockups the user can directly interact with. " +
-                    "Provide a complete, self-contained HTML document (inline <style>/<script> only — remote resources such as CDN scripts, " +
-                    "web fonts, or remote images are blocked unless the user has enabled network access for widgets in settings)." +
+                description =
+                    "Display an interactive HTML widget directly in the conversation. " +
+                    "Use it whenever the user would benefit from interacting with a visualization, UI, game, calculator, editor, or other small web component. " +
+
+                    "IMPORTANT: The widget is shown automatically after this tool is called. " +
+                    "Do NOT paste or explain the HTML/CSS/JavaScript in your response, and do NOT tell the user to copy or run the code themselves. " +
+                    "After the tool call, simply continue the conversation normally or briefly explain how to use the widget. " +
+
+                    "Provide only an HTML fragment (elements plus optional inline <style> and <script>). " +
+                    "Do not include <html>, <head>, or <body>. " +
+
+                    "Assume the app already provides the page layout and Material 3 styling. " +
+                    "Avoid global CSS, body/html styling, viewport sizing (100vh, fixed heights, etc.), or custom layout unless the widget genuinely requires it. " +
+                    "Let the content size naturally." +
                     themeNote,
                 parameters = ToolParameters(
                     properties = mapOf(
-                        "html" to ToolProperty("string", "A complete, self-contained HTML document to render."),
+                        "html" to ToolProperty("string", "The widget's HTML content — a fragment, not a full document (no <html>/<head>/<body>)."),
                         "title" to ToolProperty("string", "Optional short label shown above the widget.")
                     ),
                     required = listOf("html")
@@ -63,6 +68,7 @@ class WidgetToolProvider : ToolProvider {
             put("type", RENDER_WIDGET)
             put("status", "ok")
             put("length", html.length)
+            put("message", "The widget was rendered successfully and is already visible to the user. Do not paste, repeat, or describe the HTML/CSS/JS source in your reply.")
         }.toString()
     }
 

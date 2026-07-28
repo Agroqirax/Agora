@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,11 +21,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
@@ -36,7 +41,12 @@ import androidx.compose.ui.viewinterop.AndroidView
  * unless the user has explicitly opted in via the HTML widgets network setting.
  */
 @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
-private fun configureWidgetWebView(webView: WebView, allowNetwork: Boolean, transparentBackground: Boolean) {
+private fun configureWidgetWebView(
+    webView: WebView,
+    allowNetwork: Boolean,
+    transparentBackground: Boolean,
+    onContentHeightPx: ((Int) -> Unit)? = null
+) {
     webView.settings.apply {
         javaScriptEnabled = true
         domStorageEnabled = true
@@ -44,6 +54,12 @@ private fun configureWidgetWebView(webView: WebView, allowNetwork: Boolean, tran
         allowFileAccess = false
         allowContentAccess = false
         setGeolocationEnabled(false)
+        // Force a 1:1 CSS-px-to-dp mapping. Without this, some WebView versions lay the page
+        // out at a "desktop-width" virtual viewport (~980px) and scale it down to fit, which
+        // makes document.documentElement.scrollHeight report a value in the wrong scale —
+        // the content-height measurement below would come out systematically too small.
+        useWideViewPort = false
+        loadWithOverviewMode = false
     }
     if (transparentBackground) {
         webView.setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -66,6 +82,18 @@ private fun configureWidgetWebView(webView: WebView, allowNetwork: Boolean, tran
                 true
             } catch (_: Exception) {
                 true
+            }
+        }
+
+        override fun onPageFinished(view: WebView, url: String?) {
+            super.onPageFinished(view, url)
+            // No addJavascriptInterface bridge is used anywhere — evaluateJavascript is a
+            // one-shot "run this script, hand back the result" call, not a persistent bridge,
+            // so this stays within the same sandboxing posture as the rest of this WebView.
+            onContentHeightPx?.let { cb ->
+                view.evaluateJavascript("document.documentElement.scrollHeight.toString()") { result ->
+                    result?.trim('"')?.toDoubleOrNull()?.toInt()?.let(cb)
+                }
             }
         }
     }
@@ -146,6 +174,9 @@ private fun rememberThemedHtml(html: String, matchAppTheme: Boolean): String {
     return remember(html, css) { injectStyle(html, css) }
 }
 
+private val WidgetMinHeight = 64.dp
+private val WidgetMaxHeight = 420.dp
+
 @Composable
 fun HtmlWidgetCard(
     html: String,
@@ -155,10 +186,17 @@ fun HtmlWidgetCard(
     modifier: Modifier = Modifier
 ) {
     val effectiveHtml = rememberThemedHtml(html, matchAppTheme)
+    var contentHeight by remember(html) { mutableStateOf<Dp?>(null) }
+    // Start at the roomy end, not the small end: the WebView's own JS-side height
+    // measurement runs against whatever size this Box currently is, so starting small
+    // would make that very measurement come out wrong for content sized in viewport units.
+    // Shrinking down after the real height is known reads as "settling", not "getting smaller".
+    val targetHeight = (contentHeight ?: WidgetMaxHeight).coerceIn(WidgetMinHeight, WidgetMaxHeight)
+    val animatedHeight by animateDpAsState(targetValue = targetHeight, label = "widgetHeight")
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(300.dp)
+            .height(animatedHeight)
             .clip(RoundedCornerShape(12.dp))
             .then(
                 if (matchAppTheme) Modifier
@@ -168,7 +206,13 @@ fun HtmlWidgetCard(
         AndroidView(
             factory = { context ->
                 WebView(context).apply {
-                    configureWidgetWebView(this, allowNetwork, matchAppTheme)
+                    configureWidgetWebView(this, allowNetwork, matchAppTheme) { px ->
+                        // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
+                        // JS coordinate space is device-independent when useWideViewPort is
+                        // off), so wrap it directly — do NOT run it through Density.toDp(),
+                        // which would treat it as physical pixels and divide by density again.
+                        contentHeight = px.dp
+                    }
                     loadDataWithBaseURL(null, effectiveHtml, "text/html", "utf-8", null)
                 }
             },
