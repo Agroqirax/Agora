@@ -24,6 +24,9 @@
 [<img src="https://raw.githubusercontent.com/Kunzisoft/Github-badge/main/get-it-on-github.png"
     alt="Get it on GitHub"
     height="80">](https://github.com/newo-ether/Agora/releases/latest)
+[<img src="https://github.com/ImranR98/Obtainium/raw/main/assets/graphics/badge_obtainium.png"
+    alt="Get it on Obtainium"
+    height="80">](https://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/newo-ether/Agora)
 
 Note: the google play version does not include certain features. Download from GitHub or F-Droid instead.
 
