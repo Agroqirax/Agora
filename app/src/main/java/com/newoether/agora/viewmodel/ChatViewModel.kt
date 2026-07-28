@@ -76,6 +76,12 @@ data class SwitchingScrollRequest(
     val targetMessageId: String?,
 )
 
+data class AnimatedScrollRequest(
+    val id: Long,
+    val conversationId: String,
+    val targetMessageId: String?,
+)
+
 class ChatViewModel(
     application: Application,
     // [chatDao] and [settingsManager] are retained ONLY to pass to ImportExportManager,
@@ -363,8 +369,10 @@ class ChatViewModel(
 
 
 
-    private val _scrollToMessage = MutableSharedFlow<String?>(replay = 0)
-    val scrollToMessage = _scrollToMessage.asSharedFlow()
+    private val animatedScrollIds = AtomicLong(0L)
+    private val _animatedScrollRequest = MutableStateFlow<AnimatedScrollRequest?>(null)
+    val animatedScrollRequest: StateFlow<AnimatedScrollRequest?> =
+        _animatedScrollRequest.asStateFlow()
 
     /** One-shot: set when sendMessage creates a new conversation so the conversation-open
      *  auto-scroll skips once (the send's scroll-to-message already handles it), preventing
@@ -378,8 +386,17 @@ class ChatViewModel(
     var loadingDraft: Boolean = false
 
     fun triggerScrollToMessage(messageId: String? = null) {
-        viewModelScope.launch {
-            _scrollToMessage.emit(messageId)
+        val conversationId = _currentConversationId.value ?: return
+        _animatedScrollRequest.value = AnimatedScrollRequest(
+            id = animatedScrollIds.incrementAndGet(),
+            conversationId = conversationId,
+            targetMessageId = messageId,
+        )
+    }
+
+    fun completeAnimatedScroll(requestId: Long) {
+        if (_animatedScrollRequest.value?.id == requestId) {
+            _animatedScrollRequest.value = null
         }
     }
 
@@ -1005,6 +1022,7 @@ class ChatViewModel(
             _allMessages.value = emptyList()
             _selectedChildren.value = emptyMap()
             _switchingScrollRequest.value = null
+            _animatedScrollRequest.value = null
             _isSwitching.value = false
             _isTransitioningToNewChat.value = false
         }
@@ -1020,6 +1038,7 @@ class ChatViewModel(
             kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
             _isNewChatMode.value = false
             _switchingScrollRequest.value = null
+            _animatedScrollRequest.value = null
             _currentConversationId.value = id
             val conversation = convRepo.getConversation(id)
             _currentActiveModel.value = conversation?.modelId

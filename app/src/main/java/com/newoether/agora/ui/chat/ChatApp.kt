@@ -260,38 +260,41 @@ fun ChatApp(
         val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
         if (targetIndex == -1) return false
 
-        with(density) {
-            val targetTopPx = 140.dp.toPx()
-            val topPaddingPx = 140.dp.toPx()
-
-            var totalHeightBeforePx = 0
-            var hasAnyHeight = false
-            for (i in 0 until targetIndex) {
-                val h = messageHeights[currentMessages[i].id]
-                if (h != null) { totalHeightBeforePx += h; hasAnyHeight = true }
-            }
-
-            if (!hasAnyHeight && targetIndex > 0) {
-                return false
-            }
-            val targetScrollPx = (topPaddingPx + totalHeightBeforePx - targetTopPx).coerceAtLeast(0f)
-            var currentOffsetPx = listState.firstVisibleItemScrollOffset.toFloat()
-            for (i in 0 until listState.firstVisibleItemIndex) {
-                if (i < currentMessages.size) {
-                    currentOffsetPx += (messageHeights[currentMessages[i].id] ?: 0)
-                }
-            }
-
-            val diff = targetScrollPx - currentOffsetPx
-            if (kotlin.math.abs(diff) > 2) {
-                listState.animateScrollBy(diff, tween(600, easing = easing))
-            }
-            return true
+        val firstVisibleIndex = listState.firstVisibleItemIndex
+        val visibleSizes = listState.layoutInfo.visibleItemsInfo.associate {
+            it.index to it.size
         }
+        val fallbackHeight = visibleSizes.values
+            .takeIf { it.isNotEmpty() }
+            ?.average()
+            ?.toFloat()
+            ?: with(density) { 72.dp.toPx() }
+        fun heightAt(index: Int): Float {
+            val message = currentMessages.getOrNull(index)
+            return message
+                ?.let { messageHeights[it.id]?.toFloat() }
+                ?: visibleSizes[index]?.toFloat()
+                ?: fallbackHeight
+        }
+
+        val diff = if (targetIndex >= firstVisibleIndex) {
+            var distance = -listState.firstVisibleItemScrollOffset.toFloat()
+            for (index in firstVisibleIndex until targetIndex) distance += heightAt(index)
+            distance
+        } else {
+            var distance = -listState.firstVisibleItemScrollOffset.toFloat()
+            for (index in targetIndex until firstVisibleIndex) distance -= heightAt(index)
+            distance
+        }
+        if (kotlin.math.abs(diff) > 2f) {
+            listState.animateScrollBy(diff, tween(600, easing = easing))
+        }
+        return listState.firstVisibleItemIndex == targetIndex &&
+            listState.firstVisibleItemScrollOffset <= 2
     }
 
-    /** Wait until the actual target bubble has a non-zero, unchanged measured height three times. */
-    suspend fun waitForBubbleStable(targetMessageId: String?): Boolean =
+    /** Wait until the committed target occupies a stable position in the LazyColumn data set. */
+    suspend fun waitForTargetCommittedStable(targetMessageId: String?): Boolean =
         withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
             var stableSamples = 0
             var previousSignature: List<Any>? = null
@@ -305,17 +308,11 @@ fun ChatApp(
                     continue
                 }
                 val target = currentMessages[targetIndex]
-                val targetHeight = messageHeights[target.id]
-                if (targetHeight == null || targetHeight <= 0) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
                 val signature = listOf(
                     target.id,
                     targetIndex,
-                    targetHeight,
                     currentMessages.size,
+                    listState.layoutInfo.totalItemsCount,
                     viewportHeightPx,
                 )
                 if (signature == previousSignature) {
@@ -328,17 +325,55 @@ fun ChatApp(
             true
         } == true
 
+    /** Require the destination and the newly-created bubble measurement to settle three times. */
+    suspend fun waitForAnimatedDestinationStable(targetMessageId: String?): Boolean =
+        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+            var stableSamples = 0
+            var previousSignature: List<Any>? = null
+            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
+                delay(LAYOUT_SAMPLE_INTERVAL_MS)
+                val currentMessages = messages
+                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
+                val target = currentMessages.getOrNull(targetIndex)
+                val targetHeight = target?.let { messageHeights[it.id] }
+                val positioned =
+                    targetIndex >= 0 &&
+                        listState.firstVisibleItemIndex == targetIndex &&
+                        listState.firstVisibleItemScrollOffset <= 2
+                if (!positioned || targetHeight == null || targetHeight <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val signature = listOf(
+                    target.id,
+                    targetIndex,
+                    targetHeight,
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    viewportHeightPx,
+                )
+                if (signature == previousSignature) stableSamples += 1
+                else {
+                    previousSignature = signature
+                    stableSamples = 1
+                }
+            }
+            true
+        } == true
+
     suspend fun animateAfterBubbleSettles(
         targetMessageId: String?,
         easing: Easing = FastOutSlowInEasing,
     ): Boolean {
-        if (!waitForBubbleStable(targetMessageId)) return false
-        return withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+        if (!waitForTargetCommittedStable(targetMessageId)) return false
+        val positioned = withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
             while (!animateToUserMessage(targetMessageId, easing)) {
                 delay(LAYOUT_SAMPLE_INTERVAL_MS)
             }
             true
         } == true
+        return positioned && waitForAnimatedDestinationStable(targetMessageId)
     }
 
     /**
@@ -540,11 +575,20 @@ fun ChatApp(
             }
     }
 
-    LaunchedEffect(Unit) {
-        viewModel.scrollToMessage.collect { messageId ->
-            if (!animateAfterBubbleSettles(messageId)) {
-                DebugLog.e("AgoraUI", "Animated scroll target did not stabilize: $messageId")
+    val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
+    LaunchedEffect(animatedScrollRequest?.id, currentConversationId) {
+        val request = animatedScrollRequest ?: return@LaunchedEffect
+        if (request.conversationId != currentConversationId) return@LaunchedEffect
+        while (viewModel.animatedScrollRequest.value?.id == request.id) {
+            if (animateAfterBubbleSettles(request.targetMessageId)) {
+                viewModel.completeAnimatedScroll(request.id)
+                break
             }
+            DebugLog.e(
+                "AgoraUI",
+                "Retrying forced animated scroll target: ${request.targetMessageId}",
+            )
+            delay(LAYOUT_SAMPLE_INTERVAL_MS)
         }
     }
 

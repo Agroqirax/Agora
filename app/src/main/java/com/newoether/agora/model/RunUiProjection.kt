@@ -32,7 +32,11 @@ object RunUiProjection {
     ): Map<String, RunMessagePresentation> {
         if (visibleMessages.isEmpty()) return emptyMap()
 
-        val boundaryInputs = allMessages.filter(::isBoundaryUserInput)
+        // ID is the structural identity. A transient Room/optimistic-commit race must never be
+        // interpreted as two real branches even if a caller accidentally supplies duplicates.
+        val uniqueAllMessages = allMessages.distinctBy { it.id }
+        val uniqueVisibleMessages = visibleMessages.distinctBy { it.id }
+        val boundaryInputs = uniqueAllMessages.filter(::isBoundaryUserInput)
         val boundaryInputIds = boundaryInputs.mapTo(mutableSetOf()) { it.id }
         val editSiblingsByParent = boundaryInputs
             .groupBy { it.parentId }
@@ -40,7 +44,7 @@ object RunUiProjection {
         // A legacy Run can contain several regenerated assistant siblings with the same shared
         // user parent. Structural parentage, not Run ownership, is therefore the canonical branch
         // discriminator.
-        val rootOutputs = allMessages.filter {
+        val rootOutputs = uniqueAllMessages.filter {
             isVisibleModelOutput(it) &&
                 it.parentId?.let(boundaryInputIds::contains) == true
         }
@@ -48,8 +52,10 @@ object RunUiProjection {
             .groupBy { it.parentId }
             .mapValues { (_, messages) -> messages.sortedWith(branchOrder) }
 
-        val result = visibleMessages.associate { it.id to RunMessagePresentation() }.toMutableMap()
-        visibleMessages
+        val result = uniqueVisibleMessages
+            .associate { it.id to RunMessagePresentation() }
+            .toMutableMap()
+        uniqueVisibleMessages
             .filter(::isBoundaryUserInput)
             .forEach { userBoundary ->
                 val siblings = editSiblingsByParent[userBoundary.parentId].orEmpty()
@@ -65,7 +71,7 @@ object RunUiProjection {
                 )
             }
 
-        val visibleOutputsByRun = visibleMessages
+        val visibleOutputsByRun = uniqueVisibleMessages
             .filter(::isVisibleModelOutput)
             .filter { !it.runId.isNullOrBlank() }
             .groupBy { checkNotNull(it.runId) }

@@ -106,6 +106,22 @@ class RunUiProjectionTest {
     }
 
     @Test
+    fun duplicateUiRowsWithSameId_neverCreateFalseBranches() {
+        val input = message("u0", "prompt", Participant.USER, "run", 0)
+        val output = message("m0", "answer", Participant.MODEL, "run", 1, parentId = "u0")
+
+        val projected = RunUiProjection.project(
+            visibleMessages = listOf(input, output),
+            allMessages = listOf(input, input, output, output),
+        )
+
+        assertFalse(projected.getValue("u0").showBranchSelector)
+        assertEquals(1, projected.getValue("u0").totalBranches)
+        assertFalse(projected.getValue("m0").showBranchSelector)
+        assertEquals(1, projected.getValue("m0").totalBranches)
+    }
+
+    @Test
     fun legacyAssistantSiblingsInOneRun_remainIndependentRegenerationBranches() {
         val input = message("u0", "prompt", Participant.USER, "legacy-run", 0)
         val original = message(

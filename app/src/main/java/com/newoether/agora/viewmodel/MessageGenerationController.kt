@@ -113,6 +113,34 @@ internal object RunRegenerationPolicy {
 }
 
 /**
+ * Merges Controller-owned optimistic commits into the Room-backed UI snapshot by message ID.
+ *
+ * Room can publish a just-inserted row before the inserting coroutine reaches its UI commit.
+ * Appending in that race creates duplicate in-memory rows (the database remains unique), which
+ * projection code can then misread as real Edit/Regenerate siblings.
+ */
+internal object UiMessageCommitPolicy {
+    fun upsert(
+        existing: List<ChatMessage>,
+        committed: List<ChatMessage>,
+    ): List<ChatMessage> {
+        if (committed.isEmpty()) return existing.distinctBy { it.id }
+        val committedById = committed.associateBy { it.id }
+        val emittedIds = hashSetOf<String>()
+        return buildList(existing.size + committedById.size) {
+            for (message in existing) {
+                if (emittedIds.add(message.id)) {
+                    add(committedById[message.id] ?: message)
+                }
+            }
+            for (message in committedById.values) {
+                if (emittedIds.add(message.id)) add(message)
+            }
+        }
+    }
+}
+
+/**
  * Owns the message lifecycle (send / regenerate / edit / delete) and the
  * race-free generation handshake.
  *
@@ -397,7 +425,7 @@ class MessageGenerationController(
                 )
                 ifOpenOn(genId) {
                     allMessages.update { existing ->
-                        existing + placeholder
+                        UiMessageCommitPolicy.upsert(existing, listOf(placeholder))
                     }
                     selectedChildren.value = selectedAfterRegenerate
                     onScrollToMessage(sourceInput.id)
@@ -621,7 +649,12 @@ class MessageGenerationController(
             )
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) {
-                allMessages.update { it + newUser.toChatMessage() + placeholder }
+                allMessages.update {
+                    UiMessageCommitPolicy.upsert(
+                        existing = it,
+                        committed = listOf(newUser.toChatMessage(), placeholder),
+                    )
+                }
                 selectedChildren.value = selectedAfterModelEdit
                 onScrollToMessage(newUser.id)
             }
@@ -794,7 +827,11 @@ class MessageGenerationController(
                         runId = runId, runSequence = insertedPlaceholder.runSequence,
                     )
                     state.streamUpdate(myUiToken, placeholder)
-                    ifOpenOn(genId) { allMessages.update { it.filter { m -> m.id != modelMessageId } + placeholder } }
+                    ifOpenOn(genId) {
+                        allMessages.update {
+                            UiMessageCommitPolicy.upsert(it, listOf(placeholder))
+                        }
+                    }
                     newChildren[lastUserMessageId] = modelMessageId
                     onPersistSelectedChildren(genId, newChildren)
                     ifOpenOn(genId) { selectedChildren.value = newChildren }
@@ -991,7 +1028,10 @@ class MessageGenerationController(
                 state.streamUpdate(myUiToken, placeholder)
                 ifOpenOn(genId) {
                     allMessages.update { existing ->
-                        existing.filter { it.id != modelMessageId } + userEntity.toChatMessage() + placeholder
+                        UiMessageCommitPolicy.upsert(
+                            existing = existing,
+                            committed = listOf(userEntity.toChatMessage(), placeholder),
+                        )
                     }
                 }
                 val newChildren = selectedBeforeSend.toMutableMap().apply {
