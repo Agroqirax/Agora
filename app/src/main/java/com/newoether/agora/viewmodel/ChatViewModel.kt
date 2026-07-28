@@ -69,6 +69,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
+
+data class SwitchingScrollRequest(
+    val id: Long,
+    val targetMessageId: String?,
+)
 
 class ChatViewModel(
     application: Application,
@@ -618,7 +624,6 @@ class ChatViewModel(
             convRepo = convRepo,
             settings = settings,
             registry = generationRegistry,
-            finalizer = generationFinalizer,
             generationManagerProvider = { generationManager },
             requestBuilder = requestBuilder,
             payloadBuilder = payloadBuilder,
@@ -640,6 +645,12 @@ class ChatViewModel(
             onConversationCreatedBySend = { suppressNextOpenScroll = true },
             onConversationGraduated = ragManager::backfillConversationForRag,
             onUserMessagePersisted = ragManager::indexMessageForRag,
+            onTreeMutationStart = {
+                _isSwitching.value = true
+                delay(SWITCH_OVERLAY_FADE_MS)
+            },
+            onTreeMutationSettling = ::requestSwitchingScroll,
+            onTreeMutationFailed = { _isSwitching.value = false },
         )
     }
 
@@ -653,11 +664,29 @@ class ChatViewModel(
         }
     }
 
-    private val _branchSwitchTrigger = MutableStateFlow<String?>(null)
-    val branchSwitchTrigger: StateFlow<String?> = _branchSwitchTrigger.asStateFlow()
+    private val switchingScrollIds = AtomicLong(0L)
+    private val _switchingScrollRequest = MutableStateFlow<SwitchingScrollRequest?>(null)
+    val switchingScrollRequest: StateFlow<SwitchingScrollRequest?> =
+        _switchingScrollRequest.asStateFlow()
 
-    fun clearBranchSwitchTrigger() {
-        _branchSwitchTrigger.value = null
+    private fun requestSwitchingScroll(targetMessageId: String?) {
+        _switchingScrollRequest.value = SwitchingScrollRequest(
+            id = switchingScrollIds.incrementAndGet(),
+            targetMessageId = targetMessageId,
+        )
+    }
+
+    fun completeSwitchingScroll(requestId: Long) {
+        if (_switchingScrollRequest.value?.id != requestId) return
+        _switchingScrollRequest.value = null
+        _isSwitching.value = false
+    }
+
+    fun failSwitchingScroll(requestId: Long, reason: String) {
+        if (_switchingScrollRequest.value?.id != requestId) return
+        DebugLog.e("AgoraVM", "Switching scroll did not settle: $reason")
+        _switchingScrollRequest.value = null
+        _isSwitching.value = false
     }
 
     // Export/Import state lives in [importExport]; exposed here for the UI.
@@ -750,7 +779,10 @@ class ChatViewModel(
                                     },
                                     attachmentMeta = it.attachmentMeta?.let { json ->
                                         try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
-                                    }
+                                    },
+                                    runId = it.runId,
+                                    runSequence = it.runSequence,
+                                    consumedAtPass = it.consumedAtPass,
                                 )
                             }
                             // Backfill toolCall for old result_ messages persisted without toolCallJson.
@@ -961,7 +993,7 @@ class ChatViewModel(
             _pendingConversationSettings.value = null
             _allMessages.value = emptyList()
             _selectedChildren.value = emptyMap()
-            _branchSwitchTrigger.value = null
+            _switchingScrollRequest.value = null
             _isSwitching.value = false
             _isTransitioningToNewChat.value = false
         }
@@ -976,11 +1008,10 @@ class ChatViewModel(
         switchingJob = viewModelScope.launch {
             kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
             _isNewChatMode.value = false
-            _branchSwitchTrigger.value = null
+            _switchingScrollRequest.value = null
             _currentConversationId.value = id
             val conversation = convRepo.getConversation(id)
             _currentActiveModel.value = conversation?.modelId
-            triggerScrollToMessage()
         }
     }
 
@@ -1038,7 +1069,10 @@ class ChatViewModel(
      * Attachments, embeddings, and branch selections are cleaned up.
      * Returns the count of deleted messages (for the confirmation dialog).
      */
-    fun deleteMessage(messageId: String): Int = generationController.deleteMessage(messageId)
+    fun deleteMessage(messageId: String): Int {
+        if (_isSwitching.value) return 0
+        return generationController.deleteMessage(messageId)
+    }
 
     /** Queued sends for the currently-open conversation (drives the queue banner above the input). */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -1060,12 +1094,29 @@ class ChatViewModel(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
 
     fun removeQueuedSend(id: String) {
-        val removed = _currentConversationId.value?.let {
-            generationRegistry.getOrCreate(it).removeQueuedSend(id)
-        } ?: return
-        // The queued send held the only reference to its copied attachment files (the composer
-        // cleared its own on enqueue). It was never sent → delete them so they don't orphan.
-        com.newoether.agora.util.AttachmentFiles.deleteBacking(removed.attachments)
+        val conversationId = _currentConversationId.value ?: return
+        val state = generationRegistry.getOrCreate(conversationId)
+        viewModelScope.launch(Dispatchers.IO) {
+            state.queueMutationMutex.withLock {
+                val queued = state.queuedSends.value.firstOrNull { it.id == id } ?: return@withLock
+                val removed = convRepo.removePendingRunInput(queued.id)
+                try {
+                    if (
+                        removed != null &&
+                        _currentConversationId.value == conversationId
+                    ) {
+                        _selectedChildren.value = removed.repairedSelections
+                    }
+                } finally {
+                    state.removeQueuedSend(queued.id)
+                    if (removed != null) {
+                        convRepo.deleteMessageFiles(listOf(removed.message))
+                    } else {
+                        com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
+                    }
+                }
+            }
+        }
     }
 
     fun stopGeneration() {
@@ -1090,21 +1141,29 @@ class ChatViewModel(
                 } else null
             }
         }
-        if (messages.isNotEmpty()) {
+        if (messages.isNotEmpty() || result.runId != null) {
             // Release the STOPPED overlay once the terminal row is in Room — otherwise the stale
             // snapshot lives on in the state and resolvePath resurrects it as a ghost bubble
             // after the persisted message is later deleted.
             generationFinalizer.launchStopFinalization(
-                state.scope, result.conversationId, messages,
-                onFinalized = state::clearStoppedOverlay,
+                state.scope, result.conversationId, result.runId, messages,
+                onFinalized = {
+                    state.clearStoppedOverlay()
+                    state.finishStopFinalization()
+                },
             )
+        } else {
+            state.finishStopFinalization()
         }
     }
 
     fun regenerate(messageId: String) = generationController.regenerate(messageId)
 
     fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
-        if (_isLoading.value && _generatingInConversationId.value == _currentConversationId.value) return
+        if (_isSwitching.value) return
+        val conversationId = _currentConversationId.value ?: return
+        val state = generationRegistry.getOrCreate(conversationId)
+        if (state.generating.value) return
         val siblings = _allMessages.value.filter { it.parentId == parentId && !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }.sortedBy { it.timestamp }
         if (siblings.size < 2) return
         var currentIndex = siblings.indexOfFirst { it.id == currentMessageId }
@@ -1115,26 +1174,57 @@ class ChatViewModel(
         if (currentIndex == -1) return
         val newIndex = (currentIndex + direction).coerceIn(0, siblings.size - 1)
         if (newIndex == currentIndex) return
+        val parentRunId = parentId?.let { pid ->
+            _allMessages.value.firstOrNull { it.id == pid }?.runId
+        }
         
         switchingJob?.cancel()
         _isSwitching.value = true
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
-            val newMap = _selectedChildren.value.toMutableMap()
-            val targetMessage = siblings[newIndex]
-            newMap[parentId] = targetMessage.id
-            _selectedChildren.value = newMap
-            
-            _branchSwitchTrigger.value = null
-            _branchSwitchTrigger.value = targetMessage.id
+            try {
+                delay(SWITCH_OVERLAY_FADE_MS)
+                state.queueMutationMutex.withLock {
+                    if (
+                        state.generating.value ||
+                        _currentConversationId.value != conversationId
+                    ) {
+                        _isSwitching.value = false
+                        return@withLock
+                    }
+                    val newMap = _selectedChildren.value.toMutableMap()
+                    val targetMessage = siblings[newIndex]
+                    val targetRunId = targetMessage.runId ?: run {
+                        _isSwitching.value = false
+                        return@withLock
+                    }
+                    newMap[parentId] = targetMessage.id
+                    convRepo.selectRunBranch(
+                        conversationId = conversationId,
+                        parentRunId = parentRunId,
+                        runId = targetRunId,
+                        messageSelections = newMap,
+                    )
+                    _selectedChildren.value = newMap
+                    requestSwitchingScroll(targetMessage.id)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                DebugLog.e("AgoraVM", "Failed to switch Run branch", e)
+                _isSwitching.value = false
+            }
         }
     }
 
     fun editMessage(messageId: String, newText: String) = generationController.editMessage(messageId, newText)
 
-    fun sendMessage(text: String, images: List<String> = emptyList(), attachments: List<SelectedAttachment> = emptyList()): Boolean {
-        val sent = generationController.sendMessage(text, images, attachments)
-        if (sent) {
+    suspend fun sendMessage(
+        text: String,
+        images: List<String> = emptyList(),
+        attachments: List<SelectedAttachment> = emptyList(),
+    ): SendAcceptance? {
+        val acceptance = generationController.sendMessage(text, images, attachments)
+        if (acceptance != null) {
             // The message has left the composer (launched or queued) — clear this conversation's
             // persisted draft so switching back doesn't restore text the user already sent.
             val id = _currentConversationId.value
@@ -1146,7 +1236,7 @@ class ChatViewModel(
                 }
             }
         }
-        return sent
+        return acceptance
     }
 
     /**

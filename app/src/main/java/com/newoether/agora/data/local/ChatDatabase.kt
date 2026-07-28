@@ -7,6 +7,10 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.repairSelectionsAfterQueuedRemoval
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
+import com.newoether.agora.data.local.migration.MIGRATION_16_17
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,6 +25,16 @@ class MessageConverters {
     fun fromStatus(value: MessageStatus) = value.name
     @TypeConverter
     fun toStatus(value: String) = MessageStatus.valueOf(value)
+
+    @TypeConverter
+    fun fromRunStatus(value: RunStatus) = value.name
+    @TypeConverter
+    fun toRunStatus(value: String) = RunStatus.valueOf(value)
+
+    @TypeConverter
+    fun fromRunEndReason(value: RunEndReason?) = value?.name
+    @TypeConverter
+    fun toRunEndReason(value: String?) = value?.let(RunEndReason::valueOf)
     
     @TypeConverter
     fun fromStringList(value: List<String>?): String {
@@ -56,7 +70,9 @@ data class ChatEntity(
     /** Unsent composer text for per-conversation draft persistence. */
     val draftText: String = "",
     /** JSON-serialized list of [com.newoether.agora.model.SelectedAttachment]; null = no draft attachments. */
-    val draftAttachments: String? = null
+    val draftAttachments: String? = null,
+    /** Run-level branch selections. Message-level selections remain for legacy compatibility. */
+    val selectedRunBranchesJson: String? = null,
 )
 
 /** A saved automation: a prompt + schedule that fans out a fresh conversation on each run. */
@@ -143,12 +159,18 @@ data class EmbeddingEntity(
 
 @Entity(
     tableName = "messages",
-    indices = [Index(value = ["conversationId"])],
+    indices = [Index(value = ["conversationId"]), Index(value = ["runId"])],
     foreignKeys = [
         ForeignKey(
             entity = ChatEntity::class,
             parentColumns = ["id"],
             childColumns = ["conversationId"],
+            onDelete = ForeignKey.CASCADE
+        ),
+        ForeignKey(
+            entity = RunEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["runId"],
             onDelete = ForeignKey.CASCADE
         )
     ]
@@ -168,8 +190,16 @@ data class MessageEntity(
     val thoughtTimeMs: Long? = null,
     val modelName: String? = null,
     val toolCallJson: String? = null,
-    val attachmentMeta: String? = null
-)
+    val attachmentMeta: String? = null,
+    val runId: String,
+    val runSequence: Long = UNASSIGNED_RUN_SEQUENCE,
+    /** Non-null only for visible user input; null for model/tool/result rows. */
+    val consumedAtPass: Int? = null,
+) {
+    companion object {
+        const val UNASSIGNED_RUN_SEQUENCE = -1L
+    }
+}
 
 /**
  * Partial Room entity used for durable streaming checkpoints.
@@ -237,6 +267,354 @@ interface ChatDao {
 
     @Upsert
     suspend fun upsertMessage(message: MessageEntity)
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertMessage(message: MessageEntity)
+
+    @Query("SELECT * FROM messages WHERE id = :messageId")
+    suspend fun getMessage(messageId: String): MessageEntity?
+
+    // Runs
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insertRun(run: RunEntity)
+
+    @Upsert
+    suspend fun upsertRun(run: RunEntity)
+
+    @Query("SELECT * FROM runs WHERE id = :runId")
+    suspend fun getRun(runId: String): RunEntity?
+
+    @Query("SELECT * FROM runs WHERE conversationId = :conversationId ORDER BY startedAt, id")
+    fun getRunsForConversation(conversationId: String): Flow<List<RunEntity>>
+
+    @Query("SELECT * FROM runs WHERE conversationId = :conversationId ORDER BY startedAt, id")
+    suspend fun getRunsForConversationSnapshot(conversationId: String): List<RunEntity>
+
+    @Query("SELECT * FROM messages WHERE runId IN (:runIds) ORDER BY runSequence, timestamp, id")
+    suspend fun getMessagesForRuns(runIds: List<String>): List<MessageEntity>
+
+    @Query("DELETE FROM runs WHERE id = :runId")
+    suspend fun deleteRun(runId: String): Int
+
+    @Query("DELETE FROM embeddings WHERE messageId IN (:messageIds)")
+    suspend fun deleteEmbeddingsByMessageIds(messageIds: List<String>)
+
+    @Query(
+        """
+        UPDATE conversations
+        SET selectedBranchesJson = :selectedBranchesJson,
+            selectedRunBranchesJson = :selectedRunBranchesJson,
+            lastUpdated = :at
+        WHERE id = :conversationId
+        """
+    )
+    suspend fun updateSelectionsForRunDeletion(
+        conversationId: String,
+        selectedBranchesJson: String,
+        selectedRunBranchesJson: String,
+        at: Long,
+    ): Int
+
+    /**
+     * Atomically removes a Run subtree (via the self-referencing CASCADE), its embeddings, and
+     * every branch-selection reference that the caller repaired from the same locked snapshot.
+     * Attachment files are intentionally deleted only after this transaction commits.
+     */
+    @Transaction
+    suspend fun deleteRunGraph(
+        conversationId: String,
+        rootRunId: String,
+        staleMessageIds: List<String>,
+        selectedBranchesJson: String,
+        selectedRunBranchesJson: String,
+        at: Long,
+    ): Boolean {
+        val root = getRun(rootRunId) ?: return false
+        require(root.conversationId == conversationId) {
+            "Run $rootRunId does not belong to conversation $conversationId"
+        }
+        if (staleMessageIds.isNotEmpty()) {
+            deleteEmbeddingsByMessageIds(staleMessageIds)
+        }
+        check(
+            updateSelectionsForRunDeletion(
+                conversationId,
+                selectedBranchesJson,
+                selectedRunBranchesJson,
+                at,
+            ) == 1
+        ) { "Conversation $conversationId disappeared during Run deletion" }
+        check(deleteRun(rootRunId) == 1) { "Run $rootRunId disappeared during deletion" }
+        return true
+    }
+
+    @Query(
+        "SELECT * FROM runs WHERE conversationId = :conversationId AND activeSlot = 1 LIMIT 1"
+    )
+    suspend fun getLiveRun(conversationId: String): RunEntity?
+
+    @Query("SELECT COALESCE(MAX(runSequence), -1) + 1 FROM messages WHERE runId = :runId")
+    suspend fun nextRunSequence(runId: String): Long
+
+    @Query("UPDATE runs SET lastCheckpointAt = :at WHERE id = :runId")
+    suspend fun touchRun(runId: String, at: Long): Int
+
+    @Transaction
+    suspend fun createRunWithMessages(run: RunEntity, messages: List<MessageEntity>) {
+        require(run.status == RunStatus.ACTIVE)
+        require(run.activeSlot == 1)
+        require(messages.isNotEmpty())
+        require(messages.all { it.runId == run.id })
+        require(messages.map { it.runSequence } == messages.indices.map { it.toLong() })
+        insertRun(run)
+        messages.forEach { insertMessage(it) }
+    }
+
+    @Transaction
+    suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) {
+        require(runs.all { it.status.isTerminal }) {
+            "Imported Runs must be terminal"
+        }
+        val incomingRunIds = runs.mapTo(mutableSetOf()) { it.id }
+        require(messages.all { it.runId in incomingRunIds || getRun(it.runId) != null }) {
+            "Every imported message must reference an imported or existing Run"
+        }
+        for (run in runs) {
+            if (getRun(run.id) == null) insertRun(run)
+        }
+        messages.forEach { upsertMessage(it) }
+    }
+
+    @Transaction
+    suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
+        val run = getRun(message.runId) ?: error("Run ${message.runId} does not exist")
+        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
+        val assigned = message.copy(runSequence = nextRunSequence(run.id))
+        insertMessage(assigned)
+        touchRun(run.id, maxOf(run.lastCheckpointAt, assigned.timestamp))
+        return assigned
+    }
+
+    /** A provider tool round is protocol-atomic: assistant tool_calls and every result commit
+     * together, or none of them do. */
+    @Transaction
+    suspend fun appendToolRoundToRun(messages: List<MessageEntity>): List<MessageEntity> {
+        require(messages.size >= 2) { "A tool round requires a tool row and at least one result" }
+        val runId = messages.first().runId
+        require(messages.all { it.runId == runId }) { "One tool round cannot span Runs" }
+        val run = getRun(runId) ?: error("Run $runId does not exist")
+        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
+        val firstSequence = nextRunSequence(runId)
+        val assigned = messages.mapIndexed { index, message ->
+            message.copy(runSequence = firstSequence + index)
+        }
+        assigned.forEach { insertMessage(it) }
+        touchRun(runId, maxOf(run.lastCheckpointAt, assigned.maxOf { it.timestamp }))
+        return assigned
+    }
+
+    @Query(
+        """
+        UPDATE runs
+        SET status = 'STOPPING', stopRequestedAt = :at, lastCheckpointAt = :at
+        WHERE id = :runId AND status = 'ACTIVE' AND activeSlot = 1
+        """
+    )
+    suspend fun markRunStopping(runId: String, at: Long): Int
+
+    @Query(
+        """
+        UPDATE runs
+        SET status = :status, activeSlot = NULL, lastCheckpointAt = :at, endedAt = :at,
+            endReason = :reason
+        WHERE id = :runId AND activeSlot = 1
+        """
+    )
+    suspend fun terminalizeLiveRun(
+        runId: String,
+        status: RunStatus,
+        reason: RunEndReason,
+        at: Long,
+    ): Int
+
+    /**
+     * The only user-Stop terminal writer. Checkpoints and Run terminalization commit together, so
+     * tree operations never observe a STOPPED message inside a still-live Run (or the inverse).
+     */
+    @Transaction
+    suspend fun finishStoppedGeneration(
+        checkpoints: List<MessageStreamCheckpoint>,
+        runId: String?,
+        at: Long,
+    ): Boolean {
+        checkpoints.forEach { updateMessageCheckpoint(it) }
+        return runId == null || terminalizeLiveRun(
+            runId,
+            RunStatus.STOPPED,
+            RunEndReason.USER_STOPPED,
+            at,
+        ) == 1
+    }
+
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE runId = :runId
+          AND participant = 'USER'
+          AND id NOT LIKE 'tool_%'
+          AND id NOT LIKE 'result_%'
+          AND consumedAtPass IS NULL
+        ORDER BY runSequence
+        """
+    )
+    suspend fun getPendingRunInputs(runId: String): List<MessageEntity>
+
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE runId = :runId
+          AND parentId = :parentId
+          AND participant = 'USER'
+          AND consumedAtPass IS NULL
+        ORDER BY runSequence, timestamp, id
+        """
+    )
+    suspend fun getPendingRunInputChildren(
+        runId: String,
+        parentId: String,
+    ): List<MessageEntity>
+
+    @Query(
+        """
+        UPDATE messages
+        SET parentId = :replacementParentId
+        WHERE runId = :runId
+          AND parentId = :removedMessageId
+          AND participant = 'USER'
+          AND consumedAtPass IS NULL
+        """
+    )
+    suspend fun reparentPendingRunInputChildren(
+        runId: String,
+        removedMessageId: String,
+        replacementParentId: String?,
+    ): Int
+
+    @Query(
+        """
+        UPDATE conversations
+        SET selectedBranchesJson = :selectedBranchesJson, lastUpdated = :at
+        WHERE id = :conversationId
+        """
+    )
+    suspend fun updateMessageSelectionsAfterPendingRemoval(
+        conversationId: String,
+        selectedBranchesJson: String,
+        at: Long,
+    ): Int
+
+    @Transaction
+    suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? {
+        val message = getMessage(messageId) ?: return null
+        check(message.participant == Participant.USER && message.consumedAtPass == null) {
+            "Only an unconsumed user intervention can be removed from the queue"
+        }
+        val children = getPendingRunInputChildren(message.runId, message.id)
+        check(
+            reparentPendingRunInputChildren(
+                runId = message.runId,
+                removedMessageId = message.id,
+                replacementParentId = message.parentId,
+            ) == children.size
+        )
+        deleteEmbeddingsByMessageIds(listOf(message.id))
+        deleteMessagesByIds(listOf(message.id))
+        val conversation = checkNotNull(getConversation(message.conversationId)) {
+            "Conversation ${message.conversationId} disappeared during queue removal"
+        }
+        val selections = conversation.selectedBranchesJson?.let { raw ->
+            runCatching {
+                Json.decodeFromString<Map<String, String>>(raw)
+                    .mapKeys { if (it.key == "null") null else it.key }
+            }.getOrDefault(emptyMap())
+        }.orEmpty()
+        val repairedSelections = repairSelectionsAfterQueuedRemoval(
+            selections = selections,
+            removedMessageId = message.id,
+            removedParentId = message.parentId,
+            reparentedChildIds = children.map { it.id },
+        )
+        check(
+            updateMessageSelectionsAfterPendingRemoval(
+                conversationId = message.conversationId,
+                selectedBranchesJson = Json.encodeToString(
+                    repairedSelections.mapKeys { it.key ?: "null" }
+                ),
+                at = System.currentTimeMillis(),
+            ) == 1
+        )
+        return RemovedPendingRunInput(
+            message = message,
+            reparentedChildIds = children.map { it.id },
+            repairedSelections = repairedSelections,
+        )
+    }
+
+    @Query(
+        "UPDATE messages SET consumedAtPass = :pass WHERE id IN (:messageIds) AND consumedAtPass IS NULL"
+    )
+    suspend fun markInputsConsumed(messageIds: List<String>, pass: Int): Int
+
+    @Query(
+        """
+        UPDATE runs
+        SET currentPass = :pass, lastCheckpointAt = :at
+        WHERE id = :runId AND status = 'ACTIVE' AND currentPass = :previousPass
+        """
+    )
+    suspend fun advanceRunPass(runId: String, previousPass: Int, pass: Int, at: Long): Int
+
+    @Transaction
+    suspend fun claimPendingRunInputs(runId: String, at: Long): ClaimedRunPass? {
+        val run = getRun(runId) ?: return null
+        if (run.status != RunStatus.ACTIVE) return null
+        val pending = getPendingRunInputs(runId)
+        if (pending.isEmpty()) return null
+        val pass = run.currentPass + 1
+        check(markInputsConsumed(pending.map { it.id }, pass) == pending.size)
+        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
+        return ClaimedRunPass(runId, pass, pending.map { it.id })
+    }
+
+    @Query(
+        """
+        UPDATE messages
+        SET status = 'STOPPED'
+        WHERE runId IN (
+            SELECT id FROM runs
+            WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
+        )
+        AND participant = 'MODEL'
+        AND status IN ('SENDING', 'THINKING', 'TOOL_CALLING', 'TRANSCRIBING')
+        """
+    )
+    suspend fun markOrphanedRunMessagesStopped(): Int
+
+    @Query(
+        """
+        UPDATE runs
+        SET status = 'STOPPED', activeSlot = NULL, lastCheckpointAt = :at, endedAt = :at,
+            endReason = 'PROCESS_RECOVERED'
+        WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
+        """
+    )
+    suspend fun terminalizeOrphanedRuns(at: Long): Int
+
+    @Transaction
+    suspend fun recoverOrphanedRuns(at: Long): Int {
+        markOrphanedRunMessagesStopped()
+        return terminalizeOrphanedRuns(at)
+    }
 
     @Update(entity = MessageEntity::class)
     suspend fun updateMessageCheckpoint(checkpoint: MessageStreamCheckpoint): Int
@@ -508,7 +886,14 @@ interface ChatDao {
 }
 
 @Database(
-    entities = [ChatEntity::class, MessageEntity::class, EmbeddingEntity::class, TaskEntity::class, LoopEntity::class],
+    entities = [
+        ChatEntity::class,
+        RunEntity::class,
+        MessageEntity::class,
+        EmbeddingEntity::class,
+        TaskEntity::class,
+        LoopEntity::class,
+    ],
     version = ChatDatabase.CURRENT_VERSION,
     exportSchema = true
 )@TypeConverters(MessageConverters::class)
@@ -516,7 +901,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 16
+        const val CURRENT_VERSION = 17
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -644,7 +1029,8 @@ abstract class ChatDatabase : RoomDatabase() {
                 override fun migrate(db: SupportSQLiteDatabase) {
                     db.execSQL("ALTER TABLE tasks ADD COLUMN runAt INTEGER")
                 }
-            }
+            },
+            MIGRATION_16_17,
         )
 
         fun getStoredVersion(context: Context): Int {

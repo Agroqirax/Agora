@@ -20,7 +20,21 @@ data class ConversationUiState(
             selectedChildren: Map<String?, String>
         ): List<ChatMessage> {
             val path = mutableListOf<ChatMessage>()
-            val messagesByParent = allMessages.groupBy { it.parentId }
+            // An intervention is durable as soon as Send succeeds, but while the current model
+            // Pass is still on screen it belongs exclusively to the queue banner. Advancing the
+            // visible message path here would make the live model cease to be the last message,
+            // incorrectly rendering its in-flight status as a terminal warning. Once the Pass
+            // releases (or Stop/recovery clears the overlay), the durable input becomes visible.
+            val messagesForPath = if (streamingMsg != null) {
+                allMessages.filterNot {
+                    it.participant == Participant.USER &&
+                        !it.runId.isNullOrBlank() &&
+                        it.consumedAtPass == null
+                }
+            } else {
+                allMessages
+            }
+            val messagesByParent = messagesForPath.groupBy { it.parentId }
                 .mapValues { (_, list) -> list.sortedBy { it.timestamp } }
             var cursor: String? = null
 

@@ -8,15 +8,22 @@ import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.MessageStreamCheckpoint
+import com.newoether.agora.data.local.RemovedPendingRunInput
+import com.newoether.agora.data.local.RunEntity
+import com.newoether.agora.data.local.ClaimedRunPass
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -24,6 +31,17 @@ import kotlinx.serialization.json.Json
 class ConversationRepository(
     private val chatDao: ChatDao
 ) {
+    private val runRecoveryMutex = Mutex()
+    @Volatile private var runRecoveryComplete = false
+
+    suspend fun ensureRunRecovery() {
+        if (runRecoveryComplete) return
+        runRecoveryMutex.withLock {
+            if (runRecoveryComplete) return
+            chatDao.recoverOrphanedRuns(System.currentTimeMillis())
+            runRecoveryComplete = true
+        }
+    }
     // ── Conversations ─────────────────────────────────────────
 
     private fun ChatEntity.toConversation() = ChatConversation(
@@ -86,14 +104,121 @@ class ConversationRepository(
     suspend fun getLastMessageForConversation(conversationId: String): MessageEntity? =
         chatDao.getLastMessageForConversation(conversationId)
 
-    suspend fun upsertMessage(entity: MessageEntity) = chatDao.upsertMessage(entity)
+    suspend fun upsertMessage(entity: MessageEntity) {
+        require(entity.runId.isNotBlank()) { "Message ${entity.id} has no Run" }
+        require(entity.runSequence >= 0) { "Message ${entity.id} has no Run sequence" }
+        chatDao.upsertMessage(entity)
+    }
+
+    suspend fun createRunWithMessages(run: RunEntity, messages: List<MessageEntity>) {
+        ensureRunRecovery()
+        chatDao.createRunWithMessages(run, messages)
+    }
+
+    suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) =
+        chatDao.importRunGraph(runs, messages)
+
+    suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
+        ensureRunRecovery()
+        require(message.runId.isNotBlank()) { "Message ${message.id} has no Run" }
+        return chatDao.appendMessageToRun(message)
+    }
+
+    suspend fun appendToolRoundToRun(messages: List<MessageEntity>): List<MessageEntity> {
+        ensureRunRecovery()
+        require(messages.isNotEmpty() && messages.all { it.runId.isNotBlank() })
+        return chatDao.appendToolRoundToRun(messages)
+    }
+
+    suspend fun getRun(runId: String): RunEntity? = chatDao.getRun(runId)
+
+    fun getRunsForConversation(conversationId: String): Flow<List<RunEntity>> =
+        chatDao.getRunsForConversation(conversationId)
+
+    suspend fun getRunsForConversationSnapshot(conversationId: String): List<RunEntity> =
+        chatDao.getRunsForConversationSnapshot(conversationId)
+
+    suspend fun getMessagesForRuns(runIds: List<String>): List<MessageEntity> =
+        if (runIds.isEmpty()) emptyList() else chatDao.getMessagesForRuns(runIds)
+
+    suspend fun deleteRunGraph(
+        conversationId: String,
+        rootRunId: String,
+        staleMessageIds: List<String>,
+        messageSelections: Map<String?, String>,
+        runSelections: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.deleteRunGraph(
+        conversationId = conversationId,
+        rootRunId = rootRunId,
+        staleMessageIds = staleMessageIds,
+        selectedBranchesJson = Json.encodeToString(messageSelections.mapKeys { it.key ?: "null" }),
+        selectedRunBranchesJson = Json.encodeToString(runSelections.mapKeys { it.key ?: "null" }),
+        at = at,
+    )
+
+    suspend fun getLiveRun(conversationId: String): RunEntity? =
+        chatDao.getLiveRun(conversationId)
+
+    suspend fun requestRunStop(runId: String, at: Long = System.currentTimeMillis()): Boolean =
+        chatDao.markRunStopping(runId, at) == 1
+
+    suspend fun finishRunStopped(
+        runId: String,
+        reason: RunEndReason = RunEndReason.USER_STOPPED,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.terminalizeLiveRun(runId, RunStatus.STOPPED, reason, at) == 1
+
+    suspend fun completeRun(runId: String, at: Long = System.currentTimeMillis()): Boolean =
+        chatDao.terminalizeLiveRun(
+            runId,
+            RunStatus.COMPLETED,
+            RunEndReason.MODEL_COMPLETED,
+            at,
+        ) == 1
+
+    suspend fun failRun(runId: String, at: Long = System.currentTimeMillis()): Boolean =
+        chatDao.terminalizeLiveRun(
+            runId,
+            RunStatus.FAILED,
+            RunEndReason.PROVIDER_ERROR,
+            at,
+        ) == 1
+
+    suspend fun claimPendingRunInputs(
+        runId: String,
+        at: Long = System.currentTimeMillis(),
+    ): ClaimedRunPass? = chatDao.claimPendingRunInputs(runId, at)
+
+    suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? =
+        chatDao.removePendingRunInput(messageId)
+
+    suspend fun recoverOrphanedRuns(at: Long = System.currentTimeMillis()): Int {
+        val recovered = chatDao.recoverOrphanedRuns(at)
+        runRecoveryComplete = true
+        return recovered
+    }
 
     /**
      * Persist the mutable portion of an in-flight model message without creating a missing row.
      * Returns false when the placeholder was deleted while generation was still unwinding.
      */
-    suspend fun updateStreamingMessageCheckpoint(message: ChatMessage): Boolean {
-        val segments = message.segments?.takeIf { it.isNotEmpty() } ?: message.toolCall?.let {
+    suspend fun updateStreamingMessageCheckpoint(message: ChatMessage): Boolean =
+        chatDao.updateMessageCheckpoint(message.toStreamCheckpoint()) > 0
+
+    /** Atomically persists the final stopped snapshot(s) and terminalizes their Run. */
+    suspend fun finishStoppedGeneration(
+        messages: List<ChatMessage>,
+        runId: String?,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.finishStoppedGeneration(
+        checkpoints = messages.map { it.copy(status = MessageStatus.STOPPED).toStreamCheckpoint() },
+        runId = runId,
+        at = at,
+    )
+
+    private fun ChatMessage.toStreamCheckpoint(): MessageStreamCheckpoint {
+        val persistedSegments = segments?.takeIf { it.isNotEmpty() } ?: toolCall?.let {
             listOf(
                 MessageSegment(
                     type = "tool",
@@ -105,19 +230,17 @@ class ConversationRepository(
                 )
             )
         }
-        return chatDao.updateMessageCheckpoint(
-            MessageStreamCheckpoint(
-                id = message.id,
-                text = MessagePersistenceGuard.clipText(message.text),
-                images = message.images,
-                thoughts = message.thoughts,
-                thoughtTitle = message.thoughtTitle,
-                tokenCount = message.tokenCount,
-                status = message.status,
-                thoughtTimeMs = message.thoughtTimeMs,
-                toolCallJson = MessagePersistenceGuard.encodeSegmentsBounded(segments),
-            )
-        ) > 0
+        return MessageStreamCheckpoint(
+            id = id,
+            text = MessagePersistenceGuard.clipText(text),
+            images = images,
+            thoughts = thoughts,
+            thoughtTitle = thoughtTitle,
+            tokenCount = tokenCount,
+            status = status,
+            thoughtTimeMs = thoughtTimeMs,
+            toolCallJson = MessagePersistenceGuard.encodeSegmentsBounded(persistedSegments),
+        )
     }
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
@@ -151,6 +274,57 @@ class ConversationRepository(
         } catch (_: Exception) {
             emptyMap()
         }
+    }
+
+    suspend fun saveRunBranchSelections(conversationId: String, selections: Map<String?, String>) {
+        val conversation = chatDao.getConversation(conversationId) ?: return
+        val stored = Json.encodeToString(selections.mapKeys { it.key ?: "null" })
+        if (conversation.selectedRunBranchesJson != stored) {
+            chatDao.upsertConversation(
+                conversation.copy(
+                    selectedRunBranchesJson = stored,
+                    lastUpdated = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    suspend fun restoreRunBranchSelections(conversationId: String): Map<String?, String> {
+        val raw = chatDao.getConversation(conversationId)?.selectedRunBranchesJson ?: return emptyMap()
+        return runCatching {
+            Json.decodeFromString<Map<String, String>>(raw)
+                .mapKeys { if (it.key == "null") null else it.key }
+        }.getOrDefault(emptyMap())
+    }
+
+    suspend fun selectRunBranch(
+        conversationId: String,
+        parentRunId: String?,
+        runId: String,
+    ) {
+        val selections = restoreRunBranchSelections(conversationId).toMutableMap()
+        selections[parentRunId] = runId
+        saveRunBranchSelections(conversationId, selections)
+    }
+
+    /** Persists Run and legacy message selection maps in the same row update. */
+    suspend fun selectRunBranch(
+        conversationId: String,
+        parentRunId: String?,
+        runId: String,
+        messageSelections: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ) {
+        val runSelections = restoreRunBranchSelections(conversationId).toMutableMap()
+        runSelections[parentRunId] = runId
+        check(
+            chatDao.updateSelectionsForRunDeletion(
+                conversationId = conversationId,
+                selectedBranchesJson = Json.encodeToString(messageSelections.mapKeys { it.key ?: "null" }),
+                selectedRunBranchesJson = Json.encodeToString(runSelections.mapKeys { it.key ?: "null" }),
+                at = at,
+            ) == 1
+        ) { "Conversation $conversationId disappeared during branch selection" }
     }
 
     // ── Stuck Message Fixer ───────────────────────────────────

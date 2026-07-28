@@ -54,6 +54,7 @@ import com.newoether.agora.ui.common.ThinkingControlPanel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
+import com.newoether.agora.viewmodel.SendAcceptance
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,7 +64,8 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatBottomBar(
-    onSendMessage: (String, List<com.newoether.agora.model.SelectedAttachment>) -> Boolean,
+    onSendMessage: suspend (String, List<com.newoether.agora.model.SelectedAttachment>) -> SendAcceptance?,
+    onDirectSendCommitted: (String) -> Unit = {},
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
     isSwitching: Boolean = false,
@@ -567,6 +569,7 @@ fun ChatBottomBar(
                 isStopping = isStopping,
                 isModelValid = isModelValid,
                 onSendMessage = onSendMessage,
+                onDirectSendCommitted = onDirectSendCommitted,
                 onStopGeneration = onStopGeneration,
                 onCollapse = onCollapse,
             )

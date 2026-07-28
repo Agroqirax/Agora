@@ -12,10 +12,15 @@ import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.LoopEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.local.TaskEntity
+import com.newoether.agora.data.local.migration.LegacyMessageRecord
+import com.newoether.agora.data.local.migration.LegacyRunBackfillPlanner
+import com.newoether.agora.data.local.migration.PlannedMessageAssignment
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.Dispatchers
@@ -204,6 +209,8 @@ class DataImporter(
     private data class ConversationGraphHeaders(
         val tasks: List<TaskEntity>,
         val conversations: List<ChatEntity>,
+        val runs: List<RunEntity>,
+        val sourceRunIdsWereUnique: Boolean,
         val loops: List<LoopEntity>,
         val availableConversationIds: Set<String>,
     )
@@ -212,6 +219,13 @@ class DataImporter(
         val imagesByMessage: Map<String, List<String>>,
         val videosByMessage: Map<String, String>,
         val createdFiles: List<File>,
+    )
+
+    private data class PlannedNativeRunGraph(
+        val runs: List<RunEntity>,
+        val assignments: Map<String, PlannedMessageAssignment>,
+        val recoveredRunIds: Set<String> = emptySet(),
+        val legacyRunSelections: Map<String, Map<String?, String>> = emptyMap(),
     )
 
     /** Reads one JSON value only; callers retain at most one exported entity at a time. */
@@ -290,6 +304,7 @@ class DataImporter(
         strategy: ImportStrategy,
     ): ConversationGraphHeaders {
         var rawConversations = emptyList<ExportChatEntity>()
+        var rawRuns = emptyList<ExportRunEntity>()
         var rawTasks = emptyList<ExportTaskEntity>()
         var rawLoops = emptyList<ExportLoopEntity>()
         JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
@@ -297,6 +312,7 @@ class DataImporter(
             while (reader.hasNext()) {
                 when (reader.nextName()) {
                     "conversations" -> rawConversations = reader.readSerializableArray()
+                    "runs" -> rawRuns = reader.readSerializableArray()
                     "tasks" -> rawTasks = reader.readSerializableArray()
                     "loops" -> rawLoops = reader.readSerializableArray()
                     else -> reader.skipValue()
@@ -338,6 +354,7 @@ class DataImporter(
                     taskId = conversation.taskId,
                     origin = conversation.origin,
                     graduated = conversation.graduated,
+                    selectedRunBranchesJson = conversation.selectedRunBranchesJson,
                 ),
                 availableTaskIds,
             )
@@ -347,6 +364,15 @@ class DataImporter(
         } else {
             mutableSetOf()
         }.apply { addAll(conversations.map { it.id }) }
+
+        val availableRawRuns = rawRuns.filter {
+            it.conversationId in availableConversationIds
+        }
+        val sourceRunIdsWereUnique =
+            availableRawRuns.map { it.id }.distinct().size == availableRawRuns.size
+        val runs = NativeRunArchivePolicy.orderByParent(
+            availableRawRuns.map { NativeRunArchivePolicy.terminalize(it.toArchivedSnapshot()) }
+        )
 
         val loops = rawLoops
             .filter { it.conversationId in availableConversationIds }
@@ -365,6 +391,8 @@ class DataImporter(
         return ConversationGraphHeaders(
             tasks = tasks,
             conversations = conversations,
+            runs = runs,
+            sourceRunIdsWereUnique = sourceRunIdsWereUnique,
             loops = loops,
             availableConversationIds = availableConversationIds,
         )
@@ -445,7 +473,21 @@ class DataImporter(
         )
     }
 
-    private fun ExportMessageEntity.toMessageEntity(restoredMedia: RestoredMedia): MessageEntity {
+    private fun ExportMessageEntity.toMessageEntity(
+        restoredMedia: RestoredMedia,
+        assignment: PlannedMessageAssignment,
+        recoveredRunIds: Set<String>,
+    ): MessageEntity {
+        val parsedParticipant = try {
+            Participant.valueOf(participant)
+        } catch (_: Exception) {
+            Participant.MODEL
+        }
+        val parsedStatus = try {
+            MessageStatus.valueOf(status)
+        } catch (_: Exception) {
+            MessageStatus.SUCCESS
+        }
         var message = MessageEntity(
             id = id,
             conversationId = conversationId,
@@ -455,21 +497,25 @@ class DataImporter(
             thoughts = thoughts,
             thoughtTitle = thoughtTitle,
             tokenCount = tokenCount,
-            status = try {
-                MessageStatus.valueOf(status)
-            } catch (_: Exception) {
-                MessageStatus.SUCCESS
-            },
-            participant = try {
-                Participant.valueOf(participant)
-            } catch (_: Exception) {
-                Participant.MODEL
-            },
+            status = if (
+                assignment.runId in recoveredRunIds &&
+                parsedParticipant == Participant.MODEL &&
+                parsedStatus in setOf(
+                    MessageStatus.SENDING,
+                    MessageStatus.THINKING,
+                    MessageStatus.TOOL_CALLING,
+                    MessageStatus.TRANSCRIBING,
+                )
+            ) MessageStatus.STOPPED else parsedStatus,
+            participant = parsedParticipant,
             timestamp = timestamp,
             thoughtTimeMs = thoughtTimeMs,
             modelName = modelName,
             toolCallJson = toolCallJson,
             attachmentMeta = attachmentMeta,
+            runId = assignment.runId,
+            runSequence = assignment.runSequence,
+            consumedAtPass = assignment.consumedAtPass,
         )
         val restoredVideo = restoredMedia.videosByMessage[id]
         if (restoredVideo != null && message.attachmentMeta != null) {
@@ -493,6 +539,8 @@ class DataImporter(
         strategy: ImportStrategy,
         availableConversationIds: Set<String>,
         restoredMedia: RestoredMedia,
+        assignments: Map<String, PlannedMessageAssignment>,
+        recoveredRunIds: Set<String>,
     ) {
         val batch = mutableListOf<MessageEntity>()
 
@@ -524,7 +572,15 @@ class DataImporter(
                         readJsonElement(reader)
                     )
                     if (exported.conversationId in availableConversationIds) {
-                        batch.add(exported.toMessageEntity(restoredMedia))
+                        batch.add(
+                            exported.toMessageEntity(
+                                restoredMedia,
+                                checkNotNull(assignments[exported.id]) {
+                                    "Message ${exported.id} has no planned Run assignment"
+                                },
+                                recoveredRunIds,
+                            )
+                        )
                         if (batch.size >= IMPORT_MESSAGE_BATCH_SIZE) {
                             flushBatch()
                         }
@@ -537,12 +593,134 @@ class DataImporter(
         flushBatch()
     }
 
+    private fun planNativeRunGraph(
+        stream: InputStream,
+        headers: ConversationGraphHeaders,
+    ): PlannedNativeRunGraph {
+        val messagesByConversation = mutableMapOf<String, MutableList<LegacyMessageRecord>>()
+        val archivedOwnership = mutableListOf<ArchivedMessageRunOwnership>()
+        JsonReader(InputStreamReader(stream, Charsets.UTF_8)).use { reader ->
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() != "messages") {
+                    reader.skipValue()
+                    continue
+                }
+                reader.beginArray()
+                while (reader.hasNext()) {
+                    val exported = importJson.decodeFromJsonElement<ExportMessageEntity>(
+                        readJsonElement(reader)
+                    )
+                    if (exported.conversationId in headers.availableConversationIds) {
+                        archivedOwnership += ArchivedMessageRunOwnership(
+                            messageId = exported.id,
+                            conversationId = exported.conversationId,
+                            runId = exported.runId,
+                            runSequence = exported.runSequence,
+                            consumedAtPass = exported.consumedAtPass,
+                        )
+                        messagesByConversation.getOrPut(exported.conversationId) { mutableListOf() }
+                            .add(
+                                LegacyMessageRecord(
+                                    id = exported.id,
+                                    parentId = exported.parentId,
+                                    participant = try {
+                                        Participant.valueOf(exported.participant)
+                                    } catch (_: Exception) {
+                                        Participant.MODEL
+                                    },
+                                    status = try {
+                                        MessageStatus.valueOf(exported.status)
+                                    } catch (_: Exception) {
+                                        MessageStatus.SUCCESS
+                                    },
+                                    timestamp = exported.timestamp,
+                                )
+                            )
+                    }
+                }
+                reader.endArray()
+            }
+            reader.endObject()
+        }
+
+        val archiveOwnershipIsComplete = NativeRunArchivePolicy.hasCompleteOwnership(
+            runs = headers.runs,
+            ownership = archivedOwnership,
+            sourceRunIdsWereUnique = headers.sourceRunIdsWereUnique,
+        )
+        if (archiveOwnershipIsComplete) {
+            val assignments = archivedOwnership.associate { ownership ->
+                ownership.messageId to PlannedMessageAssignment(
+                    messageId = ownership.messageId,
+                    runId = checkNotNull(ownership.runId),
+                    runSequence = checkNotNull(ownership.runSequence),
+                    consumedAtPass = ownership.consumedAtPass,
+                )
+            }
+            return PlannedNativeRunGraph(
+                runs = headers.runs,
+                assignments = assignments,
+                recoveredRunIds = headers.runs
+                    .filter { it.endReason == RunEndReason.PROCESS_RECOVERED }
+                    .mapTo(mutableSetOf()) { it.id },
+            )
+        }
+
+        val runs = mutableListOf<RunEntity>()
+        val assignments = mutableMapOf<String, PlannedMessageAssignment>()
+        val legacyRunSelections = mutableMapOf<String, Map<String?, String>>()
+        val conversationsById = headers.conversations.associateBy { it.id }
+        for (conversation in headers.conversations) {
+            val conversationId = conversation.id
+            val messages = messagesByConversation[conversationId].orEmpty()
+            val plan = LegacyRunBackfillPlanner.plan(conversationId, messages)
+            runs += plan.runs.map {
+                RunEntity(
+                    id = it.id,
+                    conversationId = it.conversationId,
+                    parentRunId = it.parentRunId,
+                    status = it.status,
+                    activeSlot = null,
+                    startedAt = it.startedAt,
+                    lastCheckpointAt = it.endedAt,
+                    endedAt = it.endedAt,
+                    endReason = it.endReason,
+                    legacyAmbiguous = it.legacyAmbiguous,
+                )
+            }
+            plan.assignments.forEach { assignments[it.messageId] = it }
+            val messageSelections = conversationsById[conversationId]
+                ?.selectedBranchesJson
+                ?.let { raw ->
+                    runCatching {
+                        importJson.decodeFromString<Map<String, String>>(raw)
+                            .mapKeys { if (it.key == "null") null else it.key }
+                    }.getOrDefault(emptyMap())
+                }
+                .orEmpty()
+            legacyRunSelections[conversationId] = LegacyRunBackfillPlanner.selectedRunBranches(
+                messages,
+                plan,
+                messageSelections,
+            )
+        }
+        return PlannedNativeRunGraph(
+            runs = NativeRunArchivePolicy.orderByParent(runs),
+            assignments = assignments,
+            legacyRunSelections = legacyRunSelections,
+        )
+    }
+
     private suspend fun importConversationGraph(
         archive: Archive,
         strategy: ImportStrategy,
         headers: ConversationGraphHeaders,
         restoredMedia: RestoredMedia,
     ) {
+        val plannedRunGraph = archive.stream("conversations.json")?.use { stream ->
+            planNativeRunGraph(stream, headers)
+        } ?: error("conversations.json is missing")
         database.withTransaction {
             if (strategy == ImportStrategy.REPLACE) {
                 chatDao.deleteAllLoops()
@@ -551,13 +729,35 @@ class DataImporter(
                 chatDao.deleteOrphanedEmbeddings()
             }
             headers.tasks.forEach { chatDao.upsertTask(it) }
-            headers.conversations.forEach { chatDao.upsertConversation(it) }
+            headers.conversations.forEach { conversation ->
+                val derivedSelections = plannedRunGraph.legacyRunSelections[conversation.id]
+                chatDao.upsertConversation(
+                    if (derivedSelections != null) {
+                        conversation.copy(
+                            selectedRunBranchesJson = derivedSelections
+                                .takeIf { it.isNotEmpty() }
+                                ?.let { selections ->
+                                    Json.encodeToString(
+                                        selections.mapKeys { it.key ?: "null" }
+                                    )
+                                }
+                        )
+                    } else {
+                        conversation
+                    }
+                )
+            }
+            for (run in plannedRunGraph.runs) {
+                if (chatDao.getRun(run.id) == null) chatDao.insertRun(run)
+            }
             archive.stream("conversations.json")?.use { stream ->
                 importMessagesFromGraph(
                     stream = stream,
                     strategy = strategy,
                     availableConversationIds = headers.availableConversationIds,
                     restoredMedia = restoredMedia,
+                    assignments = plannedRunGraph.assignments,
+                    recoveredRunIds = plannedRunGraph.recoveredRunIds,
                 )
             } ?: error("conversations.json is missing")
             headers.loops.forEach { chatDao.upsertLoop(it) }
@@ -914,7 +1114,23 @@ class DataImporter(
         val modelId: String? = null,
         val taskId: String? = null,
         val origin: String = "user",
-        val graduated: Boolean = false
+        val graduated: Boolean = false,
+        val selectedRunBranchesJson: String? = null,
+    )
+
+    @Serializable
+    private data class ExportRunEntity(
+        val id: String,
+        val conversationId: String,
+        val parentRunId: String? = null,
+        val status: String = "COMPLETED",
+        val startedAt: Long,
+        val lastCheckpointAt: Long,
+        val stopRequestedAt: Long? = null,
+        val endedAt: Long? = null,
+        val endReason: String? = null,
+        val currentPass: Int = 0,
+        val legacyAmbiguous: Boolean = false,
     )
 
     @Serializable
@@ -963,7 +1179,24 @@ class DataImporter(
         val thoughtTimeMs: Long? = null,
         val modelName: String? = null,
         val toolCallJson: String? = null,
-        val attachmentMeta: String? = null
+        val attachmentMeta: String? = null,
+        val runId: String? = null,
+        val runSequence: Long? = null,
+        val consumedAtPass: Int? = null,
+    )
+
+    private fun ExportRunEntity.toArchivedSnapshot() = ArchivedRunSnapshot(
+        id = id,
+        conversationId = conversationId,
+        parentRunId = parentRunId,
+        status = status,
+        startedAt = startedAt,
+        lastCheckpointAt = lastCheckpointAt,
+        stopRequestedAt = stopRequestedAt,
+        endedAt = endedAt,
+        endReason = endReason,
+        currentPass = currentPass,
+        legacyAmbiguous = legacyAmbiguous,
     )
 
     @Serializable

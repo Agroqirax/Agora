@@ -1,16 +1,11 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.repository.ConversationRepository
-import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessageSegment
-import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
 
 /**
  * Persists terminal (STOPPED) message state to the DB after a generation is stopped. Kept separate
@@ -34,57 +29,26 @@ class GenerationFinalizer(
     fun launchStopFinalization(
         scope: CoroutineScope,
         conversationId: String?,
+        runId: String?,
         messages: List<ChatMessage>,
         onFinalized: () -> Unit = {},
     ): Job? {
         if (conversationId == null) return null
         val distinct = messages.distinctBy { it.id }
-        if (distinct.isEmpty()) return null
+        if (distinct.isEmpty() && runId == null) return null
         return scope.launch {
             try {
                 if (convRepo.getConversation(conversationId) == null) return@launch
-                for (message in distinct) {
-                    convRepo.upsertMessage(message.toStoppedEntity(conversationId))
-                    // Gate lives in RagManager.indexMessageForRag (single source of truth).
-                    if (message.text.isNotBlank()) onIndexMessageForRag(message.id, message.text)
-                }
+                convRepo.finishStoppedGeneration(distinct, runId)
             } catch (e: Exception) {
                 DebugLog.e("AgoraVM", "Failed to persist stopped generation", e)
             } finally {
                 onFinalized()
             }
+            // RAG is outside the Stop critical path and owns its own eligibility gate.
+            distinct.forEach { message ->
+                if (message.text.isNotBlank()) onIndexMessageForRag(message.id, message.text)
+            }
         }
     }
-}
-
-private fun ChatMessage.toStoppedEntity(conversationId: String): MessageEntity {
-    val toolJson = segments?.let { Json.encodeToString(it) } ?: toolCall?.let {
-        Json.encodeToString(listOf(
-            MessageSegment(
-                type = "tool",
-                toolName = it.toolName,
-                toolArgs = it.arguments,
-                toolResult = it.result,
-                signature = it.signature,
-                toolCallId = it.toolCallId,
-            )
-        ))
-    }
-    return MessageEntity(
-        id = id,
-        conversationId = conversationId,
-        parentId = parentId,
-        text = text,
-        images = images,
-        thoughts = thoughts,
-        thoughtTitle = thoughtTitle,
-        tokenCount = tokenCount,
-        status = MessageStatus.STOPPED,
-        participant = participant,
-        timestamp = timestamp,
-        thoughtTimeMs = thoughtTimeMs,
-        modelName = modelName,
-        toolCallJson = toolJson,
-        attachmentMeta = attachmentMeta?.let { Json.encodeToString(it) },
-    )
 }

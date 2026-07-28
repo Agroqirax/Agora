@@ -413,7 +413,24 @@ class GenerationManager(
             val combinedText = if (attachmentText.isNotBlank()) it.text + attachmentText else it.text
             val hasTranscription = ctx.imageTranscriptionEnabled && meta != null && meta.items.any { item -> !item.transcription.isNullOrBlank() }
             val effectiveImages = if (hasTranscription) emptyList() else it.images
-            ChatMessage(id = it.id, parentId = it.parentId, text = combinedText, images = effectiveImages, thoughts = it.thoughts, thoughtTitle = it.thoughtTitle, tokenCount = it.tokenCount, status = it.status, participant = it.participant, timestamp = it.timestamp, thoughtTimeMs = it.thoughtTimeMs, segments = segs, toolCall = toolCall)
+            ChatMessage(
+                id = it.id,
+                parentId = it.parentId,
+                text = combinedText,
+                images = effectiveImages,
+                thoughts = it.thoughts,
+                thoughtTitle = it.thoughtTitle,
+                tokenCount = it.tokenCount,
+                status = it.status,
+                participant = it.participant,
+                timestamp = it.timestamp,
+                thoughtTimeMs = it.thoughtTimeMs,
+                segments = segs,
+                toolCall = toolCall,
+                runId = it.runId,
+                runSequence = it.runSequence,
+                consumedAtPass = it.consumedAtPass,
+            )
             // ERROR rows are synthetic client-side text ("Error: …"), never real model output —
             // replaying them as assistant turns would pollute the API context on retry.
         }.filter { it.participant != Participant.ERROR && it.status != MessageStatus.ERROR }
@@ -456,6 +473,8 @@ class GenerationManager(
         isRegenerate: Boolean,
         replaceMessageId: String?,
         modelName: String,
+        runId: String,
+        pass: Int,
         config: GenerationConfig,
         ctx: GenerationContext,
         generationJob: kotlinx.coroutines.Job?,
@@ -488,6 +507,7 @@ class GenerationManager(
         var currentThoughtBuf = StringBuilder()
         var currentThoughtSignature: String? = null
         var parentId: String? = null
+        var modelRunSequence = -1L
         var toolPath = emptyList<ChatMessage>()
         var latestTranscriptionSnapshot: ChatMessage? = null
         var transcriptionReturned = false
@@ -546,9 +566,18 @@ class GenerationManager(
             // controller before this coroutine runs — GenerationManager no longer touches it.
             com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName} regen=$isRegenerate")
             thinkingPlaceholder = context.getString(R.string.thinking_ellipsis)
-            val placeholder = conversations.getMessagesForConversationSnapshot(conversationId)
-                .find { it.id == modelMessageId }
-            parentId = placeholder?.parentId
+            val placeholder = checkNotNull(
+                conversations.getMessagesForConversationSnapshot(conversationId)
+                    .find { it.id == modelMessageId }
+            ) { "Generation placeholder $modelMessageId does not exist" }
+            check(placeholder.runId == runId) {
+                "Generation placeholder $modelMessageId is not owned by Run $runId"
+            }
+            check(conversations.getRun(runId)?.currentPass == pass) {
+                "Generation pass $pass is not current for Run $runId"
+            }
+            modelRunSequence = placeholder.runSequence
+            parentId = placeholder.parentId
             if (!ctx.foregroundServiceManagedExternally) {
                 foregroundLeaseAcquired = withContext(Dispatchers.Main) {
                     AgoraForegroundService.acquire(app, modelMessageId)
@@ -616,7 +645,9 @@ class GenerationManager(
                     currentThoughtSignature,
                     liveThoughtDurationMs()
                 ),
-                retryText = retryText
+                retryText = retryText,
+                runId = runId,
+                runSequence = modelRunSequence,
             )
 
             suspend fun publishStreamUpdate(forceCheckpoint: Boolean = false) {
@@ -804,7 +835,8 @@ class GenerationManager(
                         id = rid, parentId = toolMsgId,
                         text = tcData.result,
                         participant = Participant.USER, status = MessageStatus.SUCCESS,
-                        toolCall = tcData
+                        toolCall = tcData,
+                        runId = runId,
                     )
                 }
                 toolPath = toolPath.toMutableList().apply {
@@ -812,27 +844,33 @@ class GenerationManager(
                         id = toolMsgId, parentId = prevLastId,
                         text = "", participant = Participant.MODEL,
                         status = MessageStatus.SUCCESS, toolCall = tcds.first(),
-                        segments = toolMsgSegs
+                        segments = toolMsgSegs,
+                        runId = runId,
                     ))
                     for ((_, msg) in resultMsgs) add(msg)
                 }
-                conversations.upsertMessage(MessageEntity(
-                    id = toolMsgId, conversationId = conversationId, parentId = prevLastId,
-                    text = "", thoughts = null, status = MessageStatus.SUCCESS,
-                    participant = Participant.MODEL, timestamp = System.currentTimeMillis(),
-                    toolCallJson = allSegmentsJson
-                ))
-                for ((index, entry) in resultMsgs.withIndex()) {
-                    val (rid, _) = entry
-                    conversations.upsertMessage(MessageEntity(
-                        id = rid, conversationId = conversationId, parentId = toolMsgId,
-                        text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
-                        participant = Participant.USER, timestamp = System.currentTimeMillis(),
-                        toolCallJson = Json.encodeToString(listOf(
-                            MessageSegment(type = "tool", toolName = tcds[index].toolName, toolArgs = tcds[index].arguments, toolResult = tcds[index].result, signature = tcds[index].signature, toolCallId = tcds[index].toolCallId)
-                        ))
+                val toolRoundTimestamp = System.currentTimeMillis()
+                val toolRoundEntities = buildList {
+                    add(MessageEntity(
+                        id = toolMsgId, conversationId = conversationId, parentId = prevLastId,
+                        text = "", thoughts = null, status = MessageStatus.SUCCESS,
+                        participant = Participant.MODEL, timestamp = toolRoundTimestamp,
+                        toolCallJson = allSegmentsJson, runId = runId,
                     ))
+                    resultMsgs.forEachIndexed { index, entry ->
+                        val (rid, _) = entry
+                        add(MessageEntity(
+                            id = rid, conversationId = conversationId, parentId = toolMsgId,
+                            text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
+                            participant = Participant.USER, timestamp = toolRoundTimestamp + index + 1,
+                            runId = runId,
+                            toolCallJson = Json.encodeToString(listOf(
+                                MessageSegment(type = "tool", toolName = tcds[index].toolName, toolArgs = tcds[index].arguments, toolResult = tcds[index].result, signature = tcds[index].signature, toolCallId = tcds[index].toolCallId)
+                            ))
+                        ))
+                    }
                 }
+                conversations.appendToolRoundToRun(toolRoundEntities)
 
                 toolCallData = null
                 toolCallDataList = emptyList()
@@ -861,23 +899,6 @@ class GenerationManager(
 
             if (!currentCoroutineContext().isActive) {
                 currentStatus = MessageStatus.STOPPED
-            }
-
-            if (!isRegenerate && isLatestPersist()) for (msg in toolPath) {
-                if (msg.id.startsWith(Constants.TOOL_MSG_PREFIX) || msg.id.startsWith(Constants.RESULT_MSG_PREFIX)) {
-                    val exists = conversations.getMessagesForConversationSnapshot(conversationId).any { it.id == msg.id }
-                    if (!exists) {
-                        conversations.upsertMessage(MessageEntity(
-                            id = msg.id, conversationId = conversationId, parentId = msg.parentId,
-                            text = msg.text, thoughts = null, status = msg.status,
-                            participant = msg.participant, timestamp = System.currentTimeMillis(),
-                            toolCallJson = msg.segments?.let { MessagePersistenceGuard.encodeSegmentsBounded(it) }
-                                ?: msg.toolCall?.let { Json.encodeToString(listOf(
-                                    MessageSegment(type = "tool", toolName = it.toolName, toolArgs = it.arguments, toolResult = it.result, signature = it.signature, toolCallId = it.toolCallId)
-                                )) }
-                        ))
-                    }
-                }
             }
 
             if (currentStatus != MessageStatus.ERROR) {
@@ -913,7 +934,7 @@ class GenerationManager(
             // indexing, UI cleanup, foreground release, notifications — is moved below
             // so a Stop returns from here as soon as the row is written, instead of
             // running a heavy non-cancellable tail that held the generation lock/queue.
-            withContext(NonCancellable) {
+            if (isLatestPersist()) withContext(NonCancellable) {
                 // A cancellation can arrive as ImageGenToolProvider's withContext returns,
                 // after the file was queued but before the normal post-tool drain ran.
                 generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
@@ -932,16 +953,35 @@ class GenerationManager(
                                 ?: segments.toList().ifEmpty { null }
                             // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
                             // text column — together they can exceed the 2MB CursorWindow otherwise.
-                            val segmentsJson = MessagePersistenceGuard.encodeSegmentsBounded(finalSegments)
                             val effectiveParentId = parentId
-                            conversations.upsertMessage(MessageEntity(
-                                id = modelMessageId, conversationId = conversationId, parentId = effectiveParentId,
-                                text = MessagePersistenceGuard.clipText(totalText), images = generatedImages.toList(),
-                                thoughts = totalThoughts.ifBlank { null },
-                                thoughtTitle = totalThoughtTitle, tokenCount = totalTokenCount,
-                                status = currentStatus, participant = Participant.MODEL, timestamp = startTime,
-                                thoughtTimeMs = totalThoughtTimeMs, modelName = modelName, toolCallJson = segmentsJson
-                            ))
+                            conversations.updateStreamingMessageCheckpoint(
+                                ChatMessage(
+                                    id = modelMessageId,
+                                    parentId = effectiveParentId,
+                                    text = MessagePersistenceGuard.clipText(totalText),
+                                    images = generatedImages.toList(),
+                                    thoughts = totalThoughts.ifBlank { null },
+                                    thoughtTitle = totalThoughtTitle,
+                                    tokenCount = totalTokenCount,
+                                    status = currentStatus,
+                                    participant = Participant.MODEL,
+                                    timestamp = startTime,
+                                    thoughtTimeMs = totalThoughtTimeMs,
+                                    modelName = modelName,
+                                    segments = finalSegments,
+                                    runId = runId,
+                                    runSequence = modelRunSequence,
+                                )
+                            )
+                            when {
+                                currentStatus == MessageStatus.STOPPED ->
+                                    conversations.finishRunStopped(runId)
+                                callbacks.hasQueuedSends() -> Unit
+                                currentStatus == MessageStatus.ERROR ->
+                                    conversations.failRun(runId)
+                                else ->
+                                    conversations.completeRun(runId)
+                            }
                         }
                     }
                 } catch (e: Exception) {

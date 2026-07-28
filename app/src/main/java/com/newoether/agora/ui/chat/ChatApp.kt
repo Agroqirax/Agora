@@ -63,21 +63,22 @@ import com.newoether.agora.ui.common.rememberAgoraHaptics
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
+import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val MESSAGE_RESOLVE_TIMEOUT_MS = 750L
+private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
+private const val STABLE_LAYOUT_SAMPLES = 3
+private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 
 // isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
 // MessageItemSegments.kt.
@@ -231,20 +232,33 @@ fun ChatApp(
     }
 
 
-    suspend fun scrollToLastUserMessage(animate: Boolean = true, targetMessageId: String? = null, easing: Easing = FastOutSlowInEasing) {
-        if (messages.isEmpty() || viewportHeightPx == 0) return
-
-        val targetIndex = if (targetMessageId != null) {
-            val msg = messages.find { it.id == targetMessageId }
+    fun resolveScrollTargetIndex(
+        currentMessages: List<com.newoether.agora.model.ChatMessage>,
+        targetMessageId: String?,
+    ): Int = if (targetMessageId != null) {
+            val msg = currentMessages.find { it.id == targetMessageId }
             if (msg?.participant == Participant.MODEL && msg.parentId != null) {
-                messages.indexOfFirst { it.id == msg.parentId }
+                currentMessages.indexOfFirst { it.id == msg.parentId }
             } else {
-                messages.indexOfFirst { it.id == targetMessageId }
+                currentMessages.indexOfFirst { it.id == targetMessageId }
             }
         } else {
-            messages.indexOfLast { it.participant == Participant.USER }
+            currentMessages.indexOfLast { it.participant == Participant.USER }
         }
-        if (targetIndex == -1) return
+
+    /**
+     * Historical visible-scroll behavior: tween(600) by default; only the bottom FAB supplies the
+     * cubic easing. There is deliberately no item-scroll fallback — a caller must wait for the
+     * required bubble/layout measurements instead of silently changing motion semantics.
+     */
+    suspend fun animateToUserMessage(
+        targetMessageId: String? = null,
+        easing: Easing = FastOutSlowInEasing,
+    ): Boolean {
+        val currentMessages = messages
+        if (currentMessages.isEmpty() || viewportHeightPx == 0) return false
+        val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
+        if (targetIndex == -1) return false
 
         with(density) {
             val targetTopPx = 140.dp.toPx()
@@ -253,37 +267,144 @@ fun ChatApp(
             var totalHeightBeforePx = 0
             var hasAnyHeight = false
             for (i in 0 until targetIndex) {
-                val h = messageHeights[messages[i].id]
+                val h = messageHeights[currentMessages[i].id]
                 if (h != null) { totalHeightBeforePx += h; hasAnyHeight = true }
             }
 
             if (!hasAnyHeight && targetIndex > 0) {
-                if (animate) {
-                    listState.animateScrollToItem(targetIndex, 0)
-                } else {
-                    listState.scrollToItem(targetIndex, 0)
-                }
-            } else {
-                val targetScrollPx = (topPaddingPx + totalHeightBeforePx - targetTopPx).coerceAtLeast(0f)
-
-                if (animate) {
-                    var currentOffsetPx = listState.firstVisibleItemScrollOffset.toFloat()
-                    for (i in 0 until listState.firstVisibleItemIndex) {
-                        if (i < messages.size) {
-                            currentOffsetPx += (messageHeights[messages[i].id] ?: 0)
-                        }
-                    }
-
-                    val diff = targetScrollPx - currentOffsetPx
-                    if (kotlin.math.abs(diff) > 2) {
-                        listState.animateScrollBy(diff, tween(600, easing = easing))
-                    }
-                } else {
-                    listState.scrollToItem(0, targetScrollPx.toInt())
+                return false
+            }
+            val targetScrollPx = (topPaddingPx + totalHeightBeforePx - targetTopPx).coerceAtLeast(0f)
+            var currentOffsetPx = listState.firstVisibleItemScrollOffset.toFloat()
+            for (i in 0 until listState.firstVisibleItemIndex) {
+                if (i < currentMessages.size) {
+                    currentOffsetPx += (messageHeights[currentMessages[i].id] ?: 0)
                 }
             }
+
+            val diff = targetScrollPx - currentOffsetPx
+            if (kotlin.math.abs(diff) > 2) {
+                listState.animateScrollBy(diff, tween(600, easing = easing))
+            }
+            return true
         }
     }
+
+    /** Wait until the actual target bubble has a non-zero, unchanged measured height three times. */
+    suspend fun waitForBubbleStable(targetMessageId: String?): Boolean =
+        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+            var stableSamples = 0
+            var previousSignature: List<Any>? = null
+            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
+                delay(LAYOUT_SAMPLE_INTERVAL_MS)
+                val currentMessages = messages
+                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
+                if (targetIndex == -1 || viewportHeightPx <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val target = currentMessages[targetIndex]
+                val targetHeight = messageHeights[target.id]
+                if (targetHeight == null || targetHeight <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val signature = listOf(
+                    target.id,
+                    targetIndex,
+                    targetHeight,
+                    currentMessages.size,
+                    viewportHeightPx,
+                )
+                if (signature == previousSignature) {
+                    stableSamples += 1
+                } else {
+                    previousSignature = signature
+                    stableSamples = 1
+                }
+            }
+            true
+        } == true
+
+    suspend fun animateAfterBubbleSettles(
+        targetMessageId: String?,
+        easing: Easing = FastOutSlowInEasing,
+    ): Boolean {
+        if (!waitForBubbleStable(targetMessageId)) return false
+        return withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+            while (!animateToUserMessage(targetMessageId, easing)) {
+                delay(LAYOUT_SAMPLE_INTERVAL_MS)
+            }
+            true
+        } == true
+    }
+
+    /**
+     * Branch/delete/conversation transitions stay covered. While covered, hard-position the
+     * target whenever necessary and require three identical, correctly-positioned layout samples
+     * before reporting settlement.
+     */
+    suspend fun settleCoveredTransition(targetMessageId: String?): Boolean =
+        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+            var stableSamples = 0
+            var previousSignature: List<Int>? = null
+            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
+                delay(LAYOUT_SAMPLE_INTERVAL_MS)
+                val currentMessages = messages
+                if (currentMessages.isEmpty()) {
+                    val signature = listOf(0, viewportHeightPx)
+                    if (signature == previousSignature) stableSamples += 1
+                    else {
+                        previousSignature = signature
+                        stableSamples = 1
+                    }
+                    continue
+                }
+                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
+                if (targetIndex == -1 || viewportHeightPx <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+
+                val positioned =
+                    listState.firstVisibleItemIndex == targetIndex &&
+                        listState.firstVisibleItemScrollOffset <= 2
+                if (!positioned) {
+                    // Covered transition: a hard correction is intentional and never visible.
+                    listState.scrollToItem(targetIndex, 0)
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+
+                val targetInfo = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == targetIndex }
+                val measuredHeight = messageHeights[currentMessages[targetIndex].id]
+                if (targetInfo == null || measuredHeight == null || measuredHeight <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val signature = listOf(
+                    targetIndex,
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    targetInfo.offset,
+                    targetInfo.size,
+                    measuredHeight,
+                    viewportHeightPx,
+                )
+                if (signature == previousSignature) stableSamples += 1
+                else {
+                    previousSignature = signature
+                    stableSamples = 1
+                }
+            }
+            true
+        } == true
 
     // Second beat of the conversation-switch feedback: the tap tick fires at the drawer item,
     // this one lands when the target conversation has finished loading and is on screen.
@@ -296,39 +417,19 @@ fun ChatApp(
         wasSwitching = isSwitching
     }
 
-    val branchSwitchTrigger by viewModel.branchSwitchTrigger.collectAsState()
+    val switchingScrollRequest by viewModel.switchingScrollRequest.collectAsState()
 
-    LaunchedEffect(branchSwitchTrigger) {
-        val targetMessageId = branchSwitchTrigger ?: return@LaunchedEffect
+    LaunchedEffect(switchingScrollRequest?.id) {
+        val request = switchingScrollRequest ?: return@LaunchedEffect
         if (currentConversationId == null) {
-            viewModel.clearBranchSwitchTrigger()
-            viewModel.setSwitching(false)
+            viewModel.failSwitchingScroll(request.id, "conversation disappeared")
             return@LaunchedEffect
         }
-
-        try {
-            val currentMsgs = withTimeout(4000) {
-                snapshotFlow { messages }
-                    .filter { currentMsgs -> currentMsgs.any { it.id == targetMessageId } }
-                    .first()
-            }
-
-            val msg = currentMsgs.find { it.id == targetMessageId }
-            val currentTargetIndex = if (msg?.participant == Participant.MODEL && msg.parentId != null) {
-                val parentIndex = currentMsgs.indexOfFirst { it.id == msg.parentId }
-                if (parentIndex != -1) parentIndex else currentMsgs.indexOfFirst { it.id == targetMessageId }
-            } else {
-                currentMsgs.indexOfFirst { it.id == targetMessageId }
-            }
-
-            if (currentTargetIndex != -1) {
-                listState.scrollToItem(currentTargetIndex, 0)
-            }
-        } catch (e: Exception) {
-            // Timeout or intended cancellation
+        if (settleCoveredTransition(request.targetMessageId)) {
+            viewModel.completeSwitchingScroll(request.id)
+        } else {
+            viewModel.failSwitchingScroll(request.id, "layout failed to stabilize")
         }
-        viewModel.clearBranchSwitchTrigger()
-        viewModel.setSwitching(false)
     }
 
     LaunchedEffect(currentConversationId) {
@@ -362,38 +463,8 @@ fun ChatApp(
                     snapshotFlow { messages }.filter { it.isNotEmpty() }.first()
                 }
             }
-            val targetIndex = messages.indexOfLast { it.participant == Participant.USER }
-
-            if (targetIndex != -1) {
-                try {
-                    withTimeout(4000) {
-                        snapshotFlow {
-                            val sum = messageHeights.values.sum()
-                            Triple(messages, sum, viewportHeightPx)
-                        }.collectLatest { data ->
-                            val currentMsgs = data.component1()
-                            val vHeight = data.component3()
-
-                            val currentTargetIndex = currentMsgs.indexOfLast { it.participant == Participant.USER }
-
-                            if (currentTargetIndex != -1 && vHeight > 0) {
-                                with(density) {
-                                    var totalHeightBeforePx = 0
-                                    for (i in 0 until currentTargetIndex) {
-                                        totalHeightBeforePx += messageHeights[currentMsgs[i].id] ?: 0
-                                    }
-                                    listState.scrollToItem(currentTargetIndex, 0)
-                                }
-                            }
-
-                            delay(500)
-                            this@withTimeout.cancel()
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Timeout or intended cancellation
-                }
-            }
+            val settled = settleCoveredTransition(targetMessageId = null)
+            if (!settled) DebugLog.e("AgoraUI", "Conversation scroll failed to stabilize")
             viewModel.setSwitching(false)
         } else {
             viewModel.setSwitching(false)
@@ -447,20 +518,8 @@ fun ChatApp(
 
     LaunchedEffect(Unit) {
         viewModel.scrollToMessage.collect { messageId ->
-            if (messageId != null) {
-                try {
-                    withTimeout(2000) {
-                        snapshotFlow { messages.indexOfFirst { it.id == messageId } }
-                            .filter { it != -1 }
-                            .first()
-                    }
-                } catch (e: Exception) {
-                    // Timeout
-                }
-                delay(50)
-                scrollToLastUserMessage(animate = true, targetMessageId = messageId)
-            } else {
-                scrollToLastUserMessage(animate = true)
+            if (!animateAfterBubbleSettles(messageId)) {
+                DebugLog.e("AgoraUI", "Animated scroll target did not stabilize: $messageId")
             }
         }
     }
@@ -617,14 +676,7 @@ fun ChatApp(
                                     // Same feel as the composer's Send: an edit re-sends, so it
                                     // gets the identical single confirmation tap.
                                     haptics.action()
-                                    val isFirstMessage = messages.isEmpty()
                                     viewModel.editMessage(id, text)
-                                    scope.launch {
-                                        if (!isFirstMessage) {
-                                            delay(50)
-                                            scrollToLastUserMessage(animate = true)
-                                        }
-                                    }
                                 },
                                 onSwitchBranch = { parentId, currentMessageId, direction ->
                                     haptics.selection()
@@ -633,10 +685,6 @@ fun ChatApp(
                                 onRegenerate = { id ->
                                     haptics.action()
                                     viewModel.regenerate(id)
-                                    scope.launch {
-                                        delay(50)
-                                        scrollToLastUserMessage(animate = true)
-                                    }
                                 },
                                 onDelete = { id -> viewModel.deleteMessage(id) },
                                 onMediaClick = onMediaClick,
@@ -701,7 +749,7 @@ fun ChatApp(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarHeight + 8.dp)
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                            FloatingActionButton(onClick = { scope.launch { scrollToLastUserMessage(animate = true, easing = SCROLL_EASING) } }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
+                            FloatingActionButton(onClick = { scope.launch { animateToUserMessage(easing = SCROLL_EASING) } }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }
                         }
@@ -790,6 +838,7 @@ fun ChatApp(
                         onSendMessage = { text, attachments ->
                             viewModel.sendMessage(text, attachments = attachments)
                         },
+                        onDirectSendCommitted = viewModel::triggerScrollToMessage,
                         onStopGeneration = {
                             haptics.generationStopped()
                             viewModel.stopGeneration()

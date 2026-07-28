@@ -58,6 +58,9 @@ internal fun UserMessageBubble(
     isEditing: Boolean,
     isLoading: Boolean,
     isEditingAllowed: Boolean,
+    showActions: Boolean,
+    actionCopyText: String?,
+    showBranchSelector: Boolean,
     branchIndex: Int,
     totalBranches: Int,
     onEdit: (String, String) -> Unit,
@@ -224,7 +227,7 @@ internal fun UserMessageBubble(
             }
         }
 
-        if (totalBranches > 1 && !isEditing) {
+        if (showBranchSelector && totalBranches > 1 && !isEditing) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -244,13 +247,15 @@ internal fun UserMessageBubble(
             }
         }
 
-        if (!isEditing) {
+        if (!isEditing && showActions) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.then(contextAlpha)
             ) {
-                IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)); haptics.success() }, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                if (!actionCopyText.isNullOrBlank()) {
+                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.success() }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                    }
                 }
                 IconButton(onClick = { onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(16.dp), tint = LocalContentColor.current.copy(alpha = if (isEditingAllowed) 0.6f else 0.3f))

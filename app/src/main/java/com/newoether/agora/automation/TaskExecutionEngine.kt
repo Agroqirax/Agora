@@ -5,11 +5,13 @@ import android.content.Context
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunStatus
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ConversationUiState
@@ -162,38 +164,56 @@ class TaskExecutionEngine(
                 ChatMessage(
                     id = it.id, parentId = it.parentId, text = it.text,
                     participant = it.participant, timestamp = it.timestamp, status = it.status,
+                    runId = it.runId, runSequence = it.runSequence,
+                    consumedAtPass = it.consumedAtPass,
                 )
             },
             streamingMsg = null,
             selectedChildren = convRepo.restoreBranchSelections(conversationId),
         )
         val leafId = path.lastOrNull()?.id
+        val parentRunId = path.lastOrNull()?.runId
 
         val now = System.currentTimeMillis()
+        val runId = UUID.randomUUID().toString()
         val userMessageId = UUID.randomUUID().toString()
-        convRepo.upsertMessage(MessageEntity(
+        val userMessage = MessageEntity(
             id = userMessageId, conversationId = conversationId, parentId = leafId,
             text = userText, thoughts = null, status = MessageStatus.SUCCESS,
             participant = Participant.USER, timestamp = now,
-        ))
+            runId = runId, runSequence = 0, consumedAtPass = 0,
+        )
         val modelMessageId = UUID.randomUUID().toString()
         val startTime = now + 1
-        convRepo.upsertMessage(MessageEntity(
+        val modelMessage = MessageEntity(
             id = modelMessageId, conversationId = conversationId, parentId = userMessageId,
             text = "", thoughts = null, status = MessageStatus.SENDING,
             participant = Participant.MODEL, timestamp = startTime,
             modelName = effectiveModelId.takeIf { it.isNotBlank() },
-        ))
+            runId = runId, runSequence = 1,
+        )
+        convRepo.createRunWithMessages(
+            RunEntity(
+                id = runId,
+                conversationId = conversationId,
+                parentRunId = parentRunId,
+                status = RunStatus.ACTIVE,
+                activeSlot = 1,
+                startedAt = now,
+                lastCheckpointAt = startTime,
+            ),
+            listOf(userMessage, modelMessage),
+        )
+        convRepo.selectRunBranch(conversationId, parentRunId, runId)
         convRepo.getConversation(conversationId)?.let { conv ->
             convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
         }
 
         return try {
             suspend fun fail(reason: String): Result.Failure {
-                convRepo.upsertMessage(
-                    MessageEntity(
+                convRepo.updateStreamingMessageCheckpoint(
+                    ChatMessage(
                         id = modelMessageId,
-                        conversationId = conversationId,
                         parentId = userMessageId,
                         text = reason,
                         thoughts = null,
@@ -201,8 +221,11 @@ class TaskExecutionEngine(
                         participant = Participant.MODEL,
                         timestamp = startTime,
                         modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                        runId = runId,
+                        runSequence = 1,
                     )
                 )
+                convRepo.failRun(runId)
                 convRepo.getConversation(conversationId)?.let { conv ->
                     convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
                 }
@@ -267,6 +290,8 @@ class TaskExecutionEngine(
                 isRegenerate = false,
                 replaceMessageId = null,
                 modelName = effectiveModelId,
+                runId = runId,
+                pass = 0,
                 config = config,
                 ctx = genCtx,
                 generationJob = null,
@@ -287,10 +312,9 @@ class TaskExecutionEngine(
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 if (convRepo.getConversation(conversationId) != null) {
-                    convRepo.upsertMessage(
-                        MessageEntity(
+                    convRepo.updateStreamingMessageCheckpoint(
+                        ChatMessage(
                             id = modelMessageId,
-                            conversationId = conversationId,
                             parentId = userMessageId,
                             text = "Execution cancelled",
                             thoughts = null,
@@ -298,18 +322,20 @@ class TaskExecutionEngine(
                             participant = Participant.MODEL,
                             timestamp = startTime,
                             modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                            runId = runId,
+                            runSequence = 1,
                         )
                     )
+                    convRepo.finishRunStopped(runId)
                 }
             }
             throw e
         } catch (e: Exception) {
             DebugLog.e("TaskExecutionEngine", "runOnce failed for conversation=$conversationId", e)
             val reason = e.localizedMessage ?: "Unexpected error"
-            convRepo.upsertMessage(
-                MessageEntity(
+            convRepo.updateStreamingMessageCheckpoint(
+                ChatMessage(
                     id = modelMessageId,
-                    conversationId = conversationId,
                     parentId = userMessageId,
                     text = reason,
                     thoughts = null,
@@ -317,8 +343,11 @@ class TaskExecutionEngine(
                     participant = Participant.MODEL,
                     timestamp = startTime,
                     modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                    runId = runId,
+                    runSequence = 1,
                 )
             )
+            convRepo.failRun(runId)
             Result.Failure(reason)
         }
     }

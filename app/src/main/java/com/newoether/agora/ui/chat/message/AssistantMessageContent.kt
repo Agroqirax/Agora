@@ -79,6 +79,9 @@ internal fun AssistantMessageContent(
     isStreaming: Boolean,
     isLoading: Boolean,
     isEditingAllowed: Boolean,
+    showActions: Boolean,
+    actionCopyText: String?,
+    showBranchSelector: Boolean,
     toolCallDisplayMode: String,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
     isThoughtExpanded: Boolean,
@@ -131,6 +134,8 @@ internal fun AssistantMessageContent(
                 val thinkingNow = message.status == MessageStatus.THINKING
                 val isToolCalling = message.status == MessageStatus.TOOL_CALLING
                 val isTranscribing = message.status == MessageStatus.TRANSCRIBING
+                val hasInFlightStatus = message.status == MessageStatus.SENDING ||
+                    thinkingNow || isToolCalling || isTranscribing
                 val hasActiveAnswer = message.hasActiveAnswerSegment()
                 LaunchedEffect(thinkingNow, hasActiveAnswer, message.status) {
                     heldLabel = when {
@@ -180,7 +185,7 @@ internal fun AssistantMessageContent(
                     val text = displayText ?: return@AnimatedVisibility
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                         Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
-                            if (isStreaming) {
+                            if (isStreaming || hasInFlightStatus) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(14.dp),
                                     color = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
@@ -616,7 +621,7 @@ internal fun AssistantMessageContent(
 
                 if (message.participant == Participant.MODEL) {
                     AnimatedVisibility(
-                        visible = !isStreaming,
+                        visible = !isStreaming && showActions,
                         enter = fadeIn(tween(400)) + expandVertically(tween(400)),
                         exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
                     ) {
@@ -625,8 +630,10 @@ internal fun AssistantMessageContent(
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            IconButton(onClick = { clipboardManager.setText(AnnotatedString(message.text)); haptics.success() }, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                            if (!actionCopyText.isNullOrBlank()) {
+                                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.success() }, modifier = Modifier.size(32.dp)) {
+                                    Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                                }
                             }
                             IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(19.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
@@ -656,7 +663,7 @@ internal fun AssistantMessageContent(
                                 }
                             }
 
-                            if (totalBranches > 1) {
+                            if (showBranchSelector && totalBranches > 1) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier

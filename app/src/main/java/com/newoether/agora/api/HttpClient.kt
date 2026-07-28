@@ -171,7 +171,7 @@ object HttpClient {
         private val call: okhttp3.Call,
         private val response: okhttp3.Response,
         private val scope: com.newoether.agora.viewmodel.StreamScope?,
-    ) {
+    ) : com.newoether.agora.viewmodel.GenerationCancelHandle {
         val code: Int get() = response.code
         val source: BufferedSource? get() = response.body?.source()
         val errorBody: String? by lazy {
@@ -188,7 +188,7 @@ object HttpClient {
         }
         fun readLine(): String? = source?.readUtf8Line()
         /** Cancel the underlying HTTP call immediately — unblocks [readLine]. */
-        fun cancel() = call.cancel()
+        override fun cancel() = call.cancel()
     }
 
     fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle =

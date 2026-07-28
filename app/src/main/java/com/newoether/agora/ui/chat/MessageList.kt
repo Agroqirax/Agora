@@ -23,11 +23,11 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunUiProjection
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.chat.message.MessageItem
-import com.newoether.agora.util.Constants
 
 @Composable
 fun MessageList(
@@ -65,14 +65,8 @@ fun MessageList(
 
     val lastUserMessageIndex = messages.list.indexOfLast { it.participant == Participant.USER }
 
-    // Precompute branch siblings grouped by parent once per allMessages change.
-    // Previously this filter+sort ran per visible item (O(n²) and re-run on every
-    // streaming-token recomposition of the active message).
-    val siblingsByParent = remember(allMessages) {
-        allMessages.list
-            .filter { !it.id.startsWith(Constants.TOOL_MSG_PREFIX) && !it.id.startsWith(Constants.RESULT_MSG_PREFIX) }
-            .groupBy { it.parentId }
-            .mapValues { (_, v) -> v.sortedBy { it.timestamp } }
+    val runPresentation = remember(messages, allMessages) {
+        RunUiProjection.project(messages.list, allMessages.list)
     }
 
     val extraPadding = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
@@ -102,9 +96,7 @@ fun MessageList(
             items(messages.list, key = { it.id }) { message ->
                 val isLastMessage = messages.list.lastOrNull()?.id == message.id
                 val isInContext = inContextIds.contains(message.id)
-                val siblings = siblingsByParent[message.parentId].orEmpty()
-                val branchIndex = siblings.indexOfFirst { it.id == message.id }
-                val totalBranches = siblings.size
+                val presentation = runPresentation[message.id]
 
                 // Fade newly-appended messages in. Placement/fade-out left off so this
                 // doesn't fight the manual height/scroll padding management below.
@@ -128,9 +120,21 @@ fun MessageList(
                     toolCallDisplayMode = toolCallDisplayMode,
                     onStartEdit = { editingMessageId = message.id },
                     onCancelEdit = { editingMessageId = null },
-                    branchIndex = branchIndex,
-                    totalBranches = totalBranches,
-                    onSwitchBranch = { direction -> onSwitchBranch(message.parentId, message.id, direction) },
+                    showActions = presentation?.showActions == true,
+                    actionCopyText = presentation?.copyText,
+                    showBranchSelector = presentation?.showBranchSelector == true,
+                    branchIndex = presentation?.branchIndex ?: 0,
+                    totalBranches = presentation?.totalBranches ?: 1,
+                    onSwitchBranch = { direction ->
+                        val anchorId = presentation?.branchAnchorMessageId
+                        if (anchorId != null) {
+                            onSwitchBranch(
+                                presentation.branchAnchorParentId,
+                                anchorId,
+                                direction,
+                            )
+                        }
+                    },
                     onRegenerate = onRegenerate,
                     onDelete = onDelete,
                     onMediaClick = onMediaClick,

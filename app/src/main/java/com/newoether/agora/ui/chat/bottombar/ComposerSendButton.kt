@@ -19,12 +19,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.viewmodel.SendAcceptance
+import kotlinx.coroutines.launch
 
 /**
  * The composer's send / stop / pending-send FAB. Owns the "wait for attachment
@@ -41,36 +48,53 @@ internal fun ComposerSendButton(
      *  the send form returning is the contract that the next message launches immediately. */
     isStopping: Boolean = false,
     isModelValid: Boolean,
-    onSendMessage: (String, List<SelectedAttachment>) -> Boolean,
+    onSendMessage: suspend (String, List<SelectedAttachment>) -> SendAcceptance?,
+    onDirectSendCommitted: (String) -> Unit,
     onStopGeneration: () -> Unit,
     onCollapse: () -> Unit,
 ) {
     val haptics = LocalAgoraHaptics.current
+    val submitScope = rememberCoroutineScope()
+    var isSubmitting by remember { mutableStateOf(false) }
     // Pending send: wait for processing to finish, then auto-send
     val anyProcessing = composer.processingStates.isNotEmpty()
     LaunchedEffect(composer.pendingSend, anyProcessing) {
         if (composer.pendingSend && !anyProcessing) {
-            if (onSendMessage(textFieldState.text.toString(), composer.selectedAttachments)) {
-                composer.clearAttachments()
-                textFieldState.edit { replace(0, length, "") }
-                onCollapse()
+            val submittedText = textFieldState.text.toString()
+            val submittedAttachmentIds = composer.selectedAttachments.map { it.localId }
+            isSubmitting = true
+            try {
+                val acceptance = onSendMessage(submittedText, composer.selectedAttachments)
+                if (acceptance != null) {
+                    if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
+                        composer.clearAttachments()
+                    }
+                    if (textFieldState.text.toString() == submittedText) {
+                        textFieldState.edit { replace(0, length, "") }
+                    }
+                    onCollapse()
+                    if (acceptance is SendAcceptance.Direct) {
+                        onDirectSendCommitted(acceptance.messageId)
+                    }
+                }
+            } finally {
+                isSubmitting = false
             }
             composer.pendingSend = false
         }
     }
     val textIsEmpty = textFieldState.text.isBlank()
     val attachmentsIsEmpty = composer.selectedAttachments.isEmpty()
-    // While stopping, Stop is already spent — the FAB reports "winding down" instead of offering
-    // a second Stop. Sends stay allowed: they enqueue and show up in the queue banner, so a
-    // message is never accepted invisibly.
+    // While stopping, Stop is already spent and the terminal Run cannot accept more input.
+    // Keep the draft untouched until the slot has fully released and the send form returns.
     val showStop = isLoading && !isStopping && textIsEmpty && attachmentsIsEmpty
 
-    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching
+    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching && !isStopping && !isSubmitting
             && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
     val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching && !isStopping
     FloatingActionButton(
         onClick = {
-            if (isSwitching) return@FloatingActionButton
+            if (isSwitching || isStopping) return@FloatingActionButton
             if (showStop) onStopGeneration()
             else if (composer.pendingSend) {
                 haptics.selection()
@@ -83,10 +107,28 @@ internal fun ComposerSendButton(
                 if (anyProcessing) {
                     composer.pendingSend = true
                 } else {
-                    if (onSendMessage(textFieldState.text.toString(), composer.selectedAttachments)) {
-                        composer.clearAttachments()
-                        textFieldState.edit { replace(0, length, "") }
-                        onCollapse()
+                    val submittedText = textFieldState.text.toString()
+                    val submittedAttachments = composer.selectedAttachments
+                    val submittedAttachmentIds = submittedAttachments.map { it.localId }
+                    isSubmitting = true
+                    submitScope.launch {
+                        try {
+                            val acceptance = onSendMessage(submittedText, submittedAttachments)
+                            if (acceptance != null) {
+                                if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
+                                    composer.clearAttachments()
+                                }
+                                if (textFieldState.text.toString() == submittedText) {
+                                    textFieldState.edit { replace(0, length, "") }
+                                }
+                                onCollapse()
+                                if (acceptance is SendAcceptance.Direct) {
+                                    onDirectSendCommitted(acceptance.messageId)
+                                }
+                            }
+                        } finally {
+                            isSubmitting = false
+                        }
                     }
                 }
             }
@@ -98,7 +140,7 @@ internal fun ComposerSendButton(
         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
     ) {
         val fabIcon = when {
-            isStopping -> "stopping"
+            isStopping || isSubmitting -> "stopping"
             composer.pendingSend -> "pending"
             showStop -> "stop"
             else -> "send"

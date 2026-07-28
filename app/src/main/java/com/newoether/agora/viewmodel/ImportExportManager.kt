@@ -14,6 +14,9 @@ import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.local.RunEntity
+import com.newoether.agora.data.local.migration.LegacyMessageRecord
+import com.newoether.agora.data.local.migration.LegacyRunBackfillPlanner
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -25,6 +28,71 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+private data class PlannedImportGraph(
+    val runs: List<RunEntity>,
+    val messages: List<MessageEntity>,
+)
+
+private fun planImportedLegacyMessages(
+    messages: List<ClaudeChatImporter.ImportMessageEntity>,
+): PlannedImportGraph {
+    val runs = mutableListOf<RunEntity>()
+    val assignedMessages = mutableListOf<MessageEntity>()
+    for ((conversationId, conversationMessages) in messages.groupBy { it.conversationId }) {
+        val plan = LegacyRunBackfillPlanner.plan(
+            conversationId,
+            conversationMessages.map {
+                LegacyMessageRecord(
+                    id = it.id,
+                    parentId = it.parentId,
+                    participant = safeValueOf<Participant>(it.participant) ?: Participant.MODEL,
+                    status = safeValueOf<MessageStatus>(it.status) ?: MessageStatus.SUCCESS,
+                    timestamp = it.timestamp,
+                )
+            },
+        )
+        runs += plan.runs.map {
+            RunEntity(
+                id = it.id,
+                conversationId = it.conversationId,
+                parentRunId = it.parentRunId,
+                status = it.status,
+                activeSlot = null,
+                startedAt = it.startedAt,
+                lastCheckpointAt = it.endedAt,
+                endedAt = it.endedAt,
+                endReason = it.endReason,
+                legacyAmbiguous = it.legacyAmbiguous,
+            )
+        }
+        val assignments = plan.assignments.associateBy { it.messageId }
+        assignedMessages += conversationMessages.map { message ->
+            val assignment = assignments.getValue(message.id)
+            MessageEntity(
+                id = message.id,
+                conversationId = message.conversationId,
+                parentId = message.parentId,
+                text = message.text,
+                images = message.images,
+                thoughts = message.thoughts,
+                thoughtTitle = message.thoughtTitle,
+                tokenCount = message.tokenCount,
+                status = safeValueOf<MessageStatus>(message.status) ?: MessageStatus.SUCCESS,
+                participant = safeValueOf<Participant>(message.participant) ?: Participant.MODEL,
+                timestamp = message.timestamp,
+                thoughtTimeMs = message.thoughtTimeMs,
+                modelName = message.modelName,
+                toolCallJson = message.toolCallJson,
+                attachmentMeta = message.attachmentMeta,
+                runId = assignment.runId,
+                runSequence = assignment.runSequence,
+                consumedAtPass = assignment.consumedAtPass,
+            )
+        }
+    }
+    return PlannedImportGraph(runs, assignedMessages)
+}
 
 private inline fun <reified T : Enum<T>> safeValueOf(name: String): T? =
     try { enumValueOf<T>(name) } catch (_: Exception) { null }
@@ -227,34 +295,23 @@ class ImportExportManager(
                 val chatEntities = importData.conversations.map { ce ->
                     ChatEntity(ce.id, ce.title, ce.lastUpdated, ce.selectedBranchesJson, ce.systemPromptId, ce.modelId)
                 }
-                val messageEntities = importData.messages.map { me ->
-                    MessageEntity(
-                        id = me.id, conversationId = me.conversationId, parentId = me.parentId,
-                        text = me.text, images = me.images, thoughts = me.thoughts,
-                        thoughtTitle = me.thoughtTitle, tokenCount = me.tokenCount,
-                        status = safeValueOf<MessageStatus>(me.status) ?: MessageStatus.SUCCESS,
-                        participant = safeValueOf<Participant>(me.participant) ?: Participant.MODEL,
-                        timestamp = me.timestamp, thoughtTimeMs = me.thoughtTimeMs,
-                        modelName = me.modelName, toolCallJson = me.toolCallJson,
-                        attachmentMeta = me.attachmentMeta
-                    )
-                }
-
                 if (strategy == ImportStrategy.REPLACE) {
                     conversations.deleteAllConversations()
                     chatEntities.forEach { conversations.upsertConversation(it) }
-                    messageEntities.forEach { conversations.upsertMessage(it) }
+                    val graph = planImportedLegacyMessages(importData.messages)
+                    conversations.importRunGraph(graph.runs, graph.messages)
                     _claudeImportProgress.value = 0.8f
-                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(chatEntities.size, messageEntities.size)
+                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(chatEntities.size, graph.messages.size)
                 } else {
                     val existingConvIds = conversations.getAllConversationsList().map { it.id }.toSet()
-                    val existingMsgIds = conversations.findExistingMessageIds(messageEntities.map { it.id }).toSet()
+                    val existingMsgIds = conversations.findExistingMessageIds(importData.messages.map { it.id }).toSet()
                     val newCh = chatEntities.filterNot { it.id in existingConvIds }
-                    val newMsgs = messageEntities.filterNot { it.id in existingMsgIds }
+                    val newMessageDrafts = importData.messages.filterNot { it.id in existingMsgIds }
                     newCh.forEach { conversations.upsertConversation(it) }
-                    newMsgs.forEach { conversations.upsertMessage(it) }
+                    val graph = planImportedLegacyMessages(newMessageDrafts)
+                    conversations.importRunGraph(graph.runs, graph.messages)
                     _claudeImportProgress.value = 0.8f
-                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(newCh.size, newMsgs.size)
+                    _claudeImportResult.value = ClaudeChatImporter.ImportResult(newCh.size, graph.messages.size)
                 }
                 _claudeImportProgress.value = null
                 onDataChanged()
@@ -334,36 +391,25 @@ class ImportExportManager(
                 val chatEntities = importData.conversations.map { ce ->
                     ChatEntity(ce.id, ce.title, ce.lastUpdated, ce.selectedBranchesJson, ce.systemPromptId, ce.modelId)
                 }
-                val messageEntities = importData.messages.map { me ->
-                    MessageEntity(
-                        id = me.id, conversationId = me.conversationId, parentId = me.parentId,
-                        text = me.text, images = me.images, thoughts = me.thoughts,
-                        thoughtTitle = me.thoughtTitle, tokenCount = me.tokenCount,
-                        status = safeValueOf<MessageStatus>(me.status) ?: MessageStatus.SUCCESS,
-                        participant = safeValueOf<Participant>(me.participant) ?: Participant.MODEL,
-                        timestamp = me.timestamp, thoughtTimeMs = me.thoughtTimeMs,
-                        modelName = me.modelName, toolCallJson = me.toolCallJson,
-                        attachmentMeta = me.attachmentMeta
-                    )
-                }
-
                 val thoughtsCount = importData.messages.count { it.thoughts != null && it.thoughts.isNotBlank() }
                 if (strategy == ImportStrategy.REPLACE) {
                     conversations.deleteAllConversations()
                     chatEntities.forEach { conversations.upsertConversation(it) }
-                    messageEntities.forEach { conversations.upsertMessage(it) }
+                    val graph = planImportedLegacyMessages(importData.messages)
+                    conversations.importRunGraph(graph.runs, graph.messages)
                     _gptImportProgress.value = 0.8f
-                    _gptImportResult.value = GptChatImporter.ImportResult(chatEntities.size, messageEntities.size, thoughtsCount)
+                    _gptImportResult.value = GptChatImporter.ImportResult(chatEntities.size, graph.messages.size, thoughtsCount)
                 } else {
                     val existingConvIds = conversations.getAllConversationsList().map { it.id }.toSet()
-                    val existingMsgIds = conversations.findExistingMessageIds(messageEntities.map { it.id }).toSet()
+                    val existingMsgIds = conversations.findExistingMessageIds(importData.messages.map { it.id }).toSet()
                     val newCh = chatEntities.filterNot { it.id in existingConvIds }
-                    val newMsgs = messageEntities.filterNot { it.id in existingMsgIds }
-                    val newThoughtsCount = newMsgs.count { it.thoughts != null && it.thoughts.isNotBlank() }
+                    val newMessageDrafts = importData.messages.filterNot { it.id in existingMsgIds }
+                    val newThoughtsCount = newMessageDrafts.count { it.thoughts != null && it.thoughts.isNotBlank() }
                     newCh.forEach { conversations.upsertConversation(it) }
-                    newMsgs.forEach { conversations.upsertMessage(it) }
+                    val graph = planImportedLegacyMessages(newMessageDrafts)
+                    conversations.importRunGraph(graph.runs, graph.messages)
                     _gptImportProgress.value = 0.8f
-                    _gptImportResult.value = GptChatImporter.ImportResult(newCh.size, newMsgs.size, newThoughtsCount)
+                    _gptImportResult.value = GptChatImporter.ImportResult(newCh.size, graph.messages.size, newThoughtsCount)
                 }
                 _gptImportProgress.value = null
                 onDataChanged()

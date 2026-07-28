@@ -106,4 +106,55 @@ class ConversationUiStateTest {
         assertEquals(2, path.size)
         assertEquals("m1", path[1].id)
     }
+
+    @Test
+    fun durableQueuedInput_staysOutOfPathUntilCurrentPassReleases() {
+        val initial = ChatMessage(
+            id = "u1",
+            text = "initial",
+            participant = Participant.USER,
+            runId = "run",
+            runSequence = 0,
+            consumedAtPass = 0,
+        )
+        val persistedModel = ChatMessage(
+            id = "m1",
+            parentId = "u1",
+            text = "partial",
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+            runId = "run",
+            runSequence = 1,
+        )
+        val queued = ChatMessage(
+            id = "u2",
+            parentId = "m1",
+            text = "steer",
+            participant = Participant.USER,
+            runId = "run",
+            runSequence = 2,
+            consumedAtPass = null,
+        )
+        val streaming = persistedModel.copy(text = "latest partial")
+        val selected = mapOf<String?, String>(
+            null to "u1",
+            "u1" to "m1",
+            "m1" to "u2",
+        )
+
+        val whileQueued = ConversationUiState.resolvePath(
+            listOf(initial, persistedModel, queued),
+            streaming,
+            selected,
+        )
+        val afterRelease = ConversationUiState.resolvePath(
+            listOf(initial, persistedModel.copy(status = MessageStatus.SUCCESS), queued),
+            null,
+            selected,
+        )
+
+        assertEquals(listOf("u1", "m1"), whileQueued.map { it.id })
+        assertEquals("latest partial", whileQueued.last().text)
+        assertEquals(listOf("u1", "m1", "u2"), afterRelease.map { it.id })
+    }
 }

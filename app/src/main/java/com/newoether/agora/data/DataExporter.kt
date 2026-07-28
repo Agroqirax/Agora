@@ -63,7 +63,23 @@ class DataExporter(
         val modelId: String? = null,
         val taskId: String? = null,
         val origin: String = "user",
-        val graduated: Boolean = false
+        val graduated: Boolean = false,
+        val selectedRunBranchesJson: String? = null,
+    )
+
+    @Serializable
+    private data class ExportRunEntity(
+        val id: String,
+        val conversationId: String,
+        val parentRunId: String? = null,
+        val status: String,
+        val startedAt: Long,
+        val lastCheckpointAt: Long,
+        val stopRequestedAt: Long? = null,
+        val endedAt: Long? = null,
+        val endReason: String? = null,
+        val currentPass: Int = 0,
+        val legacyAmbiguous: Boolean = false,
     )
 
     @Serializable
@@ -112,7 +128,10 @@ class DataExporter(
         val thoughtTimeMs: Long? = null,
         val modelName: String? = null,
         val toolCallJson: String? = null,
-        val attachmentMeta: String? = null
+        val attachmentMeta: String? = null,
+        val runId: String,
+        val runSequence: Long,
+        val consumedAtPass: Int? = null,
     )
 
     @Serializable
@@ -252,9 +271,35 @@ class DataExporter(
                         taskId = conversation.taskId,
                         origin = conversation.origin,
                         graduated = conversation.graduated,
+                        selectedRunBranchesJson = conversation.selectedRunBranchesJson,
                     ),
                     zip,
                 )
+            }
+
+            zip.writeJsonToken("],\"runs\":[")
+            first = true
+            for (conversation in chatDao.getAllConversationsList()) {
+                for (run in chatDao.getRunsForConversation(conversation.id).first()) {
+                    if (!first) zip.write(','.code)
+                    first = false
+                    Json.encodeToStream(
+                        ExportRunEntity(
+                            id = run.id,
+                            conversationId = run.conversationId,
+                            parentRunId = run.parentRunId,
+                            status = run.status.name,
+                            startedAt = run.startedAt,
+                            lastCheckpointAt = run.lastCheckpointAt,
+                            stopRequestedAt = run.stopRequestedAt,
+                            endedAt = run.endedAt,
+                            endReason = run.endReason?.name,
+                            currentPass = run.currentPass,
+                            legacyAmbiguous = run.legacyAmbiguous,
+                        ),
+                        zip,
+                    )
+                }
             }
 
             zip.writeJsonToken("],\"messages\":[")
@@ -280,6 +325,9 @@ class DataExporter(
                             modelName = message.modelName,
                             toolCallJson = message.toolCallJson,
                             attachmentMeta = message.attachmentMeta,
+                            runId = message.runId,
+                            runSequence = message.runSequence,
+                            consumedAtPass = message.consumedAtPass,
                         ),
                         zip,
                     )
@@ -348,7 +396,7 @@ class DataExporter(
             .format(java.util.Date())
 
         val manifest = ExportManifest(
-            version = 2,
+            version = 3,
             appVersion = appVersion,
             exportedAt = exportedAt,
             categories = categories.map { it.manifestKey },

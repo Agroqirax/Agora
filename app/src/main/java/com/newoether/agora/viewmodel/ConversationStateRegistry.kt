@@ -61,11 +61,10 @@ class ConversationStateRegistry {
             // severs this conversation's in-flight streams immediately.
             it.stop()
             it.cancelScope()
-            // Queued sends die with the conversation; they hold the only reference to their
-            // copied attachment files, which would otherwise orphan.
-            it.takeQueuedSends().forEach { queued ->
-                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
-            }
+            // Queue entries mirror already-persisted intervention rows. Conversation deletion
+            // owns their attachment cleanup; dropping the in-memory mirror must not delete files
+            // independently of Room.
+            it.takeQueuedSends()
         }
         markIdle(conversationId)
     }

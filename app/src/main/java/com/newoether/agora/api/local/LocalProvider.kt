@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.newoether.agora.viewmodel.GenerationCancelHandle
 import kotlin.coroutines.coroutineContext
 
 class LocalProvider(
@@ -102,45 +103,55 @@ class LocalProvider(
             // let another conversation's model load interleave — revisit the locking scope
             // (see the matching note on LocalModelSerializer).
             com.newoether.agora.api.LocalModelSerializer.mutex.withLock {
-                tokenFlow.collect { token ->
-                    if (!coroutineContext.isActive) {
-                        engine.cancel()
-                        return@collect
-                    }
-                    if (stopped) return@collect
-                    totalTokens++
+                // Register while still holding the process-wide local-model mutex. This makes the
+                // handle generation-specific: it is removed before another conversation can begin
+                // native sampling on the shared engine.
+                val streamScope = HttpClient.boundStreamScope()
+                val nativeCancel = GenerationCancelHandle { engine.cancel() }
+                streamScope?.register(nativeCancel)
+                try {
+                    tokenFlow.collect { token ->
+                        if (!coroutineContext.isActive) {
+                            engine.cancel()
+                            return@collect
+                        }
+                        if (stopped) return@collect
+                        totalTokens++
 
-                    // Check for stop patterns in the rolling buffer
-                    rawBuf += token
-                    val hit = STOP_PATTERNS.firstOrNull { p -> rawBuf.contains(p) }
-                    if (hit != null) {
-                        // Strip the stop pattern and anything after it, then stop
-                        val cleanEnd = rawBuf.substringBefore(hit)
-                        if (cleanEnd.isNotEmpty()) {
+                        // Check for stop patterns in the rolling buffer
+                        rawBuf += token
+                        val hit = STOP_PATTERNS.firstOrNull { p -> rawBuf.contains(p) }
+                        if (hit != null) {
+                            // Strip the stop pattern and anything after it, then stop
+                            val cleanEnd = rawBuf.substringBefore(hit)
+                            if (cleanEnd.isNotEmpty()) {
+                                thinkParser.feed(
+                                    content = cleanEnd,
+                                    thinkingEnabled = config.thinkingEnabled,
+                                    onText = { emit(StreamEvent.TextChunk(it)) },
+                                    onThought = { emit(StreamEvent.ThoughtChunk(it)) }
+                                )
+                            }
+                            engine.cancel()
+                            stopped = true
+                            return@collect
+                        }
+
+                        // Keep buffer bounded — only as much as longest stop pattern
+                        val maxPatLen = STOP_PATTERNS.maxOf { it.length }
+                        if (rawBuf.length > maxPatLen * 2) {
+                            val emitPart = rawBuf.substring(0, rawBuf.length - maxPatLen)
                             thinkParser.feed(
-                                content = cleanEnd,
+                                content = emitPart,
                                 thinkingEnabled = config.thinkingEnabled,
                                 onText = { emit(StreamEvent.TextChunk(it)) },
                                 onThought = { emit(StreamEvent.ThoughtChunk(it)) }
                             )
+                            rawBuf = rawBuf.substring(rawBuf.length - maxPatLen)
                         }
-                        engine.cancel()
-                        stopped = true
-                        return@collect
                     }
-
-                    // Keep buffer bounded — only as much as longest stop pattern
-                    val maxPatLen = STOP_PATTERNS.maxOf { it.length }
-                    if (rawBuf.length > maxPatLen * 2) {
-                        val emitPart = rawBuf.substring(0, rawBuf.length - maxPatLen)
-                        thinkParser.feed(
-                            content = emitPart,
-                            thinkingEnabled = config.thinkingEnabled,
-                            onText = { emit(StreamEvent.TextChunk(it)) },
-                            onThought = { emit(StreamEvent.ThoughtChunk(it)) }
-                        )
-                        rawBuf = rawBuf.substring(rawBuf.length - maxPatLen)
-                    }
+                } finally {
+                    streamScope?.unregister(nativeCancel)
                 }
             }
             // Flush remaining buffer (no stop pattern found)

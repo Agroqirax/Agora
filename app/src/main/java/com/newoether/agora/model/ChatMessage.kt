@@ -64,7 +64,10 @@ data class ChatMessage(
     val toolCall: ToolCallData? = null,
     val segments: List<MessageSegment>? = null,
     val attachmentMeta: AttachmentMeta? = null,
-    val retryText: String? = null
+    val retryText: String? = null,
+    val runId: String? = null,
+    val runSequence: Long? = null,
+    val consumedAtPass: Int? = null,
 )
 
 @Immutable

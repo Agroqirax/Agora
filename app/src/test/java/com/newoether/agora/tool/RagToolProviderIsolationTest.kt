@@ -69,6 +69,8 @@ class RagToolProviderIsolationTest {
             status = MessageStatus.SUCCESS,
             participant = Participant.MODEL,
             timestamp = 123L,
+            runId = "run-hidden",
+            runSequence = 0,
         )
         coEvery { conversations.searchMessages("private", any()) } returns listOf(hiddenMatch)
         coEvery { conversations.getSearchableConversation("hidden") } returns null

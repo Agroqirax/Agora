@@ -152,12 +152,13 @@ fun mergeConsecutiveSameRole(messages: List<ChatMessage>): List<ChatMessage> {
  * Validates tool_ / result_ message pairing and fixes ID mismatches.
  *
  * Rules enforced:
- *  - Every tool_ message must be immediately followed by >= 1 result_ message
+ *  - Every tool_ message must be immediately followed by one result per emitted tool call
  *  - Every result_ message must be immediately preceded by a tool_ message
  *  - Each result_ segment's toolCallId matches the corresponding tool_use segment
  *
- * Orphaned tool_ and result_ messages are dropped. All non-tool messages
- * pass through unchanged.
+ * An incomplete parallel tool round is dropped as a whole from the API-only path. Keeping a
+ * partially answered assistant tool_calls turn is protocol-invalid on OpenAI-compatible APIs and
+ * changes its semantics if the call list is silently truncated.
  */
 fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
     val result = mutableListOf<ChatMessage>()
@@ -172,12 +173,16 @@ fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
                     resultMessages.add(messages[j])
                     j++
                 }
-                if (resultMessages.isNotEmpty()) {
+                val toolUseIds = extractToolUseIds(msg)
+                val normalizedResults = toolUseIds?.let { normalizeToolResults(it, resultMessages) }
+                if (normalizedResults != null) {
                     result.add(msg)
-                    result.addAll(fixToolIds(msg, resultMessages))
+                    result.addAll(normalizedResults)
                     i = j
                 } else {
-                    i++ // orphan tool_ — drop
+                    // Drop the assistant tool call plus every immediately-following partial/extra
+                    // result. Otherwise the next loop would reinterpret those rows as orphans.
+                    i = j
                 }
             }
             msg.id.startsWith(Constants.RESULT_MSG_PREFIX) -> {
@@ -192,32 +197,47 @@ fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
     return result
 }
 
-/**
- * Fixes toolCallId mismatches between a tool_ message's tool-use segments and
- * the following result_ messages. Match is by position: Nth result_ → Nth tool-use.
- * Result rows beyond the tool-use count are dropped — a tool_result pointing at a
- * nonexistent tool_use fails the whole request (Anthropic/OpenAI reject it with 400).
- */
-private fun fixToolIds(
-    toolMsg: ChatMessage,
-    resultMessages: List<ChatMessage>
-): List<ChatMessage> {
-    val toolSegments = toolMsg.segments?.filter { it.type == "tool" } ?: return resultMessages
-    if (toolSegments.isEmpty()) return resultMessages
-    val useIds = toolSegments.mapNotNull { it.toolCallId }
-    if (useIds.size != toolSegments.size) return resultMessages
-
-    return resultMessages.take(useIds.size).mapIndexed { idx, resultMsg ->
-        val correctId = useIds[idx]
-
-        val fixedSegments = resultMsg.segments?.map { seg ->
-            if (seg.type == "tool" && seg.toolCallId != correctId) seg.copy(toolCallId = correctId) else seg
-        }
-        val fixedToolCall = resultMsg.toolCall?.let { tc ->
-            if (tc.toolCallId != correctId) tc.copy(toolCallId = correctId) else tc
-        }
-        if (fixedSegments != resultMsg.segments || fixedToolCall != resultMsg.toolCall) {
-            resultMsg.copy(segments = fixedSegments, toolCall = fixedToolCall)
-        } else resultMsg
+private fun extractToolUseIds(toolMsg: ChatMessage): List<String>? {
+    val toolSegments = toolMsg.segments?.filter { it.type == "tool" }.orEmpty()
+    val ids = if (toolSegments.isNotEmpty()) {
+        toolSegments.map { it.toolCallId?.takeIf(String::isNotBlank) ?: return null }
+    } else {
+        listOf(toolMsg.toolCall?.toolCallId?.takeIf(String::isNotBlank) ?: return null)
     }
+    return ids.takeIf { it.isNotEmpty() && it.distinct().size == it.size }
+}
+
+/**
+ * Normalizes every result payload against the assistant's call IDs by position. A synthetic result
+ * row normally carries one payload, but legacy imports can carry several segments in one row; both
+ * forms are counted correctly. Returns null unless every tool call has exactly one usable result.
+ * Extra result rows/segments are dropped.
+ */
+private fun normalizeToolResults(
+    useIds: List<String>,
+    resultMessages: List<ChatMessage>
+): List<ChatMessage>? {
+    val normalized = mutableListOf<ChatMessage>()
+    var useIndex = 0
+    for (resultMsg in resultMessages) {
+        if (useIndex >= useIds.size) break
+        val toolSegments = resultMsg.segments?.filter { it.type == "tool" }.orEmpty()
+        if (toolSegments.isNotEmpty()) {
+            val kept = toolSegments.take(useIds.size - useIndex).map { segment ->
+                segment.copy(toolCallId = useIds[useIndex++])
+            }
+            normalized += resultMsg.copy(
+                segments = kept,
+                toolCall = resultMsg.toolCall?.takeIf { kept.size == 1 }?.copy(
+                    toolCallId = kept.single().toolCallId
+                ),
+            )
+        } else {
+            val toolCall = resultMsg.toolCall ?: continue
+            normalized += resultMsg.copy(
+                toolCall = toolCall.copy(toolCallId = useIds[useIndex++])
+            )
+        }
+    }
+    return normalized.takeIf { useIndex == useIds.size }
 }

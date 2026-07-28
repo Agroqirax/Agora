@@ -10,6 +10,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Mutex
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -30,9 +31,9 @@ import java.util.concurrent.atomic.AtomicLong
  *    as seen through the registry). Advanced on EVERY stop and captured by each new generation.
  *    Token-gated mutators below only touch state while their captured token is current.
  *
- *  • [persistId] owns the model message's DB row. Advanced ONLY when a new generation starts
- *    (never on stop), so a stopped generation still persists its own text while a superseded
- *    one is blocked from clobbering the newer message.
+ *  • [persistId] owns the model message's DB row. Advanced when a new generation starts and when
+ *    Stop transfers terminal-write ownership to [GenerationFinalizer], so the cancelled provider
+ *    coroutine cannot race the dedicated STOPPED transaction.
  *
  * ## Slot lifecycle (acquireForSend / tryAcquireForReplacement / endGeneration / stop)
  *
@@ -57,13 +58,13 @@ class ConversationGenerationState(val conversationId: String) {
     /** True while this conversation has an active generation. Drives the Stop-button visibility. */
     val generating = MutableStateFlow(false)
     /** True from a user Stop until the stopped generation coroutine has fully unwound (its
-     *  finally released the slot). Drives the composer's gray "stopping…" spinner: while set,
-     *  new sends enqueue (visible in the queue banner) instead of claiming the slot — and the
-     *  moment it clears, the send form is back and a send launches immediately. */
+     *  finally released the slot). Drives the composer's gray "stopping…" spinner. */
     val stopping = MutableStateFlow(false)
 
     /** Queued sends waiting for the current generation to finish. Per-conversation. */
     val queuedSends = MutableStateFlow<List<QueuedSend>>(emptyList())
+    /** Serializes durable intervention acceptance against slot release/queue drain. */
+    val queueMutationMutex = Mutex()
 
     // ── Ownership tokens ──
     private val genLock = Any()
@@ -72,6 +73,13 @@ class ConversationGenerationState(val conversationId: String) {
      *  (advanced on every stop to gate late UI writes), this only changes on acquire/release,
      *  so a stopped-but-still-unwinding coroutine can still release the slot it owns. */
     private var slotOwnerToken = 0L
+    /** Run owned by the current slot. Bound before provider work or queue acceptance. */
+    private var slotRunId: String? = null
+    private var suppressNextQueueDrain = false
+    /** Stop keeps the generation slot/tree lock until both the provider coroutine and the single
+     * terminal DB finalizer have completed, whichever finishes last. */
+    private var stopFinalizationPending = false
+    private var stoppedCoroutineUnwound = false
     private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -82,6 +90,16 @@ class ConversationGenerationState(val conversationId: String) {
     fun isLatestPersist(id: Long): Boolean = persistId.get() == id
     /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
     fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
+
+    fun bindRun(uiToken: Long, runId: String) = synchronized(genLock) {
+        require(runId.isNotBlank())
+        check(slotOwnerToken == uiToken) { "Only the slot owner can bind a Run" }
+        val existing = slotRunId
+        check(existing == null || existing == runId) { "Generation slot is already bound to $existing" }
+        slotRunId = runId
+    }
+
+    fun currentRunId(): String? = synchronized(genLock) { slotRunId }
 
     // ── Generation slot (single source of truth: [generating] under [genLock]) ────────────
     // Replaces the old `sendGate` AtomicBoolean. The slot is the atomic decision point for
@@ -99,6 +117,8 @@ class ConversationGenerationState(val conversationId: String) {
         if (generating.value) return null
         uiGenToken += 1
         slotOwnerToken = uiGenToken
+        stopFinalizationPending = false
+        stoppedCoroutineUnwound = false
         generating.value = true
         onActive?.invoke(conversationId)
         uiGenToken
@@ -113,6 +133,8 @@ class ConversationGenerationState(val conversationId: String) {
             if (generating.value) return null
             uiGenToken += 1
             slotOwnerToken = uiGenToken
+            stopFinalizationPending = false
+            stoppedCoroutineUnwound = false
             isLoading.value = true
             generating.value = true
             onActive?.invoke(conversationId)
@@ -128,12 +150,30 @@ class ConversationGenerationState(val conversationId: String) {
      */
     fun endGeneration(uiToken: Long): Boolean = synchronized(genLock) {
         if (slotOwnerToken != uiToken) return false
+        if (stopping.value) {
+            stoppedCoroutineUnwound = true
+            if (stopFinalizationPending) return false
+        }
+        releaseSlotLocked()
+    }
+
+    private fun releaseSlotLocked(): Boolean {
         slotOwnerToken = 0L
+        slotRunId = null
+        stopFinalizationPending = false
+        stoppedCoroutineUnwound = false
         isLoading.value = false
         generating.value = false
         stopping.value = false
         onIdle?.invoke(conversationId)
-        true
+        return true
+    }
+
+    /** Stop is an atomic Run cutoff: accepted but unconsumed inputs stay in the stopped Run. */
+    fun consumeQueueDrainPermission(): Boolean = synchronized(genLock) {
+        val allowed = !suppressNextQueueDrain
+        suppressNextQueueDrain = false
+        allowed
     }
 
     // ── Token-gated UI mutators ───────────────────────────────────────────
@@ -178,51 +218,72 @@ class ConversationGenerationState(val conversationId: String) {
 
     // ── Stop / finalization ───────────────────────────────────────────────
     /**
-     * Terminal stop that fully releases the slot (Stop button, or a delete that lands inside the
-     * generating conversation). Cancels ONLY this conversation's job + in-flight HTTP streams,
-     * advances the UI token, commits STOPPED to the streaming snapshot, and clears the slot
-     * (generating=false + onIdle). Regenerate/edit never call Stop; they can claim only an idle
-     * slot through [tryAcquireForReplacement].
+     * Terminal stop request (Stop button, or a delete that lands inside the generating
+     * conversation). Cancels ONLY this conversation's job + in-flight HTTP streams, advances the
+     * UI token, and commits STOPPED to the streaming snapshot. The cancelled coroutine retains
+     * the slot until its finally block releases it. Regenerate/edit never call Stop; they can
+     * claim only an idle slot through [tryAcquireForReplacement].
      */
     fun stop(): StopResult {
-        val previousJob = generationJob
-        // Hard kill: cancel THIS conversation's in-flight HTTP streams only.
-        streamScope.cancelAll()
-        previousJob?.cancel()
-        val stoppedMsg = synchronized(genLock) {
+        val previousJob: Job?
+        val result = synchronized(genLock) {
+            previousJob = generationJob
+            val boundRunId = slotRunId
+            if (boundRunId != null || generating.value) suppressNextQueueDrain = true
+            // Revoke DB ownership before cancellation can enter GenerationManager.finally. The
+            // stopped coroutine therefore skips its normal NonCancellable terminal upsert; the
+            // dedicated stop finalizer below is the only terminal writer.
+            persistId.incrementAndGet()
             uiGenToken += 1
-            isLoading.value = false
             val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
             streamingMessage.value = s
+            // Accepted interventions already belong to this Run in Room. Stop ends the Run, so
+            // they are no longer pending queue work even though their user rows stay visible.
+            queuedSends.value = emptyList()
+            stopFinalizationPending = s != null || boundRunId != null
+            stoppedCoroutineUnwound = previousJob == null || previousJob.isCompleted
             // The slot stays HELD until the cancelled coroutine's finally releases it via
             // [endGeneration] (slot ownership is keyed to slotOwnerToken, which stop does NOT
             // advance). Freeing it here would let a new send claim the slot and then block
             // invisibly on the conversation lock the dying coroutine may still hold (e.g. a
             // tool stuck in non-cancellable IO) — no bubble, no queue chip, nothing. Instead:
-            // while stopping, sends enqueue (visible), the composer shows the stopping
-            // spinner, and the release drains the whole queue the moment the old coroutine
-            // has fully unwound.
+            // while stopping, the composer keeps the draft and shows the stopping spinner.
+            // Once the old coroutine has fully unwound, the next explicit Send claims a fresh
+            // Run instead of being attached to the terminal one.
             //
             // Unless nothing is actually running: with no live coroutine no finally will ever
             // fire, so holding the slot would strand the composer in the stopping state
             // forever. Release it here instead — the historical immediate-release behavior,
             // correct precisely when there is nothing left to wind down.
             if (generating.value) {
-                // isCompleted, NOT isActive: previousJob was just cancelled, so isActive is
-                // already false while the coroutine is still unwinding — and an unwinding
-                // coroutine WILL run its finally and release the slot.
-                if (previousJob != null && !previousJob.isCompleted) {
+                if (!stoppedCoroutineUnwound || stopFinalizationPending) {
+                    // STOPPING is still generating for every tree-mutation/UI gate.
+                    isLoading.value = true
                     stopping.value = true
                 } else {
-                    slotOwnerToken = 0L
-                    generating.value = false
-                    stopping.value = false
-                    onIdle?.invoke(conversationId)
+                    releaseSlotLocked()
                 }
             }
-            s
+            StopResult(s, conversationId, boundRunId)
         }
-        return StopResult(stoppedMsg, conversationId)
+        // Hard kill after the ownership cutoff: synchronous cancellation handles wake blocking
+        // HTTP/native reads immediately, then Job cancellation tears down every remaining child.
+        streamScope.cancelAll()
+        previousJob?.cancel()
+        return result
+    }
+
+    /**
+     * Marks the single STOP terminal transaction complete. The slot/tree lock is released only
+     * when the provider coroutine has also unwound. Returns true when this call performed release.
+     */
+    fun finishStopFinalization(): Boolean = synchronized(genLock) {
+        stopFinalizationPending = false
+        if (!stopping.value || !stoppedCoroutineUnwound) return false
+        // If releaseAndDrain already returned while waiting for this finalizer, there is no
+        // matching consumeQueueDrainPermission call left to consume the Stop suppression.
+        suppressNextQueueDrain = false
+        releaseSlotLocked()
     }
 
     /**
@@ -269,17 +330,18 @@ class ConversationGenerationState(val conversationId: String) {
         queuedSends.update { items + it }
     }
 
-    data class StopResult(val stoppedMessage: ChatMessage?, val conversationId: String)
+    data class StopResult(
+        val stoppedMessage: ChatMessage?,
+        val conversationId: String,
+        val runId: String?,
+    )
 
 }
 
 /**
  * A message queued behind an in-progress generation, waiting to be sent. Carries the full
- * [SelectedAttachment] list (not bare paths) so a drained send rebuilds the exact same payload —
- * image/video frames, PDF pages, slice configs — as a direct send would. The composer copies each
- * attachment to app-private storage before enqueue and then clears its own list, so this list
- * holds the only live reference to those files until the send drains (ownership → MessageEntity)
- * or the item is removed (files deleted).
+ * [SelectedAttachment] list for the queue banner, while [id] is also the already-persisted
+ * MessageEntity id. Room owns the payload and attachment lifetime before the composer clears.
  */
 data class QueuedSend(
     val id: String,
@@ -287,6 +349,8 @@ data class QueuedSend(
     /** Model selected in the originating conversation when Send was tapped. */
     val modelId: String,
     val attachments: List<SelectedAttachment>,
+    /** Run that was ACTIVE when this intervention was accepted. */
+    val runId: String,
     /** Legacy bare-image paths (kept so a queued send rebuilds the identical payload). */
     val images: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
@@ -297,16 +361,20 @@ data class QueuedSend(
  * streams opened under this scope — so a Stop on conversation A no longer kills conversation B's
  * in-flight provider stream (the fix for the global `cancelAllStreams` race).
  */
+fun interface GenerationCancelHandle {
+    fun cancel()
+}
+
 class StreamScope {
     private val handles = java.util.Collections.newSetFromMap(
-        java.util.concurrent.ConcurrentHashMap<com.newoether.agora.api.HttpClient.StreamHandle, Boolean>()
+        java.util.concurrent.ConcurrentHashMap<GenerationCancelHandle, Boolean>()
     )
 
-    fun register(handle: com.newoether.agora.api.HttpClient.StreamHandle) {
+    fun register(handle: GenerationCancelHandle) {
         handles.add(handle)
     }
 
-    fun unregister(handle: com.newoether.agora.api.HttpClient.StreamHandle) {
+    fun unregister(handle: GenerationCancelHandle) {
         handles.remove(handle)
     }
 

@@ -28,5 +28,7 @@ class RagBackfillPolicyTest {
         text = text,
         participant = participant,
         timestamp = 1L,
+        runId = "run-$id",
+        runSequence = 0,
     )
 }

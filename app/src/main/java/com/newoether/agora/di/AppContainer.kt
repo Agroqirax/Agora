@@ -24,6 +24,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.ChatViewModelFactory
 import com.newoether.agora.viewmodel.ProviderRegistry
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Centralized dependency container (manual DI).
@@ -61,6 +62,12 @@ class AppContainer(private val appContext: Context) {
 
     val conversationRepository: ConversationRepository by lazy {
         ConversationRepository(chatDao)
+    }
+
+    fun startRunRecovery() {
+        appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            conversationRepository.ensureRunRecovery()
+        }
     }
     val taskRepository: TaskRepository by lazy {
         TaskRepository(chatDao)
