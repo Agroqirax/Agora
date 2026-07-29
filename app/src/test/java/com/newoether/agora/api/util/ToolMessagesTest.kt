@@ -5,12 +5,13 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ToolMessagesTest {
     @Test
-    fun parallelToolRoundWithMissingResult_isDroppedAsAWhole() {
+    fun parallelToolRoundWithMissingResult_becomesPlainContext() {
         val validated = validateToolMessages(
             listOf(
                 normal("u0", Participant.USER),
@@ -20,16 +21,37 @@ class ToolMessagesTest {
             )
         )
 
-        assertEquals(listOf("u0", "u1"), validated.map { it.id })
+        assertEquals(3, validated.size)
+        assertEquals("u0", validated.first().id)
+        assertTrue(validated[1].id.startsWith("protocol_notice_"))
+        assertEquals(Participant.USER, validated[1].participant)
+        assertTrue(validated[1].text.contains("incomplete or damaged"))
+        assertEquals("u1", validated.last().id)
     }
 
     @Test
-    fun completeParallelToolRound_survivesAndRepairsIdsPositionally() {
+    fun explicitMismatchedResultIds_areNeverRepairedPositionally() {
         val validated = validateToolMessages(
             listOf(
                 tool("tool_round", "call-a", "call-b"),
                 result("result_a", "wrong-a"),
                 result("result_b", "wrong-b"),
+            )
+        )
+
+        assertEquals(1, validated.size)
+        assertTrue(validated.single().id.startsWith("protocol_notice_"))
+        assertTrue(validated.single().text.contains("Tool 1"))
+        assertTrue(validated.single().text.contains("Tool 2"))
+    }
+
+    @Test
+    fun completeParallelToolRoundWithMatchingIds_survives() {
+        val validated = validateToolMessages(
+            listOf(
+                tool("tool_round", "call-a", "call-b"),
+                result("result_a", "call-a"),
+                result("result_b", "call-b"),
             )
         )
 
@@ -39,15 +61,38 @@ class ToolMessagesTest {
     }
 
     @Test
-    fun legacyMultiResultRow_coversEveryParallelCall() {
+    fun signedThoughtSegmentsSurviveToolNormalizationInOriginalOrder() {
+        val toolMessage = tool("tool_round", "call-a").copy(
+            segments = listOf(
+                MessageSegment(
+                    type = "thought",
+                    content = "reasoning",
+                    signature = "signed",
+                    signatureProvider = "Anthropic",
+                ),
+                tool("ignored", "call-a").segments!!.single(),
+            )
+        )
+
+        val validated = validateToolMessages(
+            listOf(toolMessage, result("result_a", "call-a"))
+        )
+
+        assertEquals(listOf("thought", "tool"), validated.first().segments!!.map { it.type })
+        assertEquals("signed", validated.first().segments!!.first().signature)
+        assertEquals("Anthropic", validated.first().segments!!.first().signatureProvider)
+    }
+
+    @Test
+    fun legacyMultiResultRowWithoutIds_isPairedByCardinality() {
         val combinedResult = ChatMessage(
             id = "result_combined",
             text = "",
             participant = Participant.USER,
             status = MessageStatus.SUCCESS,
             segments = listOf(
-                toolResultSegment("wrong-a", "first"),
-                toolResultSegment("wrong-b", "second"),
+                toolResultSegment(null, "first"),
+                toolResultSegment(null, "second"),
             ),
         )
 
@@ -63,7 +108,7 @@ class ToolMessagesTest {
     }
 
     @Test
-    fun extraResults_areDroppedAfterCompleteCardinality() {
+    fun extraResults_degradeTheWholeRoundInsteadOfBeingDropped() {
         val validated = validateToolMessages(
             listOf(
                 tool("tool_round", "call-a"),
@@ -72,16 +117,33 @@ class ToolMessagesTest {
             )
         )
 
-        assertEquals(listOf("tool_round", "result_a"), validated.map { it.id })
+        assertEquals(1, validated.size)
+        assertTrue(validated.single().id.startsWith("protocol_notice_"))
+        assertTrue(validated.single().text.contains("result"))
     }
 
     @Test
-    fun missingOrDuplicateToolCallIds_dropTheRound() {
-        val missing = tool("tool_missing", "call-a", "")
+    fun missingIdsCanBeSynthesizedButExplicitDuplicatesDegrade() {
+        val missing = tool("tool_missing", null)
         val duplicate = tool("tool_duplicate", "same", "same")
 
-        assertTrue(validateToolMessages(listOf(missing, result("result_a", "call-a"), result("result_b", "call-b"))).isEmpty())
-        assertTrue(validateToolMessages(listOf(duplicate, result("result_c", "same"), result("result_d", "same"))).isEmpty())
+        val normalizedMissing = validateToolMessages(
+            listOf(missing, result("result_a", null))
+        )
+        assertEquals(2, normalizedMissing.size)
+        val generatedId = normalizedMissing.first().segments!!.single().toolCallId
+        assertFalse(generatedId.isNullOrBlank())
+        assertEquals(generatedId, normalizedMissing.last().segments!!.single().toolCallId)
+
+        val normalizedDuplicate = validateToolMessages(
+            listOf(
+                duplicate,
+                result("result_c", "same"),
+                result("result_d", "same"),
+            )
+        )
+        assertEquals(1, normalizedDuplicate.size)
+        assertTrue(normalizedDuplicate.single().id.startsWith("protocol_notice_"))
     }
 
     private fun normal(id: String, participant: Participant) = ChatMessage(
@@ -91,7 +153,7 @@ class ToolMessagesTest {
         status = MessageStatus.SUCCESS,
     )
 
-    private fun tool(id: String, vararg callIds: String) = ChatMessage(
+    private fun tool(id: String, vararg callIds: String?) = ChatMessage(
         id = id,
         text = "",
         participant = Participant.MODEL,
@@ -106,7 +168,7 @@ class ToolMessagesTest {
         },
     )
 
-    private fun result(id: String, callId: String) = ChatMessage(
+    private fun result(id: String, callId: String?) = ChatMessage(
         id = id,
         text = "result",
         participant = Participant.USER,
@@ -114,7 +176,7 @@ class ToolMessagesTest {
         segments = listOf(toolResultSegment(callId, "result")),
     )
 
-    private fun toolResultSegment(callId: String, result: String) = MessageSegment(
+    private fun toolResultSegment(callId: String?, result: String) = MessageSegment(
         type = "tool",
         toolName = "tool",
         toolArgs = "{}",

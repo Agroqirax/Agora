@@ -7,6 +7,7 @@ import com.newoether.agora.api.util.StreamingThinkTagParser
 import com.newoether.agora.api.util.convertToOpenAiMessages
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.model.ChatMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -139,6 +140,12 @@ abstract class BaseOpenAiProvider : LlmProvider {
         try {
             request.requireValidWireFormat(name)
             val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), request)
+            requireValidSerializedRequest(
+                provider = name,
+                body = requestBodyJson,
+                requiredStringFields = setOf("model"),
+                requiredArrayFields = setOf("messages"),
+            )
             DebugLog.d("AgoraAPI", "[$name] REQ -> ${endpointUrls.first()} | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
 
             val headers = mutableMapOf("Content-Type" to "application/json")

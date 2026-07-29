@@ -9,6 +9,7 @@ import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.adaptToolRoundsForProvider
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
@@ -417,6 +418,11 @@ class GeminiProvider : LlmProvider {
                 "x-goog-api-key" to config.apiKey
             )
             val requestJson = json.encodeToString(ApiGenerateContentRequest.serializer(), requestBody)
+            requireValidSerializedRequest(
+                provider = "Gemini",
+                body = requestJson,
+                requiredArrayFields = setOf("contents"),
+            )
             DebugLog.d("AgoraAPI", "[Gemini] REQ → $finalUrlString | model=$cleanModelName | msgs=${apiContents.size} | thinking=${config.thinkingEnabled} | tools=${tools.size}")
             DebugLog.d("AgoraAPI", "[Gemini] BODY: ${requestJson.take(4000)}")
             val maxAttempts = 3

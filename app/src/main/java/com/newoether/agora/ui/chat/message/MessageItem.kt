@@ -13,7 +13,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.layout.onSizeChanged
-import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
@@ -61,23 +60,9 @@ fun MessageItem(
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
 
-    val isThoughtExpanded by remember(message.id) {
-        derivedStateOf { thoughtExpandedStates[message.id] ?: false }
-    }
     var showSegmentDetail by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var selectedSegmentIndices by remember { mutableStateOf<List<Int>>(emptyList()) }
-    var currentThoughtBlockHeight by remember { mutableIntStateOf(0) }
-    var stableCollapsedThoughtHeight by remember { mutableIntStateOf(0) }
-    // Capture the fully-settled collapsed height after collapse animation finishes.
-    // This lets calculateReportedHeight immediately report the post-collapse height
-    // even mid-animation, so extraPadding doesn't "chase" the shrinking thought block.
-    LaunchedEffect(isThoughtExpanded) {
-        if (!isThoughtExpanded) {
-            delay(500) // slightly longer than the 400ms collapse tween + mergedBottomPadding tween
-            stableCollapsedThoughtHeight = currentThoughtBlockHeight
-        }
-    }
     var showInfoDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
@@ -99,27 +84,6 @@ fun MessageItem(
             },
             onDismiss = { showDeleteConfirm = false }
         )
-    }
-
-    var currentTotalHeight by remember { mutableIntStateOf(0) }
-    // No-op modifier that suppresses bring-into-view auto-scrolling on focus
-
-    fun calculateReportedHeight(totalPx: Int, thoughtPx: Int): Int {
-        // When we are NOT expanded, the thought block is animating down from its large height 
-        // to its stableCollapsedThoughtHeight. We want the outer list padding to behave as if
-        // the thought block INSTANTLY hit stableCollapsedThoughtHeight, avoiding the final "jump".
-        // But we ONLY do this if the thought block is currently larger than its collapsed height 
-        // AND we know what the collapsed height is.
-        if (!isThoughtExpanded && stableCollapsedThoughtHeight > 0 && thoughtPx > stableCollapsedThoughtHeight) {
-            val excessHeight = thoughtPx - stableCollapsedThoughtHeight
-            return totalPx - excessHeight
-        }
-        return totalPx
-    }
-
-    LaunchedEffect(message.text, message.status, isEditing, isThoughtExpanded) {
-        kotlinx.coroutines.delay(50)
-        onHeightChanged(calculateReportedHeight(currentTotalHeight, currentThoughtBlockHeight))
     }
 
     val alignment = when (message.participant) {
@@ -156,8 +120,7 @@ fun MessageItem(
         modifier = Modifier
             .fillMaxWidth()
             .onSizeChanged {
-                currentTotalHeight = it.height
-                onHeightChanged(calculateReportedHeight(it.height, currentThoughtBlockHeight))
+                onHeightChanged(it.height)
             }
             .padding(vertical = 8.dp),
         horizontalAlignment = alignment
@@ -214,7 +177,7 @@ fun MessageItem(
                     selectedSegmentIndex = indices.firstOrNull() ?: -1
                     showSegmentDetail = true
                 },
-                setThoughtBlockHeight = { currentThoughtBlockHeight = it },
+                setThoughtBlockHeight = {},
             )
         }
     }

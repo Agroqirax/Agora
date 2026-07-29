@@ -257,16 +257,18 @@ fun mergeConsecutiveSameRole(messages: List<ChatMessage>): List<ChatMessage> {
 }
 
 /**
- * Validates tool_ / result_ message pairing and fixes ID mismatches.
+ * Validates and canonicalizes complete tool_ / result_ protocol rounds.
  *
  * Rules enforced:
  *  - Every tool_ message must be immediately followed by one result per emitted tool call
  *  - Every result_ message must be immediately preceded by a tool_ message
  *  - Each result_ segment's toolCallId matches the corresponding tool_use segment
  *
- * An incomplete parallel tool round is dropped as a whole from the API-only path. Keeping a
- * partially answered assistant tool_calls turn is protocol-invalid on OpenAI-compatible APIs and
- * changes its semantics if the call list is silently truncated.
+ * Missing legacy IDs may be synthesized only when every result is unambiguously paired by
+ * cardinality and position. Explicit conflicting IDs, duplicate IDs, malformed arguments, and
+ * extra/missing results are never "repaired" by relabeling or truncation: the whole round is
+ * replayed as ordinary context instead, so an invalid protocol sequence cannot reach a provider
+ * and a result can never be attached to the wrong call.
  */
 fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
     val result = mutableListOf<ChatMessage>()
@@ -324,7 +326,7 @@ private data class NormalizedToolCalls(
 )
 
 private val toolJson = Json { ignoreUnknownKeys = true }
-private val safeToolCallId = Regex("[A-Za-z0-9_-]{1,128}")
+private val safeToolCallId = safeWireToolCallId
 
 private fun normalizeToolCalls(
     toolMsg: ChatMessage,
@@ -348,20 +350,24 @@ private fun normalizeToolCalls(
         }
     if (sourceSegments.isEmpty()) return null
 
+    val explicitIds = sourceSegments.map { it.toolCallId?.takeIf(String::isNotBlank) }
+    if (
+        explicitIds.filterNotNull().any { !it.matches(safeToolCallId) } ||
+        explicitIds.filterNotNull().distinct().size != explicitIds.filterNotNull().size ||
+        explicitIds.filterNotNull().any(alreadySeenIds::contains)
+    ) {
+        return null
+    }
+
     val reserved = alreadySeenIds.toMutableSet()
     val normalized = sourceSegments.mapIndexed { index, segment ->
-        val name = segment.toolName?.takeIf(String::isNotBlank) ?: return null
-        val arguments = normalizeArguments(segment.toolArgs)
-        var callId = segment.toolCallId?.takeIf { it.matches(safeToolCallId) }
+        val name = segment.toolName
+            ?.takeIf { it.matches(safeWireToolName) }
+            ?: return null
+        val arguments = normalizeArgumentsOrNull(segment.toolArgs) ?: return null
+        val callId = segment.toolCallId?.takeIf(String::isNotBlank)
             ?: buildToolCallId("$name:${toolMsg.id}:$index", arguments)
-        var collision = 0
-        while (!reserved.add(callId)) {
-            collision++
-            callId = buildToolCallId(
-                "$name:${toolMsg.id}:$index:$collision",
-                arguments,
-            )
-        }
+        if (!reserved.add(callId)) return null
         segment.copy(
             toolName = name,
             toolArgs = arguments,
@@ -375,9 +381,17 @@ private fun normalizeToolCalls(
         arguments = normalized.single().toolArgs.orEmpty(),
         toolCallId = normalized.single().toolCallId,
     )
+    var normalizedIndex = 0
+    val rebuiltSegments = toolMsg.segments
+        ?.map { segment ->
+            if (segment.type == "tool") normalized[normalizedIndex++] else segment
+        }
+        ?: normalized
     return NormalizedToolCalls(
         message = toolMsg.copy(
-            segments = normalized,
+            // Signed thought blocks are protocol state for Anthropic/Gemini. Replace only tool
+            // segments and preserve every non-tool segment in its original order.
+            segments = rebuiltSegments,
             toolCall = normalizedToolCall,
         ),
         segments = normalized,
@@ -439,21 +453,65 @@ private fun normalizeToolResults(
     calls: NormalizedToolCalls,
     resultMessages: List<ChatMessage>
 ): List<ChatMessage>? {
+    data class ResultRef(
+        val message: ChatMessage,
+        val segment: MessageSegment?,
+        val explicitId: String?,
+    )
+
+    val resultRefs = resultMessages.flatMap { message ->
+        val segments = message.segments
+            ?.filter { it.type == "tool" }
+            .orEmpty()
+        if (segments.isNotEmpty()) {
+            segments.map { segment ->
+                ResultRef(message, segment, segment.toolCallId?.takeIf(String::isNotBlank))
+            }
+        } else {
+            listOf(
+                ResultRef(
+                    message,
+                    null,
+                    message.toolCall?.toolCallId?.takeIf(String::isNotBlank),
+                )
+            )
+        }
+    }
+    if (resultRefs.size != calls.segments.size) return null
+
+    val explicitResultIds = resultRefs.map(ResultRef::explicitId)
+    val hasExplicitResultIds = explicitResultIds.any { it != null }
+    if (
+        explicitResultIds.filterNotNull().any { !it.matches(safeToolCallId) } ||
+        (hasExplicitResultIds && explicitResultIds.any { it == null }) ||
+        explicitResultIds.filterNotNull().distinct().size != explicitResultIds.filterNotNull().size ||
+        (hasExplicitResultIds && explicitResultIds.filterNotNull().toSet() != calls.callIds.toSet())
+    ) {
+        return null
+    }
+
+    val callById = calls.segments.associateBy { checkNotNull(it.toolCallId) }
     val normalized = mutableListOf<ChatMessage>()
     var callIndex = 0
     for (resultMsg in resultMessages) {
-        if (callIndex >= calls.segments.size) break
         val toolSegments = resultMsg.segments
             ?.filter { it.type == "tool" }
             .orEmpty()
         if (toolSegments.isNotEmpty()) {
-            val kept = toolSegments.take(calls.segments.size - callIndex).map { segment ->
-                val call = calls.segments[callIndex++]
+            val kept = toolSegments.map { segment ->
+                val call = if (hasExplicitResultIds) {
+                    segment.toolCallId?.let(callById::get) ?: return null
+                } else {
+                    calls.segments.getOrNull(callIndex) ?: return null
+                }
+                callIndex++
                 segment.copy(
                     toolName = call.toolName,
                     toolArgs = call.toolArgs,
                     toolCallId = call.toolCallId,
-                    toolResult = segment.toolResult ?: resultMsg.text,
+                    toolResult = nonEmptyToolResult(segment.toolResult ?: resultMsg.text),
+                    signature = call.signature,
+                    signatureProvider = call.signatureProvider,
                 )
             }
             normalized += resultMsg.copy(
@@ -464,14 +522,20 @@ private fun normalizeToolResults(
             )
         } else {
             val toolCall = resultMsg.toolCall
-            val call = calls.segments[callIndex++]
+            val call = if (hasExplicitResultIds) {
+                toolCall?.toolCallId?.let(callById::get) ?: return null
+            } else {
+                calls.segments.getOrNull(callIndex) ?: return null
+            }
+            callIndex++
+            val result = nonEmptyToolResult(toolCall?.result ?: resultMsg.text)
             normalized += resultMsg.copy(
                 segments = listOf(
                     MessageSegment(
                         type = "tool",
                         toolName = call.toolName,
                         toolArgs = call.toolArgs,
-                        toolResult = toolCall?.result ?: resultMsg.text,
+                        toolResult = result,
                         toolCallId = call.toolCallId,
                         signature = call.signature,
                         signatureProvider = call.signatureProvider,
@@ -480,6 +544,7 @@ private fun normalizeToolResults(
                 toolCall = toolCall?.copy(
                     toolName = call.toolName.orEmpty(),
                     arguments = call.toolArgs.orEmpty(),
+                    result = result,
                     toolCallId = call.toolCallId,
                 ),
             )
@@ -488,12 +553,18 @@ private fun normalizeToolResults(
     return normalized.takeIf { callIndex == calls.segments.size }
 }
 
-private fun normalizeArguments(arguments: String?): String {
+private fun normalizeArgumentsOrNull(arguments: String?): String? {
     val parsed = runCatching {
         toolJson.parseToJsonElement(arguments?.takeIf(String::isNotBlank) ?: "{}")
     }.getOrNull()
-    return (parsed as? JsonObject)?.toString() ?: "{}"
+    return (parsed as? JsonObject)?.toString()
 }
+
+private fun normalizeArguments(arguments: String?): String =
+    normalizeArgumentsOrNull(arguments) ?: arguments.orEmpty().ifBlank { "{}" }
+
+private fun nonEmptyToolResult(result: String): String =
+    result.takeIf(String::isNotBlank) ?: "[Tool returned no textual output]"
 
 private fun toolRoundAsPlainContext(
     toolMessage: ChatMessage?,

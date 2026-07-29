@@ -41,9 +41,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -230,16 +228,6 @@ internal fun AssistantMessageContent(
                 }
             }
 
-            // Level 1: anti-shrink for text and thinking content (kept after streaming ends)
-            var streamingMaxHeightPx by remember { mutableIntStateOf(0) }
-
-            // Reset anti-shrink heights when streaming restarts (e.g. regeneration)
-            LaunchedEffect(isStreaming) {
-                if (isStreaming) {
-                    streamingMaxHeightPx = 0
-                }
-            }
-
             Column {
                 val isError = message.status == MessageStatus.ERROR || message.participant == Participant.ERROR
 
@@ -329,16 +317,6 @@ internal fun AssistantMessageContent(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .then(
-                            if (streamingMaxHeightPx > 0)
-                                Modifier.heightIn(min = with(LocalDensity.current) { streamingMaxHeightPx.toDp() })
-                            else Modifier
-                        )
-                        .onSizeChanged { size ->
-                            if (isStreaming) {
-                                streamingMaxHeightPx = maxOf(streamingMaxHeightPx, size.height)
-                            }
-                        }
                         .noOpBringIntoView()
                 ) {
                     if (isError) {

@@ -1,6 +1,7 @@
 package com.newoether.agora.api.ollama
 
 import com.newoether.agora.api.util.requireValidRequestFormat
+import com.newoether.agora.api.util.safeWireToolName
 import com.newoether.agora.api.util.validateToolDefinitions
 import kotlinx.serialization.json.JsonObject
 
@@ -53,7 +54,9 @@ internal fun OllamaChatRequest.requireValidWireFormat() {
                     val name = call.function?.name
                     val arguments = call.function?.arguments
                     if (call.type != "function") violations += "$callLocation type is not function"
-                    if (name.isNullOrBlank()) violations += "$callLocation name is blank"
+                    if (name?.matches(safeWireToolName) != true) {
+                        violations += "$callLocation name is not wire-safe"
+                    }
                     if (arguments !is JsonObject) violations += "$callLocation arguments are not an object"
                     if (!name.isNullOrBlank()) pendingToolNames.addLast(name)
                 }
@@ -61,8 +64,8 @@ internal fun OllamaChatRequest.requireValidWireFormat() {
             "tool" -> {
                 sawNonSystem = true
                 val expectedName = pendingToolNames.removeFirstOrNull()
-                if (message.toolName.isNullOrBlank()) {
-                    violations += "$location tool_name is blank"
+                if (message.toolName?.matches(safeWireToolName) != true) {
+                    violations += "$location tool_name is not wire-safe"
                 } else if (expectedName == null || message.toolName != expectedName) {
                     violations += "$location does not match the pending tool call"
                 }

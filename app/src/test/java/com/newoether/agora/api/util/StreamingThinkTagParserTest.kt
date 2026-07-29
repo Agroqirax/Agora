@@ -43,12 +43,12 @@ class StreamingThinkTagParserTest {
     }
 
     @Test
-    fun multipleThinkBlocks_onlyFirstHonored() = runTest {
+    fun multipleThinkBlocks_areAllParsed() = runTest {
         val parser = StreamingThinkTagParser()
         val (text, thought) = collectFeeds(parser,
             listOf("<think>first</think> middle <think>second</think> end"), true)
-        assertEquals(" middle <think>second</think> end", text)
-        assertEquals("first", thought)
+        assertEquals(" middle  end", text)
+        assertEquals("firstsecond", thought)
     }
 
     @Test
@@ -117,5 +117,114 @@ class StreamingThinkTagParserTest {
             listOf("a", "<think>", "b", "c", "</think>", "d"), true)
         assertEquals("ad", text)
         assertEquals("bc", thought)
+    }
+
+    @Test
+    fun multipleSupportedXmlTagsAndMixedCase_areParsed() = runTest {
+        val parser = StreamingThinkTagParser()
+        val (text, thought) = collectFeeds(
+            parser,
+            listOf(
+                "<THINKING>a</thinking>",
+                "<reasoning>b</reasoning>",
+                "<analysis>c</analysis>",
+                "<thought>d</thought>",
+                "answer",
+            ),
+            true,
+        )
+
+        assertEquals("answer", text)
+        assertEquals("abcd", thought)
+    }
+
+    @Test
+    fun harmonyChannelMarkersAcrossChunks_areParsed() = runTest {
+        val parser = StreamingThinkTagParser()
+        val (text, thought) = collectFeeds(
+            parser,
+            listOf(
+                "<|start|>assistant<|channel|>anal",
+                "ysis<|message|>reason",
+                "<|channel|>final<|message|>answer",
+            ),
+            true,
+        )
+
+        assertEquals("answer", text)
+        assertEquals("reason", thought)
+    }
+
+    @Test
+    fun unknownAngleBracketTagsRemainLiteralText() = runTest {
+        val parser = StreamingThinkTagParser()
+        val source = "Use <widget id=\"x\">value</widget> and <T>."
+        val (text, thought) = collectFeeds(
+            parser,
+            source.chunked(2),
+            true,
+        )
+
+        assertEquals(source, text)
+        assertTrue(thought.isEmpty())
+    }
+
+    @Test
+    fun reservedTagsInsideInlineAndFencedCodeRemainLiteral() = runTest {
+        val parser = StreamingThinkTagParser()
+        val source = "`<think>inline</think>`\n```\n<analysis>code</analysis>\n```"
+        val (text, thought) = collectFeeds(
+            parser,
+            source.map(Char::toString),
+            true,
+        )
+
+        assertEquals(source, text)
+        assertTrue(thought.isEmpty())
+    }
+
+    @Test
+    fun incompleteOpeningTagAtEndOfStreamIsNotLost() = runTest {
+        val parser = StreamingThinkTagParser()
+        val (text, thought) = collectFeeds(parser, listOf("answer <thi"), true)
+
+        assertEquals("answer <thi", text)
+        assertTrue(thought.isEmpty())
+    }
+
+    @Test
+    fun unclosedThinkingBlockFlushesItsContentAsThought() = runTest {
+        val parser = StreamingThinkTagParser()
+        val (text, thought) = collectFeeds(parser, listOf("<think>unfinished"), true)
+
+        assertEquals("", text)
+        assertEquals("unfinished", thought)
+    }
+
+    @Test
+    fun everyTwoChunkBoundaryProducesTheSameResult() = runTest {
+        val sources = listOf(
+            "<think>reason</think>answer",
+            "<thinking>reason</thinking>answer",
+            "<reasoning>reason</reasoning>answer",
+            "<analysis>reason</analysis>answer",
+            "<thought>reason</thought>answer",
+            "<|channel|>analysis<|message|>reason<|end|>answer",
+            "<|start|>assistant<|channel|>reasoning<|message|>reason" +
+                "<|channel|>final<|message|>answer",
+        )
+
+        sources.forEach { source ->
+            for (split in 0..source.length) {
+                val parser = StreamingThinkTagParser()
+                val (text, thought) = collectFeeds(
+                    parser,
+                    listOf(source.substring(0, split), source.substring(split)),
+                    true,
+                )
+                assertEquals("split=$split source=$source", "answer", text)
+                assertEquals("split=$split source=$source", "reason", thought)
+            }
+        }
     }
 }

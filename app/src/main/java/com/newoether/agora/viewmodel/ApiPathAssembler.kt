@@ -20,7 +20,7 @@ internal object ApiPathAssembler {
 
         val protocolChildren = allMessages
             .asSequence()
-            .filter(MessageEntity::isToolProtocolRow)
+            .filter { it.isToolProtocolRow() }
             .groupBy(MessageEntity::parentId)
         val emittedIds = mutableSetOf<String>()
         val result = mutableListOf<MessageEntity>()

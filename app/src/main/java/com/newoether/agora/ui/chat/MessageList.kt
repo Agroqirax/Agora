@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +30,33 @@ import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.chat.message.MessageItem
 
+internal enum class MessageListLayoutMode {
+    STABLE,
+    ACTIVE_SCROLL,
+    COVERED_TRANSITION,
+}
+
+internal fun messageListLayoutMode(
+    isSwitching: Boolean,
+    isScrollInProgress: Boolean,
+): MessageListLayoutMode = when {
+    isSwitching -> MessageListLayoutMode.COVERED_TRANSITION
+    isScrollInProgress -> MessageListLayoutMode.ACTIVE_SCROLL
+    else -> MessageListLayoutMode.STABLE
+}
+
+internal fun calculateBottomSpacerPx(
+    viewportHeightPx: Int,
+    targetTopPx: Int,
+    bottomObstructionPx: Int,
+    tailContentHeightPx: Int,
+): Int {
+    val availableTailHeight =
+        viewportHeightPx - targetTopPx - bottomObstructionPx
+    return (availableTailHeight - tailContentHeightPx).coerceAtLeast(0)
+}
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageList(
     messages: StableMessageList,
@@ -69,21 +97,21 @@ fun MessageList(
         RunUiProjection.project(messages.list, allMessages.list)
     }
 
-    val extraPadding = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
-        0.dp
+    val extraPaddingPx = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
+        0
     } else {
-        with(density) {
-            val vDp = viewportHeight.toDp()
-            val targetTopDp = 140.dp
-            val availableSpaceDp = vDp - targetTopDp - (bottomBarHeight + 8.dp)
-            var contentHeightPx = 0
-            for (i in lastUserMessageIndex until messages.list.size) {
-                contentHeightPx += messageHeights[messages.list[i].id] ?: 0
-            }
-            val contentHeightDp = contentHeightPx.toDp()
-            (availableSpaceDp - contentHeightDp).coerceAtLeast(0.dp)
+        var contentHeightPx = 0
+        for (i in lastUserMessageIndex until messages.list.size) {
+            contentHeightPx += messageHeights[messages.list[i].id] ?: 0
         }
+        calculateBottomSpacerPx(
+            viewportHeightPx = viewportHeight,
+            targetTopPx = with(density) { 140.dp.roundToPx() },
+            bottomObstructionPx = with(density) { (bottomBarHeight + 8.dp).roundToPx() },
+            tailContentHeightPx = contentHeightPx,
+        )
     }
+    val extraPadding = with(density) { extraPaddingPx.toDp() }
 
     Box(modifier = modifier) {
         LazyColumn(
@@ -142,7 +170,25 @@ fun MessageList(
                     onMediaClick = onMediaClick,
                     onFileContentClick = onFileContentClick,
                     onPdfPagesClick = onPdfPagesClick,
-                    onHeightChanged = { height -> messageHeights[message.id] = height },
+                    onHeightChanged = { height ->
+                        if (height > 0 && messageHeights[message.id] != height) {
+                            val mode = messageListLayoutMode(
+                                isSwitching = isSwitching,
+                                isScrollInProgress = state.isScrollInProgress,
+                            )
+                            val anchorIndex = state.firstVisibleItemIndex
+                            val anchorOffset = state.firstVisibleItemScrollOffset
+                            messageHeights[message.id] = height
+                            if (
+                                mode == MessageListLayoutMode.STABLE &&
+                                anchorIndex < messages.list.size
+                            ) {
+                                // Commit the real height and its inverse spacer correction while
+                                // retaining the visible item/offset for the next remeasure.
+                                state.requestScrollToItem(anchorIndex, anchorOffset)
+                            }
+                        }
+                    },
                     thoughtExpandedStates = thoughtExpandedStates
                 )
                 }

@@ -3,6 +3,8 @@ package com.newoether.agora.api.openai
 import com.newoether.agora.api.OpenAiChatRequest
 import com.newoether.agora.api.OpenAiContentPart
 import com.newoether.agora.api.util.requireValidRequestFormat
+import com.newoether.agora.api.util.safeWireToolCallId
+import com.newoether.agora.api.util.safeWireToolName
 import com.newoether.agora.api.util.validateToolDefinitions
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -65,9 +67,13 @@ internal fun OpenAiChatRequest.requireValidWireFormat(provider: String) {
                 }
                 message.toolCalls.orEmpty().forEachIndexed { callIndex, call ->
                     val callLocation = "$location.tool_calls[$callIndex]"
-                    if (call.id.isBlank()) violations += "$callLocation id is blank"
+                    if (!call.id.matches(safeWireToolCallId)) {
+                        violations += "$callLocation id is not wire-safe"
+                    }
                     if (call.type != "function") violations += "$callLocation type is not function"
-                    if (call.function.name.isBlank()) violations += "$callLocation name is blank"
+                    if (!call.function.name.matches(safeWireToolName)) {
+                        violations += "$callLocation name is not wire-safe"
+                    }
                     if (!isJsonObject(call.function.arguments)) {
                         violations += "$callLocation arguments are not a JSON object"
                     }

@@ -9,7 +9,9 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
+import com.newoether.agora.api.util.adaptToolRoundsForProvider
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -163,6 +165,20 @@ private fun MessageSegment.signatureIsCompatibleWithAnthropic(
         sourceModel.contains("claude", ignoreCase = true)
 }
 
+private fun ChatMessage.isAnthropicToolRoundCompatible(
+    targetModel: String,
+    signedThinkingRequired: Boolean,
+): Boolean {
+    if (!signedThinkingRequired) return true
+    val thoughts = segments
+        ?.filter { it.type == "thought" && it.content.isNotBlank() }
+        .orEmpty()
+    return thoughts.isNotEmpty() && thoughts.all {
+        !it.signature.isNullOrBlank() &&
+            it.signatureIsCompatibleWithAnthropic(modelName, targetModel)
+    }
+}
+
 class AnthropicProvider : LlmProvider {
     override val name: String = Constants.PROVIDER_ANTHROPIC
     override val defaultBaseUrl: String = "https://api.anthropic.com/v1"
@@ -175,7 +191,45 @@ class AnthropicProvider : LlmProvider {
         val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
         val modelName = config.modelId
 
-        val validatedPath = prepareMessages(messages, config.maxContextWindow)
+        // ── Model-generation classification ─────────────────────────────────
+        // The legacy sets are CLOSED lists; every model NOT matched below — including
+        // claude-opus-5 / claude-sonnet-5 / fable / mythos and all FUTURE families — is
+        // treated as current-generation: adaptive thinking only, and no sampling params.
+        // Rationale (API contract): `budget_tokens` and `temperature`/`top_p` are REMOVED
+        // from Opus 4.7 onward (sending either returns a hard 400), so an unknown new
+        // model must never fall back onto the legacy request shape.
+        val family = classifyClaudeFamily(modelName)
+        val thinkingBudget = (
+            if (config.thinkingBudgetEnabled) config.thinkingBudgetTokens else ThinkingLevels.DefaultBudgetTokens
+        ).coerceIn(1024, 128000)
+        val thinking = when {
+            !config.thinkingEnabled || !modelName.startsWith("claude") -> null
+            family == ClaudeFamily.NO_THINKING -> null
+            family == ClaudeFamily.BUDGET_THINKING ->
+                AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
+            // 4.6: adaptive preferred; the deprecated budget form is still functional there,
+            // so honor an explicit user-enabled budget as the documented transitional escape hatch.
+            family == ClaudeFamily.TRANSITIONAL_4_6 && config.thinkingBudgetEnabled ->
+                AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
+            else -> AnthropicThinking(type = "adaptive", display = "summarized")
+        }
+        val outputConfig = if (thinking?.type == "adaptive") {
+            AnthropicOutputConfig(effort = ThinkingLevels.anthropicEffort(config.thinkingLevel))
+        } else null
+        // temperature/top_p are rejected with a 400 on Opus 4.7+ / Sonnet 5 / Fable — only the
+        // legacy and transitional families may carry user sampling overrides.
+        val allowsSamplingParams = family != ClaudeFamily.CURRENT_ADAPTIVE
+
+        val canonicalPath = prepareMessages(messages, config.maxContextWindow)
+        val validatedPath = adaptToolRoundsForProvider(
+            messages = canonicalPath,
+            providerName = "Anthropic",
+        ) { toolMessage ->
+            toolMessage.isAnthropicToolRoundCompatible(
+                targetModel = modelName,
+                signedThinkingRequired = thinking != null,
+            )
+        }
 
         // Convert ChatMessages to Anthropic API format.
         // Consecutive result_ messages are batched into a single user message
@@ -210,35 +264,6 @@ class AnthropicProvider : LlmProvider {
                 }
             }
         })
-
-        // ── Model-generation classification ─────────────────────────────────
-        // The legacy sets are CLOSED lists; every model NOT matched below — including
-        // claude-opus-5 / claude-sonnet-5 / fable / mythos and all FUTURE families — is
-        // treated as current-generation: adaptive thinking only, and no sampling params.
-        // Rationale (API contract): `budget_tokens` and `temperature`/`top_p` are REMOVED
-        // from Opus 4.7 onward (sending either returns a hard 400), so an unknown new
-        // model must never fall back onto the legacy request shape.
-        val family = classifyClaudeFamily(modelName)
-        val thinkingBudget = (
-            if (config.thinkingBudgetEnabled) config.thinkingBudgetTokens else ThinkingLevels.DefaultBudgetTokens
-        ).coerceIn(1024, 128000)
-        val thinking = when {
-            !config.thinkingEnabled || !modelName.startsWith("claude") -> null
-            family == ClaudeFamily.NO_THINKING -> null
-            family == ClaudeFamily.BUDGET_THINKING ->
-                AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
-            // 4.6: adaptive preferred; the deprecated budget form is still functional there,
-            // so honor an explicit user-enabled budget as the documented transitional escape hatch.
-            family == ClaudeFamily.TRANSITIONAL_4_6 && config.thinkingBudgetEnabled ->
-                AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
-            else -> AnthropicThinking(type = "adaptive", display = "summarized")
-        }
-        val outputConfig = if (thinking?.type == "adaptive") {
-            AnthropicOutputConfig(effort = ThinkingLevels.anthropicEffort(config.thinkingLevel))
-        } else null
-        // temperature/top_p are rejected with a 400 on Opus 4.7+ / Sonnet 5 / Fable — only the
-        // legacy and transitional families may carry user sampling overrides.
-        val allowsSamplingParams = family != ClaudeFamily.CURRENT_ADAPTIVE
 
         // Convert ToolDefinition to Anthropic format
         val anthropicTools = config.tools?.map { td ->
@@ -299,6 +324,12 @@ class AnthropicProvider : LlmProvider {
             headers["x-api-key"] = config.apiKey
             headers["anthropic-version"] = "2023-06-01"
             val requestBodyJson = json.encodeToString(AnthropicRequest.serializer(), requestBody)
+            requireValidSerializedRequest(
+                provider = "Anthropic",
+                body = requestBodyJson,
+                requiredStringFields = setOf("model"),
+                requiredArrayFields = setOf("messages"),
+            )
             DebugLog.d("AgoraAPI", "[Anthropic] REQ → $baseUrl/messages | model=$modelName | msgs=${apiMessages.size} | thinking=${thinking != null} | tools=${anthropicTools?.size ?: 0}")
             DebugLog.d("AgoraAPI", "[Anthropic] BODY: ${requestBodyJson.take(4000)}")
             val maxAttempts = 3
@@ -365,6 +396,22 @@ class AnthropicProvider : LlmProvider {
                                             when (delta.type) {
                                                 "input_json_delta" -> {
                                                     delta.partialJson?.let { toolUseArgs.append(it) }
+                                                }
+                                                "signature_delta" -> {
+                                                    delta.signature
+                                                        ?.takeIf(String::isNotBlank)
+                                                        ?.let { signature ->
+                                                            thinkingSignature = signature
+                                                            // Signature deltas carry no thinking
+                                                            // text, but must reach persistence
+                                                            // before the following tool_use turn.
+                                                            emit(
+                                                                StreamEvent.ThoughtChunk(
+                                                                    thought = "",
+                                                                    signature = signature,
+                                                                )
+                                                            )
+                                                        }
                                                 }
                                                 else -> {
                                                     delta.text?.let { emit(StreamEvent.TextChunk(it)) }

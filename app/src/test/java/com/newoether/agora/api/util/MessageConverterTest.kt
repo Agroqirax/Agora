@@ -74,7 +74,7 @@ class MessageConverterTest {
         )
         val result = convertToOpenAiMessages(msgs, "You are helpful")
         assertEquals("system", result.first().role)
-        assertEquals("You are helpful", result.first().content.first().text)
+        assertEquals("You are helpful", result.first().content!!.first().text)
     }
 
     @Test
@@ -96,16 +96,16 @@ class MessageConverterTest {
             participant = Participant.USER
         )
         val result = convertToOpenAiMessages(listOf(msg), includeImages = false)
-        assertEquals(1, result.first().content.size) // only text, no image
-        assertEquals("text", result.first().content.first().type)
+        assertEquals(1, result.first().content!!.size) // only text, no image
+        assertEquals("text", result.first().content!!.first().type)
     }
 
     @Test
-    fun convertToOpenAiMessages_emptyText_addsSpacePart() {
+    fun convertToOpenAiMessages_emptyText_addsVisibleFallbackPart() {
         val msg = ChatMessage(id = "u1", text = "", participant = Participant.USER)
         val result = convertToOpenAiMessages(listOf(msg))
-        assertEquals(1, result.first().content.size)
-        assertEquals(" ", result.first().content.first().text)
+        assertEquals(1, result.first().content!!.size)
+        assertEquals("[Attachment unavailable]", result.first().content!!.first().text)
     }
 
     @Test

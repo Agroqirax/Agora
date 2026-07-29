@@ -713,9 +713,9 @@ internal fun String.protectLiteralAngleBracketTags(): String {
                 }
                 if (character == '<') {
                     val close = indexOf('>', startIndex = index + 1)
-                    if (close > index && indexOf('\n', startIndex = index + 1).let { it < 0 || it > close }) {
+                    if (close > index) {
                         val inner = substring(index + 1, close)
-                        if (inner.isLiteralTagCandidate()) {
+                        if (inner.shouldProtectAngleBracketContent()) {
                             if (inner.startsWith('/')) {
                                 appendRaw("</\u200B${inner.drop(1)}>")
                             } else {
@@ -752,8 +752,7 @@ internal fun String.protectLiteralAngleBracketTags(): String {
     return output.toString()
 }
 
-private val literalTagName = Regex("""/?[A-Za-z][A-Za-z0-9:_-]*(?:\s+[^<>\r\n]*)?/?""")
 private val markdownAutolink = Regex("""(?i)(?:https?://|mailto:).+|[^<>\s]+@[^<>\s]+""")
 
-private fun String.isLiteralTagCandidate(): Boolean =
-    matches(literalTagName) && !matches(markdownAutolink)
+private fun String.shouldProtectAngleBracketContent(): Boolean =
+    isNotEmpty() && !matches(markdownAutolink)

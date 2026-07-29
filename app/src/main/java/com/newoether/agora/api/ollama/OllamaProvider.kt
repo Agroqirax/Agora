@@ -7,6 +7,7 @@ import com.newoether.agora.api.util.StreamingThinkTagParser
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
@@ -186,6 +187,12 @@ class OllamaProvider : LlmProvider {
                 headers["Authorization"] = "Bearer ${config.apiKey}"
             }
             val requestBodyJson = json.encodeToString(OllamaChatRequest.serializer(), requestBody)
+            requireValidSerializedRequest(
+                provider = "Ollama",
+                body = requestBodyJson,
+                requiredStringFields = setOf("model"),
+                requiredArrayFields = setOf("messages"),
+            )
             DebugLog.d("AgoraAPI", "[Ollama] REQ → $baseUrl/api/chat | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
             DebugLog.d("AgoraAPI", "[Ollama] BODY: ${requestBodyJson.take(4000)}")
             val maxAttempts = 3

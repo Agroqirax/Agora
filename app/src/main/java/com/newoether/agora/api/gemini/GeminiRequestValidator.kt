@@ -1,6 +1,8 @@
 package com.newoether.agora.api.gemini
 
 import com.newoether.agora.api.util.requireValidRequestFormat
+import com.newoether.agora.api.util.safeWireToolCallId
+import com.newoether.agora.api.util.safeWireToolName
 
 internal fun coalesceGeminiContents(
     contents: List<ApiRequestContent>,
@@ -8,7 +10,7 @@ internal fun coalesceGeminiContents(
     val result = mutableListOf<ApiRequestContent>()
     for (content in contents) {
         val previous = result.lastOrNull()
-        if (previous?.role == content.role && content.role != null) {
+        if (previous != null && previous.role == content.role && content.role != null) {
             result[result.lastIndex] = previous.copy(parts = previous.parts + content.parts)
         } else {
             result += content
@@ -89,8 +91,12 @@ internal fun ApiGenerateContentRequest.requireValidWireFormat(modelName: String)
             }
             part.functionCall?.let { call ->
                 if (content.role != "model") violations += "$partLocation functionCall is not model role"
-                if (call.id.isNullOrBlank()) violations += "$partLocation functionCall id is blank"
-                if (call.name.isBlank()) violations += "$partLocation functionCall name is blank"
+                if (call.id?.matches(safeWireToolCallId) != true) {
+                    violations += "$partLocation functionCall id is not wire-safe"
+                }
+                if (!call.name.matches(safeWireToolName)) {
+                    violations += "$partLocation functionCall name is not wire-safe"
+                }
                 if (requiresFunctionCallSignature && part.thoughtSignature.isNullOrBlank()) {
                     violations += "$partLocation Gemini 3 functionCall has no thoughtSignature"
                 }
@@ -104,8 +110,12 @@ internal fun ApiGenerateContentRequest.requireValidWireFormat(modelName: String)
             }
             part.functionResponse?.let { response ->
                 if (content.role != "user") violations += "$partLocation functionResponse is not user role"
-                if (response.id.isNullOrBlank()) violations += "$partLocation functionResponse id is blank"
-                if (response.name.isBlank()) violations += "$partLocation functionResponse name is blank"
+                if (response.id?.matches(safeWireToolCallId) != true) {
+                    violations += "$partLocation functionResponse id is not wire-safe"
+                }
+                if (!response.name.matches(safeWireToolName)) {
+                    violations += "$partLocation functionResponse name is not wire-safe"
+                }
             }
             if (part.thoughtSignature != null && part.functionCall == null) {
                 violations += "$partLocation thoughtSignature is not attached to a functionCall"
@@ -152,8 +162,8 @@ private fun ApiGenerateContentRequest.validateTools(violations: MutableList<Stri
         ).size
         if (payloadCount != 1) violations += "tools[$toolIndex] must contain exactly one tool type"
         tool.functionDeclarations.orEmpty().forEachIndexed { functionIndex, declaration ->
-            if (declaration.name.isBlank()) {
-                violations += "tools[$toolIndex].functions[$functionIndex].name is blank"
+            if (!declaration.name.matches(safeWireToolName)) {
+                violations += "tools[$toolIndex].functions[$functionIndex].name is not wire-safe"
             }
             if (!functionNames.add(declaration.name)) {
                 violations += "duplicate function declaration ${declaration.name}"

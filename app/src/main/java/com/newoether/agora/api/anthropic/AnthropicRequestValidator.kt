@@ -1,6 +1,8 @@
 package com.newoether.agora.api.anthropic
 
 import com.newoether.agora.api.util.requireValidRequestFormat
+import com.newoether.agora.api.util.safeWireToolCallId
+import com.newoether.agora.api.util.safeWireToolName
 
 internal fun coalesceAnthropicMessages(
     messages: List<AnthropicMessage>,
@@ -45,6 +47,16 @@ internal fun AnthropicRequest.requireValidWireFormat() {
         val leadingResults = message.content.takeWhile { it.type == "tool_result" }
         val laterResults = message.content.drop(leadingResults.size).any { it.type == "tool_result" }
         if (laterResults) violations += "$location has tool_result after another content type"
+        val leadingThinking = message.content.takeWhile { it.type == "thinking" }
+        val laterThinking = message.content.drop(leadingThinking.size).any { it.type == "thinking" }
+        if (laterThinking) violations += "$location has thinking after another content type"
+        if (
+            thinking != null &&
+            message.content.any { it.type == "tool_use" } &&
+            leadingThinking.isEmpty()
+        ) {
+            violations += "$location tool_use is missing its leading signed thinking block"
+        }
 
         if (pendingToolIds.isNotEmpty()) {
             if (message.role != "user") {
@@ -105,8 +117,8 @@ internal fun AnthropicRequest.requireValidWireFormat() {
                 "tool_use" -> {
                     if (
                         message.role != "assistant" ||
-                        part.id.isNullOrBlank() ||
-                        part.name.isNullOrBlank() ||
+                        part.id?.matches(safeWireToolCallId) != true ||
+                        part.name?.matches(safeWireToolName) != true ||
                         part.input == null ||
                         populated.size != 3
                     ) {
@@ -165,7 +177,9 @@ private fun AnthropicRequest.validateThinking(violations: MutableList<String>) {
 private fun AnthropicRequest.validateTools(violations: MutableList<String>) {
     val names = mutableSetOf<String>()
     tools.orEmpty().forEachIndexed { index, tool ->
-        if (tool.name.isBlank()) violations += "tools[$index].name is blank"
+        if (!tool.name.matches(safeWireToolName)) {
+            violations += "tools[$index].name is not wire-safe"
+        }
         if (!names.add(tool.name)) violations += "duplicate tool name ${tool.name}"
         if (tool.inputSchema["type"]?.toString()?.trim('"') != "object") {
             violations += "tool ${tool.name} input_schema is not an object schema"
