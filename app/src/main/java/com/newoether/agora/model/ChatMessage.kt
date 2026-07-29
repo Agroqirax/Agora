@@ -22,6 +22,12 @@ data class MessageSegment(
     val toolResult: String? = null,
     val toolCallId: String? = null,
     val signature: String? = null,
+    /**
+     * Provider that issued [signature]. Signatures are opaque provider protocol state and must
+     * never be replayed to a different wire protocol. This lives in the existing JSON segment
+     * payload, so old rows remain readable without a Room schema migration.
+     */
+    val signatureProvider: String? = null,
     val durationMs: Long? = null,
     /** Durable UI lifecycle for tool segments. Null keeps old rows backward-compatible. */
     val toolState: String? = null,

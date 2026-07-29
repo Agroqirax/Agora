@@ -17,7 +17,13 @@ fun buildToolCallId(toolName: String, arguments: String, prefix: String = Consta
     val input = "$toolName:$arguments"
     val hash = digest.digest(input.toByteArray())
     val shortHash = hash.take(8).joinToString("") { "%02x".format(it) }
-    return "$prefix${toolName}_$shortHash"
+    val safeName = toolName
+        .trim()
+        .replace(Regex("[^A-Za-z0-9_-]+"), "_")
+        .trim('_')
+        .take(32)
+        .ifBlank { "tool" }
+    return "$prefix${safeName}_$shortHash"
 }
 
 /** Maps an image file path to its MIME type. Providers reject a mislabeled payload
@@ -76,7 +82,7 @@ fun convertToOpenAiMessages(
                 }
                 entries.add(OpenAiMessage(
                     role = "assistant",
-                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    content = null,
                     toolCalls = toolCalls,
                     reasoningContent = thoughtContent?.ifEmpty { null }
                 ))
@@ -85,7 +91,7 @@ fun convertToOpenAiMessages(
                 val toolId = tc.toolCallId ?: buildToolCallId(tc.toolName, tc.arguments)
                 entries.add(OpenAiMessage(
                     role = "assistant",
-                    content = listOf(OpenAiContentPart(type = "text", text = " ")),
+                    content = null,
                     toolCalls = listOf(OpenAiRequestToolCall(
                         id = toolId,
                         function = OpenAiRequestFunction(name = tc.toolName, arguments = tc.arguments)
@@ -142,7 +148,7 @@ fun convertToOpenAiMessages(
         }
 
         if (parts.isEmpty()) {
-            parts.add(OpenAiContentPart(type = "text", text = " "))
+            parts.add(OpenAiContentPart(type = "text", text = "[Attachment unavailable]"))
         }
 
         entries.add(OpenAiMessage(
@@ -156,13 +162,46 @@ fun convertToOpenAiMessages(
 }
 
 fun limitContext(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMessage> {
-    val result = mutableListOf<ChatMessage>()
-    var userCount = 0
-    for (msg in messages.reversed()) {
-        result.add(0, msg)
-        val isTool = msg.id.startsWith(Constants.TOOL_MSG_PREFIX) || msg.id.startsWith(Constants.RESULT_MSG_PREFIX)
-        if (!isTool) userCount++
-        if (userCount >= maxUserMessages) break
+    if (messages.isEmpty()) return emptyList()
+
+    // A tool call and all of its results are one protocol unit. Truncating the flat list can leave
+    // either an orphan result or an unanswered assistant tool call, so window complete units only.
+    val units = mutableListOf<List<ChatMessage>>()
+    var index = 0
+    while (index < messages.size) {
+        val message = messages[index]
+        if (message.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
+            val round = mutableListOf(message)
+            index++
+            while (
+                index < messages.size &&
+                messages[index].id.startsWith(Constants.RESULT_MSG_PREFIX)
+            ) {
+                round += messages[index++]
+            }
+            units += round
+        } else {
+            units += listOf(message)
+            index++
+        }
     }
-    return result
+
+    val selected = ArrayDeque<List<ChatMessage>>()
+    var normalTurnCount = 0
+    val turnLimit = maxUserMessages.coerceAtLeast(1)
+    for (unit in units.asReversed()) {
+        selected.addFirst(unit)
+        if (unit.size == 1 && !unit.single().isToolProtocolMessage()) {
+            normalTurnCount++
+        }
+        if (normalTurnCount >= turnLimit) break
+    }
+
+    val flattened = selected.flatten()
+    // All supported chat protocols accept a user-led suffix. Starting at an assistant/tool turn
+    // after truncation is ambiguous and is a common source of provider-side 400 responses.
+    val firstNormalUser = flattened.indexOfFirst {
+        it.participant == Participant.USER && !it.isToolProtocolMessage()
+    }
+    return if (firstNormalUser >= 0) flattened.drop(firstNormalUser) else emptyList()
 }

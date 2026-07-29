@@ -6,6 +6,7 @@ import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.util.StreamingThinkTagParser
 import com.newoether.agora.api.util.convertToOpenAiMessages
 import com.newoether.agora.api.util.prepareMessages
+import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.model.ChatMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -136,6 +137,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         val thinkParser = StreamingThinkTagParser()
 
         try {
+            request.requireValidWireFormat(name)
             val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), request)
             DebugLog.d("AgoraAPI", "[$name] REQ -> ${endpointUrls.first()} | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
 
@@ -188,6 +190,9 @@ abstract class BaseOpenAiProvider : LlmProvider {
             }
         } catch (e: CancellationException) {
             throw e
+        } catch (e: RequestFormatException) {
+            DebugLog.e("AgoraAPI", "[$name] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat(name, e.violations.joinToString())))
         } catch (e: SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: ConnectException) {

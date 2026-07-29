@@ -353,10 +353,21 @@ class GenerationManager(
 
     private fun appendMergedSegment(target: MutableList<MessageSegment>, segment: MessageSegment) {
         val last = target.lastOrNull()
-        if (last != null && last.type == segment.type && (segment.type == "answer" || segment.type == "thought")) {
+        val canMerge = last != null &&
+            last.type == segment.type &&
+            (
+                segment.type == "answer" ||
+                    (
+                        segment.type == "thought" &&
+                            last.signature == null &&
+                            segment.signature == null
+                        )
+                )
+        if (canMerge) {
             target[target.lastIndex] = last.copy(
                 content = last.content + segment.content,
                 signature = segment.signature ?: last.signature,
+                signatureProvider = segment.signatureProvider ?: last.signatureProvider,
                 durationMs = mergeDurationMs(last.durationMs, segment.durationMs)
             )
         } else {
@@ -374,6 +385,7 @@ class GenerationManager(
         answerBuf: StringBuilder,
         thoughtBuf: StringBuilder,
         signature: String? = null,
+        signatureProvider: String? = null,
         thoughtDurationMs: Long? = null
     ): List<MessageSegment>? {
         val result = flushed.toMutableList()
@@ -385,6 +397,7 @@ class GenerationManager(
                 type = "thought",
                 content = thoughtBuf.toString(),
                 signature = signature,
+                signatureProvider = signatureProvider,
                 durationMs = thoughtDurationMs
             ))
         }
@@ -407,51 +420,20 @@ class GenerationManager(
             pathEntities.add(0, msg)
             currId = msg.parentId
         }
-        // Inject tool call chains that are children of messages in the ancestor path.
-        val expanded = mutableListOf<MessageEntity>()
-        for (entity in pathEntities) {
-            val toolChildren = dbMessages
-                .filter { it.parentId == entity.id && it.id.startsWith(Constants.TOOL_MSG_PREFIX) }
-                .sortedBy { it.timestamp }
-            if (toolChildren.isEmpty()) {
-                expanded.add(entity)
-            } else {
-                for (toolMsg in toolChildren) {
-                    expanded.add(toolMsg)
-                    val pending = mutableListOf(toolMsg)
-                    var safety = 0
-                    while (pending.isNotEmpty() && safety < 100) {
-                        val current = pending.removeAt(0)
-                        val children = dbMessages
-                            .filter { it.parentId == current.id && (it.id.startsWith(Constants.RESULT_MSG_PREFIX) || it.id.startsWith(Constants.TOOL_MSG_PREFIX)) }
-                            .sortedBy { it.timestamp }
-                        for (child in children) {
-                            val isResult = child.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                            if (isResult) {
-                                // Include result_ messages so providers can emit
-                                // correct tool_use/tool_result pairs. The result
-                                // data lives in TOOL_MSG segments too, but Anthropic
-                                // requires separate tool_result blocks in the next
-                                // user-role message.
-                                if (child !in expanded) {
-                                    expanded.add(child)
-                                }
-                                pending.add(child)
-                            } else if (child !in expanded) {
-                                expanded.add(child)
-                                pending.add(child)
-                            }
-                        }
-                        safety++
-                    }
-                }
-                expanded.add(entity.copy(toolCallJson = null))
-            }
-        }
+        // Inject each persisted tool protocol row exactly once. A queued intervention may have a
+        // result_ ancestor while that same round is also reachable as a side chain of the visible
+        // model message; ApiPathAssembler owns that overlap and prevents duplicate replay.
+        val expanded = ApiPathAssembler.assemble(pathEntities, dbMessages)
         val currentPath = expanded.map {
             val segs = it.toolCallJson?.let { json -> try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null } }
             val toolCall = segs?.lastOrNull { s -> s.type == "tool" }?.let { s ->
-                ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", s.toolResult ?: "", s.toolCallId)
+                ToolCallData(
+                    toolName = s.toolName ?: "",
+                    arguments = s.toolArgs ?: "{}",
+                    result = s.toolResult ?: "",
+                    signature = s.signature,
+                    toolCallId = s.toolCallId,
+                )
             }
             val meta = it.attachmentMeta?.let { json -> try { Json.decodeFromString<com.newoether.agora.model.AttachmentMeta>(json) } catch (_: Exception) { null } }
             val attachmentText = if (meta != null) {
@@ -487,6 +469,7 @@ class GenerationManager(
                 participant = it.participant,
                 timestamp = it.timestamp,
                 thoughtTimeMs = it.thoughtTimeMs,
+                modelName = it.modelName,
                 segments = segs,
                 toolCall = toolCall,
                 runId = it.runId,
@@ -566,6 +549,7 @@ class GenerationManager(
         var currentAnswerBuf = StringBuilder()
         var currentThoughtBuf = StringBuilder()
         var currentThoughtSignature: String? = null
+        var currentThoughtSignatureProvider: String? = null
         var parentId: String? = null
         var modelRunSequence = -1L
         var toolPath = emptyList<ChatMessage>()
@@ -703,6 +687,7 @@ class GenerationManager(
                     currentAnswerBuf,
                     currentThoughtBuf,
                     currentThoughtSignature,
+                    currentThoughtSignatureProvider,
                     liveThoughtDurationMs()
                 ),
                 retryText = retryText,
@@ -730,10 +715,12 @@ class GenerationManager(
                         type = "thought",
                         content = currentThoughtBuf.toString(),
                         signature = currentThoughtSignature,
+                        signatureProvider = currentThoughtSignatureProvider,
                         durationMs = currentThoughtDurationMs.takeIf { it > 0L }
                     ))
                     currentThoughtBuf = StringBuilder()
                     currentThoughtSignature = null
+                    currentThoughtSignatureProvider = null
                 }
                 currentThoughtDurationMs = 0L
             }
@@ -826,7 +813,10 @@ class GenerationManager(
                             else totalThoughts += event.thought
                         }
                         if (event.title != null) totalThoughtTitle = event.title
-                        if (event.signature != null) currentThoughtSignature = event.signature
+                        if (event.signature != null) {
+                            currentThoughtSignature = event.signature
+                            currentThoughtSignatureProvider = provider.name
+                        }
                     }
                     is StreamEvent.UsageUpdate -> {
                         if (event.tokenCount > 0) totalTokenCount = event.tokenCount
@@ -860,6 +850,7 @@ class GenerationManager(
                             toolResult = null,
                             toolCallId = event.id,
                             signature = event.signature,
+                            signatureProvider = provider.name.takeIf { event.signature != null },
                             toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
                         )
                         appendMergedSegment(segments, ts)
@@ -901,6 +892,7 @@ class GenerationManager(
                                     toolResult = null,
                                     toolCallId = call.id,
                                     signature = call.signature,
+                                    signatureProvider = provider.name.takeIf { call.signature != null },
                                     toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
                                 ),
                             )
@@ -968,7 +960,15 @@ class GenerationManager(
                 val toolMsgSegs = txedSegments.ifEmpty { null }
                 val tcds = toolCallDataList
                 val allSegments = toolMsgSegs ?: tcds.map { tc ->
-                    MessageSegment(type = "tool", toolName = tc.toolName, toolArgs = tc.arguments, toolResult = tc.result, signature = tc.signature, toolCallId = tc.toolCallId)
+                    MessageSegment(
+                        type = "tool",
+                        toolName = tc.toolName,
+                        toolArgs = tc.arguments,
+                        toolResult = tc.result,
+                        signature = tc.signature,
+                        signatureProvider = provider.name.takeIf { tc.signature != null },
+                        toolCallId = tc.toolCallId,
+                    )
                 }
                 // Bound the aggregate: a model message row crams every tool round into one
                 // toolCallJson column, so many rounds × a clipped 100KB result can still exceed the
@@ -1004,7 +1004,7 @@ class GenerationManager(
                         id = toolMsgId, conversationId = conversationId, parentId = prevLastId,
                         text = "", thoughts = null, status = MessageStatus.SUCCESS,
                         participant = Participant.MODEL, timestamp = toolRoundTimestamp,
-                        toolCallJson = allSegmentsJson, runId = runId,
+                        modelName = modelName, toolCallJson = allSegmentsJson, runId = runId,
                     ))
                     resultMsgs.forEachIndexed { index, entry ->
                         val (rid, _) = entry
@@ -1012,9 +1012,17 @@ class GenerationManager(
                             id = rid, conversationId = conversationId, parentId = toolMsgId,
                             text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
                             participant = Participant.USER, timestamp = toolRoundTimestamp + index + 1,
-                            runId = runId,
+                            modelName = modelName, runId = runId,
                             toolCallJson = Json.encodeToString(listOf(
-                                MessageSegment(type = "tool", toolName = tcds[index].toolName, toolArgs = tcds[index].arguments, toolResult = tcds[index].result, signature = tcds[index].signature, toolCallId = tcds[index].toolCallId)
+                                MessageSegment(
+                                    type = "tool",
+                                    toolName = tcds[index].toolName,
+                                    toolArgs = tcds[index].arguments,
+                                    toolResult = tcds[index].result,
+                                    signature = tcds[index].signature,
+                                    signatureProvider = provider.name.takeIf { tcds[index].signature != null },
+                                    toolCallId = tcds[index].toolCallId,
+                                )
                             ))
                         ))
                     }
@@ -1102,9 +1110,10 @@ class GenerationManager(
                             val finalSegments = buildLiveSegments(
                                 segments,
                                 currentAnswerBuf,
-                                currentThoughtBuf,
-                                currentThoughtSignature,
-                                currentThoughtDurationMs.takeIf { it > 0L }
+                                  currentThoughtBuf,
+                                  currentThoughtSignature,
+                                  currentThoughtSignatureProvider,
+                                  currentThoughtDurationMs.takeIf { it > 0L }
                             )
                                 ?: segments.toList().ifEmpty { null }
                             // Bound the row's toolCallJson aggregate (#51) and the unbounded answer

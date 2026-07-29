@@ -2,17 +2,32 @@ package com.newoether.agora.api.util
 
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import java.security.MessageDigest
 
 /**
- * Full message preparation pipeline: context window truncation, consecutive
- * same-role merge, empty-turn stripping, then tool message validation. All providers MUST
- * call this before converting messages to their API format.
+ * Full fail-closed message preparation pipeline shared by every provider.
+ *
+ * The result is a canonical history:
+ *  - duplicate persisted rows are removed by id;
+ *  - status rows are projected into model-visible user events;
+ *  - tool calls/results are complete atomic rounds with globally unique call ids;
+ *  - context truncation never splits a tool round;
+ *  - the history starts with a normal user turn and has no empty normal turns.
  */
 fun prepareMessages(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMessage> {
-    return validateToolMessages(
-        stripEmptyTurns(mergeConsecutiveSameRole(limitContext(messages, maxUserMessages)))
+    val canonical = validateToolMessages(
+        stripEmptyTurns(
+            projectGenerationStatusesForApi(messages.distinctBy(ChatMessage::id))
+        )
+    )
+    val merged = stripEmptyTurns(mergeConsecutiveSameRole(canonical))
+    return stripEmptyTurns(
+        mergeConsecutiveSameRole(limitContext(merged, maxUserMessages))
     )
 }
 
@@ -255,6 +270,7 @@ fun mergeConsecutiveSameRole(messages: List<ChatMessage>): List<ChatMessage> {
  */
 fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
     val result = mutableListOf<ChatMessage>()
+    val seenToolCallIds = mutableSetOf<String>()
     var i = 0
     while (i < messages.size) {
         val msg = messages[i]
@@ -266,20 +282,31 @@ fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
                     resultMessages.add(messages[j])
                     j++
                 }
-                val toolUseIds = extractToolUseIds(msg)
-                val normalizedResults = toolUseIds?.let { normalizeToolResults(it, resultMessages) }
-                if (normalizedResults != null) {
-                    result.add(msg)
+                val normalizedCalls = normalizeToolCalls(msg, seenToolCallIds)
+                val normalizedResults = normalizedCalls?.let { calls ->
+                    normalizeToolResults(calls, resultMessages)
+                }
+                if (normalizedCalls != null && normalizedResults != null) {
+                    result.add(normalizedCalls.message)
                     result.addAll(normalizedResults)
+                    seenToolCallIds.addAll(normalizedCalls.callIds)
                     i = j
                 } else {
-                    // Drop the assistant tool call plus every immediately-following partial/extra
-                    // result. Otherwise the next loop would reinterpret those rows as orphans.
+                    result += toolRoundAsPlainContext(
+                        toolMessage = msg,
+                        resultMessages = resultMessages,
+                        reason = "the stored tool round was incomplete or damaged",
+                    )
                     i = j
                 }
             }
             msg.id.startsWith(Constants.RESULT_MSG_PREFIX) -> {
-                i++ // orphan result_ — drop
+                result += toolRoundAsPlainContext(
+                    toolMessage = null,
+                    resultMessages = listOf(msg),
+                    reason = "the stored tool result had no matching tool call",
+                )
+                i++
             }
             else -> {
                 result.add(msg)
@@ -290,14 +317,116 @@ fun validateToolMessages(messages: List<ChatMessage>): List<ChatMessage> {
     return result
 }
 
-private fun extractToolUseIds(toolMsg: ChatMessage): List<String>? {
-    val toolSegments = toolMsg.segments?.filter { it.type == "tool" }.orEmpty()
-    val ids = if (toolSegments.isNotEmpty()) {
-        toolSegments.map { it.toolCallId?.takeIf(String::isNotBlank) ?: return null }
-    } else {
-        listOf(toolMsg.toolCall?.toolCallId?.takeIf(String::isNotBlank) ?: return null)
+private data class NormalizedToolCalls(
+    val message: ChatMessage,
+    val segments: List<MessageSegment>,
+    val callIds: List<String>,
+)
+
+private val toolJson = Json { ignoreUnknownKeys = true }
+private val safeToolCallId = Regex("[A-Za-z0-9_-]{1,128}")
+
+private fun normalizeToolCalls(
+    toolMsg: ChatMessage,
+    alreadySeenIds: Set<String>,
+): NormalizedToolCalls? {
+    val sourceSegments = toolMsg.segments
+        ?.filter { it.type == "tool" }
+        .orEmpty()
+        .ifEmpty {
+            val toolCall = toolMsg.toolCall ?: return null
+            listOf(
+                MessageSegment(
+                    type = "tool",
+                    toolName = toolCall.toolName,
+                    toolArgs = toolCall.arguments,
+                    toolResult = toolCall.result,
+                    toolCallId = toolCall.toolCallId,
+                    signature = toolCall.signature,
+                )
+            )
+        }
+    if (sourceSegments.isEmpty()) return null
+
+    val reserved = alreadySeenIds.toMutableSet()
+    val normalized = sourceSegments.mapIndexed { index, segment ->
+        val name = segment.toolName?.takeIf(String::isNotBlank) ?: return null
+        val arguments = normalizeArguments(segment.toolArgs)
+        var callId = segment.toolCallId?.takeIf { it.matches(safeToolCallId) }
+            ?: buildToolCallId("$name:${toolMsg.id}:$index", arguments)
+        var collision = 0
+        while (!reserved.add(callId)) {
+            collision++
+            callId = buildToolCallId(
+                "$name:${toolMsg.id}:$index:$collision",
+                arguments,
+            )
+        }
+        segment.copy(
+            toolName = name,
+            toolArgs = arguments,
+            toolCallId = callId,
+            // Results belong only to the following result_ row in the API representation.
+            toolResult = null,
+        )
     }
-    return ids.takeIf { it.isNotEmpty() && it.distinct().size == it.size }
+    val normalizedToolCall = toolMsg.toolCall?.takeIf { normalized.size == 1 }?.copy(
+        toolName = normalized.single().toolName.orEmpty(),
+        arguments = normalized.single().toolArgs.orEmpty(),
+        toolCallId = normalized.single().toolCallId,
+    )
+    return NormalizedToolCalls(
+        message = toolMsg.copy(
+            segments = normalized,
+            toolCall = normalizedToolCall,
+        ),
+        segments = normalized,
+        callIds = normalized.map { checkNotNull(it.toolCallId) },
+    )
+}
+
+/**
+ * Replaces provider-specific tool rounds that cannot safely be replayed with ordinary user
+ * context. This is the last-resort compatibility path for opaque thought signatures: the model
+ * still sees what ran and what it returned, while no foreign signature reaches the target API.
+ */
+fun adaptToolRoundsForProvider(
+    messages: List<ChatMessage>,
+    providerName: String,
+    isCompatible: (ChatMessage) -> Boolean,
+): List<ChatMessage> {
+    if (messages.none(ChatMessage::isToolProtocolMessage)) return messages
+    val result = mutableListOf<ChatMessage>()
+    var index = 0
+    while (index < messages.size) {
+        val message = messages[index]
+        if (!message.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
+            if (!message.id.startsWith(Constants.RESULT_MSG_PREFIX)) result += message
+            index++
+            continue
+        }
+
+        val resultMessages = mutableListOf<ChatMessage>()
+        var end = index + 1
+        while (
+            end < messages.size &&
+            messages[end].id.startsWith(Constants.RESULT_MSG_PREFIX)
+        ) {
+            resultMessages += messages[end++]
+        }
+        if (isCompatible(message)) {
+            result += message
+            result += resultMessages
+        } else {
+            result += toolRoundAsPlainContext(
+                toolMessage = message,
+                resultMessages = resultMessages,
+                reason = "its opaque protocol metadata is not compatible with $providerName",
+            )
+        }
+        index = end
+    }
+    return stripEmptyTurns(mergeConsecutiveSameRole(result))
 }
 
 /**
@@ -307,17 +436,25 @@ private fun extractToolUseIds(toolMsg: ChatMessage): List<String>? {
  * Extra result rows/segments are dropped.
  */
 private fun normalizeToolResults(
-    useIds: List<String>,
+    calls: NormalizedToolCalls,
     resultMessages: List<ChatMessage>
 ): List<ChatMessage>? {
     val normalized = mutableListOf<ChatMessage>()
-    var useIndex = 0
+    var callIndex = 0
     for (resultMsg in resultMessages) {
-        if (useIndex >= useIds.size) break
-        val toolSegments = resultMsg.segments?.filter { it.type == "tool" }.orEmpty()
+        if (callIndex >= calls.segments.size) break
+        val toolSegments = resultMsg.segments
+            ?.filter { it.type == "tool" }
+            .orEmpty()
         if (toolSegments.isNotEmpty()) {
-            val kept = toolSegments.take(useIds.size - useIndex).map { segment ->
-                segment.copy(toolCallId = useIds[useIndex++])
+            val kept = toolSegments.take(calls.segments.size - callIndex).map { segment ->
+                val call = calls.segments[callIndex++]
+                segment.copy(
+                    toolName = call.toolName,
+                    toolArgs = call.toolArgs,
+                    toolCallId = call.toolCallId,
+                    toolResult = segment.toolResult ?: resultMsg.text,
+                )
             }
             normalized += resultMsg.copy(
                 segments = kept,
@@ -326,11 +463,135 @@ private fun normalizeToolResults(
                 ),
             )
         } else {
-            val toolCall = resultMsg.toolCall ?: continue
+            val toolCall = resultMsg.toolCall
+            val call = calls.segments[callIndex++]
             normalized += resultMsg.copy(
-                toolCall = toolCall.copy(toolCallId = useIds[useIndex++])
+                segments = listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = call.toolName,
+                        toolArgs = call.toolArgs,
+                        toolResult = toolCall?.result ?: resultMsg.text,
+                        toolCallId = call.toolCallId,
+                        signature = call.signature,
+                        signatureProvider = call.signatureProvider,
+                    )
+                ),
+                toolCall = toolCall?.copy(
+                    toolName = call.toolName.orEmpty(),
+                    arguments = call.toolArgs.orEmpty(),
+                    toolCallId = call.toolCallId,
+                ),
             )
         }
     }
-    return normalized.takeIf { useIndex == useIds.size }
+    return normalized.takeIf { callIndex == calls.segments.size }
+}
+
+private fun normalizeArguments(arguments: String?): String {
+    val parsed = runCatching {
+        toolJson.parseToJsonElement(arguments?.takeIf(String::isNotBlank) ?: "{}")
+    }.getOrNull()
+    return (parsed as? JsonObject)?.toString() ?: "{}"
+}
+
+private fun toolRoundAsPlainContext(
+    toolMessage: ChatMessage?,
+    resultMessages: List<ChatMessage>,
+    reason: String,
+): ChatMessage {
+    val calls = toolMessage
+        ?.segments
+        ?.filter { it.type == "tool" }
+        .orEmpty()
+        .ifEmpty {
+            toolMessage?.toolCall?.let { call ->
+                listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = call.toolName,
+                        toolArgs = call.arguments,
+                        toolResult = call.result,
+                        toolCallId = call.toolCallId,
+                        signature = call.signature,
+                    )
+                )
+            }.orEmpty()
+        }
+    val results = resultMessages.flatMap { message ->
+        message.segments
+            ?.filter { it.type == "tool" }
+            .orEmpty()
+            .ifEmpty {
+                message.toolCall?.let { call ->
+                    listOf(
+                        MessageSegment(
+                            type = "tool",
+                            toolName = call.toolName,
+                            toolArgs = call.arguments,
+                            toolResult = call.result.ifBlank { message.text },
+                            toolCallId = call.toolCallId,
+                        )
+                    )
+                } ?: listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolResult = message.text,
+                    )
+                )
+            }
+    }
+    val fallbackById = results
+        .filter { !it.toolCallId.isNullOrBlank() }
+        .associateBy { it.toolCallId }
+    val unusedResults = results.toMutableList()
+    val details = buildString {
+        append("[Tool history notice: ")
+        append(reason)
+        append(". Replayed as plain context.]\n")
+        if (calls.isEmpty()) {
+            results.forEachIndexed { index, result ->
+                append("\nResult ")
+                append(index + 1)
+                append(":\n")
+                append(result.toolResult.orEmpty())
+                append('\n')
+            }
+        } else {
+            calls.forEachIndexed { index, call ->
+                val exact = call.toolCallId?.let(fallbackById::get)
+                if (exact != null) unusedResults.remove(exact)
+                val paired = exact ?: unusedResults.removeFirstOrNull() ?: call
+                append("\nTool ")
+                append(index + 1)
+                append(": ")
+                append(call.toolName?.takeIf(String::isNotBlank) ?: "unknown")
+                append("\nArguments: ")
+                append(normalizeArguments(call.toolArgs))
+                append("\nResult:\n")
+                append(paired.toolResult.orEmpty())
+                append('\n')
+            }
+        }
+    }.trimEnd()
+    val source = toolMessage ?: resultMessages.first()
+    val stableIdSeed = buildString {
+        append(toolMessage?.id.orEmpty())
+        resultMessages.forEach { append(':').append(it.id) }
+        append(':').append(reason)
+    }
+    val digest = MessageDigest.getInstance("SHA-256")
+        .digest(stableIdSeed.toByteArray())
+        .take(8)
+        .joinToString("") { "%02x".format(it) }
+    return ChatMessage(
+        id = "protocol_notice_$digest",
+        parentId = source.parentId,
+        text = details,
+        participant = Participant.USER,
+        status = MessageStatus.SUCCESS,
+        timestamp = source.timestamp,
+        runId = source.runId,
+        runSequence = source.runSequence,
+    )
 }

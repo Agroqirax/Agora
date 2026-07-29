@@ -60,6 +60,12 @@ sealed class GenerationError {
         val message: String
     ) : GenerationError()
 
+    /** The request was rejected locally before any network I/O because its shape was not valid. */
+    data class RequestFormat(
+        val provider: String,
+        val details: String,
+    ) : GenerationError()
+
     /** Wraps an unexpected exception. */
     data class Unknown(
         val cause: Throwable
@@ -91,6 +97,7 @@ sealed class GenerationError {
         is Embedding -> "Embedding failed: $message"
         is LocalModel -> message
         is Configuration -> message
+        is RequestFormat -> "Request validation failed before sending ($provider): $details"
         is Unknown -> cause.localizedMessage ?: "An unexpected error occurred."
         Cancelled -> "Generation cancelled."
         Timeout -> "Request timed out."

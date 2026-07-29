@@ -6,6 +6,7 @@ import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.util.StreamingThinkTagParser
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
+import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
@@ -37,6 +38,7 @@ internal data class OllamaMessage(
     val content: String = "",
     val thinking: String? = null,
     val images: List<String>? = null,
+    @SerialName("tool_name") val toolName: String? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiToolCall>? = null
 )
 
@@ -100,7 +102,7 @@ class OllamaProvider : LlmProvider {
                     }
                     entries.add(OllamaMessage(
                         role = "assistant",
-                        content = " ",
+                        content = "",
                         thinking = thinkingContent?.ifEmpty { null },
                         toolCalls = toolCalls
                     ))
@@ -109,7 +111,7 @@ class OllamaProvider : LlmProvider {
                     val argsObj = try { json.parseToJsonElement(msg.toolCall!!.arguments) as? JsonObject } catch (_: Exception) { JsonObject(emptyMap()) }
                     entries.add(OllamaMessage(
                         role = "assistant",
-                        content = " ",
+                        content = "",
                         thinking = thinkingContent?.ifEmpty { null },
                         toolCalls = listOf(OpenAiToolCall(
                             id = toolId,
@@ -127,14 +129,16 @@ class OllamaProvider : LlmProvider {
                 if (!toolSegs.isNullOrEmpty()) {
                     for (seg in toolSegs) {
                         entries.add(OllamaMessage(
-                            role = "user",
-                            content = seg.toolResult ?: ""
+                            role = "tool",
+                            content = seg.toolResult ?: "",
+                            toolName = seg.toolName,
                         ))
                     }
                 } else if (msg.toolCall != null) {
                     entries.add(OllamaMessage(
-                        role = "user",
-                        content = msg.toolCall!!.result
+                        role = "tool",
+                        content = msg.toolCall!!.result,
+                        toolName = msg.toolCall!!.toolName,
                     ))
                 }
                 return@flatMap entries
@@ -175,6 +179,7 @@ class OllamaProvider : LlmProvider {
         )
 
         try {
+            requestBody.requireValidWireFormat()
             val url = "$baseUrl/api/chat"
             val headers = mutableMapOf("Content-Type" to "application/json")
             if (config.apiKey.isNotEmpty()) {
@@ -291,6 +296,9 @@ class OllamaProvider : LlmProvider {
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: RequestFormatException) {
+            DebugLog.e("AgoraAPI", "[Ollama] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat("Ollama", e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {

@@ -108,7 +108,7 @@ data class OpenAiStreamOptions(
 @Serializable
 data class OpenAiMessage(
     val role: String,
-    val content: List<OpenAiContentPart>,
+    val content: List<OpenAiContentPart>? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiRequestToolCall>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
     @SerialName("reasoning_content") val reasoningContent: String? = null

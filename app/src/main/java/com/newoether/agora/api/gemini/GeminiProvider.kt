@@ -4,8 +4,11 @@ import com.newoether.agora.api.*
 
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.api.util.prepareMessages
+import com.newoether.agora.api.util.adaptToolRoundsForProvider
+import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
@@ -35,6 +38,39 @@ private val THOUGHT_TITLE_HEADING = Regex("(?m)^#+\\s*(.*)$")
 private fun extractThoughtTitle(content: String): String? =
     THOUGHT_TITLE_BOLD.find(content)?.groupValues?.get(1)
         ?: THOUGHT_TITLE_HEADING.find(content)?.groupValues?.get(1)
+
+private fun ChatMessage.isGeminiToolRoundCompatible(
+    targetModel: String,
+    signatureRequired: Boolean,
+): Boolean {
+    val calls = segments
+        ?.filter { it.type == "tool" }
+        .orEmpty()
+        .ifEmpty {
+            toolCall?.let { call ->
+                listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = call.toolName,
+                        toolArgs = call.arguments,
+                        toolCallId = call.toolCallId,
+                        signature = call.signature,
+                    )
+                )
+            }.orEmpty()
+        }
+    if (calls.isEmpty()) return false
+    return calls.all { call ->
+        if (signatureRequired && call.signature.isNullOrBlank()) return@all false
+        if (call.signature.isNullOrBlank()) return@all true
+        call.signatureProvider?.let { provider ->
+            return@all provider.equals(Constants.PROVIDER_GOOGLE, ignoreCase = true)
+        }
+        modelName == null ||
+            modelName.equals(targetModel, ignoreCase = true) ||
+            modelName.contains("gemini", ignoreCase = true)
+    }
+}
 
 @Serializable
 internal data class ApiGenerateContentRequest(
@@ -99,6 +135,7 @@ internal data class ApiRequestPart(
 
 @Serializable
 internal data class GeminiFunctionResponse(
+    val id: String? = null,
     val name: String,
     val response: JsonObject
 )
@@ -119,6 +156,7 @@ internal data class ApiResponsePart(
 
 @Serializable
 internal data class GeminiFunctionCall(
+    val id: String? = null,
     val name: String,
     val args: JsonObject? = null,
     @SerialName("thought_signature") val thoughtSignature: String? = null
@@ -170,9 +208,21 @@ class GeminiProvider : LlmProvider {
         val cleanModelName = config.modelId.removePrefix("models/")
         
         // Context windowing
-        val validatedPath = prepareMessages(messages, config.maxContextWindow)
+        val canonicalPath = prepareMessages(messages, config.maxContextWindow)
+        val requiresFunctionCallSignature =
+            cleanModelName.contains("gemini-3", ignoreCase = true) ||
+                cleanModelName.contains("gemini-3.5", ignoreCase = true)
+        val validatedPath = adaptToolRoundsForProvider(
+            messages = canonicalPath,
+            providerName = "Gemini",
+        ) { toolMessage ->
+            toolMessage.isGeminiToolRoundCompatible(
+                targetModel = cleanModelName,
+                signatureRequired = requiresFunctionCallSignature,
+            )
+        }
 
-        val apiContents = validatedPath.flatMap { msg ->
+        val apiContents = coalesceGeminiContents(validatedPath.flatMap { msg ->
             val entries = mutableListOf<ApiRequestContent>()
 
             // tool_ messages: model turn with functionCall(s)
@@ -180,7 +230,6 @@ class GeminiProvider : LlmProvider {
             // and only include thoughtSignature on the functionCall part
             if (msg.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
                 val toolSegs = msg.segments?.filter { it.type == "tool" }
-                val sig = msg.segments?.lastOrNull { !it.signature.isNullOrBlank() }?.signature
                 if (!toolSegs.isNullOrEmpty()) {
                     val parts = toolSegs.map { seg ->
                         val args = try {
@@ -188,9 +237,11 @@ class GeminiProvider : LlmProvider {
                         } catch (_: Exception) { JsonObject(emptyMap()) }
                         ApiRequestPart(
                             functionCall = GeminiFunctionCall(
-                                name = seg.toolName ?: "", args = args ?: JsonObject(emptyMap())
+                                id = seg.toolCallId,
+                                name = seg.toolName ?: "",
+                                args = args ?: JsonObject(emptyMap())
                             ),
-                            thoughtSignature = sig
+                            thoughtSignature = seg.signature
                         )
                     }
                     entries.add(ApiRequestContent(role = "model", parts = parts))
@@ -202,9 +253,11 @@ class GeminiProvider : LlmProvider {
                         role = "model",
                         parts = listOf(ApiRequestPart(
                             functionCall = GeminiFunctionCall(
-                                name = msg.toolCall!!.toolName, args = args ?: JsonObject(emptyMap())
+                                id = msg.toolCall!!.toolCallId,
+                                name = msg.toolCall!!.toolName,
+                                args = args ?: JsonObject(emptyMap())
                             ),
-                            thoughtSignature = sig
+                            thoughtSignature = msg.toolCall!!.signature
                         ))
                     ))
                 }
@@ -218,6 +271,7 @@ class GeminiProvider : LlmProvider {
                     val parts = toolSegs.map { seg ->
                         val response = buildGeminiFunctionResponse(seg.toolResult ?: "{}")
                         ApiRequestPart(functionResponse = GeminiFunctionResponse(
+                            id = seg.toolCallId,
                             name = seg.toolName ?: "",
                             response = response
                         ))
@@ -228,6 +282,7 @@ class GeminiProvider : LlmProvider {
                     entries.add(ApiRequestContent(
                         role = "user",
                         parts = listOf(ApiRequestPart(functionResponse = GeminiFunctionResponse(
+                            id = msg.toolCall!!.toolCallId,
                             name = msg.toolCall!!.toolName,
                             response = response
                         )))
@@ -253,14 +308,14 @@ class GeminiProvider : LlmProvider {
                     DebugLog.e("AgoraAPI", "Failed to encode image: $imagePath", e)
                 }
             }
-            if (parts.isEmpty()) parts.add(ApiRequestPart(text = ""))
+            if (parts.isEmpty()) parts.add(ApiRequestPart(text = "[Attachment unavailable]"))
             entries.add(ApiRequestContent(
                 role = if (msg.participant == Participant.USER) "user" else "model",
                 parts = parts
             ))
 
             entries
-        }
+        })
 
         val systemInstruction = if (!config.systemPrompt.isNullOrBlank()) {
             ApiRequestContent(parts = listOf(ApiRequestPart(text = config.systemPrompt)))
@@ -349,6 +404,7 @@ class GeminiProvider : LlmProvider {
         )
 
         try {
+            requestBody.requireValidWireFormat(cleanModelName)
             // Determine if baseUrl already includes versioning
             val finalUrlString = if (baseUrl.contains("/v1") || baseUrl.contains("/v1beta")) {
                 "$baseUrl/models/$cleanModelName:streamGenerateContent?alt=sse"
@@ -451,8 +507,10 @@ class GeminiProvider : LlmProvider {
 
                                         part.functionCall?.let { fc ->
                                             val argsJson = fc.args?.let { Json.encodeToString(JsonObject.serializer(), it) } ?: "{}"
-                                            val sig = fc.thoughtSignature ?: currentThoughtSignature
-                                            emit(StreamEvent.ToolCallRequest("call_${UUID.randomUUID()}", fc.name, argsJson, sig))
+                                            val sig = part.thoughtSignature ?: fc.thoughtSignature ?: currentThoughtSignature
+                                            emit(StreamEvent.ToolCallRequest(fc.id ?: "call_${UUID.randomUUID()}", fc.name, argsJson, sig))
+                                            // A separately-streamed signature belongs to the next function call only.
+                                            currentThoughtSignature = null
                                             inThoughtBlock = false
                                         }
                                     }
@@ -494,6 +552,9 @@ class GeminiProvider : LlmProvider {
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: RequestFormatException) {
+            DebugLog.e("AgoraAPI", "[Gemini] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat("Gemini", e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {

@@ -6,6 +6,7 @@ import android.content.Context
 import com.newoether.agora.R
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.util.ThinkingParser
+import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
@@ -56,7 +57,11 @@ class LocalProvider(
 
         // Build template messages, collecting images per-message with <__media__> markers
         val imagePaths = mutableListOf<String>()
-        val templateMessages = buildTemplateMessages(messages, config.systemPrompt, imagePaths)
+        val templateMessages = buildTemplateMessages(
+            prepareMessages(messages, config.maxContextWindow),
+            config.systemPrompt,
+            imagePaths,
+        )
         val hasImages = imagePaths.isNotEmpty()
 
         // Try native chat template first, fall back to ChatML

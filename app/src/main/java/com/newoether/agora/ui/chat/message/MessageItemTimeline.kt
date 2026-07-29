@@ -81,7 +81,6 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -234,13 +233,6 @@ internal fun CompactSegmentBlock(
     val isExpanded by remember(expansionKey) {
         derivedStateOf { expandedStates[expansionKey] ?: false }
     }
-    var contentMaxHeightPx by remember(expansionKey) { mutableIntStateOf(0) }
-    LaunchedEffect(isStreaming, expansionKey) {
-        if (isStreaming) {
-            contentMaxHeightPx = 0
-        }
-    }
-
     val lastSeg = segs.last()
     val isLastTool = lastSeg.type == "tool"
     val isToolInProgress = isLastTool &&
@@ -307,19 +299,7 @@ internal fun CompactSegmentBlock(
                 enter = fadeIn(tween(400)) + expandVertically(tween(400)),
                 exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
             ) {
-                Column(
-                    modifier = Modifier
-                        .then(
-                            if (contentMaxHeightPx > 0)
-                                Modifier.heightIn(min = with(LocalDensity.current) { contentMaxHeightPx.toDp() })
-                            else Modifier
-                        )
-                        .onSizeChanged { size ->
-                            if (isStreaming) {
-                                contentMaxHeightPx = maxOf(contentMaxHeightPx, size.height)
-                            }
-                        }
-                ) {
+                Column {
                     Spacer(modifier = Modifier.height(2.dp))
                     // Animate only items appended WHILE expanded during streaming — not the
                     // items already present when the block is first expanded, nor on history.

@@ -4,10 +4,12 @@ import com.newoether.agora.api.*
 
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
+import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -149,6 +151,18 @@ internal fun classifyClaudeFamily(modelName: String): ClaudeFamily {
     return ClaudeFamily.CURRENT_ADAPTIVE
 }
 
+private fun MessageSegment.signatureIsCompatibleWithAnthropic(
+    sourceModel: String?,
+    targetModel: String,
+): Boolean {
+    signatureProvider?.let {
+        return it.equals(Constants.PROVIDER_ANTHROPIC, ignoreCase = true)
+    }
+    return sourceModel == null ||
+        sourceModel.equals(targetModel, ignoreCase = true) ||
+        sourceModel.contains("claude", ignoreCase = true)
+}
+
 class AnthropicProvider : LlmProvider {
     override val name: String = Constants.PROVIDER_ANTHROPIC
     override val defaultBaseUrl: String = "https://api.anthropic.com/v1"
@@ -167,13 +181,13 @@ class AnthropicProvider : LlmProvider {
         // Consecutive result_ messages are batched into a single user message
         // because Anthropic requires all tool_results for a batched assistant
         // tool_use to be in the single immediately-following user message.
-        val apiMessages = buildList {
+        val apiMessages = coalesceAnthropicMessages(buildList {
             var i = 0
             while (i < validatedPath.size) {
                 val msg = validatedPath[i]
                 when {
                     msg.id.startsWith(Constants.TOOL_MSG_PREFIX) -> {
-                        add(buildAssistantToolUse(msg))
+                        add(buildAssistantToolUse(msg, modelName))
                         i++
                         // Batch all immediately following result_ messages into one user message
                         if (i < validatedPath.size && validatedPath[i].id.startsWith(Constants.RESULT_MSG_PREFIX)) {
@@ -195,7 +209,7 @@ class AnthropicProvider : LlmProvider {
                     }
                 }
             }
-        }
+        })
 
         // ── Model-generation classification ─────────────────────────────────
         // The legacy sets are CLOSED lists; every model NOT matched below — including
@@ -279,6 +293,7 @@ class AnthropicProvider : LlmProvider {
         )
 
         try {
+            requestBody.requireValidWireFormat()
             val url = "$baseUrl/messages"
             val headers = mutableMapOf("Content-Type" to "application/json")
             headers["x-api-key"] = config.apiKey
@@ -408,6 +423,9 @@ class AnthropicProvider : LlmProvider {
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
+        } catch (e: RequestFormatException) {
+            DebugLog.e("AgoraAPI", "[Anthropic] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat("Anthropic", e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {
@@ -423,13 +441,18 @@ class AnthropicProvider : LlmProvider {
 
     // ── Message conversion helpers ──
 
-    private fun buildAssistantToolUse(msg: ChatMessage): AnthropicMessage {
+    private fun buildAssistantToolUse(msg: ChatMessage, targetModel: String): AnthropicMessage {
         // With thinking enabled, Anthropic requires the assistant turn that carries tool_use to
         // replay its thinking block(s) unchanged (content + signature) — a bare tool_use turn is
         // rejected on the follow-up request. Unsigned thoughts cannot be replayed, so only signed
         // segments are included; when none exist (thinking off) the turn stays tool_use-only.
         val thinkingParts = msg.segments
-            ?.filter { it.type == "thought" && it.content.isNotEmpty() && !it.signature.isNullOrBlank() }
+            ?.filter {
+                it.type == "thought" &&
+                    it.content.isNotEmpty() &&
+                    !it.signature.isNullOrBlank() &&
+                    it.signatureIsCompatibleWithAnthropic(msg.modelName, targetModel)
+            }
             ?.map { AnthropicContentPart(type = "thinking", thinking = it.content, signature = it.signature) }
             .orEmpty()
         val toolSegs = msg.segments?.filter { it.type == "tool" }
