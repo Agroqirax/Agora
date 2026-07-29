@@ -208,6 +208,21 @@ class ConversationRepository(
     suspend fun updateStreamingMessageCheckpoint(message: ChatMessage): Boolean =
         chatDao.updateMessageCheckpoint(message.toStreamCheckpoint()) > 0
 
+    /** Atomically persists a terminal model snapshot and terminalizes its Run. */
+    suspend fun finishGeneration(
+        message: ChatMessage,
+        runId: String,
+        status: RunStatus,
+        reason: RunEndReason,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.finishGeneration(
+        checkpoint = message.toStreamCheckpoint(),
+        runId = runId,
+        status = status,
+        reason = reason,
+        at = at,
+    )
+
     /** Atomically persists the final stopped snapshot(s) and terminalizes their Run. */
     suspend fun finishStoppedGeneration(
         messages: List<ChatMessage>,

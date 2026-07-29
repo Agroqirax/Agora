@@ -148,11 +148,7 @@ fun MessageItem(
 
     val markdownAssets = rememberChatMarkdownAssets(textColor)
     val markdownRenderContext = markdownAssets.renderContext
-    val customMarkdownColors = markdownAssets.colors
-    val thoughtTypography = markdownAssets.thoughtTypography
-    val thoughtMarkdownPadding = markdownAssets.thoughtPadding
-    val customMarkdownComponents = markdownAssets.components
-    val markdownFlavour = markdownAssets.flavour
+    val thoughtMarkdownRenderContext = markdownAssets.thoughtRenderContext
 
     val shouldAnimate = !isFirstComposition && !isSwitching
 
@@ -205,9 +201,7 @@ fun MessageItem(
                 showBranchSelector = showBranchSelector,
                 toolCallDisplayMode = toolCallDisplayMode,
                 thoughtExpandedStates = thoughtExpandedStates,
-                isThoughtExpanded = isThoughtExpanded,
                 renderContext = markdownRenderContext,
-                markdownFlavour = markdownFlavour,
                 branchIndex = branchIndex,
                 totalBranches = totalBranches,
                 onSwitchBranch = onSwitchBranch,
@@ -232,11 +226,7 @@ fun MessageItem(
             selectedSegmentIndex = selectedSegmentIndex,
             selectedSegmentIndices = selectedSegmentIndices,
             isStreaming = isStreaming,
-            markdownColors = customMarkdownColors,
-            thoughtTypography = thoughtTypography,
-            thoughtMarkdownPadding = thoughtMarkdownPadding,
-            markdownComponents = customMarkdownComponents,
-            markdownFlavour = markdownFlavour,
+            markdownRenderContext = thoughtMarkdownRenderContext,
             onDismiss = { showSegmentDetail = false }
         )
     }

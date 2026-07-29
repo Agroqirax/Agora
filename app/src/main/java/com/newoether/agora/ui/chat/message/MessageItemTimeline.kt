@@ -158,45 +158,13 @@ import org.intellij.markdown.parser.MarkdownParser
 // stay file-private. Behavior unchanged.
 
 @Composable
-internal fun ToolDetailContent(seg: MessageSegment) {
-    val args = seg.toolArgs
-    if (!args.isNullOrBlank() && args != "{}") {
-        Text(
-            stringResource(R.string.arguments_label),
-            style = ChatType.meta,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        JsonOrPlainView(args)
-        Spacer(modifier = Modifier.height(16.dp))
-    }
-
-    Text(
-        stringResource(R.string.result_label),
-        style = ChatType.meta,
-        color = MaterialTheme.colorScheme.onSurfaceVariant
-    )
-    Spacer(modifier = Modifier.height(4.dp))
-    val result = seg.toolResult
-    if (result != null && result.isNotEmpty()) {
-        JsonOrPlainView(result)
-    } else {
-        Text(
-            text = stringResource(R.string.tool_calling_ellipsis),
-            style = ChatType.meta,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
-}
-
-@Composable
 internal fun segmentDetailTitle(
     seg: MessageSegment,
     detailSegments: List<MessageSegment>,
     detailIndex: Int
 ): String {
     return when (seg.type) {
-        "tool" -> toolDisplayName(seg.toolName)
+        "tool" -> toolDisplayName(seg)
         "transcription" -> transcriptionLabel(detailSegments, detailIndex)
         else -> stringResource(R.string.tool_thinking)
     }
@@ -228,18 +196,18 @@ internal fun compactSegmentTitle(
 ): String {
     val lastSeg = segs.lastOrNull() ?: return ""
     val isLastTool = lastSeg.type == "tool"
-    val isToolInProgress = isLastTool && lastSeg.toolResult == null
+    val isToolInProgress = isLastTool &&
+        ToolPresentationResolver.resolve(lastSeg).isActive
     val isThinking = useLiveStatus && message.status == MessageStatus.THINKING
     val isToolCalling = useLiveStatus && message.status == MessageStatus.TOOL_CALLING
     val isTranscribing = useLiveStatus && message.status == MessageStatus.TRANSCRIBING
     val toolCount = segs.count { it.type == "tool" && it.toolResult != null }
-    val thoughtMs = thoughtDurationMs(segs)
-    val hasThought = thoughtMs != null && thoughtMs > 0
+    val thoughtMs = thoughtDurationMs(segs) ?: message.thoughtTimeMs
     return when {
         isThinking -> message.thoughtTitle ?: stringResource(R.string.thinking_ellipsis)
         isTranscribing -> message.thoughtTitle ?: stringResource(R.string.transcription_ellipsis)
-        isToolCalling || isToolInProgress -> toolDisplayName(lastSeg.toolName)
-        hasThought -> thoughtDurationTitle(thoughtMs!!, toolCount)
+        isToolCalling || isToolInProgress -> toolDisplayName(lastSeg)
+        thoughtMs != null && thoughtMs > 0 -> thoughtDurationTitle(thoughtMs, toolCount)
         toolCount > 0 -> stringResource(R.string.called_n_tools, toolCount)
         message.thoughtTitle != null -> message.thoughtTitle
         segs.any { it.type == "transcription" } -> "Image Transcription"
@@ -248,7 +216,7 @@ internal fun compactSegmentTitle(
 }
 
 @Composable
-private fun CompactSegmentBlock(
+internal fun CompactSegmentBlock(
     segs: List<MessageSegment>,
     segmentIndices: List<Int>,
     message: ChatMessage,
@@ -275,7 +243,8 @@ private fun CompactSegmentBlock(
 
     val lastSeg = segs.last()
     val isLastTool = lastSeg.type == "tool"
-    val isToolInProgress = isLastTool && lastSeg.toolResult == null
+    val isToolInProgress = isLastTool &&
+        ToolPresentationResolver.resolve(lastSeg).isActive
     val isThinking = useLiveStatus && message.status == MessageStatus.THINKING
     val isToolCalling = useLiveStatus && message.status == MessageStatus.TOOL_CALLING
     val isTranscribing = useLiveStatus && message.status == MessageStatus.TRANSCRIBING
@@ -411,7 +380,7 @@ private fun CompactSegmentBlock(
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
                                 Text(
-                                    toolDisplayName(seg.toolName),
+                                    toolDisplayName(seg),
                                     style = ChatType.meta,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontWeight = FontWeight.SemiBold
@@ -466,13 +435,12 @@ internal fun TimelineSegmentsContent(
                                 .padding(top = if (index == 0) 0.dp else 6.dp)
                         ) {
                             SelectionContainer(modifier = Modifier.noOpBringIntoView()) {
-                                RecomposeSafeMarkdown(
+                                StreamingMarkdownDocument(
                                     content = seg.content,
                                     isStreaming = isStreaming && index == segments.lastIndex,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { text ->
-                                    MarkdownTextContent(text = text, renderContext = renderContext)
-                                }
+                                    renderContext = renderContext,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                             if (isStreaming) {
                                 Box(
@@ -596,7 +564,7 @@ private fun TimelineInfoSegmentCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = when (seg.type) {
-                        "tool" -> toolDisplayName(seg.toolName)
+                        "tool" -> toolDisplayName(seg)
                         "transcription" -> transcriptionLabel(detailSegments, detailIndex)
                         else -> stringResource(R.string.tool_thinking)
                     },
@@ -633,4 +601,3 @@ private fun TimelineInfoSegmentCard(
         }
     }
 }
-

@@ -35,6 +35,7 @@ import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 @Stable
 internal class ChatMarkdownAssets(
     val renderContext: ChatMarkdownRenderContext,
+    val thoughtRenderContext: ChatMarkdownRenderContext,
     val colors: MarkdownColors,
     val thoughtTypography: MarkdownTypography,
     val thoughtPadding: MarkdownPadding,
@@ -157,9 +158,27 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
             flavour = markdownFlavour,
         )
     }
+    val thoughtMarkdownRenderContext = remember(
+        customMarkdownColors,
+        thoughtTypography,
+        thoughtMarkdownPadding,
+        customMarkdownComponents,
+        latexImageTransformer,
+        markdownFlavour,
+    ) {
+        ChatMarkdownRenderContext(
+            colors = customMarkdownColors,
+            typography = thoughtTypography,
+            padding = thoughtMarkdownPadding,
+            components = customMarkdownComponents,
+            imageTransformer = latexImageTransformer,
+            flavour = markdownFlavour,
+        )
+    }
 
     return remember(
         markdownRenderContext,
+        thoughtMarkdownRenderContext,
         customMarkdownColors,
         thoughtTypography,
         thoughtMarkdownPadding,
@@ -168,6 +187,7 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
     ) {
         ChatMarkdownAssets(
             renderContext = markdownRenderContext,
+            thoughtRenderContext = thoughtMarkdownRenderContext,
             colors = customMarkdownColors,
             thoughtTypography = thoughtTypography,
             thoughtPadding = thoughtMarkdownPadding,

@@ -80,9 +80,27 @@ class ShellToolProviderTest {
             )
         )
         val defs = provider.definitions(ctx)
-        assertEquals(7, defs.size)
+        assertEquals(10, defs.size)
         val names = defs.map { it.function.name }.toSet()
-        assertEquals(setOf("list_shells", "execute_shell_command", "file_read", "file_write", "file_edit", "file_glob", "file_grep"), names)
+        assertEquals(
+            setOf(
+                "list_shells",
+                "execute_shell_command",
+                "list_shell_jobs",
+                "get_shell_job",
+                "stop_shell_job",
+                "file_read",
+                "file_write",
+                "file_edit",
+                "file_glob",
+                "file_grep",
+            ),
+            names,
+        )
+        val command = defs.single { it.function.name == "execute_shell_command" }
+        assertTrue(command.function.parameters.properties.containsKey("background"))
+        val getJob = defs.single { it.function.name == "get_shell_job" }
+        assertEquals(listOf("job_id"), getJob.function.parameters.required)
     }
 
     @Test
@@ -104,6 +122,9 @@ class ShellToolProviderTest {
     fun handles_returnsTrueForShellAndFileTools() {
         assertTrue(provider.handles("list_shells"))
         assertTrue(provider.handles("execute_shell_command"))
+        assertTrue(provider.handles("list_shell_jobs"))
+        assertTrue(provider.handles("get_shell_job"))
+        assertTrue(provider.handles("stop_shell_job"))
         assertTrue(provider.handles("file_read"))
         assertTrue(provider.handles("file_write"))
         assertTrue(provider.handles("file_edit"))

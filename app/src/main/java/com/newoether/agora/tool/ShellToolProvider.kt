@@ -12,6 +12,9 @@ import com.newoether.agora.util.SshClient
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -63,6 +66,9 @@ class ShellToolProvider(
         return (args[key] as? JsonPrimitive)?.content ?: ""
     }
 
+    private fun boolArg(args: Map<String, JsonElement>, key: String): Boolean =
+        (args[key] as? JsonPrimitive)?.content?.toBooleanStrictOrNull() == true
+
     private fun resolveShellDevice(serverName: String, ctx: GenerationContext): ShellDeviceConfig? {
         if (serverName.equals("Local Sandbox", ignoreCase = true)) return null
         return if (serverName.isNotBlank()) {
@@ -93,6 +99,13 @@ class ShellToolProvider(
         /** The remote device this backend targets, or null for the local sandbox (never gated). */
         val device: ShellDeviceConfig?
         suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String
+        fun executeCommandEvents(
+            cmd: String,
+            workdir: String,
+            timeoutMs: Int,
+        ): Flow<ToolExecutionEvent> = flow {
+            emit(ToolExecutionEvent.Completed(executeCommand(cmd, workdir, timeoutMs)))
+        }
         suspend fun fileRead(path: String, offset: Long, limit: Long): String
         suspend fun fileWrite(path: String, content: String): String?
         suspend fun fileGlob(pattern: String, basePath: String, depth: Int?): Result<List<String>>
@@ -108,33 +121,98 @@ class ShellToolProvider(
 
         private val client: ShellClient by lazy { ShellClient(url, apiKey, pubKey) }
 
-        override suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String {
+        override suspend fun executeCommand(cmd: String, workdir: String, timeoutMs: Int): String =
+            executeCommandInternal(cmd, workdir, timeoutMs) { }
+
+        override fun executeCommandEvents(
+            cmd: String,
+            workdir: String,
+            timeoutMs: Int,
+        ): Flow<ToolExecutionEvent> = flow {
+            emit(ToolExecutionEvent.Progress("Connecting to $deviceName"))
+            val result = executeCommandInternal(cmd, workdir, timeoutMs) { delta ->
+                emit(ToolExecutionEvent.OutputDelta(delta))
+            }
+            emit(ToolExecutionEvent.Completed(result))
+        }
+
+        private suspend fun executeCommandInternal(
+            cmd: String,
+            workdir: String,
+            timeoutMs: Int,
+            onOutput: suspend (String) -> Unit,
+        ): String {
             if (url.isBlank()) return jsonError("execute_shell_command", "Server \"$deviceName\" has no URL configured.")
             if (!client.fetchPublicKey() && apiKey.isNotBlank()) {
-                return jsonError("execute_shell_command", "encryption_failed", server = deviceName)
+                return jsonError(
+                    "execute_shell_command",
+                    client.lastError ?: "Conch public-key exchange failed for $url",
+                    server = deviceName,
+                )
             }
             val prepared = client.prepareRequest(cmd, timeoutMs, workdir)
-            val handle = HttpClient.streamPost("${prepared.serverUrl}/execute", prepared.body, prepared.headers)
+            val handle = try {
+                HttpClient.streamPost(
+                    "${prepared.serverUrl}/execute",
+                    prepared.body,
+                    prepared.headers,
+                )
+            } catch (e: Exception) {
+                return jsonError(
+                    "execute_shell_command",
+                    com.newoether.agora.util.describeConchRequestFailure(
+                        prepared.serverUrl,
+                        "/execute request",
+                        e,
+                    ),
+                    server = deviceName,
+                    command = cmd,
+                )
+            }
+            if (handle.code !in 200..299) {
+                val detail = handle.errorBody
+                    ?.take(240)
+                    ?.ifBlank { "empty response" }
+                    ?: "empty response"
+                handle.close()
+                return jsonError(
+                    "execute_shell_command",
+                    "Conch at ${prepared.serverUrl} returned HTTP ${handle.code}: $detail",
+                    server = deviceName,
+                    command = cmd,
+                )
+            }
             return try {
                 val output = StringBuilder()
                 var exitCode: Int? = null
                 var errorMessage: String? = null
                 var currentEvent: String? = null
                 val aesKey = client.getSessionKey()
-                while (currentCoroutineContext().isActive) {
+                stream@ while (currentCoroutineContext().isActive) {
                     val line = handle.readLine() ?: break
                     when {
                         line.startsWith("event: ") -> currentEvent = line.substring(7).trim()
                         line.startsWith("data: ") -> {
                             var dataStr = line.substring(6).trim()
                             if (aesKey != null) {
-                                try { dataStr = client.decryptSseData(dataStr) } catch (_: Exception) { continue }
+                                try {
+                                    dataStr = client.decryptSseData(dataStr)
+                                } catch (e: Exception) {
+                                    errorMessage =
+                                        "Conch stream decryption failed at $url: " +
+                                            (e.message ?: e.javaClass.simpleName)
+                                    break@stream
+                                }
                             }
                             val dataJson = try { Json.parseToJsonElement(dataStr).jsonObject } catch (_: Exception) { null } ?: continue
                             when (currentEvent) {
                                 "line" -> {
                                     val text = (dataJson["line"] as? JsonPrimitive)?.content
-                                    if (text != null) output.append(text).append('\n')
+                                    if (text != null) {
+                                        val delta = "$text\n"
+                                        output.append(delta)
+                                        onOutput(delta)
+                                    }
                                 }
                                 "result" -> exitCode = (dataJson["exit_code"] as? JsonPrimitive)?.content?.toIntOrNull()
                                 "error" -> errorMessage = (dataJson["message"] as? JsonPrimitive)?.content
@@ -172,6 +250,15 @@ class ShellToolProvider(
             client.fileGrep(pattern, basePath, fileGlob)
 
         override fun close() {}
+
+        suspend fun startJob(cmd: String, workdir: String, timeoutMs: Int): String =
+            client.startJob(cmd, timeoutMs, workdir)
+
+        suspend fun listJobs(): String = client.listJobs()
+
+        suspend fun getJob(jobId: String): String = client.getJob(jobId)
+
+        suspend fun stopJob(jobId: String): String = client.stopJob(jobId)
     }
 
     private inner class SshBackend(override val device: ShellDeviceConfig) : Backend {
@@ -314,26 +401,74 @@ class ShellToolProvider(
         }
         val shellRequiredParams = if (allDeviceNames.size == 1) listOf("command") else listOf("command", "server")
 
-        val shellTools = listOf(
-            ToolDefinition(function = ToolFunction(
+        val conchDeviceNames = ctx.shellDevices
+            .filter { it.type != "ssh" }
+            .map { it.name.ifBlank { "Untitled" } }
+        val shellTools = buildList {
+            add(ToolDefinition(function = ToolFunction(
                 name = "list_shells",
                 description = "List configured shell servers including the local sandbox (if enabled).",
                 parameters = ToolParameters(properties = emptyMap(), required = emptyList())
-            )),
-            ToolDefinition(function = ToolFunction(
+            )))
+            add(ToolDefinition(function = ToolFunction(
                 name = "execute_shell_command",
-                description = "Execute a shell command on a remote server or local sandbox.",
+                description = "Execute a shell command. Set background=true for a durable Conch job that survives client disconnects.",
                 parameters = ToolParameters(
                     properties = mapOf(
                         "command" to ToolProperty("string", "The shell command to execute."),
                         "server" to ToolProperty("string", serverPropDesc),
-                        "timeout_ms" to ToolProperty("integer", "Timeout in milliseconds (optional, default 30s)."),
-                        "workdir" to ToolProperty("string", "Working directory (optional).")
+                        "timeout_ms" to ToolProperty("integer", "Timeout in milliseconds (optional; foreground max 120s, background is bounded by Conch policy)."),
+                        "workdir" to ToolProperty("string", "Working directory (optional)."),
+                        "background" to ToolProperty("boolean", "Start a durable background job on Conch and return its job_id immediately (optional, default false)."),
                     ),
                     required = shellRequiredParams
                 )
-            ))
-        )
+            )))
+            if (conchDeviceNames.isNotEmpty()) {
+                val jobServerDescription = if (conchDeviceNames.size == 1) {
+                    "Conch server name (optional; defaults to ${conchDeviceNames.single()})."
+                } else {
+                    "Conch server name. Available: ${conchDeviceNames.joinToString(", ")}."
+                }
+                val jobRequired = if (conchDeviceNames.size == 1) {
+                    emptyList()
+                } else {
+                    listOf("server")
+                }
+                add(ToolDefinition(function = ToolFunction(
+                    name = "list_shell_jobs",
+                    description = "List durable background shell jobs on a Conch server.",
+                    parameters = ToolParameters(
+                        properties = mapOf(
+                            "server" to ToolProperty("string", jobServerDescription),
+                        ),
+                        required = jobRequired,
+                    ),
+                )))
+                add(ToolDefinition(function = ToolFunction(
+                    name = "get_shell_job",
+                    description = "Get status and bounded output for a durable Conch shell job.",
+                    parameters = ToolParameters(
+                        properties = mapOf(
+                            "job_id" to ToolProperty("string", "The Conch job id."),
+                            "server" to ToolProperty("string", jobServerDescription),
+                        ),
+                        required = listOf("job_id") + jobRequired,
+                    ),
+                )))
+                add(ToolDefinition(function = ToolFunction(
+                    name = "stop_shell_job",
+                    description = "Stop a running durable Conch shell job and its process tree.",
+                    parameters = ToolParameters(
+                        properties = mapOf(
+                            "job_id" to ToolProperty("string", "The Conch job id."),
+                            "server" to ToolProperty("string", jobServerDescription),
+                        ),
+                        required = listOf("job_id") + jobRequired,
+                    ),
+                )))
+            }
+        }
 
         val fileServerProperty = if (allDeviceNames.size == 1) {
             ToolProperty("string", "The shell server name (optional, defaults to the only available server).")
@@ -417,6 +552,9 @@ class ShellToolProvider(
         return when (name) {
             "list_shells" -> listShells(ctx)
             "execute_shell_command" -> executeShellCommand(arguments, ctx)
+            "list_shell_jobs" -> listShellJobs(arguments, ctx)
+            "get_shell_job" -> getShellJob(arguments, ctx)
+            "stop_shell_job" -> stopShellJob(arguments, ctx)
             "file_read" -> executeFileRead(arguments, ctx)
             "file_write" -> executeFileWrite(arguments, ctx)
             "file_edit" -> executeFileEdit(arguments, ctx)
@@ -426,8 +564,20 @@ class ShellToolProvider(
         }
     }
 
+    override fun executeEvents(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+    ): Flow<ToolExecutionEvent> {
+        if (name != "execute_shell_command") {
+            return super<ToolProvider>.executeEvents(name, arguments, ctx)
+        }
+        return executeShellCommandEvents(arguments, ctx)
+    }
+
     override fun handles(name: String): Boolean = name in setOf(
         "list_shells", "execute_shell_command",
+        "list_shell_jobs", "get_shell_job", "stop_shell_job",
         "file_read", "file_write", "file_edit", "file_glob", "file_grep"
     )
 
@@ -468,8 +618,41 @@ class ShellToolProvider(
         val command = arg(args, "command")
         if (command.isBlank()) return jsonError("execute_shell_command", "no_command")
         val serverName = arg(args, "server")
-        val timeoutMs = (arg(args, "timeout_ms").toIntOrNull() ?: 30000).coerceIn(1000, 120000)
+        val background = boolArg(args, "background")
+        val timeoutMax = if (background) 86_400_000 else 120_000
+        val timeoutMs = (
+            arg(args, "timeout_ms").toIntOrNull()
+                ?: if (background) timeoutMax else 30_000
+            ).coerceIn(1000, timeoutMax)
         val workdir = arg(args, "workdir")
+
+        if (background) {
+            val backend = getConchBackend(serverName, ctx)
+                ?: return jsonError(
+                    "execute_shell_command",
+                    conchServerNotFoundMessage(serverName, ctx),
+                    server = serverName,
+                    command = command,
+                )
+            if (!confirmRemote(backend.device, "start background job: $ $command")) {
+                return jsonError(
+                    "execute_shell_command",
+                    "denied_by_user: the user declined to run this background command",
+                    server = backend.device.name,
+                    command = command,
+                )
+            }
+            return try {
+                backend.startJob(command, workdir, timeoutMs)
+            } catch (e: Exception) {
+                jsonError(
+                    "execute_shell_command",
+                    e.message ?: "Failed to start background job",
+                    server = backend.device.name,
+                    command = command,
+                )
+            }
+        }
 
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("execute_shell_command", serverNotFoundMessage(serverName, ctx))
@@ -482,6 +665,152 @@ class ShellToolProvider(
             return backend.executeCommand(command, workdir, timeoutMs)
         } finally {
             backend.close()
+        }
+    }
+
+    private fun executeShellCommandEvents(
+        arguments: String,
+        ctx: GenerationContext,
+    ): Flow<ToolExecutionEvent> = flow {
+        val args = parseToolArgs(arguments)
+        val command = arg(args, "command")
+        if (command.isBlank()) {
+            emit(ToolExecutionEvent.Completed(jsonError("execute_shell_command", "no_command")))
+            return@flow
+        }
+        if (boolArg(args, "background")) {
+            emit(ToolExecutionEvent.Progress("Starting durable background job"))
+            emit(ToolExecutionEvent.Completed(executeShellCommand(arguments, ctx)))
+            return@flow
+        }
+        val serverName = arg(args, "server")
+        val timeoutMs = (arg(args, "timeout_ms").toIntOrNull() ?: 30000)
+            .coerceIn(1000, 120000)
+        val workdir = arg(args, "workdir")
+        val backend = getBackend(serverName, ctx)
+        if (backend == null) {
+            emit(
+                ToolExecutionEvent.Completed(
+                    jsonError("execute_shell_command", serverNotFoundMessage(serverName, ctx)),
+                ),
+            )
+            return@flow
+        }
+        try {
+            if (!confirmRemote(backend.device, "$ $command")) {
+                emit(
+                    ToolExecutionEvent.Completed(
+                        jsonError(
+                            "execute_shell_command",
+                            "denied_by_user: the user declined to run this command",
+                            server = serverName,
+                            command = command,
+                        ),
+                    ),
+                )
+                return@flow
+            }
+            backend.executeCommandEvents(command, workdir, timeoutMs).collect { emit(it) }
+        } finally {
+            backend.close()
+        }
+    }
+
+    private fun getConchBackend(
+        serverName: String,
+        ctx: GenerationContext,
+    ): ConchBackend? {
+        val conchDevices = ctx.shellDevices.filter { it.type != "ssh" }
+        val device = if (serverName.isNotBlank()) {
+            conchDevices.find { it.name.equals(serverName, ignoreCase = true) }
+        } else {
+            conchDevices.singleOrNull()
+        } ?: return null
+        return ConchBackend(device)
+    }
+
+    private fun conchServerNotFoundMessage(serverName: String, ctx: GenerationContext): String {
+        val names = ctx.shellDevices
+            .filter { it.type != "ssh" }
+            .map { it.name.ifBlank { "Untitled" } }
+        return when {
+            names.isEmpty() -> "No Conch server is configured. Background jobs require Conch."
+            serverName.isNotBlank() ->
+                "Unknown Conch server \"$serverName\". Available: ${names.joinToString(", ")}."
+            names.size > 1 ->
+                "Multiple Conch servers are available. Specify one: ${names.joinToString(", ")}."
+            else -> "Conch server is unavailable."
+        }
+    }
+
+    private suspend fun listShellJobs(arguments: String, ctx: GenerationContext): String {
+        val args = parseToolArgs(arguments)
+        val serverName = arg(args, "server")
+        val backend = getConchBackend(serverName, ctx)
+            ?: return jsonError(
+                "list_shell_jobs",
+                conchServerNotFoundMessage(serverName, ctx),
+                server = serverName,
+            )
+        return try {
+            backend.listJobs()
+        } catch (e: Exception) {
+            jsonError(
+                "list_shell_jobs",
+                e.message ?: "Failed to list shell jobs",
+                server = backend.device.name,
+            )
+        }
+    }
+
+    private suspend fun getShellJob(arguments: String, ctx: GenerationContext): String {
+        val args = parseToolArgs(arguments)
+        val jobId = arg(args, "job_id")
+        if (jobId.isBlank()) return jsonError("get_shell_job", "job_id is required")
+        val serverName = arg(args, "server")
+        val backend = getConchBackend(serverName, ctx)
+            ?: return jsonError(
+                "get_shell_job",
+                conchServerNotFoundMessage(serverName, ctx),
+                server = serverName,
+            )
+        return try {
+            backend.getJob(jobId)
+        } catch (e: Exception) {
+            jsonError(
+                "get_shell_job",
+                e.message ?: "Failed to get shell job",
+                server = backend.device.name,
+            )
+        }
+    }
+
+    private suspend fun stopShellJob(arguments: String, ctx: GenerationContext): String {
+        val args = parseToolArgs(arguments)
+        val jobId = arg(args, "job_id")
+        if (jobId.isBlank()) return jsonError("stop_shell_job", "job_id is required")
+        val serverName = arg(args, "server")
+        val backend = getConchBackend(serverName, ctx)
+            ?: return jsonError(
+                "stop_shell_job",
+                conchServerNotFoundMessage(serverName, ctx),
+                server = serverName,
+            )
+        if (!confirmRemote(backend.device, "stop background shell job: $jobId")) {
+            return jsonError(
+                "stop_shell_job",
+                "denied_by_user: the user declined to stop this job",
+                server = backend.device.name,
+            )
+        }
+        return try {
+            backend.stopJob(jobId)
+        } catch (e: Exception) {
+            jsonError(
+                "stop_shell_job",
+                e.message ?: "Failed to stop shell job",
+                server = backend.device.name,
+            )
         }
     }
 

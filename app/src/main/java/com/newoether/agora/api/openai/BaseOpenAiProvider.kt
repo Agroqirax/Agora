@@ -95,6 +95,13 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
     protected open fun retryDelayMillis(statusCode: Int, attempt: Int): Long = 1000L * attempt
 
+    /**
+     * OpenAI normally follows `finish_reason` with an optional usage-only event and `[DONE]`.
+     * Compatible gateways sometimes omit `[DONE]` or keep the HTTP connection alive. Once the
+     * semantic terminal event arrives, accept that tail only for this bounded window.
+     */
+    protected open val terminalSseGraceMillis: Long = 1_000L
+
     // -- Template method --
 
     override fun generateResponse(
@@ -209,16 +216,28 @@ abstract class BaseOpenAiProvider : LlmProvider {
             emit(event)
         }
         var structuredToolCallsEmitted = false
+        var terminalDeadlineNanos: Long? = null
 
         // Read timeouts are tolerated for long thinking pauses (read timeout = 5 min), but a
         // silently-dead connection (NAT drop with no RST) must not hang forever: give up after
         // 3 consecutive timeouts (~15 min without a single byte).
         var consecutiveReadTimeouts = 0
         while (currentCoroutineContext().isActive) {
+            terminalDeadlineNanos?.let { deadline ->
+                val remainingNanos = deadline - System.nanoTime()
+                if (remainingNanos <= 0L) break
+                val remainingMillis =
+                    java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(remainingNanos)
+                        .coerceAtLeast(1L)
+                handle.setReadTimeoutMillis(remainingMillis)
+            }
             val line = try {
                 handle.readLine()
             } catch (e: SocketTimeoutException) {
                 if (!currentCoroutineContext().isActive) break
+                // A semantic terminal event already completed the model response. This timeout
+                // only closes its optional usage/[DONE] grace tail and is therefore success.
+                if (terminalDeadlineNanos != null) break
                 if (++consecutiveReadTimeouts >= 3) {
                     emit(StreamEvent.Error(GenerationError.Timeout))
                     break
@@ -268,6 +287,14 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             thoughtsTokenCount = usage.completionTokensDetails?.reasoningTokens ?: 0
                         )
                     )
+                }
+
+                if (!choice?.finishReason.isNullOrBlank() && terminalDeadlineNanos == null) {
+                    terminalDeadlineNanos =
+                        System.nanoTime() +
+                            java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(
+                                terminalSseGraceMillis.coerceAtLeast(1L)
+                            )
                 }
             } catch (e: Exception) {
                 DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)

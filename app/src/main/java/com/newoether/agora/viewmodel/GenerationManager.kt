@@ -14,6 +14,8 @@ import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.R
 import com.newoether.agora.service.AgoraForegroundService
@@ -26,6 +28,7 @@ import com.newoether.agora.tool.MemoryToolProvider
 import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
+import com.newoether.agora.tool.ToolExecutionEvent
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -36,11 +39,14 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.util.UUID
 
@@ -251,7 +257,12 @@ class GenerationManager(
     suspend fun semanticSearch(query: String, limit: Int, ctx: GenerationContext): List<Pair<MessageEntity, Float>> =
         ragToolProvider.semanticSearch(query, limit, ctx)
 
-    private suspend fun executeTool(name: String, arguments: String, ctx: GenerationContext): String {
+    private suspend fun executeTool(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+        onEvent: suspend (ToolExecutionEvent) -> Unit,
+    ): String {
         return try {
             for (provider in toolProviders) {
                 if (provider.handles(name)) {
@@ -265,7 +276,15 @@ class GenerationManager(
                     // the tool loop continues with an error instead of hanging (#49).
                     val attemptJob = Job()
                     val attempt = CoroutineScope(currentCoroutineContext() + attemptJob).async {
-                        provider.execute(name, arguments, ctx)
+                        var completedResult: String? = null
+                        provider.executeEvents(name, arguments, ctx).collect { event ->
+                            if (event is ToolExecutionEvent.Completed) {
+                                completedResult = event.result
+                            }
+                            onEvent(event)
+                        }
+                        completedResult
+                            ?: "Error executing tool '$name': provider ended without a result"
                     }
                     try {
                         return withTimeout(ctx.toolTimeoutMs) { attempt.await() }
@@ -283,6 +302,48 @@ class GenerationManager(
             throw e
         } catch (e: Exception) {
             "Error executing tool '$name': ${e.localizedMessage ?: "Unknown error"}"
+        }
+    }
+
+    private fun appendBoundedToolOutput(
+        current: String?,
+        delta: String,
+        maxChars: Int = 32 * 1024,
+    ): String {
+        if (delta.isEmpty()) return current.orEmpty()
+        val combined = current.orEmpty() + delta
+        return if (combined.length <= maxChars) combined
+        else combined.takeLast(maxChars)
+    }
+
+    private fun finalToolState(result: String): String {
+        if (result.isEmpty()) return com.newoether.agora.model.ToolExecutionStates.EMPTY
+        val resultObject = runCatching {
+            Json.parseToJsonElement(result).jsonObject
+        }.getOrNull()
+        val errorCode = (resultObject?.get("error") as? JsonPrimitive)?.content
+        if (errorCode == "no_results") {
+            return com.newoether.agora.model.ToolExecutionStates.EMPTY
+        }
+        if (
+            result.startsWith("Error", ignoreCase = true) ||
+            errorCode != null
+        ) {
+            return com.newoether.agora.model.ToolExecutionStates.FAILED
+        }
+        val isBackground = (resultObject?.get("background") as? JsonPrimitive)
+            ?.content
+            ?.toBooleanStrictOrNull() == true ||
+            (
+                (resultObject?.get("state") as? JsonPrimitive)
+                    ?.content
+                    ?.equals("running", ignoreCase = true) == true &&
+                    resultObject.get("job_id") != null
+                )
+        return if (isBackground) {
+            com.newoether.agora.model.ToolExecutionStates.BACKGROUND_RUNNING
+        } else {
+            com.newoether.agora.model.ToolExecutionStates.SUCCEEDED
         }
     }
 
@@ -677,6 +738,59 @@ class GenerationManager(
                 currentThoughtDurationMs = 0L
             }
 
+            fun updateToolSegment(
+                toolCallId: String,
+                update: (MessageSegment) -> MessageSegment,
+            ): MessageSegment? {
+                val index = segments.indexOfLast { it.toolCallId == toolCallId }
+                if (index < 0) return null
+                return update(segments[index]).also { segments[index] = it }
+            }
+
+            suspend fun executeToolWithLiveSegment(
+                name: String,
+                arguments: String,
+                toolCallId: String,
+            ): String {
+                var lastToolUiEmitMs = 0L
+                return executeTool(name, arguments, ctx) { toolEvent ->
+                    val changed = when (toolEvent) {
+                        is ToolExecutionEvent.OutputDelta -> {
+                            updateToolSegment(toolCallId) { segment ->
+                                segment.copy(
+                                    toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
+                                    toolProgress = appendBoundedToolOutput(
+                                        segment.toolProgress,
+                                        toolEvent.text,
+                                    ),
+                                )
+                            }
+                            true
+                        }
+                        is ToolExecutionEvent.Progress -> {
+                            updateToolSegment(toolCallId) { segment ->
+                                segment.copy(
+                                    toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
+                                    toolProgress = segment.toolProgress
+                                        ?.takeIf { it.isNotEmpty() }
+                                        ?: toolEvent.message,
+                                )
+                            }
+                            true
+                        }
+                        is ToolExecutionEvent.Completed -> false
+                    }
+                    if (changed) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastToolUiEmitMs >= 100L) {
+                            publishStreamUpdate()
+                            lastEmitMs = now
+                            lastToolUiEmitMs = now
+                        }
+                    }
+                }
+            }
+
             suspend fun handleStreamEvent(event: StreamEvent) {
                 when (event) {
                     is StreamEvent.TextChunk -> {
@@ -736,17 +850,32 @@ class GenerationManager(
                     is StreamEvent.ToolCallRequest -> {
                         flushAnswerSegment()
                         flushThoughtSegment()
-                        val ts = MessageSegment(type = "tool", toolName = event.name, toolArgs = event.arguments, toolResult = null, toolCallId = event.id, signature = event.signature)
+                        val ts = MessageSegment(
+                            type = "tool",
+                            toolName = event.name,
+                            toolArgs = event.arguments,
+                            toolResult = null,
+                            toolCallId = event.id,
+                            signature = event.signature,
+                            toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
+                        )
                         appendMergedSegment(segments, ts)
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
-                        val result = executeTool(event.name, event.arguments, ctx)
+                        val result = executeToolWithLiveSegment(
+                            event.name,
+                            event.arguments,
+                            event.id,
+                        )
                         generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                         val clipped = result.take(Constants.MAX_TOOL_RESULT_LENGTH)
                         val idx = segments.indexOfLast { it.toolCallId == event.id }
                         if (idx >= 0) {
-                            segments[idx] = segments[idx].copy(toolResult = clipped)
+                            segments[idx] = segments[idx].copy(
+                                toolResult = clipped,
+                                toolState = finalToolState(result),
+                            )
                             roundToolSegments.add(segments[idx])
                         }
                         val tcd = ToolCallData(event.name, event.arguments, clipped, event.signature, event.id)
@@ -760,18 +889,36 @@ class GenerationManager(
                         flushAnswerSegment()
                         flushThoughtSegment()
                         event.calls.forEach { call ->
-                            appendMergedSegment(segments, MessageSegment(type = "tool", toolName = call.name, toolArgs = call.arguments, toolResult = null, toolCallId = call.id, signature = call.signature))
+                            appendMergedSegment(
+                                segments,
+                                MessageSegment(
+                                    type = "tool",
+                                    toolName = call.name,
+                                    toolArgs = call.arguments,
+                                    toolResult = null,
+                                    toolCallId = call.id,
+                                    signature = call.signature,
+                                    toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
+                                ),
+                            )
                         }
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
                         val tcds = event.calls.map { call ->
-                            val result = executeTool(call.name, call.arguments, ctx)
+                            val result = executeToolWithLiveSegment(
+                                call.name,
+                                call.arguments,
+                                call.id,
+                            )
                             generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                             val clipped = result.take(Constants.MAX_TOOL_RESULT_LENGTH)
                             val idx = segments.indexOfLast { it.toolCallId == call.id }
                             if (idx >= 0) {
-                                segments[idx] = segments[idx].copy(toolResult = clipped)
+                                segments[idx] = segments[idx].copy(
+                                    toolResult = clipped,
+                                    toolState = finalToolState(result),
+                                )
                                 roundToolSegments.add(segments[idx])
                             }
                             ToolCallData(call.name, call.arguments, clipped, call.signature, call.id)
@@ -916,6 +1063,14 @@ class GenerationManager(
             // mid-transcription, copy the latest durable/UI snapshot into the terminal accumulator
             // so the final upsert does not overwrite that checkpoint with empty content.
             adoptIncompleteTranscriptionSnapshot()
+            segments.indices.forEach { index ->
+                val segment = segments[index]
+                if (segment.type == "tool" && segment.toolResult == null) {
+                    segments[index] = segment.copy(
+                        toolState = com.newoether.agora.model.ToolExecutionStates.STOPPED,
+                    )
+                }
+            }
             currentStatus = MessageStatus.STOPPED
             throw e
         } catch (e: Exception) {
@@ -952,34 +1107,64 @@ class GenerationManager(
                             // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
                             // text column — together they can exceed the 2MB CursorWindow otherwise.
                             val effectiveParentId = parentId
-                            conversations.updateStreamingMessageCheckpoint(
-                                ChatMessage(
-                                    id = modelMessageId,
-                                    parentId = effectiveParentId,
-                                    text = MessagePersistenceGuard.clipText(totalText),
-                                    images = generatedImages.toList(),
-                                    thoughts = totalThoughts.ifBlank { null },
-                                    thoughtTitle = totalThoughtTitle,
-                                    tokenCount = totalTokenCount,
-                                    status = currentStatus,
-                                    participant = Participant.MODEL,
-                                    timestamp = startTime,
-                                    thoughtTimeMs = totalThoughtTimeMs,
-                                    modelName = modelName,
-                                    segments = finalSegments,
-                                    runId = runId,
-                                    runSequence = modelRunSequence,
-                                )
+                            val finalMessage = ChatMessage(
+                                id = modelMessageId,
+                                parentId = effectiveParentId,
+                                text = MessagePersistenceGuard.clipText(totalText),
+                                images = generatedImages.toList(),
+                                thoughts = totalThoughts.ifBlank { null },
+                                thoughtTitle = totalThoughtTitle,
+                                tokenCount = totalTokenCount,
+                                status = currentStatus,
+                                participant = Participant.MODEL,
+                                timestamp = startTime,
+                                thoughtTimeMs = totalThoughtTimeMs,
+                                modelName = modelName,
+                                segments = finalSegments,
+                                runId = runId,
+                                runSequence = modelRunSequence,
                             )
-                            when {
+                            val terminalPersisted = when {
+                                // Stop always wins over a queued intervention. Otherwise a
+                                // cancellation racing with a queued send can strand this Run ACTIVE.
                                 currentStatus == MessageStatus.STOPPED ->
-                                    conversations.finishRunStopped(runId)
-                                callbacks.hasQueuedSends() -> Unit
+                                    conversations.finishGeneration(
+                                        finalMessage,
+                                        runId,
+                                        RunStatus.STOPPED,
+                                        RunEndReason.USER_STOPPED,
+                                    )
+                                // A queue-steered successful pass keeps this Run ACTIVE for the
+                                // next pass in the same generation cycle.
+                                callbacks.hasQueuedSends() ->
+                                    conversations.updateStreamingMessageCheckpoint(finalMessage)
                                 currentStatus == MessageStatus.ERROR ->
-                                    conversations.failRun(runId)
+                                    conversations.finishGeneration(
+                                        finalMessage,
+                                        runId,
+                                        RunStatus.FAILED,
+                                        RunEndReason.PROVIDER_ERROR,
+                                    )
                                 else ->
-                                    conversations.completeRun(runId)
+                                    conversations.finishGeneration(
+                                        finalMessage,
+                                        runId,
+                                        RunStatus.COMPLETED,
+                                        RunEndReason.MODEL_COMPLETED,
+                                    )
                             }
+                            if (!terminalPersisted) {
+                                DebugLog.e(
+                                    "AgoraVM",
+                                    "Terminal generation write did not update both message and Run: " +
+                                        "message=$modelMessageId run=$runId status=$currentStatus",
+                                )
+                            }
+                            // The last periodic checkpoint was emitted before currentStatus became
+                            // terminal. Publish this exact terminal object before onStreamClear():
+                            // otherwise streamClear can commit a stale SENDING snapshot after
+                            // Room already emitted SUCCESS, leaving the UI in Answering by race.
+                            onStreamUpdate(finalMessage)
                         }
                     }
                 } catch (e: Exception) {

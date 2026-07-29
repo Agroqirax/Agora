@@ -450,6 +450,25 @@ interface ChatDao {
     ): Int
 
     /**
+     * Normal/error provider completion is one durable boundary: the model row and its Run become
+     * terminal together. The update counts are returned as a boolean for diagnostics, but a
+     * missing row never leaves an otherwise-live Run stranded.
+     */
+    @Transaction
+    suspend fun finishGeneration(
+        checkpoint: MessageStreamCheckpoint,
+        runId: String,
+        status: RunStatus,
+        reason: RunEndReason,
+        at: Long,
+    ): Boolean {
+        require(status.isTerminal)
+        val messageUpdated = updateMessageCheckpoint(checkpoint) == 1
+        val runUpdated = terminalizeLiveRun(runId, status, reason, at) == 1
+        return messageUpdated && runUpdated
+    }
+
+    /**
      * The only user-Stop terminal writer. Checkpoints and Run terminalization commit together, so
      * tree operations never observe a STOPPED message inside a still-live Run (or the inverse).
      */

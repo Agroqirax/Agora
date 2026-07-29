@@ -22,8 +22,24 @@ data class MessageSegment(
     val toolResult: String? = null,
     val toolCallId: String? = null,
     val signature: String? = null,
-    val durationMs: Long? = null
+    val durationMs: Long? = null,
+    /** Durable UI lifecycle for tool segments. Null keeps old rows backward-compatible. */
+    val toolState: String? = null,
+    /** Bounded, display-only live output. The final model-facing result remains [toolResult]. */
+    val toolProgress: String? = null,
 )
+
+object ToolExecutionStates {
+    const val CALLING = "calling"
+    const val RUNNING = "running"
+    const val SUCCEEDED = "succeeded"
+    const val EMPTY = "empty"
+    const val FAILED = "failed"
+    const val STOPPED = "stopped"
+    const val BACKGROUND_RUNNING = "background_running"
+
+    val TERMINAL = setOf(SUCCEEDED, EMPTY, FAILED, STOPPED, BACKGROUND_RUNNING)
+}
 
 object ToolCallDisplayModes {
     const val TIMELINE = "timeline"

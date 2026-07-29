@@ -84,9 +84,7 @@ internal fun AssistantMessageContent(
     showBranchSelector: Boolean,
     toolCallDisplayMode: String,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
-    isThoughtExpanded: Boolean,
     renderContext: ChatMarkdownRenderContext,
-    markdownFlavour: MarkdownFlavourDescriptor,
     branchIndex: Int,
     totalBranches: Int,
     onSwitchBranch: (Int) -> Unit,
@@ -234,13 +232,11 @@ internal fun AssistantMessageContent(
 
             // Level 1: anti-shrink for text and thinking content (kept after streaming ends)
             var streamingMaxHeightPx by remember { mutableIntStateOf(0) }
-            var thinkingContentMaxHeightPx by remember { mutableIntStateOf(0) }
 
             // Reset anti-shrink heights when streaming restarts (e.g. regeneration)
             LaunchedEffect(isStreaming) {
                 if (isStreaming) {
                     streamingMaxHeightPx = 0
-                    thinkingContentMaxHeightPx = 0
                 }
             }
 
@@ -317,185 +313,17 @@ internal fun AssistantMessageContent(
                         scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
                     exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
                 ) {
-                    val segs = detailSegments
-                    if (segs.isEmpty()) return@AnimatedVisibility
-                    val lastSeg = segs.last()
-                    val isLastTool = lastSeg.type == "tool"
-                    val isToolInProgress = isLastTool && lastSeg.toolResult == null
-                    val isThinking = message.status == MessageStatus.THINKING
-                    val isToolCalling = message.status == MessageStatus.TOOL_CALLING
-                    val isTranscribing = message.status == MessageStatus.TRANSCRIBING
-                    val toolCount = segs.count { it.type == "tool" && it.toolResult != null }
-                    val thoughtMs = thoughtDurationMs(segs) ?: message.thoughtTimeMs
-                    val hasThought = thoughtMs != null && thoughtMs > 0
-                    val collapsedTitle = when {
-                        isThinking -> message.thoughtTitle ?: stringResource(R.string.thinking_ellipsis)
-                        isTranscribing -> message.thoughtTitle ?: stringResource(R.string.transcription_ellipsis)
-                        isToolCalling || isToolInProgress -> toolDisplayName(lastSeg.toolName)
-                        else -> {
-                            if (hasThought) {
-                                thoughtDurationTitle(thoughtMs!!, toolCount)
-                            } else if (toolCount > 0) {
-                                stringResource(R.string.called_n_tools, toolCount)
-                            } else if (message.thoughtTitle != null) {
-                                message.thoughtTitle
-                            } else if (segs.any { it.type == "transcription" }) {
-                                "Image Transcription"
-                            } else {
-                                stringResource(R.string.thinking_complete)
-                            }
-                        }
-                    }
-                    val mergedBottomPadding by animateDpAsState(
-                        targetValue = if (isThoughtExpanded) 12.dp else 4.dp,
-                        animationSpec = tween(500), label = "mergedPad"
+                    CompactSegmentBlock(
+                        segs = detailSegments,
+                        segmentIndices = detailSegments.indices.toList(),
+                        message = message,
+                        isStreaming = isStreaming,
+                        useLiveStatus = true,
+                        expandedStates = thoughtExpandedStates,
+                        expansionKey = message.id,
+                        onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
+                        onBlockHeightChanged = setThoughtBlockHeight,
                     )
-                    Surface(
-                        tonalElevation = 2.dp,
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp, bottom = mergedBottomPadding + 6.dp)
-                            .noOpBringIntoView()
-                            .onSizeChanged { setThoughtBlockHeight(it.height) }
-                    ) {
-                        Column {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable { thoughtExpandedStates[message.id] = !isThoughtExpanded }
-                                .padding(10.dp)
-                        ) {
-                            if (isToolCalling || isToolInProgress) {
-                                Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                            } else if (!isThinking && !hasThought && toolCount > 0) {
-                                Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                            } else if (isTranscribing || collapsedTitle == "Image Transcription") {
-                                Icon(Icons.Filled.Image, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                            } else {
-                                Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                collapsedTitle, style = ChatType.thoughtTitle,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                fontWeight = FontWeight.Bold, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
-                            )
-                            Icon(
-                                if (isThoughtExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                null, modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                            )
-                        }
-                        AnimatedVisibility(
-                            visible = isThoughtExpanded,
-                            enter = fadeIn(tween(400)) + expandVertically(tween(400)),
-                            exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .then(
-                                        if (thinkingContentMaxHeightPx > 0)
-                                            Modifier.heightIn(min = with(LocalDensity.current) { thinkingContentMaxHeightPx.toDp() })
-                                        else Modifier
-                                    )
-                                    .onSizeChanged { size ->
-                                        if (isStreaming) {
-                                            thinkingContentMaxHeightPx = maxOf(thinkingContentMaxHeightPx, size.height)
-                                        }
-                                    }
-                            ) {
-                                Spacer(modifier = Modifier.height(2.dp))
-                                // Animate only items appended WHILE expanded during streaming.
-                                val seenSegIdx = remember(message.id) { mutableSetOf<Int>() }
-                                var seenSegInit by remember(message.id) { mutableStateOf(false) }
-                                val newSegIdx = if (isStreaming && seenSegInit)
-                                    segs.indices.filterNotTo(linkedSetOf()) { it in seenSegIdx } else emptySet()
-                                SideEffect {
-                                    segs.indices.forEach { seenSegIdx.add(it) }
-                                    if (!seenSegInit) seenSegInit = true
-                                }
-                                segs.forEachIndexed { idx, seg ->
-                                  AnimatedTimelineBlockAppearance(
-                                    animationKey = "${message.id}:compactseg:$idx",
-                                    animate = idx in newSegIdx
-                                  ) {
-                                   Column {
-                                    if ((seg.type == "thought" && seg.content.isNotBlank()) || seg.type == "transcription") {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(18.dp))
-                                                .clickable {
-                                                    onSegmentSelected(listOf(idx))
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                        ) {
-                                            Text(
-                                                if (seg.type == "transcription") transcriptionLabel(segs, idx) else stringResource(R.string.tool_thinking),
-                                                style = ChatType.meta,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            if (seg.content.isNotBlank()) {
-                                                val flat = seg.content.replace('\n', ' ')
-                                                val preview = if (isStreaming && idx == segs.lastIndex) {
-                                                    if (flat.length > 60) "…${flat.takeLast(60)}" else flat
-                                                } else flat
-                                                Text(
-                                                    text = preview,
-                                                    style = ChatType.metaNormal,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis
-                                                )
-                                            } else {
-                                                Text(
-                                                    text = "Image transcription is empty.",
-                                                    style = ChatType.metaNormal,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                                )
-                                            }
-                                        }
-                                    } else if (seg.type == "tool") {
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(18.dp))
-                                                .clickable {
-                                                    onSegmentSelected(listOf(idx))
-                                                }
-                                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                                        ) {
-                                            Text(
-                                                toolDisplayName(seg.toolName),
-                                                style = ChatType.meta,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontWeight = FontWeight.SemiBold
-                                            )
-                                            Text(
-                                                text = toolSummary(seg),
-                                                style = ChatType.metaNormal,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                            )
-                                        }
-                                    }
-                                    if (idx < segs.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(vertical = 2.dp),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
-                                        )
-                                    }
-                                   }
-                                  }
-                                }
-                            }
-                        }
-                        }
-                    }
                 }
 
                 Box(
@@ -528,48 +356,14 @@ internal fun AssistantMessageContent(
                             }
                         }
                     } else if (debouncedText.isNotEmpty() && !useTimelineSegments) {
-                        var keepBlockRenderer by remember(message.id) { mutableStateOf(false) }
-                        val useBlockRenderer = isStreaming || keepBlockRenderer
-                        val streamingBlocks = rememberStreamingMarkdownBlocks(
-                            content = debouncedText,
-                            flavour = markdownFlavour,
-                            active = useBlockRenderer
-                        )
-
-                        LaunchedEffect(isStreaming) {
-                            if (isStreaming) {
-                                keepBlockRenderer = true
-                            }
-                        }
-
                         Box {
                             SelectionContainer {
-                                Box(modifier = Modifier.fillMaxWidth()) {
-                                    if (useBlockRenderer) {
-                                        StreamingMarkdownBlockContent(
-                                            blocks = streamingBlocks,
-                                            renderContext = renderContext,
-                                            modifier = Modifier
-                                                .fillMaxWidth(),
-                                            tailIsStreaming = isStreaming
-                                        )
-                                    }
-                                    if (!useBlockRenderer && !isStreaming) {
-                                        key("full-markdown") {
-                                            RecomposeSafeMarkdown(
-                                                content = debouncedText,
-                                                isStreaming = false,
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                            ) { text ->
-                                                MarkdownTextContent(
-                                                    text = text,
-                                                    renderContext = renderContext
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                StreamingMarkdownDocument(
+                                    content = debouncedText,
+                                    isStreaming = isStreaming,
+                                    renderContext = renderContext,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                             if (isStreaming) {
                                 Box(

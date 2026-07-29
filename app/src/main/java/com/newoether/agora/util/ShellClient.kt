@@ -7,6 +7,27 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
+internal fun describeConchConnectionFailure(serverUrl: String, error: Exception): String =
+    describeConchRequestFailure(serverUrl, "public-key request", error)
+
+internal fun describeConchRequestFailure(
+    serverUrl: String,
+    operation: String,
+    error: Exception,
+): String =
+    when (error) {
+        is java.net.UnknownHostException ->
+            "Cannot resolve Conch host for $serverUrl: ${error.message ?: "unknown host"}"
+        is java.net.ConnectException ->
+            "Cannot connect to Conch at $serverUrl: ${error.message ?: "connection refused"}"
+        is java.net.SocketTimeoutException ->
+            "Conch $operation timed out at $serverUrl"
+        is javax.net.ssl.SSLException ->
+            "TLS connection to Conch at $serverUrl failed: ${error.message ?: "SSL error"}"
+        else ->
+            "Conch $operation to $serverUrl failed: ${error.message ?: error.javaClass.simpleName}"
+    }
+
 class ShellClient(
     private val serverUrl: String,
     private val apiKey: String,
@@ -31,17 +52,19 @@ class ShellClient(
     suspend fun fetchPublicKey(): Boolean {
         if (serverPublicKey != null) return true
         if (apiKey.isBlank()) {
-            lastError = "No API key configured"
+            lastError = "Conch authentication is disabled locally; no public-key exchange is needed"
             return false
         }
         var rawResponse: String? = null
         return try {
-            rawResponse = com.newoether.agora.api.HttpClient.fetchModels(
+            val response = com.newoether.agora.api.HttpClient.getTextResponse(
                 "$serverUrl/public-key",
                 emptyMap()
             )
-            if (rawResponse == null) {
-                lastError = "Server returned no response (check server URL and port)"
+            rawResponse = response.body
+            if (!response.isSuccessful) {
+                val detail = response.body.take(240).ifBlank { "empty response" }
+                lastError = "Conch at $serverUrl returned HTTP ${response.code}: $detail"
                 DebugLog.e("ShellClient", lastError!!)
                 return false
             }
@@ -50,12 +73,12 @@ class ShellClient(
             val nonce = json["nonce"]?.jsonPrimitive?.content
             val sig = json["signature"]?.jsonPrimitive?.content
             if (pubKeyStr == null || nonce == null || sig == null) {
-                lastError = "Server response missing public_key, nonce, or signature fields"
+                lastError = "Invalid Conch public-key response from $serverUrl: missing public_key, nonce, or signature"
                 DebugLog.e("ShellClient", "$lastError: $rawResponse")
                 return false
             }
             if (!verifyPublicKeySignature(pubKeyStr, nonce, sig)) {
-                lastError = "Public key signature verification failed — API keys may not match between Conch server and Agora"
+                lastError = "Conch authentication failed at $serverUrl: the public-key signature does not match the configured API key"
                 DebugLog.e("ShellClient", lastError!!)
                 return false
             }
@@ -63,7 +86,7 @@ class ShellClient(
             lastError = null
             true
         } catch (e: Exception) {
-            lastError = "Failed to fetch public key: ${e.message} (response: ${rawResponse ?: "null"})"
+            lastError = describeConchConnectionFailure(serverUrl, e)
             DebugLog.w("ShellClient", lastError!!)
             false
         }
@@ -164,8 +187,28 @@ class ShellClient(
         val content: String
     )
 
-    private suspend fun filePost(path: String, payload: String): String? {
-        if (apiKey.isBlank()) return null
+    private suspend fun encryptedPost(path: String, payload: String): String {
+        if (apiKey.isBlank()) {
+            val response = try {
+                com.newoether.agora.api.HttpClient.postTextResponse(
+                    "$serverUrl$path",
+                    payload,
+                    mapOf("Content-Type" to "application/json"),
+                )
+            } catch (e: Exception) {
+                throw IllegalStateException(
+                    describeConchRequestFailure(serverUrl, "$path request", e),
+                    e,
+                )
+            }
+            if (!response.isSuccessful) {
+                throw IllegalStateException(
+                    "Conch at $serverUrl returned HTTP ${response.code}: " +
+                        response.body.take(240).ifBlank { "empty response" },
+                )
+            }
+            return response.body
+        }
         // Lazily establish the encrypted session. The file endpoints need the server
         // public key just like /execute does, but (unlike executeCommand) nothing
         // pre-fetches it for the file tools — so fetch it here on first use.
@@ -194,13 +237,36 @@ class ShellClient(
             "X-Client-Public-Key" to clientPubKey
         )
 
-        val rawResponse = com.newoether.agora.api.HttpClient.post(
-            "$serverUrl$path", encryptedBody, headers
-        ) ?: return null
+        val response = try {
+            com.newoether.agora.api.HttpClient.postTextResponse(
+                "$serverUrl$path", encryptedBody, headers
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException(
+                describeConchRequestFailure(serverUrl, "$path request", e),
+                e,
+            )
+        }
+        if (!response.isSuccessful) {
+            throw IllegalStateException(
+                "Conch at $serverUrl returned HTTP ${response.code}: " +
+                    response.body.take(240).ifBlank { "empty response" },
+            )
+        }
 
-        val plaintext = ShellCrypto.decrypt(aesKey, rawResponse)
+        val plaintext = try {
+            ShellCrypto.decrypt(aesKey, response.body)
+        } catch (e: Exception) {
+            throw IllegalStateException(
+                "Conch response decryption failed at $serverUrl: ${e.message}",
+                e,
+            )
+        }
         return String(plaintext, Charsets.UTF_8)
     }
+
+    private suspend fun filePost(path: String, payload: String): String =
+        encryptedPost(path, payload)
 
     suspend fun fileRead(path: String, offset: Long = 0, limit: Long = 0): FileReadResult {
         val limitVal = if (limit > 0) limit else 1048576
@@ -210,7 +276,6 @@ class ShellClient(
             "limit" to limitVal
         ))
         val jsonStr = filePost("/file/read", payload)
-            ?: return FileReadResult("", 0, 0, error = "No response from server")
         val json = Json.parseToJsonElement(jsonStr).jsonObject
         val error = json["error"]?.jsonPrimitive?.content
         if (error != null) return FileReadResult("", 0, 0, error = error)
@@ -227,7 +292,6 @@ class ShellClient(
             "content" to content
         ))
         val jsonStr = filePost("/file/write", payload)
-            ?: return "No response from server"
         val json = Json.parseToJsonElement(jsonStr).jsonObject
         return json["error"]?.jsonPrimitive?.content
     }
@@ -238,7 +302,6 @@ class ShellClient(
         if (depth != null) params["depth"] = depth
         val payload = buildJsonBodyFileMixed(params)
         val jsonStr = filePost("/file/glob", payload)
-            ?: return Result.failure(Exception("No response from server"))
         val json = Json.parseToJsonElement(jsonStr).jsonObject
         val error = json["error"]?.jsonPrimitive?.content
         if (error != null) return Result.failure(Exception(error))
@@ -252,7 +315,6 @@ class ShellClient(
         if (fileGlob.isNotBlank()) params["glob"] = fileGlob
         val payload = buildJsonBodyFile(params)
         val jsonStr = filePost("/file/grep", payload)
-            ?: return Result.failure(Exception("No response from server"))
         val json = Json.parseToJsonElement(jsonStr).jsonObject
         val error = json["error"]?.jsonPrimitive?.content
         if (error != null) return Result.failure(Exception(error))
@@ -286,5 +348,23 @@ class ShellClient(
             }
         }.toString()
     }
+
+    suspend fun startJob(
+        command: String,
+        timeoutMs: Int,
+        workdir: String,
+    ): String = encryptedPost(
+        "/jobs/start",
+        buildJsonBody(command, timeoutMs, workdir),
+    )
+
+    suspend fun listJobs(): String =
+        encryptedPost("/jobs/list", "{}")
+
+    suspend fun getJob(jobId: String): String =
+        encryptedPost("/jobs/get", buildJsonObject { put("job_id", jobId) }.toString())
+
+    suspend fun stopJob(jobId: String): String =
+        encryptedPost("/jobs/stop", buildJsonObject { put("job_id", jobId) }.toString())
 
 }

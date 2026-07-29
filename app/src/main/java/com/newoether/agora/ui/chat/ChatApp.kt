@@ -65,6 +65,8 @@ import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
+import com.newoether.agora.viewmodel.SwitchingRequestKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -75,7 +77,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
-private const val MESSAGE_RESOLVE_TIMEOUT_MS = 750L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
@@ -121,6 +122,7 @@ fun ChatApp(
     val isStopping by viewModel.isStopping.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
     val currentConversation by viewModel.currentConversation.collectAsState()
+    val loadedMessagesConversationId by viewModel.loadedMessagesConversationId.collectAsState()
     val currentLoop by viewModel.currentLoop.collectAsState()
     val runningLoopIds by viewModel.runningLoopConversationIds.collectAsState()
     val generatingInConversationId by viewModel.generatingInConversationId.collectAsState()
@@ -129,6 +131,7 @@ fun ChatApp(
     val modelAliases by viewModel.settings.modelAliases.collectAsState()
     val thoughtExpandedStates = remember(currentConversationId) { mutableStateMapOf<String, Boolean>() }
     val isNewChatMode by viewModel.isNewChatMode.collectAsState()
+    val newChatEntryId by viewModel.newChatEntryId.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
@@ -478,55 +481,78 @@ fun ChatApp(
 
     val switchingScrollRequest by viewModel.switchingScrollRequest.collectAsState()
 
-    LaunchedEffect(switchingScrollRequest?.id) {
+    LaunchedEffect(switchingScrollRequest?.id, switchingScrollRequest?.readyForUi) {
         val request = switchingScrollRequest ?: return@LaunchedEffect
-        if (currentConversationId == null) {
-            viewModel.failSwitchingScroll(request.id, "conversation disappeared")
+        if (!request.readyForUi || request.kind == SwitchingRequestKind.NEW_CHAT) {
             return@LaunchedEffect
         }
-        if (settleCoveredTransition(request.targetMessageId)) {
-            viewModel.completeSwitchingScroll(request.id)
-        } else {
-            viewModel.failSwitchingScroll(request.id, "layout failed to stabilize")
+        var terminalized = false
+        try {
+            val targetConversationId = request.conversationId
+            if (targetConversationId == null) {
+                viewModel.failSwitchingScroll(request.id, "conversation disappeared")
+                terminalized = true
+                return@LaunchedEffect
+            }
+
+            if (request.kind == SwitchingRequestKind.CONVERSATION) {
+                // The target id may equal the current id, so request identity — not a StateFlow
+                // value edge — owns this effect. Room's first target-specific message snapshot is
+                // also required before measuring; an empty target is represented by the loaded id.
+                val resolved = withTimeoutOrNull(CONVERSATION_RESOLVE_TIMEOUT_MS) {
+                    snapshotFlow {
+                        Triple(
+                            currentConversationId,
+                            currentConversation?.id,
+                            loadedMessagesConversationId,
+                        )
+                    }.filter { (currentId, loadedConversationId, loadedMessagesId) ->
+                        currentId == targetConversationId &&
+                            loadedConversationId == targetConversationId &&
+                            loadedMessagesId == targetConversationId
+                    }.first()
+                }
+                if (resolved == null) {
+                    // Preserve the historical missing-target recovery, but terminalize this
+                    // request first even when createNewChat is already a no-op.
+                    viewModel.failSwitchingScroll(request.id, "conversation did not resolve")
+                    terminalized = true
+                    viewModel.createNewChat()
+                    return@LaunchedEffect
+                }
+            } else if (currentConversationId != targetConversationId) {
+                viewModel.failSwitchingScroll(request.id, "conversation changed")
+                terminalized = true
+                return@LaunchedEffect
+            }
+
+            if (settleCoveredTransition(request.targetMessageId)) {
+                viewModel.completeSwitchingScroll(request.id)
+            } else {
+                viewModel.failSwitchingScroll(request.id, "layout failed to stabilize")
+            }
+            terminalized = true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            DebugLog.e("AgoraUI", "Switching request ${request.id} failed", e)
+            viewModel.failSwitchingScroll(request.id, "unexpected UI failure")
+            terminalized = true
+        } finally {
+            if (!terminalized) {
+                // Owner gating makes this a no-op when a newer request caused cancellation.
+                // When the composition itself disappears, it prevents a retained infinite cover.
+                viewModel.failSwitchingScroll(request.id, "switching effect cancelled")
+            }
         }
     }
 
     LaunchedEffect(currentConversationId) {
-        // New chat's first send creates the conversation; its own scroll-to-message handles
-        // scrolling, so skip this conversation-open auto-scroll once to avoid a double scroll.
+        // New chat's first send owns its persistent animated-scroll request. Conversation
+        // navigation is handled above by a monotonic switching request, so this effect only
+        // consumes the legacy one-shot suppression marker.
         if (viewModel.suppressNextOpenScroll) {
             viewModel.suppressNextOpenScroll = false
-            viewModel.setSwitching(false)
-            return@LaunchedEffect
-        }
-        val targetConversationId = currentConversationId
-        if (targetConversationId != null) {
-            // A notification or stale execution-log entry can point at a conversation that was
-            // deleted before navigation reached the UI. Do not leave the switching scrim up
-            // forever: wait a bounded amount for Room to resolve the target, then fall back.
-            val resolvedConversation = withTimeoutOrNull(CONVERSATION_RESOLVE_TIMEOUT_MS) {
-                snapshotFlow { currentConversation }
-                    .filter { it?.id == targetConversationId }
-                    .first()
-            }
-            if (resolvedConversation == null) {
-                viewModel.createNewChat()
-                return@LaunchedEffect
-            }
-
-            // Empty conversations are valid (for example, a just-created execution). Give the
-            // message Flow a short chance to populate, but never require a non-empty emission in
-            // order to release the switching overlay.
-            if (messages.isEmpty()) {
-                withTimeoutOrNull(MESSAGE_RESOLVE_TIMEOUT_MS) {
-                    snapshotFlow { messages }.filter { it.isNotEmpty() }.first()
-                }
-            }
-            val settled = settleCoveredTransition(targetMessageId = null)
-            if (!settled) DebugLog.e("AgoraUI", "Conversation scroll failed to stabilize")
-            viewModel.setSwitching(false)
-        } else {
-            viewModel.setSwitching(false)
         }
     }
 
@@ -780,13 +806,33 @@ fun ChatApp(
                                         .verticalScroll(rememberScrollState()),
                                     contentAlignment = Alignment.TopCenter
                                 ) {
-                                    TypewriterText(
-                                        text = stringResource(R.string.welcome_to_agora),
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onBackground,
-                                        modifier = Modifier.padding(top = ((LocalConfiguration.current.screenHeightDp + topBarH.value / 2f - bottomBarHeight.value) / 2).coerceAtLeast(0f).dp)
-                                    )
+                                    val welcomeText = stringResource(R.string.welcome_to_agora)
+                                    val availableWelcomeHeight =
+                                        LocalConfiguration.current.screenHeightDp +
+                                            topBarH.value / 2f -
+                                            bottomBarHeight.value
+                                    val welcomeTopPadding =
+                                        (availableWelcomeHeight / 2f).coerceAtLeast(0f).dp
+                                    val welcomeModifier =
+                                        Modifier.padding(top = welcomeTopPadding)
+                                    if (newChatEntryId == 1L) {
+                                        TypewriterText(
+                                            text = welcomeText,
+                                            animationKey = newChatEntryId,
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = welcomeModifier,
+                                        )
+                                    } else {
+                                        Text(
+                                            text = welcomeText,
+                                            style = MaterialTheme.typography.headlineMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onBackground,
+                                            modifier = welcomeModifier,
+                                        )
+                                    }
                                 }
                             }
                         } else {

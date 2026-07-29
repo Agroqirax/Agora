@@ -56,15 +56,6 @@ import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
-import com.mikepenz.markdown.m3.Markdown
-import com.mikepenz.markdown.model.markdownAnimations
-import com.mikepenz.markdown.model.MarkdownColors
-import com.mikepenz.markdown.model.MarkdownPadding
-import com.mikepenz.markdown.model.MarkdownTypography
-import com.mikepenz.markdown.model.ReferenceLinkHandlerImpl
-import com.mikepenz.markdown.compose.components.MarkdownComponents
-import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
-import org.intellij.markdown.parser.MarkdownParser
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
@@ -84,11 +75,7 @@ internal fun SegmentDetailSheet(
     selectedSegmentIndex: Int,
     selectedSegmentIndices: List<Int>,
     isStreaming: Boolean,
-    markdownColors: MarkdownColors,
-    thoughtTypography: MarkdownTypography,
-    thoughtMarkdownPadding: MarkdownPadding,
-    markdownComponents: MarkdownComponents,
-    markdownFlavour: MarkdownFlavourDescriptor,
+    markdownRenderContext: ChatMarkdownRenderContext,
     onDismiss: () -> Unit
 ) {
     val liveSegs = remember(message.segments) {
@@ -335,7 +322,7 @@ internal fun SegmentDetailSheet(
                             // Fixed title
                             Text(
                                 text = if (selectedSegs.size > 1) compactSegmentTitle(selectedSegs, message, useLiveStatus = false)
-                                    else if (seg.type == "tool") toolDisplayName(seg.toolName)
+                                    else if (seg.type == "tool") toolDisplayName(seg)
                                     else if (seg.type == "transcription") transcriptionLabel(liveSegs, selectedSegmentIndex)
                                     else stringResource(R.string.tool_thinking),
                                 style = ChatType.detailTitle,
@@ -382,25 +369,12 @@ internal fun SegmentDetailSheet(
                                         )
                                     } else {
                                         SelectionContainer {
-                                            RecomposeSafeMarkdown(
+                                            StreamingMarkdownDocument(
                                                 content = detailSeg.content,
-                                                isStreaming = isStreaming && index == selectedSegs.lastIndex
-                                            ) { text ->
-                                                val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
-                                                val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
-                                                Markdown(
-                                                    content = text.escapeForMarkdown(),
-                                                    modifier = Modifier.fillMaxWidth(),
-                                                    colors = markdownColors,
-                                                    typography = thoughtTypography,
-                                                    padding = thoughtMarkdownPadding,
-                                                    components = markdownComponents,
-                                                    flavour = markdownFlavour,
-                                                    parser = markdownParser,
-                                                    referenceLinkHandler = referenceLinkHandler,
-                                                    animations = markdownAnimations { this }
-                                                )
-                                            }
+                                                isStreaming = isStreaming && index == selectedSegs.lastIndex,
+                                                renderContext = markdownRenderContext,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
                                         }
                                     }
                                     if (index < selectedSegs.lastIndex) {
@@ -419,71 +393,22 @@ internal fun SegmentDetailSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                 )
                             } else {
-                                var debouncedThoughtContent by remember { mutableStateOf(seg.content) }
-                                if (!isStreaming) {
-                                    debouncedThoughtContent = seg.content
-                                } else {
-                                    var lastUpdateMs by remember { mutableLongStateOf(0L) }
-                                    var flushJob by remember { mutableStateOf<Job?>(null) }
-                                    LaunchedEffect(seg.content) {
-                                        val now = System.currentTimeMillis()
-                                        val elapsed = now - lastUpdateMs
-                                        if (elapsed >= 500) {
-                                            flushJob?.cancel()
-                                            debouncedThoughtContent = seg.content
-                                            lastUpdateMs = now
-                                        } else {
-                                            flushJob?.cancel()
-                                            flushJob = launch {
-                                                delay(500 - elapsed)
-                                                debouncedThoughtContent = seg.content
-                                                lastUpdateMs = System.currentTimeMillis()
-                                            }
-                                        }
-                                    }
-                                }
                                 if (!isStreaming) {
                                     SelectionContainer {
-                                        RecomposeSafeMarkdown(
-                                            content = debouncedThoughtContent,
-                                            isStreaming = isStreaming
-                                        ) { text ->
-                                            val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
-                                            val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
-                                            Markdown(
-                                                content = text.escapeForMarkdown(),
-                                                modifier = Modifier.fillMaxWidth(),
-                                                colors = markdownColors,
-                                                typography = thoughtTypography,
-                                                padding = thoughtMarkdownPadding,
-                                                components = markdownComponents,
-                                                flavour = markdownFlavour,
-                                                parser = markdownParser,
-                                                referenceLinkHandler = referenceLinkHandler,
-                                                animations = markdownAnimations { this }
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    RecomposeSafeMarkdown(
-                                        content = debouncedThoughtContent,
-                                        isStreaming = isStreaming
-                                    ) { text ->
-                                        val markdownParser = remember(text) { MarkdownParser(markdownFlavour) }
-                                        val referenceLinkHandler = remember(text) { ReferenceLinkHandlerImpl() }
-                                        Markdown(
-                                            content = text.escapeForMarkdown(),
+                                        StreamingMarkdownDocument(
+                                            content = seg.content,
+                                            isStreaming = false,
+                                            renderContext = markdownRenderContext,
                                             modifier = Modifier.fillMaxWidth(),
-                                            colors = markdownColors,
-                                            typography = thoughtTypography,
-                                            padding = thoughtMarkdownPadding,
-                                            components = markdownComponents,
-                                            flavour = markdownFlavour,
-                                            parser = markdownParser,
-                                            referenceLinkHandler = referenceLinkHandler,
-                                            animations = markdownAnimations { this }
                                         )
                                     }
+                                } else {
+                                    StreamingMarkdownDocument(
+                                        content = seg.content,
+                                        isStreaming = true,
+                                        renderContext = markdownRenderContext,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
                                 }
                             }
                         }

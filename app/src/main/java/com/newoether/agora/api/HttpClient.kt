@@ -12,6 +12,11 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 object HttpClient {
+    data class TextResponse(
+        val code: Int,
+        val body: String,
+        val isSuccessful: Boolean,
+    )
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
     // Header names that carry secret credentials across the providers.
@@ -187,6 +192,16 @@ object HttpClient {
             response.close()
         }
         fun readLine(): String? = source?.readUtf8Line()
+        /**
+         * Shortens subsequent blocking reads on this one response. OpenAI-compatible SSE streams
+         * use this after a semantic terminal `finish_reason`: a bounded grace window accepts the
+         * optional trailing usage chunk / `[DONE]`, but peer socket closure is no longer required
+         * to complete the generation.
+         */
+        fun setReadTimeoutMillis(timeoutMillis: Long) {
+            require(timeoutMillis > 0L)
+            source?.timeout()?.timeout(timeoutMillis, TimeUnit.MILLISECONDS)
+        }
         /** Cancel the underlying HTTP call immediately — unblocks [readLine]. */
         override fun cancel() = call.cancel()
     }
@@ -259,6 +274,24 @@ object HttpClient {
         }
     }
 
+    fun postTextResponse(
+        url: String,
+        bodyText: String,
+        headers: Map<String, String> = emptyMap(),
+    ): TextResponse {
+        guardCleartextCredentials(url, headers)
+        val body = bodyText.toRequestBody(JSON)
+        val requestBuilder = Request.Builder().url(url).post(body)
+        headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        return client.newCall(requestBuilder.build()).execute().use { response ->
+            TextResponse(
+                code = response.code,
+                body = response.body?.string().orEmpty(),
+                isSuccessful = response.isSuccessful,
+            )
+        }
+    }
+
     fun fetchModels(url: String, headers: Map<String, String> = emptyMap()): String? {
         guardCleartextCredentials(url, headers)
         val requestBuilder = Request.Builder().url(url).get()
@@ -266,6 +299,22 @@ object HttpClient {
         val response = client.newCall(requestBuilder.build()).execute()
         return response.use {
             if (it.isSuccessful) it.body?.string() else null
+        }
+    }
+
+    fun getTextResponse(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+    ): TextResponse {
+        guardCleartextCredentials(url, headers)
+        val requestBuilder = Request.Builder().url(url).get()
+        headers.forEach { (key, value) -> requestBuilder.addHeader(key, value) }
+        return client.newCall(requestBuilder.build()).execute().use { response ->
+            TextResponse(
+                code = response.code,
+                body = response.body?.string().orEmpty(),
+                isSuccessful = response.isSuccessful,
+            )
         }
     }
 

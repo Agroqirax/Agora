@@ -211,12 +211,10 @@ private data class ParsedStreamingMarkdownBlocks(
 internal fun rememberStreamingMarkdownBlocks(
     content: String,
     flavour: MarkdownFlavourDescriptor,
-    active: Boolean
 ): StreamingMarkdownBlocksState {
     val state = remember { StreamingMarkdownBlocksState("") }
 
-    LaunchedEffect(content, flavour, active) {
-        if (!active) return@LaunchedEffect
+    LaunchedEffect(content, flavour) {
         val parsed = withContext(Dispatchers.Default) {
             val prepared = content.toRenderableMarkdownText()
             splitStreamingMarkdownBlocks(prepared, flavour)
@@ -311,6 +309,25 @@ private fun ASTNode.toStreamingMarkdownNode(sourceContent: String): StreamingMar
         contentHash = sourceContent.substring(start, end).hashCode(),
         node = this,
         sourceContent = sourceContent
+    )
+}
+
+@Composable
+internal fun StreamingMarkdownDocument(
+    content: String,
+    isStreaming: Boolean,
+    renderContext: ChatMarkdownRenderContext,
+    modifier: Modifier = Modifier,
+) {
+    val blocks = rememberStreamingMarkdownBlocks(
+        content = content,
+        flavour = renderContext.flavour,
+    )
+    StreamingMarkdownBlockContent(
+        blocks = blocks,
+        renderContext = renderContext,
+        modifier = modifier,
+        tailIsStreaming = isStreaming,
     )
 }
 
@@ -521,8 +538,6 @@ private fun RecomposeSafeMarkdownNode(
     var fading by remember { mutableStateOf(false) }
     var fadeAlpha by remember { mutableFloatStateOf(0f) }
     var fadeKey by remember { mutableIntStateOf(0) }
-    var wasStreaming by remember { mutableStateOf(false) }
-    var waitingForFade by remember { mutableStateOf(false) }
 
     fun sameContent(a: StreamingMarkdownNode?, b: StreamingMarkdownNode): Boolean =
         a?.startOffset == b.startOffset &&
@@ -531,39 +546,35 @@ private fun RecomposeSafeMarkdownNode(
             a.node.type == b.node.type
 
     LaunchedEffect(content, isStreaming, fading) {
-        if (isStreaming) {
-            waitingForFade = false
-            val cur = if (front == 0) buf0 else buf1
-            if (!sameContent(cur, content) && !fading) {
+        val current = if (front == 0) buf0 else buf1
+        if (sameContent(current, content)) {
+            if (!fading) {
+                if (front == 0) buf1 = null else buf0 = null
+            }
+            return@LaunchedEffect
+        }
+
+        if (isStreaming && !fading) {
+            if (current == null) {
+                if (front == 0) buf0 = content else buf1 = content
+            } else {
                 if (front == 0) buf1 = content else buf0 = content
                 fadeKey++
                 fading = true
                 fadeAlpha = 0f
             }
-        } else {
-            if (wasStreaming) {
-                waitingForFade = true
-            }
-            if (waitingForFade) {
-                if (!fading) {
-                    if (front == 0) buf1 = content else buf0 = content
-                    waitingForFade = false
-                    fadeKey++
-                    fading = true
-                    fadeAlpha = 0f
-                }
-            }
-            if (!waitingForFade && !fading) {
-                if (front == 0) {
-                    if (!sameContent(buf0, content)) buf0 = content
-                    buf1 = null
-                } else {
-                    if (!sameContent(buf1, content)) buf1 = content
-                    buf0 = null
-                }
+        } else if (!isStreaming && !fading) {
+            // Terminalization must never manufacture one final crossfade. If the latest
+            // provider chunk arrived while a fade was in flight, snap the now-idle buffer
+            // to the authoritative final AST once that fade completes.
+            if (front == 0) {
+                buf0 = content
+                buf1 = null
+            } else {
+                buf1 = content
+                buf0 = null
             }
         }
-        wasStreaming = isStreaming
     }
 
     LaunchedEffect(fadeKey) {

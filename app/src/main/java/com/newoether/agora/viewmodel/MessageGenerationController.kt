@@ -192,9 +192,10 @@ class MessageGenerationController(
     // ever entered the cache through a manual full re-cache. Enqueues background work only.
     private val onUserMessagePersisted: (messageId: String, text: String) -> Unit = { _, _ -> },
     /** Covers destructive tree mutation until ChatApp has settled the resulting path. */
-    private val onTreeMutationStart: suspend () -> Unit = {},
-    private val onTreeMutationSettling: (targetMessageId: String?) -> Unit = {},
-    private val onTreeMutationFailed: () -> Unit = {},
+    private val onTreeMutationStart: suspend () -> Long? = { null },
+    private val onTreeMutationSettling: (requestId: Long?, targetMessageId: String?) -> Unit =
+        { _, _ -> },
+    private val onTreeMutationFailed: (requestId: Long?) -> Unit = {},
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
 
@@ -258,7 +259,7 @@ class MessageGenerationController(
         val previewIds = structuralDescendantIds(snapshot, messageId)
 
         viewModelScope.launch(Dispatchers.IO) {
-            onTreeMutationStart()
+            val switchingRequestId = onTreeMutationStart()
             var committed = false
             try {
                 state.queueMutationMutex.withLock {
@@ -306,13 +307,13 @@ class MessageGenerationController(
                             selectedChildren.value = plan.messageSelections
                         }
                         committed = true
-                        onTreeMutationSettling(targetAfterDelete)
+                        onTreeMutationSettling(switchingRequestId, targetAfterDelete)
                     }
                 }
             } catch (e: Exception) {
                 DebugLog.e("AgoraVM", "Failed to delete message branch $messageId", e)
             } finally {
-                if (!committed) onTreeMutationFailed()
+                if (!committed) onTreeMutationFailed(switchingRequestId)
             }
         }
 

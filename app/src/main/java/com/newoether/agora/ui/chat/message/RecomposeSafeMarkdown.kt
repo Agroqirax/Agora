@@ -26,45 +26,38 @@ internal fun RecomposeSafeMarkdown(
     var fading by remember { mutableStateOf(false) }
     var fadeAlpha by remember { mutableFloatStateOf(0f) }
     var fadeKey by remember { mutableIntStateOf(0) }
-    var wasStreaming by remember { mutableStateOf(false) }
-    var waitingForFade by remember { mutableStateOf(false) }
     // State machine — driven from an effect so composition stays read-only.
     // Keyed on every input that can trigger a buffer swap / fade transition:
     // a new content value, a streaming↔idle flip, or a fade completing (fading → false).
     LaunchedEffect(content, isStreaming, fading) {
-        if (isStreaming) {
-            waitingForFade = false
-            val cur = if (front == 0) buf0 else buf1
-            if (content != cur && !fading) {
+        val current = if (front == 0) buf0 else buf1
+        if (content == current) {
+            if (!fading) {
+                if (front == 0) buf1 = "" else buf0 = ""
+            }
+            return@LaunchedEffect
+        }
+
+        if (isStreaming && !fading) {
+            if (current.isEmpty()) {
+                if (front == 0) buf0 = content else buf1 = content
+            } else {
                 if (front == 0) buf1 = content else buf0 = content
                 fadeKey++
                 fading = true
                 fadeAlpha = 0f
             }
-        } else {
-            if (wasStreaming) {
-                waitingForFade = true
-            }
-            if (waitingForFade) {
-                if (!fading) {
-                    if (front == 0) buf1 = content else buf0 = content
-                    waitingForFade = false
-                    fadeKey++
-                    fading = true
-                    fadeAlpha = 0f
-                }
-            }
-            if (!waitingForFade && !fading) {
-                if (front == 0) {
-                    if (buf0 != content) buf0 = content
-                    buf1 = ""
-                } else {
-                    if (buf1 != content) buf1 = content
-                    buf0 = ""
-                }
+        } else if (!isStreaming && !fading) {
+            // A streaming→idle transition is a state change, not new content. Snap only
+            // when the final text genuinely differs, avoiding the completion flash.
+            if (front == 0) {
+                buf0 = content
+                buf1 = ""
+            } else {
+                buf1 = content
+                buf0 = ""
             }
         }
-        wasStreaming = isStreaming
     }
 
     // Fade animation — keyed by fadeKey so every fade gets a fresh LaunchedEffect

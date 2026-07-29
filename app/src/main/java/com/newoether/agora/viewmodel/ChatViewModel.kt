@@ -71,11 +71,6 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
-data class SwitchingScrollRequest(
-    val id: Long,
-    val targetMessageId: String?,
-)
-
 data class AnimatedScrollRequest(
     val id: Long,
     val conversationId: String,
@@ -483,6 +478,14 @@ class ChatViewModel(
 
     private val _allMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val allMessages: StateFlow<List<ChatMessage>> = _allMessages.asStateFlow()
+    /**
+     * Identity of the conversation whose first Room message snapshot has been installed into
+     * [_allMessages]. This stays meaningful for an empty conversation, unlike checking whether
+     * the list is non-empty, and prevents a switch from settling against the previous tree.
+     */
+    private val _loadedMessagesConversationId = MutableStateFlow<String?>(null)
+    val loadedMessagesConversationId: StateFlow<String?> =
+        _loadedMessagesConversationId.asStateFlow()
 
     private val _isSyncingModels = MutableStateFlow(false)
     val isSyncingModels: StateFlow<Boolean> = _isSyncingModels.asStateFlow()
@@ -565,7 +568,7 @@ class ChatViewModel(
             state.onStreamCommit = { conversationId, message ->
                 if (_currentConversationId.value == conversationId) {
                     _allMessages.update { messages ->
-                        messages.map { if (it.id == message.id) message else it }
+                        UiMessageCommitPolicy.upsert(messages, listOf(message))
                     }
                 }
             }
@@ -597,17 +600,19 @@ class ChatViewModel(
         GenerationFinalizer(convRepo, ragManager::indexMessageForRag)
     }
 
-    private val _isSwitching = MutableStateFlow(false)
-    val isSwitching: StateFlow<Boolean> = _isSwitching.asStateFlow()
+    private val switchingCoordinator = SwitchingCoordinator()
+    val isSwitching: StateFlow<Boolean> = switchingCoordinator.isSwitching
 
     private var switchingJob: Job? = null
 
-    fun setSwitching(switching: Boolean) {
-        _isSwitching.value = switching
-    }
-
     private val _isNewChatMode = MutableStateFlow(true)
     val isNewChatMode: StateFlow<Boolean> = _isNewChatMode.asStateFlow()
+
+    // A monotonic page-entry identity, distinct from recomposition/configuration changes.
+    // The initial value owns the app-launch welcome; each real conversation→New Chat
+    // transition increments it exactly once.
+    private val _newChatEntryId = MutableStateFlow(1L)
+    val newChatEntryId: StateFlow<Long> = _newChatEntryId.asStateFlow()
 
     private val _isTransitioningToNewChat = MutableStateFlow(false)
     val isTransitioningToNewChat: StateFlow<Boolean> = _isTransitioningToNewChat.asStateFlow()
@@ -674,11 +679,20 @@ class ChatViewModel(
             onConversationGraduated = ragManager::backfillConversationForRag,
             onUserMessagePersisted = ragManager::indexMessageForRag,
             onTreeMutationStart = {
-                _isSwitching.value = true
+                val request = _currentConversationId.value?.let {
+                    switchingCoordinator.beginTreeMutation(it)
+                }
                 delay(SWITCH_OVERLAY_FADE_MS)
+                request?.id
             },
-            onTreeMutationSettling = ::requestSwitchingScroll,
-            onTreeMutationFailed = { _isSwitching.value = false },
+            onTreeMutationSettling = { requestId, targetMessageId ->
+                requestId?.let {
+                    switchingCoordinator.markTreeMutationReady(it, targetMessageId)
+                }
+            },
+            onTreeMutationFailed = { requestId ->
+                requestId?.let { switchingCoordinator.complete(it) }
+            },
         )
     }
 
@@ -692,29 +706,17 @@ class ChatViewModel(
         }
     }
 
-    private val switchingScrollIds = AtomicLong(0L)
-    private val _switchingScrollRequest = MutableStateFlow<SwitchingScrollRequest?>(null)
     val switchingScrollRequest: StateFlow<SwitchingScrollRequest?> =
-        _switchingScrollRequest.asStateFlow()
-
-    private fun requestSwitchingScroll(targetMessageId: String?) {
-        _switchingScrollRequest.value = SwitchingScrollRequest(
-            id = switchingScrollIds.incrementAndGet(),
-            targetMessageId = targetMessageId,
-        )
-    }
+        switchingCoordinator.request
 
     fun completeSwitchingScroll(requestId: Long) {
-        if (_switchingScrollRequest.value?.id != requestId) return
-        _switchingScrollRequest.value = null
-        _isSwitching.value = false
+        switchingCoordinator.complete(requestId)
     }
 
     fun failSwitchingScroll(requestId: Long, reason: String) {
-        if (_switchingScrollRequest.value?.id != requestId) return
+        if (!switchingCoordinator.isCurrent(requestId)) return
         DebugLog.e("AgoraVM", "Switching scroll did not settle: $reason")
-        _switchingScrollRequest.value = null
-        _isSwitching.value = false
+        switchingCoordinator.complete(requestId)
     }
 
     // Export/Import state lives in [importExport]; exposed here for the UI.
@@ -743,6 +745,7 @@ class ChatViewModel(
         startInitJobs()
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
+                _loadedMessagesConversationId.value = null
                 if (id != null) {
                     coroutineScope {
                         val switchScope = this
@@ -824,6 +827,7 @@ class ChatViewModel(
                                     } else msg
                                 } else msg
                             }
+                            _loadedMessagesConversationId.value = id
                             if (!generationMirrorStarted) {
                                 generationMirrorStarted = true
                                 // Publish the target conversation's generation overlay only AFTER its
@@ -839,6 +843,7 @@ class ChatViewModel(
                     }
                 } else {
                     _allMessages.value = emptyList()
+                    _loadedMessagesConversationId.value = null
                     _selectedChildren.value = emptyMap()
                     _streamingMessage.value = null
                     _isLoading.value = false
@@ -1007,41 +1012,66 @@ class ChatViewModel(
         // Already on the new-chat screen: ignore (both the drawer and the top-bar capsule route
         // here; behaviour must be identical and a no-op when there's nothing to reset).
         if (_isNewChatMode.value) return
-        switchingJob?.cancel()
+        val previousJob = switchingJob
+        val request = switchingCoordinator.beginNewChat()
+        previousJob?.cancel()
         if (!_isNewChatMode.value) {
             _pendingSystemPromptId.value = null
         }
+        _newChatEntryId.value += 1L
         _isNewChatMode.value = true
         _isTransitioningToNewChat.value = true
-        _isSwitching.value = true
+        _animatedScrollRequest.value = null
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
-            _currentConversationId.value = null
-            _currentActiveModel.value = null
-            _pendingConversationSettings.value = null
-            _allMessages.value = emptyList()
-            _selectedChildren.value = emptyMap()
-            _switchingScrollRequest.value = null
-            _animatedScrollRequest.value = null
-            _isSwitching.value = false
-            _isTransitioningToNewChat.value = false
+            try {
+                kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
+                if (!switchingCoordinator.isCurrent(request.id)) return@launch
+                _currentConversationId.value = null
+                _currentActiveModel.value = null
+                _pendingConversationSettings.value = null
+                _allMessages.value = emptyList()
+                _loadedMessagesConversationId.value = null
+                _selectedChildren.value = emptyMap()
+            } finally {
+                if (switchingCoordinator.complete(request.id)) {
+                    _isTransitioningToNewChat.value = false
+                }
+            }
         }
     }
 
     fun selectConversation(id: String) {
         if (_currentConversationId.value == id && !_isNewChatMode.value) return
 
-        switchingJob?.cancel()
+        val previousJob = switchingJob
+        val request = switchingCoordinator.beginConversation(id)
+        previousJob?.cancel()
         _isTransitioningToNewChat.value = false
-        _isSwitching.value = true
+        _animatedScrollRequest.value = null
         switchingJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
-            _isNewChatMode.value = false
-            _switchingScrollRequest.value = null
-            _animatedScrollRequest.value = null
-            _currentConversationId.value = id
-            val conversation = convRepo.getConversation(id)
-            _currentActiveModel.value = conversation?.modelId
+            try {
+                kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
+                if (!switchingCoordinator.isCurrent(request.id)) return@launch
+                _isNewChatMode.value = false
+                _currentConversationId.value = id
+                val conversation = convRepo.getConversation(id)
+                if (switchingCoordinator.isCurrent(request.id)) {
+                    _currentActiveModel.value = conversation?.modelId
+                    // Publish UI readiness only after this owned job has committed every
+                    // synchronous target state. In particular, a same-id selection must not let
+                    // the UI settle the request during the overlay delay and cancel this job's
+                    // transition out of New Chat mode.
+                    switchingCoordinator.markConversationReady(request.id)
+                }
+            } catch (e: CancellationException) {
+                if (switchingCoordinator.isCurrent(request.id)) {
+                    failSwitchingScroll(request.id, "conversation switch cancelled")
+                }
+                throw e
+            } catch (e: Exception) {
+                DebugLog.e("AgoraVM", "Failed to select conversation $id", e)
+                failSwitchingScroll(request.id, "conversation load failed")
+            }
         }
     }
 
@@ -1100,7 +1130,7 @@ class ChatViewModel(
      * Returns the count of deleted messages (for the confirmation dialog).
      */
     fun deleteMessage(messageId: String): Int {
-        if (_isSwitching.value) return 0
+        if (isSwitching.value) return 0
         return generationController.deleteMessage(messageId)
     }
 
@@ -1190,7 +1220,7 @@ class ChatViewModel(
     fun regenerate(messageId: String) = generationController.regenerate(messageId)
 
     fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
-        if (_isSwitching.value) return
+        if (isSwitching.value) return
         val conversationId = _currentConversationId.value ?: return
         val state = generationRegistry.getOrCreate(conversationId)
         if (state.generating.value) return
@@ -1217,23 +1247,25 @@ class ChatViewModel(
             _allMessages.value.firstOrNull { it.id == pid }?.runId
         }
         
-        switchingJob?.cancel()
-        _isSwitching.value = true
+        val previousJob = switchingJob
+        val request = switchingCoordinator.beginTreeMutation(conversationId)
+        previousJob?.cancel()
         switchingJob = viewModelScope.launch {
             try {
                 delay(SWITCH_OVERLAY_FADE_MS)
+                if (!switchingCoordinator.isCurrent(request.id)) return@launch
                 state.queueMutationMutex.withLock {
                     if (
                         state.generating.value ||
                         _currentConversationId.value != conversationId
                     ) {
-                        _isSwitching.value = false
+                        switchingCoordinator.complete(request.id)
                         return@withLock
                     }
                     val newMap = _selectedChildren.value.toMutableMap()
                     val targetMessage = siblings[newIndex]
                     val targetRunId = targetMessage.runId ?: run {
-                        _isSwitching.value = false
+                        switchingCoordinator.complete(request.id)
                         return@withLock
                     }
                     newMap[parentId] = targetMessage.id
@@ -1244,13 +1276,13 @@ class ChatViewModel(
                         messageSelections = newMap,
                     )
                     _selectedChildren.value = newMap
-                    requestSwitchingScroll(targetMessage.id)
+                    switchingCoordinator.markTreeMutationReady(request.id, targetMessage.id)
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 DebugLog.e("AgoraVM", "Failed to switch Run branch", e)
-                _isSwitching.value = false
+                switchingCoordinator.complete(request.id)
             }
         }
     }

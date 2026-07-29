@@ -61,19 +61,35 @@ object MessagePersistenceGuard {
     /** Size of the field that trimming would shrink — drives "largest first" selection. */
     private fun trimmableSize(s: MessageSegment): Int {
         val result = s.toolResult?.length ?: 0
+        val progress = s.toolProgress?.length ?: 0
         val content = if (s.type == "tool") 0 else s.content.length
-        return maxOf(result, content)
+        return maxOf(result, progress, content)
     }
 
     private fun canTrim(s: MessageSegment): Boolean =
         (s.toolResult != null && s.toolResult.length > TRIM_FLOOR_CHARS) ||
+            (s.toolProgress != null && s.toolProgress.length > TRIM_FLOOR_CHARS) ||
             (s.type != "tool" && s.content.length > TRIM_FLOOR_CHARS)
 
     /** Halve the largest trimmable field of [s], preferring the tool result on ties. */
     private fun trimLargest(s: MessageSegment): MessageSegment {
         val result = s.toolResult
-        if (result != null && result.length >= s.content.length && result.length > TRIM_FLOOR_CHARS) {
+        val progress = s.toolProgress
+        val contentSize = if (s.type == "tool") 0 else s.content.length
+        val largest = maxOf(result?.length ?: 0, progress?.length ?: 0, contentSize)
+        if (
+            result != null &&
+            result.length == largest &&
+            result.length > TRIM_FLOOR_CHARS
+        ) {
             return s.copy(toolResult = halveWithMarker(result))
+        }
+        if (
+            progress != null &&
+            progress.length == largest &&
+            progress.length > TRIM_FLOOR_CHARS
+        ) {
+            return s.copy(toolProgress = halveWithMarker(progress))
         }
         if (s.type != "tool" && s.content.length > TRIM_FLOOR_CHARS) {
             return s.copy(content = halveWithMarker(s.content))

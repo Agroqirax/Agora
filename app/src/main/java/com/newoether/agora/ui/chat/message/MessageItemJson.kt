@@ -108,39 +108,21 @@ private fun JsonObjectView(obj: kotlinx.serialization.json.JsonObject, depth: In
 
 @Composable
 private fun JsonArrayView(arr: kotlinx.serialization.json.JsonArray, depth: Int) {
-    val allPrimitive = arr.all { it is JsonPrimitive || it is kotlinx.serialization.json.JsonNull }
-    if (allPrimitive && arr.size <= 8) {
-        Row(modifier = Modifier.padding(vertical = 1.dp)) {
-            Text("[", style = ChatType.thoughtBody, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            arr.forEachIndexed { i, item ->
+    Column(modifier = Modifier.fillMaxWidth()) {
+        arr.forEachIndexed { i, item ->
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                KeyChip("${i + 1}", MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(8.dp))
                 when (item) {
-                    is JsonPrimitive -> JsonPrimitiveView(item, inline = true)
+                    is JsonPrimitive -> JsonPrimitiveView(item, modifier = Modifier.weight(1f))
                     is kotlinx.serialization.json.JsonNull -> JsonNullView()
-                    else -> {}
-                }
-                if (i < arr.lastIndex) {
-                    Text(", ", style = ChatType.thoughtBody, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Text("]", style = ChatType.thoughtBody, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    } else {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            arr.forEachIndexed { i, item ->
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    KeyChip("$i", MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(8.dp))
-                    when (item) {
-                        is JsonPrimitive -> JsonPrimitiveView(item, modifier = Modifier.weight(1f))
-                        is kotlinx.serialization.json.JsonNull -> JsonNullView()
-                        is kotlinx.serialization.json.JsonObject ->
-                            Box(Modifier.weight(1f)) { JsonObjectView(item, depth) }
-                        is kotlinx.serialization.json.JsonArray ->
-                            Box(Modifier.weight(1f)) { JsonArrayView(item, depth) }
-                    }
+                    is kotlinx.serialization.json.JsonObject ->
+                        Box(Modifier.weight(1f)) { JsonObjectView(item, depth) }
+                    is kotlinx.serialization.json.JsonArray ->
+                        Box(Modifier.weight(1f)) { JsonArrayView(item, depth) }
                 }
             }
         }

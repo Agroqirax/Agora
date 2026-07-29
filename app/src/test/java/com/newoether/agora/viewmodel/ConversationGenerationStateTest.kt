@@ -124,6 +124,29 @@ class ConversationGenerationStateTest {
     }
 
     @Test
+    fun terminalStreamUpdate_replacesStaleAnsweringSnapshotBeforeClearCommit() {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        val answering = ChatMessage(
+            id = "model",
+            text = "complete",
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+        )
+        val terminal = answering.copy(status = MessageStatus.SUCCESS)
+        var committed: ChatMessage? = null
+        state.onStreamCommit = { _, message -> committed = message }
+        state.streamUpdate(token, answering)
+
+        state.streamUpdate(token, terminal)
+        state.streamClear(token)
+
+        assertEquals(MessageStatus.SUCCESS, committed?.status)
+        assertEquals(terminal, committed)
+        assertNull(state.streamingMessage.value)
+    }
+
+    @Test
     fun streamClear_keepsStoppedOverlay() {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
