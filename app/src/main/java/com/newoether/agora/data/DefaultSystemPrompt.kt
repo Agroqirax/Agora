@@ -36,7 +36,8 @@ object DefaultSystemPrompt {
             title = titleForLocale(locale),
             systemItems = systemItems(),
             userPrependItems = userPrependItems(),
-            userPostpendItems = userPostpendItems()
+            userPostpendItems = userPostpendItems(),
+            isBuiltIn = true
         )
 
     private fun systemItems(): List<PromptTemplateItem> = listOf(

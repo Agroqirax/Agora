@@ -252,6 +252,8 @@ class SettingsRepository(
 
     fun deleteSystemPrompt(id: String) {
         scope.launch {
+            // The built-in default is pinned — never removable, even if a caller bypasses the UI.
+            if (systemPrompts.value.any { it.id == id && it.isBuiltIn }) return@launch
             val newList = systemPrompts.value.filter { it.id != id }
             settingsManager.saveSystemPrompts(newList)
             if (activeSystemPromptId.value == id) settingsManager.setActiveSystemPromptId(newList.firstOrNull()?.id)
@@ -263,6 +265,10 @@ class SettingsRepository(
         userPrependItems: List<PromptTemplateItem>, userPostpendItems: List<PromptTemplateItem>
     ) {
         scope.launch {
+            // The built-in default is pinned — never editable/renamable; SettingsManager
+            // re-derives its content from DefaultSystemPrompt on every read regardless, but
+            // refuse the write outright so it never round-trips through storage either.
+            if (systemPrompts.value.any { it.id == id && it.isBuiltIn }) return@launch
             settingsManager.saveSystemPrompts(systemPrompts.value.map { if (it.id == id) it.copy(title = title, content = "", systemItems = systemItems, userPrependItems = userPrependItems, userPostpendItems = userPostpendItems) else it })
         }
     }

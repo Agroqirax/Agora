@@ -150,7 +150,10 @@ data class SystemPromptEntry(
     val content: String = "",
     val systemItems: List<PromptTemplateItem> = emptyList(),
     val userPrependItems: List<PromptTemplateItem> = emptyList(),
-    val userPostpendItems: List<PromptTemplateItem> = emptyList()
+    val userPostpendItems: List<PromptTemplateItem> = emptyList(),
+    /** The pinned, non-editable, non-removable entry mirroring [DefaultSystemPrompt] exactly —
+     *  at most one entry has this set. See [SettingsManager.pinBuiltInPrompt]. */
+    val isBuiltIn: Boolean = false
 ) {
     val resolvedSystemItems: List<PromptTemplateItem>
         get() = if (systemItems.isNotEmpty()) systemItems
@@ -363,7 +366,8 @@ class SettingsManager(private val context: Context) {
 
     val systemPrompts: Flow<List<SystemPromptEntry>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[SYSTEM_PROMPTS_JSON] ?: "[]"
-        try { json.decodeFromString<List<SystemPromptEntry>>(jsonStr) } catch (e: Exception) { emptyList() }
+        val decoded = try { json.decodeFromString<List<SystemPromptEntry>>(jsonStr) } catch (e: Exception) { emptyList() }
+        decoded.pinBuiltInPrompt()
     }
     
     val activeSystemPromptId: Flow<String?> = context.dataStore.data.map { it[ACTIVE_SYSTEM_PROMPT_ID] }
@@ -606,22 +610,55 @@ class SettingsManager(private val context: Context) {
             } catch (_: Exception) {
                 emptyList()
             }
-            val migratedPrompts = migrateLegacyDefaultPromptTitle(
-                migrateLegacyDefaultPromptTemplate(currentPrompts, locale),
+            val migratedPrompts = ensureBuiltInPrompt(
+                migrateLegacyDefaultPromptTitle(
+                    migrateLegacyDefaultPromptTemplate(currentPrompts, locale),
+                    locale
+                ),
                 locale
             )
             if (migratedPrompts != currentPrompts) {
                 prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(migratedPrompts)
             }
-            if (looksLikeFreshInstall) {
-                if (migratedPrompts.isEmpty()) {
-                    val defaultPrompt = DefaultSystemPrompt.create(locale)
-                    prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(listOf(defaultPrompt))
-                    if (prefs[ACTIVE_SYSTEM_PROMPT_ID] == null) {
-                        prefs[ACTIVE_SYSTEM_PROMPT_ID] = defaultPrompt.id
-                    }
-                }
+            if (looksLikeFreshInstall && prefs[ACTIVE_SYSTEM_PROMPT_ID] == null) {
+                migratedPrompts.firstOrNull { it.isBuiltIn }?.let { prefs[ACTIVE_SYSTEM_PROMPT_ID] = it.id }
             }
+        }
+    }
+
+    /** Guarantees exactly one [SystemPromptEntry.isBuiltIn] entry always exists. An entry that
+     *  structurally matches the (now-normalized, by the migrations above) default template —
+     *  even if the user renamed it — is treated as the originally-seeded default and pinned in
+     *  place; a genuinely edited copy is left alone as a regular, editable/deletable prompt and
+     *  a fresh pinned default is added alongside it, so nothing the user wrote is lost. */
+    private fun ensureBuiltInPrompt(prompts: List<SystemPromptEntry>, locale: Locale): List<SystemPromptEntry> {
+        if (prompts.any { it.isBuiltIn }) return prompts
+        val defaultPrompt = DefaultSystemPrompt.create(locale)
+        val matchIndex = prompts.indexOfFirst { it.sameTemplateAs(defaultPrompt) }
+        return if (matchIndex >= 0) {
+            prompts.toMutableList().also { it[matchIndex] = it[matchIndex].copy(isBuiltIn = true) }
+        } else {
+            prompts + defaultPrompt
+        }
+    }
+
+    /** Forces the pinned built-in entry's content back to [DefaultSystemPrompt.create] on every
+     *  read, regardless of what's actually persisted — this is what makes it non-editable in
+     *  practice (any edit that somehow reaches storage is silently discarded on the next read)
+     *  and keeps it following the current locale's title/wording without a separate migration. */
+    private fun List<SystemPromptEntry>.pinBuiltInPrompt(): List<SystemPromptEntry> {
+        if (none { it.isBuiltIn }) return this
+        val defaultPrompt = DefaultSystemPrompt.create(Locale.getDefault())
+        return map { entry ->
+            if (!entry.isBuiltIn) entry
+            else entry.copy(
+                title = defaultPrompt.title,
+                content = "",
+                systemItems = defaultPrompt.systemItems,
+                userPrependItems = defaultPrompt.userPrependItems,
+                userPostpendItems = defaultPrompt.userPostpendItems,
+                isBuiltIn = true
+            )
         }
     }
 

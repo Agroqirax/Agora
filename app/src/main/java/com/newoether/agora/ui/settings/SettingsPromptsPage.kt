@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ContentCopy
@@ -166,7 +167,8 @@ private fun SystemPromptEntry.duplicateAsDraft(title: String): SystemPromptEntry
         content = "",
         systemItems = resolvedSystemItems.copyWithNewIds(),
         userPrependItems = userPrependItems.copyWithNewIds(),
-        userPostpendItems = userPostpendItems.copyWithNewIds()
+        userPostpendItems = userPostpendItems.copyWithNewIds(),
+        isBuiltIn = false
     )
 
 private fun List<PromptTemplateItem>.copyWithNewIds(): List<PromptTemplateItem> =
@@ -217,13 +219,28 @@ private fun PromptList(
                             },
                             trailingContent = {
                                 Box {
-                                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) {
-                                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options), modifier = Modifier.size(18.dp))
+                                    if (entry.isBuiltIn) {
+                                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) {
+                                            Icon(
+                                                Icons.Default.Lock,
+                                                contentDescription = stringResource(R.string.prompts_built_in),
+                                                modifier = Modifier.size(16.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                            )
+                                        }
+                                    } else {
+                                        IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) {
+                                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.options), modifier = Modifier.size(18.dp))
+                                        }
                                     }
                                     DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }, containerColor = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 16.dp, shape = RoundedCornerShape(12.dp)) {
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; onEdit(entry) })
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.prompts_duplicate)) }, leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.scale(0.9f)) }, onClick = { showMenu = false; onDuplicate(entry) })
-                                        DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; onDeleteRequest(entry) })
+                                        if (entry.isBuiltIn) {
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.prompts_duplicate)) }, leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.scale(0.9f)) }, onClick = { showMenu = false; onDuplicate(entry) })
+                                        } else {
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.provider_edit)) }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { showMenu = false; onEdit(entry) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.prompts_duplicate)) }, leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.scale(0.9f)) }, onClick = { showMenu = false; onDuplicate(entry) })
+                                            DropdownMenuItem(text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) }, leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) }, onClick = { showMenu = false; onDeleteRequest(entry) })
+                                        }
                                     }
                                 }
                             },

@@ -305,6 +305,7 @@
     <string name="prompts_template_default_desc">Use Agora\'s default prompt with runtime context, memory, web search, shell, and device-file guidance.</string>
     <string name="prompts_duplicate">Duplicate</string>
     <string name="prompts_duplicate_title">%1$s Copy</string>
+    <string name="prompts_built_in">Built-in — cannot be edited, renamed, or deleted. Duplicate it to make an editable copy.</string>
     <string name="prompts_empty_preview">Empty prompt</string>
     <string name="prompts_empty_title">No system prompts</string>
     <string name="prompts_empty_desc">Create custom personalities and instructions</string>
