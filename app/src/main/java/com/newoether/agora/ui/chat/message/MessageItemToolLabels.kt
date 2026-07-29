@@ -31,7 +31,6 @@ internal fun toolDisplayName(toolName: String?): String {
         "file_glob" -> stringResource(R.string.tool_file_glob)
         "file_grep" -> stringResource(R.string.tool_file_grep)
         "generate_image" -> stringResource(R.string.tool_generate_image)
-        "render_widget" -> stringResource(R.string.tool_render_widget)
         "get_location" -> stringResource(R.string.tool_get_location)
         "list_calendars" -> stringResource(R.string.tool_list_calendars)
         "get_calendar_events" -> stringResource(R.string.tool_get_calendar_events)
@@ -247,11 +246,6 @@ internal fun toolSummary(seg: MessageSegment): String {
             isError -> stringResource(R.string.tool_call_failed)
             content.isEmpty() -> stringResource(R.string.tool_generating_image)
             else -> stringResource(R.string.tool_generated_image)
-        }
-        "render_widget" -> when {
-            isError -> stringResource(R.string.tool_call_failed)
-            content.isEmpty() -> stringResource(R.string.tool_rendering_widget)
-            else -> stringResource(R.string.tool_rendered_widget)
         }
         "get_location" -> {
             val errorCode = try {

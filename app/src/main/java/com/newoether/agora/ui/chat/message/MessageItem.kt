@@ -53,6 +53,7 @@ fun MessageItem(
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
     onHeightChanged: (Int) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
+    htmlWidgetsEnabled: Boolean = false,
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
     onWidgetClick: (String) -> Unit = {},
@@ -145,7 +146,13 @@ fun MessageItem(
         Participant.ERROR -> RoundedCornerShape(12.dp)
     }
 
-    val markdownAssets = rememberChatMarkdownAssets(textColor)
+    val markdownAssets = rememberChatMarkdownAssets(
+        textColor = textColor,
+        htmlWidgetsEnabled = htmlWidgetsEnabled,
+        htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
+        htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
+        onWidgetClick = onWidgetClick,
+    )
     val markdownRenderContext = markdownAssets.renderContext
     val customMarkdownColors = markdownAssets.colors
     val thoughtTypography = markdownAssets.thoughtTypography
@@ -214,9 +221,6 @@ fun MessageItem(
                     showSegmentDetail = true
                 },
                 setThoughtBlockHeight = { currentThoughtBlockHeight = it },
-                htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
-                htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
-                onWidgetClick = onWidgetClick,
             )
         }
     }

@@ -118,6 +118,7 @@ fun ChatApp(
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
     val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
+    val htmlWidgetsEnabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
     val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
@@ -597,6 +598,7 @@ fun ChatApp(
                                 onFileContentClick = onFileContentClick,
                                 onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
                                 thoughtExpandedStates = thoughtExpandedStates,
+                                htmlWidgetsEnabled = htmlWidgetsEnabled,
                                 htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
                                 htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
                                 onWidgetClick = onWidgetClick,

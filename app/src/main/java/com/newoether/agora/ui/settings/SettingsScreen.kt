@@ -177,13 +177,13 @@ private val settingsGroups = listOf(
     SettingsGroupData(titleRes = R.string.settings_group_multimodal, items = listOf(
         SettingsCategory("transcription", R.string.settings_transcription, R.string.settings_transcription_desc, Icons.Default.ImageSearch),
         SettingsCategory("imagegen", R.string.settings_image_gen, R.string.settings_image_gen_desc, Icons.Default.AddPhotoAlternate),
+        SettingsCategory("htmlwidgets", R.string.settings_html_widgets, R.string.settings_html_widgets_desc, Icons.Default.Widgets),
     )),
     SettingsGroupData(titleRes = R.string.settings_group_tools, items = listOf(
         SettingsCategory("websearch", R.string.settings_web_search, R.string.settings_web_search_desc, Icons.Default.Language),
         SettingsCategory("weather", R.string.weather_title, R.string.weather_enable_desc, Icons.Default.WbSunny),
         SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
-        SettingsCategory("htmlwidgets", R.string.settings_html_widgets, R.string.settings_html_widgets_desc, Icons.Default.Widgets),
         SettingsCategory("mcp", R.string.mcp_title, R.string.mcp_desc, Icons.Default.Api),
         SettingsCategory("device", R.string.android_title, R.string.android_desc, Icons.Default.Android),
     )),

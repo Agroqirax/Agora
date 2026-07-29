@@ -5,21 +5,30 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +41,11 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.newoether.agora.ui.theme.ChatType
+import com.mikepenz.markdown.compose.components.MarkdownComponentModel
+import org.intellij.markdown.MarkdownTokenTypes
+import org.intellij.markdown.ast.findChildOfType
+import org.intellij.markdown.ast.getTextInNode
 
 /**
  * Configures a [WebView] to render model-authored HTML as safely as this app can manage: no
@@ -185,6 +199,7 @@ fun HtmlWidgetCard(
     onExpand: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showSource by remember(html) { mutableStateOf(false) }
     val effectiveHtml = rememberThemedHtml(html, matchAppTheme)
     var contentHeight by remember(html) { mutableStateOf<Dp?>(null) }
     // Start at the roomy end, not the small end: the WebView's own JS-side height
@@ -192,46 +207,124 @@ fun HtmlWidgetCard(
     // would make that very measurement come out wrong for content sized in viewport units.
     // Shrinking down after the real height is known reads as "settling", not "getting smaller".
     val targetHeight = (contentHeight ?: WidgetMaxHeight).coerceIn(WidgetMinHeight, WidgetMaxHeight)
-    val animatedHeight by animateDpAsState(targetValue = targetHeight, label = "widgetHeight")
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(animatedHeight)
+            // The rendered widget's height is an exact value driven by the WebView's JS-side
+            // scrollHeight measurement (no intrinsic Compose size to measure otherwise); the
+            // source view has no such measurement and just wraps its own (scroll-clamped) text
+            // height instead. animateContentSize() smooths the jump between those two regimes,
+            // and also the WebView height settling in as contentHeight arrives asynchronously.
+            .animateContentSize()
+            .then(
+                if (showSource) Modifier.heightIn(min = WidgetMinHeight, max = WidgetMaxHeight)
+                else Modifier.height(targetHeight)
+            )
             .clip(RoundedCornerShape(12.dp))
             .then(
-                if (matchAppTheme) Modifier
+                if (matchAppTheme && !showSource) Modifier
                 else Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
             )
     ) {
-        AndroidView(
-            factory = { context ->
-                WebView(context).apply {
-                    configureWidgetWebView(this, allowNetwork, matchAppTheme) { px ->
-                        // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
-                        // JS coordinate space is device-independent when useWideViewPort is
-                        // off), so wrap it directly — do NOT run it through Density.toDp(),
-                        // which would treat it as physical pixels and divide by density again.
-                        contentHeight = px.dp
+        if (showSource) {
+            SelectionContainer(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = html,
+                    style = ChatType.code,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .horizontalScroll(rememberScrollState())
+                        .padding(12.dp)
+                )
+            }
+        } else {
+            AndroidView(
+                factory = { context ->
+                    WebView(context).apply {
+                        configureWidgetWebView(this, allowNetwork, matchAppTheme) { px ->
+                            // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
+                            // JS coordinate space is device-independent when useWideViewPort is
+                            // off), so wrap it directly — do NOT run it through Density.toDp(),
+                            // which would treat it as physical pixels and divide by density again.
+                            contentHeight = px.dp
+                        }
+                        loadDataWithBaseURL(null, effectiveHtml, "text/html", "utf-8", null)
                     }
-                    loadDataWithBaseURL(null, effectiveHtml, "text/html", "utf-8", null)
-                }
-            },
-            update = { /* html/settings are fixed for the lifetime of a completed tool call */ },
-            modifier = Modifier.fillMaxSize()
-        )
-        Surface(
-            onClick = onExpand,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
-            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)
-        ) {
-            Icon(
-                Icons.Default.OpenInFull,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.size(32.dp).padding(6.dp)
+                },
+                update = { /* html/settings are fixed for the lifetime of a completed tool call */ },
+                modifier = Modifier.fillMaxSize()
             )
         }
+        Row(
+            modifier = Modifier.align(Alignment.TopEnd).padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Surface(
+                onClick = { showSource = !showSource },
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
+            ) {
+                Icon(
+                    Icons.Default.Code,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp).padding(6.dp)
+                )
+            }
+            Surface(
+                onClick = onExpand,
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
+            ) {
+                Icon(
+                    Icons.Default.OpenInFull,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp).padding(6.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * `markdownComponents(codeFence = ...)` interception point: an `html-render` fenced code block
+ * renders as a live [HtmlWidgetCard]; any other language (including plain `html`) — or
+ * `html-render` while the setting is off — falls through to the library's own fence rendering,
+ * so the model can choose to inline-render or show source just by picking the fence language.
+ */
+@Composable
+fun MarkdownHtmlWidgetFence(
+    model: MarkdownComponentModel,
+    widgetsEnabled: Boolean,
+    allowNetwork: Boolean,
+    matchAppTheme: Boolean,
+    onExpand: (String) -> Unit,
+) {
+    val node = model.node
+    val content = model.content
+    val language = node.findChildOfType(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content)?.toString()
+    if (widgetsEnabled && language == "html-render" && node.children.size >= 3) {
+        // Same body-extraction math as the library's own MarkdownCodeFence (MarkdownCode.kt),
+        // since that helper isn't exposed with a hook to swap in a different renderer per-fence.
+        val start = node.children[2].startOffset
+        val minCodeFenceCount = if (language != null && node.children.size > 3) 3 else 2
+        val end = node.children[(node.children.size - 2).coerceAtLeast(minCodeFenceCount)].endOffset
+        val body = content.subSequence(start, end).toString().replaceIndent()
+        HtmlWidgetCard(
+            html = body,
+            allowNetwork = allowNetwork,
+            matchAppTheme = matchAppTheme,
+            onExpand = { onExpand(body) },
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+    } else {
+        com.mikepenz.markdown.compose.elements.MarkdownCodeFence(
+            content = content,
+            node = node,
+            style = model.typography.code,
+        )
     }
 }
 

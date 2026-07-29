@@ -8,6 +8,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.ui.chat.MarkdownHtmlWidgetFence
 import com.newoether.agora.ui.components.LatexImageTransformer
 import com.newoether.agora.ui.theme.ChatType
 import com.mikepenz.markdown.m3.markdownColor
@@ -43,7 +44,13 @@ internal class ChatMarkdownAssets(
 )
 
 @Composable
-internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
+internal fun rememberChatMarkdownAssets(
+    textColor: Color,
+    htmlWidgetsEnabled: Boolean = false,
+    htmlWidgetsNetworkEnabled: Boolean = false,
+    htmlWidgetsThemeEnabled: Boolean = false,
+    onWidgetClick: (String) -> Unit = {},
+): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
     // Heading steps of 3sp (h1→h2→h3) and 2sp (h3→h4) create
@@ -101,7 +108,12 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
     val customMarkdownPadding = markdownPadding(block = 8.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 5.dp)
 
-    val customMarkdownComponents = remember {
+    val customMarkdownComponents = remember(
+        htmlWidgetsEnabled,
+        htmlWidgetsNetworkEnabled,
+        htmlWidgetsThemeEnabled,
+        onWidgetClick,
+    ) {
         markdownComponents(
             table = { model ->
                 MarkdownTable(
@@ -128,6 +140,15 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
                             overflow = TextOverflow.Clip,
                         )
                     },
+                )
+            },
+            codeFence = { model ->
+                MarkdownHtmlWidgetFence(
+                    model = model,
+                    widgetsEnabled = htmlWidgetsEnabled,
+                    allowNetwork = htmlWidgetsNetworkEnabled,
+                    matchAppTheme = htmlWidgetsThemeEnabled,
+                    onExpand = onWidgetClick,
                 )
             }
         )

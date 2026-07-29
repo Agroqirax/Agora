@@ -55,15 +55,10 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallDisplayModes
-import com.newoether.agora.tool.WidgetToolProvider
-import com.newoether.agora.ui.chat.HtmlWidgetCard
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 
 private const val STREAMING_MARKDOWN_FLUSH_MS = 250L
 
@@ -98,9 +93,6 @@ internal fun AssistantMessageContent(
     onShowDelete: () -> Unit,
     onSegmentSelected: (List<Int>) -> Unit,
     setThoughtBlockHeight: (Int) -> Unit,
-    htmlWidgetsNetworkEnabled: Boolean = false,
-    htmlWidgetsThemeEnabled: Boolean = false,
-    onWidgetClick: (String) -> Unit = {},
 ) {
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
@@ -609,35 +601,6 @@ internal fun AssistantMessageContent(
                                         onLongClick = { haptics.longPress() }
                                     )
                             )
-                        }
-                    }
-                }
-                if (message.participant == Participant.MODEL) {
-                    val widgetSegments = remember(message.segments) {
-                        message.segments?.filter {
-                            it.type == "tool" && it.toolName == WidgetToolProvider.RENDER_WIDGET && it.toolResult != null
-                        } ?: emptyList()
-                    }
-                    if (widgetSegments.isNotEmpty()) {
-                        Column(
-                            modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            widgetSegments.forEach { seg ->
-                                val html = remember(seg.toolArgs) {
-                                    try {
-                                        (Json.parseToJsonElement(seg.toolArgs ?: "{}").jsonObject["html"] as? JsonPrimitive)?.content
-                                    } catch (_: Exception) { null }
-                                }
-                                if (!html.isNullOrEmpty()) {
-                                    HtmlWidgetCard(
-                                        html = html,
-                                        allowNetwork = htmlWidgetsNetworkEnabled,
-                                        matchAppTheme = htmlWidgetsThemeEnabled,
-                                        onExpand = { onWidgetClick(html) }
-                                    )
-                                }
-                            }
                         }
                     }
                 }

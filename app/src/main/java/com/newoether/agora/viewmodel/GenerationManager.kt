@@ -40,7 +40,6 @@ import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.TorchToolProvider
 import com.newoether.agora.tool.WeatherToolProvider
 import com.newoether.agora.tool.WebSearchToolProvider
-import com.newoether.agora.tool.WidgetToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -96,9 +95,6 @@ data class GenerationContext(
     val imageGenBaseUrl: String = "",
     val imageGenModel: String = "gpt-image-1",
     val imageGenSize: String = "1024x1024",
-    val htmlWidgetsEnabled: Boolean = false,
-    val htmlWidgetsNetworkEnabled: Boolean = false,
-    val htmlWidgetsThemeEnabled: Boolean = false,
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val deviceInfoEnabled: Boolean = true,
@@ -263,7 +259,6 @@ class GenerationManager(
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider(conversations)
     private val imageGenToolProvider = ImageGenToolProvider(app)
-    private val widgetToolProvider = WidgetToolProvider()
     private val shellToolProvider = ShellToolProvider(sandboxFactory).also { stp ->
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { serverId, serverLabel, summary -> onConfirmShellCommand?.invoke(serverId, serverLabel, summary) ?: true }
@@ -320,7 +315,7 @@ class GenerationManager(
     }
     private val calculatorToolProvider = CalculatorToolProvider()
     private val toolProviders: List<ToolProvider> = listOf(
-        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, widgetToolProvider, shellToolProvider,
+        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
         contactsToolProvider, alarmToolProvider, appLaunchToolProvider, urlOpenToolProvider, mediaControlToolProvider, notificationToolProvider,
         torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider
@@ -337,9 +332,6 @@ class GenerationManager(
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         imageGenToolProvider.definitions(ctx)
-
-    fun buildWidgetTool(ctx: GenerationContext): List<ToolDefinition> =
-        widgetToolProvider.definitions(ctx)
 
     fun buildLocationTool(ctx: GenerationContext): List<ToolDefinition> =
         locationToolProvider.definitions(ctx)
@@ -583,7 +575,6 @@ class GenerationManager(
         val shellTool = buildShellTool(ctx)
         val fileTool = buildFileTool(ctx)
         val imageGenTool = buildImageGenTool(ctx)
-        val widgetTool = buildWidgetTool(ctx)
         val locationTool = buildLocationTool(ctx)
         val deviceInfoTool = buildDeviceInfoTool(ctx)
         val packageQueryTool = buildPackageQueryTool(ctx)
@@ -598,7 +589,7 @@ class GenerationManager(
         val weatherTool = buildWeatherTool(ctx)
         val calculatorTool = buildCalculatorTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + widgetTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
+        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

@@ -221,9 +221,6 @@
     <string name="tool_generate_image">Generate Image</string>
     <string name="tool_generating_image">Generating image…</string>
     <string name="tool_generated_image">Generated image</string>
-    <string name="tool_render_widget">Render Widget</string>
-    <string name="tool_rendering_widget">Rendering widget…</string>
-    <string name="tool_rendered_widget">Rendered widget</string>
     <string name="tool_get_location">Get Location</string>
     <string name="tool_getting_location">Getting location…</string>
     <string name="tool_location_done">Got current location</string>
