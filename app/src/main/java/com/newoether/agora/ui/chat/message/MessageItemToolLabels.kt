@@ -55,8 +55,16 @@ internal fun toolSummary(segment: MessageSegment): String {
     val presentation = ToolPresentationResolver.resolve(segment)
     val subject = presentation.subject
     return when (presentation.state) {
-        ToolPresentationState.FAILED ->
-            presentation.errorMessage?.take(160) ?: stringResource(R.string.tool_call_failed)
+        ToolPresentationState.FAILED -> when {
+            presentation.kind == ToolKind.SHELL_EXECUTE &&
+                presentation.exitCode != null &&
+                presentation.exitCode != 0 -> stringResource(
+                    R.string.tool_shell_returned_exit_code,
+                    presentation.exitCode,
+                )
+            else -> presentation.errorMessage?.take(160)
+                ?: stringResource(R.string.tool_call_failed)
+        }
         ToolPresentationState.STOPPED -> stringResource(R.string.tool_execution_stopped)
         ToolPresentationState.BACKGROUND_RUNNING -> stringResource(
             R.string.tool_background_job_running,
@@ -121,10 +129,7 @@ private fun emptySummary(
     )
     ToolKind.CONVERSATION_LIST -> stringResource(R.string.tool_listed_no_conversations)
     ToolKind.SHELL_LIST -> stringResource(R.string.tool_shell_list_done)
-    ToolKind.SHELL_EXECUTE -> stringResource(
-        R.string.tool_executed_no_output,
-        subject ?: "shell",
-    )
+    ToolKind.SHELL_EXECUTE -> stringResource(R.string.tool_shell_execution_completed)
     ToolKind.SHELL_JOB_LIST -> stringResource(R.string.tool_no_shell_jobs)
     ToolKind.FILE_READ -> stringResource(R.string.tool_read_file_empty, subject ?: "file")
     ToolKind.FILE_GLOB -> stringResource(R.string.tool_found_no_files)
@@ -170,11 +175,14 @@ private fun completedSummary(
         R.string.tool_shell_list_count,
         presentation.count ?: 0,
     )
-    ToolKind.SHELL_EXECUTE -> stringResource(
-        R.string.tool_shell_exit_summary,
-        presentation.exitCode ?: -1,
-        presentation.outputLength ?: 0,
-    )
+    ToolKind.SHELL_EXECUTE -> when (presentation.exitCode) {
+        0 -> stringResource(R.string.tool_shell_executed_successfully)
+        null -> stringResource(R.string.tool_shell_execution_completed)
+        else -> stringResource(
+            R.string.tool_shell_returned_exit_code,
+            presentation.exitCode,
+        )
+    }
     ToolKind.SHELL_JOB_LIST -> stringResource(
         R.string.tool_shell_job_count,
         presentation.count ?: 0,

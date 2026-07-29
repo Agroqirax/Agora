@@ -85,10 +85,14 @@ internal object ToolPresentationResolver {
         val resultElement = parseElement(segment.toolResult)
         val resultObject = resultElement as? JsonObject
         val errorCode = resultObject.string("error")
+        val exitCode = resultObject.int("exit_code")
         val explicitState = stateFromWire(segment.toolState)
         val background = resultObject.boolean("background") == true ||
             resultObject.string("state").equals("running", ignoreCase = true) &&
             resultObject.string("job_id") != null
+        val nonZeroShellExit = kind == ToolKind.SHELL_EXECUTE &&
+            exitCode != null &&
+            exitCode != 0
         val count = semanticCount(kind, resultObject)
         val semanticEmpty = isSemanticEmpty(
             kind = kind,
@@ -113,6 +117,8 @@ internal object ToolPresentationResolver {
             semanticEmpty -> ToolPresentationState.EMPTY
             error != null -> ToolPresentationState.FAILED
             background -> ToolPresentationState.BACKGROUND_RUNNING
+            explicitState == ToolPresentationState.STOPPED -> ToolPresentationState.STOPPED
+            nonZeroShellExit -> ToolPresentationState.FAILED
             else -> explicitState ?: ToolPresentationState.SUCCEEDED
         }
         return ToolPresentation(
@@ -130,7 +136,7 @@ internal object ToolPresentationResolver {
                 ?: args.string("server"),
             count = count,
             errorMessage = error,
-            exitCode = resultObject.int("exit_code"),
+            exitCode = exitCode,
             jobId = resultObject.string("job_id"),
             outputLength = resultObject.string("output")?.length,
         )
@@ -211,8 +217,6 @@ internal object ToolPresentationResolver {
         if (count != null && count == 0) return true
         if (errorCode == "no_results") return true
         return when (kind) {
-            ToolKind.SHELL_EXECUTE ->
-                result.string("output").isNullOrEmpty() && result.int("exit_code") == 0
             ToolKind.FILE_READ -> result.string("content").isNullOrEmpty()
             else -> false
         }

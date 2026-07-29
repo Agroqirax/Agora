@@ -700,6 +700,9 @@
     <string name="tool_shell_job_status">已读取 Shell 任务 %1$s</string>
     <string name="tool_stopped_shell_job">已停止 Shell 任务 %1$s</string>
     <string name="tool_shell_exit_summary">退出码 %1$d · %2$d 字节</string>
+    <string name="tool_shell_executed_successfully">命令执行成功</string>
+    <string name="tool_shell_execution_completed">命令执行完毕</string>
+    <string name="tool_shell_returned_exit_code">命令返回退出码 %1$d</string>
     <string name="tool_read_file_empty">已读取 %1$s · 空文件</string>
     <string name="tool_found_no_matches">未找到匹配项</string>
     <string name="file_path_unknown">未知文件</string>

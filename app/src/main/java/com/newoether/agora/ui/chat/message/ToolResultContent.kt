@@ -267,7 +267,9 @@ private fun shellStatusLabel(presentation: ToolPresentation): String {
         ToolPresentationState.RUNNING -> stringResource(R.string.tool_state_executing)
         ToolPresentationState.BACKGROUND_RUNNING ->
             resultState ?: stringResource(R.string.tool_state_running)
-        ToolPresentationState.FAILED -> stringResource(R.string.tool_state_failed)
+        ToolPresentationState.FAILED -> presentation.exitCode?.let {
+            stringResource(R.string.tool_exit_code, it)
+        } ?: stringResource(R.string.tool_state_failed)
         ToolPresentationState.STOPPED -> stringResource(R.string.tool_state_stopped)
         ToolPresentationState.EMPTY,
         ToolPresentationState.SUCCEEDED -> presentation.exitCode?.let {

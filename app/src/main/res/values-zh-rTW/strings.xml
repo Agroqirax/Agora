@@ -615,6 +615,9 @@
     <string name="tool_shell_job_status">已讀取 Shell 工作 %1$s</string>
     <string name="tool_stopped_shell_job">已停止 Shell 工作 %1$s</string>
     <string name="tool_shell_exit_summary">結束碼 %1$d · %2$d 位元組</string>
+    <string name="tool_shell_executed_successfully">命令執行成功</string>
+    <string name="tool_shell_execution_completed">命令執行完畢</string>
+    <string name="tool_shell_returned_exit_code">命令傳回結束碼 %1$d</string>
     <string name="tool_read_file_empty">已讀取 %1$s · 空檔案</string>
     <string name="tool_found_no_matches">找不到符合項目</string>
     <string name="file_path_unknown">未知檔案</string>

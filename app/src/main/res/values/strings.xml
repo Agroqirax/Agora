@@ -96,6 +96,9 @@
     <string name="tool_shell_job_status">Read shell job %1$s</string>
     <string name="tool_stopped_shell_job">Stopped shell job %1$s</string>
     <string name="tool_shell_exit_summary">Exit %1$d · %2$d bytes</string>
+    <string name="tool_shell_executed_successfully">Command executed successfully</string>
+    <string name="tool_shell_execution_completed">Command execution completed</string>
+    <string name="tool_shell_returned_exit_code">Command returned exit code %1$d</string>
     <string name="tool_read_file_empty">Read %1$s · empty</string>
     <string name="tool_found_no_matches">No matches found</string>
     <string name="file_path_unknown">Unknown file</string>

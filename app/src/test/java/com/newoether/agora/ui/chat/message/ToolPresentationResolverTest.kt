@@ -129,6 +129,49 @@ class ToolPresentationResolverTest {
     }
 
     @Test
+    fun successfulShellWithoutOutputIsStillSucceeded() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolResult = """{"type":"execute_shell_command","exit_code":0,"output":""}""",
+            ),
+        )
+
+        assertEquals(ToolPresentationState.SUCCEEDED, presentation.state)
+        assertEquals(0, presentation.exitCode)
+    }
+
+    @Test
+    fun nonZeroShellExitIsFailed() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolResult = """{"type":"execute_shell_command","exit_code":127,"output":"not found"}""",
+            ),
+        )
+
+        assertEquals(ToolPresentationState.FAILED, presentation.state)
+        assertEquals(127, presentation.exitCode)
+    }
+
+    @Test
+    fun nonZeroShellExitOverridesStaleSucceededWireState() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolState = ToolExecutionStates.SUCCEEDED,
+                toolResult = """{"type":"execute_shell_command","exit_code":2,"output":"bad arguments"}""",
+            ),
+        )
+
+        assertEquals(ToolPresentationState.FAILED, presentation.state)
+        assertEquals(2, presentation.exitCode)
+    }
+
+    @Test
     fun completedShellResultUsesAuthoritativeServerAndOutput() {
         val presentation = ToolPresentationResolver.resolve(
             MessageSegment(
