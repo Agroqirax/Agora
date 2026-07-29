@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -56,6 +57,40 @@ internal fun calculateBottomSpacerPx(
     return (availableTailHeight - tailContentHeightPx).coerceAtLeast(0)
 }
 
+internal data class MessageListViewportAnchor(
+    val messageId: String,
+    val scrollOffsetPx: Int,
+)
+
+internal class MessageListMutationAnchorLock {
+    private val activeMutationKeys = mutableSetOf<String>()
+
+    var anchor: MessageListViewportAnchor? = null
+        private set
+
+    fun begin(key: String, candidate: MessageListViewportAnchor?) {
+        activeMutationKeys += key
+        if (anchor == null) anchor = candidate
+    }
+
+    /**
+     * Returns the anchor exactly once, when the final overlapping mutation settles.
+     * Repeated begin calls for the same reversing animation never replace the pre-change anchor.
+     */
+    fun finish(key: String): MessageListViewportAnchor? {
+        if (!activeMutationKeys.remove(key) || activeMutationKeys.isNotEmpty()) return null
+        return anchor.also { anchor = null }
+    }
+
+    fun cancel() {
+        activeMutationKeys.clear()
+        anchor = null
+    }
+
+    val activeMutationCount: Int
+        get() = activeMutationKeys.size
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageList(
@@ -84,7 +119,16 @@ fun MessageList(
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
+    val mutationAnchorLock = remember(state) { MessageListMutationAnchorLock() }
     LaunchedEffect(isLoading) { if (isLoading) editingMessageId = null }
+    LaunchedEffect(isSwitching) {
+        if (isSwitching) mutationAnchorLock.cancel()
+    }
+    LaunchedEffect(state) {
+        snapshotFlow { state.isScrollInProgress }.collect { scrolling ->
+            if (scrolling) mutationAnchorLock.cancel()
+        }
+    }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
     val currentPath = messages.list.filter { it.participant != Participant.ERROR }
@@ -112,6 +156,13 @@ fun MessageList(
         )
     }
     val extraPadding = with(density) { extraPaddingPx.toDp() }
+
+    fun restoreAnchor(anchor: MessageListViewportAnchor): Boolean {
+        val anchorIndex = messages.list.indexOfFirst { it.id == anchor.messageId }
+        if (anchorIndex < 0) return false
+        state.requestScrollToItem(anchorIndex, anchor.scrollOffsetPx)
+        return true
+    }
 
     Box(modifier = modifier) {
         LazyColumn(
@@ -179,14 +230,50 @@ fun MessageList(
                             val anchorIndex = state.firstVisibleItemIndex
                             val anchorOffset = state.firstVisibleItemScrollOffset
                             messageHeights[message.id] = height
-                            if (
-                                mode == MessageListLayoutMode.STABLE &&
-                                anchorIndex < messages.list.size
-                            ) {
+                            if (mode == MessageListLayoutMode.STABLE) {
                                 // Commit the real height and its inverse spacer correction while
-                                // retaining the visible item/offset for the next remeasure.
-                                state.requestScrollToItem(anchorIndex, anchorOffset)
+                                // retaining the pre-mutation viewport anchor when an explicit
+                                // component animation is active. The fallback preserves the
+                                // current behavior for unannounced streaming/layout changes.
+                                val lockedAnchor = mutationAnchorLock.anchor
+                                if (lockedAnchor != null) {
+                                    restoreAnchor(lockedAnchor)
+                                } else if (anchorIndex < messages.list.size) {
+                                    state.requestScrollToItem(anchorIndex, anchorOffset)
+                                }
                             }
+                        }
+                    },
+                    onLayoutMutationStarted = { mutationKey ->
+                        if (
+                            messageListLayoutMode(
+                                isSwitching = isSwitching,
+                                isScrollInProgress = state.isScrollInProgress,
+                            ) == MessageListLayoutMode.STABLE
+                        ) {
+                            val anchorMessage = messages.list
+                                .getOrNull(state.firstVisibleItemIndex)
+                            mutationAnchorLock.begin(
+                                key = mutationKey,
+                                candidate = anchorMessage?.let {
+                                    MessageListViewportAnchor(
+                                        messageId = it.id,
+                                        scrollOffsetPx = state.firstVisibleItemScrollOffset,
+                                    )
+                                },
+                            )
+                        }
+                    },
+                    onLayoutMutationSettled = { mutationKey ->
+                        val anchor = mutationAnchorLock.finish(mutationKey)
+                        if (
+                            anchor != null &&
+                            messageListLayoutMode(
+                                isSwitching = isSwitching,
+                                isScrollInProgress = state.isScrollInProgress,
+                            ) == MessageListLayoutMode.STABLE
+                        ) {
+                            restoreAnchor(anchor)
                         }
                     },
                     thoughtExpandedStates = thoughtExpandedStates

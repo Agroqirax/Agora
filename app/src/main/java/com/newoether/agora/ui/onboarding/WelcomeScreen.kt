@@ -93,7 +93,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.newoether.agora.R
+import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.model.apiModelName
@@ -145,13 +147,14 @@ fun WelcomeScreen(
     val customProviders by viewModel.settings.customProviders.collectAsState()
     val allProviders = (builtInProviders + customProviders.map { it.name } + "Custom" + Constants.PROVIDER_LOCAL).distinct()
     var selectedProvider by remember { mutableStateOf<String?>(null) }
-    // True for any user-defined OpenAI-compatible provider (the "Custom" slot or an
-    // already-created custom provider) — these need both a base URL and an API key.
+    // True for any user-defined endpoint (the "Custom" slot or an already-created
+    // provider). Its selected wire protocol determines request and response handling.
     val isCustomProvider = selectedProvider != null &&
         selectedProvider != Constants.PROVIDER_LOCAL && selectedProvider != Constants.PROVIDER_OLLAMA &&
         selectedProvider !in builtInProviders
     var apiKeyText by remember { mutableStateOf("") }
     var baseUrlText by remember { mutableStateOf("") }
+    var customProtocol by remember { mutableStateOf(CustomEndpointProtocol.OPENAI) }
     var apiKeyVisible by remember { mutableStateOf(false) }
     var selectedModelId by remember { mutableStateOf<String?>(null) }
     val autoBackupEnabled by viewModel.settings.autoBackupEnabled.collectAsState()
@@ -162,8 +165,12 @@ fun WelcomeScreen(
     val existingProviderUrls by viewModel.settings.providerBaseUrls.collectAsState()
 
     // Pre-fill API key / URL when switching to a configured provider
-    LaunchedEffect(selectedProvider) {
+    LaunchedEffect(selectedProvider, customProviders) {
         val p = selectedProvider ?: return@LaunchedEffect
+        customProtocol = customProviders
+            .firstOrNull { it.name == p }
+            ?.protocol
+            ?: CustomEndpointProtocol.OPENAI
         when {
             p == Constants.PROVIDER_OLLAMA -> {
                 val url = existingProviderUrls[Constants.PROVIDER_OLLAMA]
@@ -268,8 +275,15 @@ fun WelcomeScreen(
             p == Constants.PROVIDER_OLLAMA -> if (apiKeyText.isNotBlank()) viewModel.settings.setProviderBaseUrl(Constants.PROVIDER_OLLAMA, apiKeyText)
             isCustomProvider -> {
                 if (baseUrlText.isNotBlank()) {
-                    if (customProviders.none { it.name == p }) viewModel.addCustomProvider(p, baseUrlText)
-                    else viewModel.settings.setProviderBaseUrl(p, baseUrlText)
+                    val existing = customProviders.firstOrNull { it.name == p }
+                    if (existing == null) {
+                        viewModel.addCustomProvider(p, baseUrlText, customProtocol)
+                    } else {
+                        viewModel.settings.setProviderBaseUrl(p, baseUrlText)
+                        if (existing.protocol != customProtocol) {
+                            viewModel.updateCustomProviderProtocol(p, customProtocol)
+                        }
+                    }
                 }
                 if (apiKeyText.isNotBlank()) viewModel.settings.upsertApiKey(p, apiKeyText, p)
             }
@@ -364,6 +378,8 @@ fun WelcomeScreen(
                                     onApiKeyChange = { apiKeyText = it },
                                     baseUrlText = baseUrlText,
                                     onBaseUrlChange = { baseUrlText = it },
+                                    customProtocol = customProtocol,
+                                    onCustomProtocolChange = { customProtocol = it },
                                     apiKeyVisible = apiKeyVisible,
                                     onToggleVisibility = { apiKeyVisible = !apiKeyVisible },
                                     isImporting = isImportingGGUF,
@@ -542,6 +558,8 @@ private fun ProviderPage(providers: List<String>, selected: String?, onSelect: (
 private fun ApiKeyPage(
     provider: String?, isCustom: Boolean, apiKeyText: String, onApiKeyChange: (String) -> Unit,
     baseUrlText: String, onBaseUrlChange: (String) -> Unit,
+    customProtocol: CustomEndpointProtocol,
+    onCustomProtocolChange: (CustomEndpointProtocol) -> Unit,
     apiKeyVisible: Boolean, onToggleVisibility: () -> Unit,
     isImporting: Boolean, onImportGGUF: () -> Unit, modifier: Modifier,
     localModels: List<com.newoether.agora.data.LocalChatModelConfig> = emptyList()
@@ -578,6 +596,16 @@ private fun ApiKeyPage(
                     Text(provider, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(20.dp))
+                Text(
+                    stringResource(R.string.custom_provider_protocol_label),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Spacer(Modifier.height(4.dp))
+                CustomEndpointProtocolSelector(
+                    selected = customProtocol,
+                    onSelected = onCustomProtocolChange,
+                )
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = apiKeyText, onValueChange = onApiKeyChange, modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text(stringResource(R.string.onboarding_ollama_hint)) },

@@ -226,6 +226,7 @@
     <string name="custom_provider_badge">Custom</string>
     <string name="custom_provider_add">Add</string>
     <string name="custom_provider_add_title">Add Provider</string>
+    <string name="custom_provider_protocol_label">API format</string>
     <string name="custom_provider_empty">No custom provider added</string>
     <string name="settings_group_multimodal">Multimodal</string>
     <string name="settings_image_gen">Image Generation</string>

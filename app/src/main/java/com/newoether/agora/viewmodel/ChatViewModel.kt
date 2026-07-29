@@ -869,8 +869,17 @@ class ChatViewModel(
     // ── Custom providers ──────────────────────────────────────
     // Settings persistence lives in SettingsRepository; ChatViewModel only maintains
     // the live in-memory provider instances (the `providers` map) via callbacks.
-    fun addCustomProvider(name: String, baseUrl: String) = providerRegistry.addCustom(name, baseUrl)
+    fun addCustomProvider(
+        name: String,
+        baseUrl: String,
+        protocol: com.newoether.agora.data.CustomEndpointProtocol =
+            com.newoether.agora.data.CustomEndpointProtocol.OPENAI,
+    ) = providerRegistry.addCustom(name, baseUrl, protocol)
     fun renameCustomProvider(oldName: String, newName: String) = providerRegistry.renameCustom(oldName, newName)
+    fun updateCustomProviderProtocol(
+        name: String,
+        protocol: com.newoether.agora.data.CustomEndpointProtocol,
+    ) = providerRegistry.updateCustomProtocol(name, protocol)
     fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
 
     fun getCurrentVersion(): String {

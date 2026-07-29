@@ -207,6 +207,7 @@
     <string name="custom_provider_badge">自定义</string>
     <string name="custom_provider_add">添加</string>
     <string name="custom_provider_add_title">添加提供商</string>
+    <string name="custom_provider_protocol_label">API 格式</string>
     <string name="custom_provider_empty">未添加自定义提供商</string>
     <string name="settings_group_multimodal">多模态</string>
     <string name="settings_image_gen">图像生成</string>

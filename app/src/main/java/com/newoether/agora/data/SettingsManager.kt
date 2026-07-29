@@ -32,11 +32,6 @@ data class ApiKeyEntry(
 )
 
 @Serializable
-data class CustomProviderConfig(
-    val name: String
-)
-
-@Serializable
 data class ShellDeviceConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String,

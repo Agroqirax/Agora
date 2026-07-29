@@ -227,6 +227,8 @@ internal fun CompactSegmentBlock(
     topPaddingExtra: Dp = 0.dp,
     bottomPaddingExtra: Dp = 6.dp,
     onSegmentClick: (Int) -> Unit,
+    onExpansionStarted: (String) -> Unit = {},
+    onExpansionSettled: (String) -> Unit = {},
     onBlockHeightChanged: (Int) -> Unit = {}
 ) {
     if (segs.isEmpty()) return
@@ -244,11 +246,31 @@ internal fun CompactSegmentBlock(
     val thoughtMs = thoughtDurationMs(segs)
     val hasThought = thoughtMs != null && thoughtMs > 0
     val collapsedTitle = compactSegmentTitle(segs, message, useLiveStatus)
-    val mergedBottomPadding by animateDpAsState(
-        targetValue = if (isExpanded) 12.dp else 4.dp,
-        animationSpec = tween(500),
-        label = "compactSegmentPad"
+    val expansionTransition = updateTransition(
+        targetState = isExpanded,
+        label = "compactSegmentExpansion",
     )
+    val mergedBottomPadding by expansionTransition.animateDp(
+        transitionSpec = { tween(500) },
+        label = "compactSegmentPad",
+    ) { expanded ->
+        if (expanded) 12.dp else 4.dp
+    }
+    val currentOnExpansionSettled by rememberUpdatedState(onExpansionSettled)
+    LaunchedEffect(expansionTransition, expansionKey) {
+        var observedRunning = false
+        snapshotFlow { expansionTransition.isRunning }.collect { running ->
+            if (running) {
+                observedRunning = true
+            } else if (observedRunning) {
+                observedRunning = false
+                currentOnExpansionSettled(expansionKey)
+            }
+        }
+    }
+    DisposableEffect(expansionKey) {
+        onDispose { currentOnExpansionSettled(expansionKey) }
+    }
 
     Surface(
         tonalElevation = 2.dp,
@@ -265,7 +287,10 @@ internal fun CompactSegmentBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
-                    .clickable { expandedStates[expansionKey] = !isExpanded }
+                    .clickable {
+                        onExpansionStarted(expansionKey)
+                        expandedStates[expansionKey] = !isExpanded
+                    }
                     .padding(10.dp)
             ) {
                 if (isToolCalling || isToolInProgress) {
@@ -294,8 +319,8 @@ internal fun CompactSegmentBlock(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                 )
             }
-            AnimatedVisibility(
-                visible = isExpanded,
+            expansionTransition.AnimatedVisibility(
+                visible = { it },
                 enter = fadeIn(tween(400)) + expandVertically(tween(400)),
                 exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
             ) {
@@ -368,7 +393,9 @@ internal fun CompactSegmentBlock(
                                 Text(
                                     text = toolSummary(seg),
                                     style = ChatType.metaNormal,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
                             }
                         }
@@ -397,6 +424,8 @@ internal fun TimelineSegmentsContent(
     expandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
     animatedBlockKeys: Set<String>,
+    onLayoutMutationStarted: (String) -> Unit,
+    onLayoutMutationSettled: (String) -> Unit,
     onSegmentClick: (List<Int>) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
@@ -463,6 +492,8 @@ internal fun TimelineSegmentsContent(
                                 expansionKey = expansionKey,
                                 topPaddingExtra = blockTopPaddingExtra,
                                 bottomPaddingExtra = 0.dp,
+                                onExpansionStarted = onLayoutMutationStarted,
+                                onExpansionSettled = onLayoutMutationSettled,
                                 onSegmentClick = { detailIndex -> onSegmentClick(listOf(detailIndex)) }
                             )
                         }

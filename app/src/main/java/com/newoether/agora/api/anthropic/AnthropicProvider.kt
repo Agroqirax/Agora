@@ -179,16 +179,17 @@ private fun ChatMessage.isAnthropicToolRoundCompatible(
     }
 }
 
-class AnthropicProvider : LlmProvider {
-    override val name: String = Constants.PROVIDER_ANTHROPIC
-    override val defaultBaseUrl: String = "https://api.anthropic.com/v1"
+class AnthropicProvider(
+    override val name: String = Constants.PROVIDER_ANTHROPIC,
+    override val defaultBaseUrl: String = "https://api.anthropic.com/v1",
+) : LlmProvider {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(
         messages: List<ChatMessage>,
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
-        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
+        val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
         val modelName = config.modelId
 
         // ── Model-generation classification ─────────────────────────────────
@@ -562,7 +563,7 @@ class AnthropicProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "https://api.anthropic.com/v1"
+            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
             val headers = mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
             // /v1/models is paginated (default page ~20); follow has_more/last_id so accounts
             // with long model lists aren't silently truncated to the first page.

@@ -11,6 +11,8 @@ import com.newoether.agora.api.openai.GroqProvider
 import com.newoether.agora.api.openai.OpenAiProvider
 import com.newoether.agora.api.openai.OpenRouterProvider
 import com.newoether.agora.api.openai.QwenProvider
+import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.util.Constants
@@ -20,6 +22,37 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
+
+internal fun createCustomProvider(
+    config: CustomProviderConfig,
+    baseUrl: String,
+): LlmProvider? = when (config.protocol) {
+    CustomEndpointProtocol.OPENAI -> CustomOpenAiProvider(config.name, baseUrl)
+    CustomEndpointProtocol.GOOGLE -> GeminiProvider(config.name, baseUrl)
+    CustomEndpointProtocol.ANTHROPIC -> AnthropicProvider(config.name, baseUrl)
+    CustomEndpointProtocol.UNKNOWN -> null
+}
+
+internal fun customEndpointBaseUrlCandidates(
+    protocol: CustomEndpointProtocol,
+    baseUrl: String?,
+): List<String?> {
+    if (baseUrl.isNullOrBlank()) return listOf(baseUrl)
+    if (com.newoether.agora.api.BaseUrlResolver.hasVersionSegment(baseUrl)) {
+        return listOf(baseUrl)
+    }
+    return when (protocol) {
+        CustomEndpointProtocol.OPENAI,
+        CustomEndpointProtocol.ANTHROPIC -> listOf(
+            com.newoether.agora.api.BaseUrlResolver.withV1(baseUrl),
+            baseUrl,
+        )
+        // GeminiProvider owns its v1beta completion so both model discovery and generation
+        // use the same exact base URL semantics.
+        CustomEndpointProtocol.GOOGLE -> listOf(baseUrl)
+        CustomEndpointProtocol.UNKNOWN -> emptyList()
+    }
+}
 
 /** Pure policy boundary used by both production code and JVM tests. Missing providers fail shut. */
 internal fun providerConfigurationIsValid(
@@ -108,27 +141,49 @@ class ProviderRegistry(
     // ── Custom provider CRUD ──────────────────────────────────
     // Settings persists the config; the callbacks keep the live `providers` map in sync.
 
-    fun addCustom(name: String, baseUrl: String) {
-        providers[name] = CustomOpenAiProvider(name, baseUrl)
-        settings.addCustomProvider(name, baseUrl) { n, p -> providers[n] = p }
+    fun addCustom(
+        name: String,
+        baseUrl: String,
+        protocol: CustomEndpointProtocol = CustomEndpointProtocol.OPENAI,
+    ) {
+        val config = CustomProviderConfig(name = name, protocol = protocol)
+        val provider = createCustomProvider(config, baseUrl) ?: return
+        providers[name] = provider
+        settings.addCustomProvider(config, baseUrl)
     }
 
     fun renameCustom(oldName: String, newName: String) {
         val url = settings.providerBaseUrls.value[oldName] ?: return
+        val oldConfig = settings.customProviders.value.firstOrNull { it.name == oldName } ?: return
+        val newConfig = oldConfig.copy(name = newName)
+        val provider = createCustomProvider(newConfig, url) ?: return
         providers.remove(oldName)
-        providers[newName] = CustomOpenAiProvider(newName, url)
-        settings.renameCustomProvider(oldName, newName, { providers.remove(it) }, { n, p -> providers[n] = p })
+        providers[newName] = provider
+        settings.renameCustomProvider(oldName, newName)
+    }
+
+    fun updateCustomProtocol(name: String, protocol: CustomEndpointProtocol) {
+        val current = settings.customProviders.value.firstOrNull { it.name == name } ?: return
+        val updated = current.copy(protocol = protocol)
+        val url = settings.providerBaseUrls.value[name].orEmpty()
+        val provider = createCustomProvider(updated, url)
+        if (provider == null) providers.remove(name) else providers[name] = provider
+        settings.updateCustomProviderProtocol(name, protocol)
     }
 
     fun deleteCustom(name: String) {
-        settings.deleteCustomProvider(name) { providers.remove(it) }
+        providers.remove(name)
+        settings.deleteCustomProvider(name)
     }
 
     /** Registers any persisted custom provider not yet present in the live map. */
     fun ensureCustomProvidersRegistered() {
         settings.customProviders.value.forEach { config ->
             if (config.name !in providers) {
-                providers[config.name] = CustomOpenAiProvider(config.name, settings.providerBaseUrls.value[config.name] ?: "")
+                createCustomProvider(
+                    config,
+                    settings.providerBaseUrls.value[config.name].orEmpty(),
+                )?.let { providers[config.name] = it }
             }
         }
     }
@@ -159,11 +214,12 @@ class ProviderRegistry(
         // Base URL, so the request hot path uses a single deterministic endpoint instead
         // of trying both forms (and eating a 404) on every call. Custom OpenAI-compatible
         // providers without a version segment are probed /v1-first (the common case).
-        val candidates: List<String?> =
-            if (!isBuiltIn(name) && baseUrl != null && !com.newoether.agora.api.BaseUrlResolver.hasVersionSegment(baseUrl))
-                listOf(com.newoether.agora.api.BaseUrlResolver.withV1(baseUrl), baseUrl)
-            else
-                listOf(baseUrl)
+        val customConfig = settings.customProviders.value.firstOrNull { it.name == name }
+        val candidates: List<String?> = if (customConfig != null) {
+            customEndpointBaseUrlCandidates(customConfig.protocol, baseUrl)
+        } else {
+            listOf(baseUrl)
+        }
 
         for (candidate in candidates) {
             val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) { provider.fetchModels(activeKey, candidate) }
@@ -182,7 +238,12 @@ class ProviderRegistry(
     fun computeFingerprint(): String = providers.map { (name, _) ->
         val keyId = settings.activeApiKeyIds.value[name] ?: ""
         val url = settings.providerBaseUrls.value[name] ?: ""
-        "$name|$keyId|$url"
+        val protocol = settings.customProviders.value
+            .firstOrNull { it.name == name }
+            ?.protocol
+            ?.wireValue
+            .orEmpty()
+        "$name|$keyId|$url|$protocol"
     }.sorted().joinToString(",").hashCode().toString()
 
     /** Starts the long-lived collectors that keep the provider map and caches consistent. */
@@ -197,10 +258,10 @@ class ProviderRegistry(
                     providers.keys.filter { !isBuiltIn(it) }.forEach { providers.remove(it) }
                     val baseUrls = settings.getProviderBaseUrls()
                     custom.forEach { config ->
-                        providers[config.name] = CustomOpenAiProvider(
-                            config.name,
+                        createCustomProvider(
+                            config,
                             baseUrls[config.name] ?: "",
-                        )
+                        )?.let { providers[config.name] = it }
                     }
                     initialCustomProviderSync.complete(Unit)
                 }

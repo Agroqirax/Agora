@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MessageListLayoutTest {
@@ -66,5 +67,50 @@ class MessageListLayoutTest {
             MessageListLayoutMode.COVERED_TRANSITION,
             messageListLayoutMode(isSwitching = true, isScrollInProgress = false),
         )
+    }
+
+    @Test
+    fun reversingMutationKeepsTheOriginalPreChangeAnchor() {
+        val lock = MessageListMutationAnchorLock()
+        val original = MessageListViewportAnchor("message-a", 37)
+
+        lock.begin("thinking-card", original)
+        lock.begin(
+            "thinking-card",
+            MessageListViewportAnchor("already-shifted", 91),
+        )
+
+        assertEquals(1, lock.activeMutationCount)
+        assertEquals(original, lock.anchor)
+        assertEquals(original, lock.finish("thinking-card"))
+        assertNull(lock.anchor)
+    }
+
+    @Test
+    fun overlappingMutationsReleaseOnlyAfterTheLastAnimationSettles() {
+        val lock = MessageListMutationAnchorLock()
+        val original = MessageListViewportAnchor("message-a", 12)
+
+        lock.begin("card-a", original)
+        lock.begin("card-b", MessageListViewportAnchor("message-b", 99))
+
+        assertNull(lock.finish("card-a"))
+        assertEquals(original, lock.anchor)
+        assertEquals(original, lock.finish("card-b"))
+    }
+
+    @Test
+    fun userScrollCancelsPendingMutationCorrection() {
+        val lock = MessageListMutationAnchorLock()
+        lock.begin(
+            "thinking-card",
+            MessageListViewportAnchor("message-a", 12),
+        )
+
+        lock.cancel()
+
+        assertEquals(0, lock.activeMutationCount)
+        assertNull(lock.anchor)
+        assertNull(lock.finish("thinking-card"))
     }
 }

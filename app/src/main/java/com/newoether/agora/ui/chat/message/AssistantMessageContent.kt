@@ -91,6 +91,8 @@ internal fun AssistantMessageContent(
     onShowInfo: () -> Unit,
     onShowDelete: () -> Unit,
     onSegmentSelected: (List<Int>) -> Unit,
+    onLayoutMutationStarted: (String) -> Unit,
+    onLayoutMutationSettled: (String) -> Unit,
     setThoughtBlockHeight: (Int) -> Unit,
 ) {
     @Suppress("DEPRECATION")
@@ -284,6 +286,8 @@ internal fun AssistantMessageContent(
                         expandedStates = thoughtExpandedStates,
                         renderContext = renderContext,
                         animatedBlockKeys = timelineAnimatedBlockKeys,
+                        onLayoutMutationStarted = onLayoutMutationStarted,
+                        onLayoutMutationSettled = onLayoutMutationSettled,
                         onSegmentClick = { indices ->
                             onSegmentSelected(indices)
                         }
@@ -309,6 +313,8 @@ internal fun AssistantMessageContent(
                         useLiveStatus = true,
                         expandedStates = thoughtExpandedStates,
                         expansionKey = message.id,
+                        onExpansionStarted = onLayoutMutationStarted,
+                        onExpansionSettled = onLayoutMutationSettled,
                         onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
                         onBlockHeightChanged = setThoughtBlockHeight,
                     )

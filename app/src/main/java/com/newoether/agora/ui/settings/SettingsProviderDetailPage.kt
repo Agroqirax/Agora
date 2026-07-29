@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.noOpBringIntoView
@@ -57,7 +58,8 @@ fun SettingsProviderDetailPage(
     val localChatModels by viewModel.settings.localChatModels.collectAsState()
 
     val isLocal = providerName == Constants.PROVIDER_LOCAL
-    val isCustom = customProviders.any { it.name == providerName }
+    val customConfig = customProviders.firstOrNull { it.name == providerName }
+    val isCustom = customConfig != null
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -124,6 +126,23 @@ fun SettingsProviderDetailPage(
         }
     ) {
             SettingsGroupColumn {
+                if (customConfig != null) {
+                    SettingsGroup(
+                        title = stringResource(R.string.custom_provider_protocol_label),
+                        items = listOf {
+                            CustomEndpointProtocolSelector(
+                                selected = customConfig.protocol,
+                                onSelected = { protocol ->
+                                    if (protocol != customConfig.protocol) {
+                                        viewModel.updateCustomProviderProtocol(providerName, protocol)
+                                    }
+                                },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            )
+                        },
+                    )
+                }
+
                 // Base URL (non-Local only)
                 if (!isLocal) {
                 // Nullable: after deleting a custom provider this page recomposes once more

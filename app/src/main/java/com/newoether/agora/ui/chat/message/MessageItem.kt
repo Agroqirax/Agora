@@ -55,6 +55,8 @@ fun MessageItem(
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
     onHeightChanged: (Int) -> Unit = {},
+    onLayoutMutationStarted: (String) -> Unit = {},
+    onLayoutMutationSettled: (String) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
@@ -177,6 +179,8 @@ fun MessageItem(
                     selectedSegmentIndex = indices.firstOrNull() ?: -1
                     showSegmentDetail = true
                 },
+                onLayoutMutationStarted = onLayoutMutationStarted,
+                onLayoutMutationSettled = onLayoutMutationSettled,
                 setThoughtBlockHeight = {},
             )
         }

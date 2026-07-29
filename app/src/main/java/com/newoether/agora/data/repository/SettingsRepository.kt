@@ -1,9 +1,9 @@
 package com.newoether.agora.data.repository
 
-import com.newoether.agora.api.openai.CustomOpenAiProvider
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
+import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
@@ -271,27 +271,21 @@ class SettingsRepository(
         scope.launch { settingsManager.setActiveSystemPromptId(id) }
     }
 
-    // Custom provider CRUD (callbacks touch ChatViewModel's live provider map)
-    fun addCustomProvider(name: String, baseUrl: String, onProviderAdd: (String, CustomOpenAiProvider) -> Unit) {
+    // Custom provider CRUD. ProviderRegistry owns live instance construction.
+    fun addCustomProvider(config: CustomProviderConfig, baseUrl: String) {
         scope.launch {
-            settingsManager.saveProviderBaseUrl(name, baseUrl)
-            settingsManager.saveCustomProviders(customProviders.value + CustomProviderConfig(name))
-            onProviderAdd(name, CustomOpenAiProvider(name, baseUrl))
+            settingsManager.saveProviderBaseUrl(config.name, baseUrl)
+            settingsManager.saveCustomProviders(customProviders.value + config)
         }
     }
 
-    fun renameCustomProvider(
-        oldName: String, newName: String,
-        onProviderRemove: (String) -> Unit,
-        onProviderAdd: (String, CustomOpenAiProvider) -> Unit
-    ) {
+    fun renameCustomProvider(oldName: String, newName: String) {
         val url = providerBaseUrls.value[oldName] ?: return
         scope.launch {
-            onProviderRemove(oldName)
             val updated = customProviders.value.toMutableList()
             val idx = updated.indexOfFirst { it.name == oldName }
             if (idx >= 0) {
-                updated[idx] = CustomProviderConfig(newName)
+                updated[idx] = updated[idx].copy(name = newName)
                 settingsManager.saveCustomProviders(updated)
                 settingsManager.saveProviderBaseUrl(oldName, "")
                 settingsManager.saveProviderBaseUrl(newName, url)
@@ -308,14 +302,21 @@ class SettingsRepository(
                 settingsManager.saveApiKeys(newKeys)
                 activeApiKeyIds.value[oldName]?.let { settingsManager.setActiveApiKeyId(newName, it) }
             }
-            onProviderAdd(newName, CustomOpenAiProvider(newName, url))
         }
     }
 
-    fun deleteCustomProvider(name: String, onProviderRemove: (String) -> Unit) {
+    fun updateCustomProviderProtocol(name: String, protocol: CustomEndpointProtocol) {
+        scope.launch {
+            val updated = customProviders.value.map { config ->
+                if (config.name == name) config.copy(protocol = protocol) else config
+            }
+            settingsManager.saveCustomProviders(updated)
+        }
+    }
+
+    fun deleteCustomProvider(name: String) {
         scope.launch {
             settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
-            onProviderRemove(name)
             settingsManager.saveAvailableModels(name, emptyList())
             settingsManager.saveEnabledModels(enabledModels.value.filter { !it.startsWith("$name:") }.toSet())
             settingsManager.saveModelAliases(modelAliases.value.filterKeys { !it.startsWith("$name:") })
