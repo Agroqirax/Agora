@@ -193,6 +193,9 @@ internal data class StreamingMarkdownNode(
     val sourceContent: String,
 )
 
+internal fun StreamingMarkdownNode.hasSameBlockIdentity(other: StreamingMarkdownNode): Boolean =
+    startOffset == other.startOffset && node.type == other.node.type
+
 @Stable
 internal class StreamingMarkdownBlocksState(initialTail: String) {
     val stableBlocks: SnapshotStateList<StableMarkdownBlock> = mutableStateListOf()
@@ -345,11 +348,13 @@ internal fun StreamingMarkdownBlockContent(
         )
         val tailNode = blocks.tailNode
         if (tailNode != null) {
-            RecomposeSafeMarkdownNode(
-                content = tailNode,
-                isStreaming = tailIsStreaming
-            ) { node ->
-                MarkdownNodeContent(node, renderContext)
+            key(tailNode.startOffset, tailNode.node.type) {
+                RecomposeSafeMarkdownNode(
+                    content = tailNode,
+                    isStreaming = tailIsStreaming
+                ) { node ->
+                    MarkdownNodeContent(node, renderContext)
+                }
             }
         } else if (blocks.fallbackTail.isNotBlank()) {
             RecomposeSafeMarkdown(
@@ -532,7 +537,7 @@ private fun RecomposeSafeMarkdownNode(
     modifier: Modifier = Modifier,
     render: @Composable (node: StreamingMarkdownNode) -> Unit
 ) {
-    var buf0 by remember { mutableStateOf<StreamingMarkdownNode?>(null) }
+    var buf0 by remember { mutableStateOf<StreamingMarkdownNode?>(content) }
     var buf1 by remember { mutableStateOf<StreamingMarkdownNode?>(null) }
     var front by remember { mutableIntStateOf(0) }
     var fading by remember { mutableStateOf(false) }
@@ -551,6 +556,24 @@ private fun RecomposeSafeMarkdownNode(
             if (!fading) {
                 if (front == 0) buf1 = null else buf0 = null
             }
+            return@LaunchedEffect
+        }
+
+        if (current != null && !current.hasSameBlockIdentity(content)) {
+            // The previous tail has been promoted into the stable block list. Reusing its
+            // fade buffer for the next Markdown block would render the promoted block twice:
+            // once in the stable list and once underneath the new tail. Abort any in-flight
+            // fade and install the new logical block as the sole authoritative buffer.
+            if (front == 0) {
+                buf0 = content
+                buf1 = null
+            } else {
+                buf1 = content
+                buf0 = null
+            }
+            fading = false
+            fadeAlpha = 0f
+            fadeKey++
             return@LaunchedEffect
         }
 

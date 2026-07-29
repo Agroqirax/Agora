@@ -129,7 +129,6 @@ class ShellToolProvider(
             workdir: String,
             timeoutMs: Int,
         ): Flow<ToolExecutionEvent> = flow {
-            emit(ToolExecutionEvent.Progress("Connecting to $deviceName"))
             val result = executeCommandInternal(cmd, workdir, timeoutMs) { delta ->
                 emit(ToolExecutionEvent.OutputDelta(delta))
             }
@@ -678,12 +677,27 @@ class ShellToolProvider(
             emit(ToolExecutionEvent.Completed(jsonError("execute_shell_command", "no_command")))
             return@flow
         }
+        val serverName = arg(args, "server")
         if (boolArg(args, "background")) {
+            val backend = getConchBackend(serverName, ctx)
+            if (backend == null) {
+                emit(
+                    ToolExecutionEvent.Completed(
+                        jsonError(
+                            "execute_shell_command",
+                            conchServerNotFoundMessage(serverName, ctx),
+                            server = serverName,
+                            command = command,
+                        ),
+                    ),
+                )
+                return@flow
+            }
+            emit(ToolExecutionEvent.TargetResolved(backend.device.name))
             emit(ToolExecutionEvent.Progress("Starting durable background job"))
             emit(ToolExecutionEvent.Completed(executeShellCommand(arguments, ctx)))
             return@flow
         }
-        val serverName = arg(args, "server")
         val timeoutMs = (arg(args, "timeout_ms").toIntOrNull() ?: 30000)
             .coerceIn(1000, 120000)
         val workdir = arg(args, "workdir")
@@ -696,6 +710,11 @@ class ShellToolProvider(
             )
             return@flow
         }
+        emit(
+            ToolExecutionEvent.TargetResolved(
+                backend.device?.name?.ifBlank { "Untitled" } ?: "Local Sandbox",
+            ),
+        )
         try {
             if (!confirmRemote(backend.device, "$ $command")) {
                 emit(
@@ -710,6 +729,7 @@ class ShellToolProvider(
                 )
                 return@flow
             }
+            emit(ToolExecutionEvent.Progress("Running command"))
             backend.executeCommandEvents(command, workdir, timeoutMs).collect { emit(it) }
         } finally {
             backend.close()

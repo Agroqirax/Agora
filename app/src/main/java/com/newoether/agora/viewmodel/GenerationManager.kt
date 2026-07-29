@@ -767,13 +767,16 @@ class GenerationManager(
                             }
                             true
                         }
+                        is ToolExecutionEvent.TargetResolved -> {
+                            updateToolSegment(toolCallId) { segment ->
+                                segment.copy(toolTarget = toolEvent.target)
+                            }
+                            true
+                        }
                         is ToolExecutionEvent.Progress -> {
                             updateToolSegment(toolCallId) { segment ->
                                 segment.copy(
                                     toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
-                                    toolProgress = segment.toolProgress
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?: toolEvent.message,
                                 )
                             }
                             true

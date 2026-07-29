@@ -62,6 +62,7 @@ internal data class ToolPresentation(
     val rawResult: String?,
     val liveOutput: String?,
     val subject: String?,
+    val device: String?,
     val count: Int?,
     val errorMessage: String?,
     val exitCode: Int?,
@@ -124,6 +125,9 @@ internal object ToolPresentationResolver {
             rawResult = segment.toolResult,
             liveOutput = segment.toolProgress,
             subject = subject(kind, args, resultObject),
+            device = resultObject.string("server")
+                ?: segment.toolTarget
+                ?: args.string("server"),
             count = count,
             errorMessage = error,
             exitCode = resultObject.int("exit_code"),

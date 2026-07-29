@@ -45,6 +45,12 @@ internal fun ToolDetailContent(segment: MessageSegment) {
 
     ToolSectionLabel(stringResource(R.string.result_label))
     Spacer(Modifier.height(6.dp))
+    if (presentation.kind == ToolKind.SHELL_EXECUTE ||
+        presentation.kind == ToolKind.SHELL_JOB_GET
+    ) {
+        ShellResult(presentation)
+        return
+    }
     when (presentation.state) {
         ToolPresentationState.CALLING -> ToolActiveContent(
             text = stringResource(R.string.tool_calling_ellipsis),
@@ -130,8 +136,6 @@ private fun ToolCompletedContent(
     when (presentation.kind) {
         ToolKind.FILE_GLOB -> FileGlobResult(presentation)
         ToolKind.FILE_GREP -> FileGrepResult(presentation)
-        ToolKind.SHELL_EXECUTE,
-        ToolKind.SHELL_JOB_GET -> ShellResult(presentation, segment)
         ToolKind.FILE_READ -> FileReadResult(presentation)
         ToolKind.WEB_SEARCH -> WebSearchResult(presentation, segment)
         else -> {
@@ -228,26 +232,62 @@ private fun FileGrepResult(presentation: ToolPresentation) {
 @Composable
 private fun ShellResult(
     presentation: ToolPresentation,
-    segment: MessageSegment,
 ) {
-    val result = presentation.result as? JsonObject
-    val output = result.string("output")
-        ?: presentation.liveOutput
-        ?: ""
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MetaPill(stringResource(R.string.tool_exit_code, presentation.exitCode ?: -1))
-        result.string("server")?.let { MetaPill(it) }
-        presentation.jobId?.let { MetaPill(it) }
+        MetaPill(shellStatusLabel(presentation))
+        MetaPill(
+            presentation.device
+                ?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.tool_unknown_device),
+        )
+    }
+    if (presentation.state == ToolPresentationState.FAILED &&
+        !presentation.errorMessage.isNullOrBlank()
+    ) {
+        Spacer(Modifier.height(8.dp))
+        ToolErrorContent(presentation.errorMessage)
     }
     Spacer(Modifier.height(8.dp))
-    if (output.isEmpty()) {
-        ToolMutedContent(toolSummary(segment))
-    } else {
-        TerminalOutput(output)
+    TerminalOutput(
+        shellOutputText(presentation)
+            ?: stringResource(R.string.tool_no_output),
+    )
+}
+
+@Composable
+private fun shellStatusLabel(presentation: ToolPresentation): String {
+    val resultState = (presentation.result as? JsonObject)
+        .string("state")
+        ?.replaceFirstChar { it.uppercaseChar() }
+    return when (presentation.state) {
+        ToolPresentationState.CALLING,
+        ToolPresentationState.RUNNING -> stringResource(R.string.tool_state_executing)
+        ToolPresentationState.BACKGROUND_RUNNING ->
+            resultState ?: stringResource(R.string.tool_state_running)
+        ToolPresentationState.FAILED -> stringResource(R.string.tool_state_failed)
+        ToolPresentationState.STOPPED -> stringResource(R.string.tool_state_stopped)
+        ToolPresentationState.EMPTY,
+        ToolPresentationState.SUCCEEDED -> presentation.exitCode?.let {
+            stringResource(R.string.tool_exit_code, it)
+        } ?: resultState ?: stringResource(R.string.tool_state_succeeded)
     }
+}
+
+internal fun shellOutputText(presentation: ToolPresentation): String? {
+    val completedOutput = (presentation.result as? JsonObject)
+        .string("output")
+        ?.takeIf { it.isNotBlank() }
+    if (completedOutput != null) return completedOutput
+
+    return presentation.liveOutput
+        ?.takeIf { it.isNotBlank() }
+        ?.takeUnless { output ->
+            output.startsWith("Connecting to ") ||
+                output == "Starting durable background job"
+        }
 }
 
 @Composable

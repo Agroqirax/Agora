@@ -10,23 +10,8 @@ import com.newoether.agora.model.MessageSegment
  * [ToolPresentationResolver]; compact, timeline and detail surfaces all call these functions.
  */
 @Composable
-internal fun toolDisplayName(segment: MessageSegment): String {
-    val presentation = ToolPresentationResolver.resolve(segment)
-    val state = when (presentation.state) {
-        ToolPresentationState.CALLING,
-        ToolPresentationState.RUNNING -> stringResource(R.string.tool_state_calling)
-        ToolPresentationState.BACKGROUND_RUNNING -> stringResource(R.string.tool_state_running)
-        ToolPresentationState.SUCCEEDED,
-        ToolPresentationState.EMPTY -> stringResource(R.string.tool_state_called)
-        ToolPresentationState.FAILED -> stringResource(R.string.tool_state_failed)
-        ToolPresentationState.STOPPED -> stringResource(R.string.tool_state_stopped)
-    }
-    return stringResource(
-        R.string.tool_state_title,
-        state,
-        toolBaseDisplayName(presentation),
-    )
-}
+internal fun toolDisplayName(segment: MessageSegment): String =
+    toolBaseDisplayName(ToolPresentationResolver.resolve(segment))
 
 @Composable
 private fun toolBaseDisplayName(presentation: ToolPresentation): String = when (presentation.kind) {

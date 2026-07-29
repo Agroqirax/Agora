@@ -27,6 +27,8 @@ data class MessageSegment(
     val toolState: String? = null,
     /** Bounded, display-only live output. The final model-facing result remains [toolResult]. */
     val toolProgress: String? = null,
+    /** Resolved execution target for tool UI. Kept separate from lifecycle and output text. */
+    val toolTarget: String? = null,
 )
 
 object ToolExecutionStates {

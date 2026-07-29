@@ -9,7 +9,10 @@ sealed interface ToolExecutionEvent {
     /** Incremental user-visible output. It is never sent to the model as a partial result. */
     data class OutputDelta(val text: String) : ToolExecutionEvent
 
-    /** A low-volume lifecycle/detail update, such as "connecting". */
+    /** The concrete device selected after resolving optional tool arguments. */
+    data class TargetResolved(val target: String) : ToolExecutionEvent
+
+    /** A low-volume lifecycle update. It is not command output. */
     data class Progress(val message: String) : ToolExecutionEvent
 
     /** Exactly one authoritative model-facing result. */

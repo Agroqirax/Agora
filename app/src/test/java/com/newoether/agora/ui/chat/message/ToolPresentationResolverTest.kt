@@ -47,11 +47,13 @@ class ToolPresentationResolverTest {
                 toolResult = null,
                 toolState = ToolExecutionStates.RUNNING,
                 toolProgress = "line one\n",
+                toolTarget = "tinybox",
             ),
         )
 
         assertEquals(ToolPresentationState.RUNNING, presentation.state)
         assertEquals("line one\n", presentation.liveOutput)
+        assertEquals("tinybox", presentation.device)
     }
 
     @Test
@@ -124,5 +126,38 @@ class ToolPresentationResolverTest {
         )
 
         assertEquals(3, presentation.outputLength)
+    }
+
+    @Test
+    fun completedShellResultUsesAuthoritativeServerAndOutput() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolArgs = """{"server":"requested"}""",
+                toolResult = """
+                    {"type":"execute_shell_command","server":"actual","exit_code":0,"output":"done"}
+                """.trimIndent(),
+                toolTarget = "resolved",
+            ),
+        )
+
+        assertEquals("actual", presentation.device)
+        assertEquals("done", shellOutputText(presentation))
+    }
+
+    @Test
+    fun legacyConnectingProgressIsNotRenderedAsCommandOutput() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = "Connecting to tinybox",
+                toolTarget = "tinybox",
+            ),
+        )
+
+        assertEquals(null, shellOutputText(presentation))
     }
 }
