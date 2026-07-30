@@ -96,6 +96,10 @@ data class GenerationContext(
     val imageGenBaseUrl: String = "",
     val imageGenModel: String = "gpt-image-1",
     val imageGenSize: String = "1024x1024",
+    /** Gates the html-widgets skill's visibility in [com.newoether.agora.tool.SkillToolProvider] —
+     *  the fence-rendering itself is a pure UI concern (see ChatApp.kt), this only controls
+     *  whether the model is told the html-render syntax exists. */
+    val htmlWidgetsEnabled: Boolean = false,
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val deviceInfoEnabled: Boolean = true,
