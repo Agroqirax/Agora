@@ -61,11 +61,12 @@ import org.intellij.markdown.ast.getTextInNode
 private fun configureWidgetWebView(
     webView: WebView,
     allowNetwork: Boolean,
+    allowJavaScript: Boolean,
     transparentBackground: Boolean,
     onContentHeightPx: ((Int) -> Unit)? = null
 ) {
     webView.settings.apply {
-        javaScriptEnabled = true
+        javaScriptEnabled = allowJavaScript
         domStorageEnabled = true
         blockNetworkLoads = !allowNetwork
         allowFileAccess = false
@@ -107,6 +108,9 @@ private fun configureWidgetWebView(
             // No addJavascriptInterface bridge is used anywhere — evaluateJavascript is a
             // one-shot "run this script, hand back the result" call, not a persistent bridge,
             // so this stays within the same sandboxing posture as the rest of this WebView.
+            // This measurement itself relies on JS, so it's a no-op when JS is disabled — the
+            // card just falls back to WidgetMaxHeight (or fixedHeight, when the caller set one).
+            if (!allowJavaScript) return
             onContentHeightPx?.let { cb ->
                 view.evaluateJavascript("document.documentElement.scrollHeight.toString()") { result ->
                     result?.trim('"')?.toDoubleOrNull()?.toInt()?.let(cb)
@@ -214,6 +218,7 @@ private val WidgetMaxHeight = 420.dp
 data class ExpandedWidget(
     val html: String,
     val allowNetwork: Boolean,
+    val allowJavaScript: Boolean,
     val transparentBackground: Boolean
 )
 
@@ -227,6 +232,7 @@ fun WidgetCard(
     sourceText: String,
     documentHtml: String,
     allowNetwork: Boolean,
+    allowJavaScript: Boolean,
     transparentBackground: Boolean,
     onExpand: (html: String) -> Unit,
     modifier: Modifier = Modifier,
@@ -278,7 +284,7 @@ fun WidgetCard(
                 factory = { context ->
                     WebView(context).apply {
                         configureWidgetWebView(
-                            this, allowNetwork, transparentBackground,
+                            this, allowNetwork, allowJavaScript, transparentBackground,
                             onContentHeightPx = if (fixedHeight != null) null else { px ->
                                 // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
                                 // JS coordinate space is device-independent when useWideViewPort is
@@ -330,6 +336,7 @@ fun WidgetCard(
 fun HtmlWidgetCard(
     html: String,
     allowNetwork: Boolean,
+    allowJavaScript: Boolean,
     matchAppTheme: Boolean,
     onExpand: (ExpandedWidget) -> Unit,
     modifier: Modifier = Modifier
@@ -339,8 +346,9 @@ fun HtmlWidgetCard(
         sourceText = html,
         documentHtml = effectiveHtml,
         allowNetwork = allowNetwork,
+        allowJavaScript = allowJavaScript,
         transparentBackground = matchAppTheme,
-        onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork, matchAppTheme)) },
+        onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork, allowJavaScript, matchAppTheme)) },
         modifier = modifier
     )
 }
@@ -394,7 +402,7 @@ fun FullScreenHtmlWebView(
     AndroidView(
         factory = { context ->
             WebView(context).apply {
-                configureWidgetWebView(this, widget.allowNetwork, widget.transparentBackground)
+                configureWidgetWebView(this, widget.allowNetwork, widget.allowJavaScript, widget.transparentBackground)
                 loadDataWithBaseURL(null, widget.html, "text/html", "utf-8", null)
             }
         },

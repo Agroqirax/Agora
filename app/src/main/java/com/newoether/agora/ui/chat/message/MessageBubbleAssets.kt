@@ -56,6 +56,7 @@ internal fun rememberChatMarkdownAssets(
     htmlWidgetsEnabled: Boolean = false,
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
+    htmlWidgetsJsEnabled: Boolean = true,
     mermaidWidgetsEnabled: Boolean = false,
     geoJsonWidgetsEnabled: Boolean = false,
     geoJsonWidgetsNetworkEnabled: Boolean = false,
@@ -123,6 +124,7 @@ internal fun rememberChatMarkdownAssets(
         htmlWidgetsEnabled,
         htmlWidgetsNetworkEnabled,
         htmlWidgetsThemeEnabled,
+        htmlWidgetsJsEnabled,
         mermaidWidgetsEnabled,
         geoJsonWidgetsEnabled,
         geoJsonWidgetsNetworkEnabled,
@@ -134,6 +136,7 @@ internal fun rememberChatMarkdownAssets(
                 HtmlWidgetCard(
                     html = body,
                     allowNetwork = htmlWidgetsNetworkEnabled,
+                    allowJavaScript = htmlWidgetsJsEnabled,
                     matchAppTheme = htmlWidgetsThemeEnabled,
                     onExpand = onWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)

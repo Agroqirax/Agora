@@ -290,8 +290,9 @@ fun GeoJsonWidgetCard(
             sourceText = source,
             documentHtml = "<html><body style=\"font-family:sans-serif;color:#b00020;padding:12px;\">Invalid GeoJSON</body></html>",
             allowNetwork = false,
+            allowJavaScript = true,
             transparentBackground = true,
-            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = false, transparentBackground = true)) },
+            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = false, allowJavaScript = true, transparentBackground = true)) },
             modifier = modifier
         )
         return
@@ -313,8 +314,9 @@ fun GeoJsonWidgetCard(
             sourceText = source,
             documentHtml = documentHtml,
             allowNetwork = networkEnabled,
+            allowJavaScript = true,
             transparentBackground = true,
-            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = networkEnabled, transparentBackground = true)) },
+            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = networkEnabled, allowJavaScript = true, transparentBackground = true)) },
             fixedHeight = GeoJsonMapHeight,
         )
         if (parsed.pins.isNotEmpty() || parsed.routes.isNotEmpty()) {

@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Palette
@@ -28,6 +29,7 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val htmlEnabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val htmlNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val htmlThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
+    val htmlJsEnabled by viewModel.settings.htmlWidgetsJsEnabled.collectAsState()
     val mermaidEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
     val geoJsonEnabled by viewModel.settings.geoJsonWidgetsEnabled.collectAsState()
     val geoJsonNetworkEnabled by viewModel.settings.geoJsonWidgetsNetworkEnabled.collectAsState()
@@ -74,6 +76,17 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Switch(checked = htmlThemeEnabled, onCheckedChange = { viewModel.settings.setHtmlWidgetsThemeEnabled(it) })
                             },
                             modifier = Modifier.clickable { viewModel.settings.setHtmlWidgetsThemeEnabled(!htmlThemeEnabled) }
+                        )
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.html_widgets_js_enable)) },
+                            supportingContent = { Text(stringResource(R.string.html_widgets_js_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Code, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = htmlJsEnabled, onCheckedChange = { viewModel.settings.setHtmlWidgetsJsEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setHtmlWidgetsJsEnabled(!htmlJsEnabled) }
                         )
                     }
                 }

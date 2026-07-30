@@ -32,6 +32,7 @@ object DefaultSkills {
                 - The app already supplies page layout and Material 3 styling; avoid global CSS, body/html styling, or viewport sizing (100vh, fixed heights, etc.) unless the widget genuinely requires it, and let content size naturally.
                 - The widget renders automatically right where the fence appears — do not also paste or explain the HTML/CSS/JS elsewhere in your reply.
                 - Use a normal ```html fence (not `html-render`) when the user actually wants to see or copy HTML source instead of seeing it rendered.
+                - You may use the css color variables --md-primary, --md-on-primary, --md-secondary, --md-on-secondary, --md-background, --md-on-background, --md-surface, --md-on-surface, --md-surface-variant, --md-on-surface-variant, --md-outline, --md-error, --md-on-error to style your widget. Prefer these over hard coded color values.
             """.trimIndent()
         ),
         Builtin(

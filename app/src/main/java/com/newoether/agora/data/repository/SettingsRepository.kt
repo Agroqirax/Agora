@@ -89,6 +89,7 @@ class SettingsRepository(
     val htmlWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsEnabled, false)
     val htmlWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsNetworkEnabled, false)
     val htmlWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsThemeEnabled, false)
+    val htmlWidgetsJsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsJsEnabled, true)
     val mermaidWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidWidgetsEnabled, false)
     val geoJsonWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsEnabled, false)
     val geoJsonWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsNetworkEnabled, false)
@@ -381,6 +382,7 @@ class SettingsRepository(
     fun setHtmlWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsEnabled(enabled) }
     fun setHtmlWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsNetworkEnabled(enabled) }
     fun setHtmlWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsThemeEnabled(enabled) }
+    fun setHtmlWidgetsJsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsJsEnabled(enabled) }
     fun setMermaidWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMermaidWidgetsEnabled(enabled) }
     fun setGeoJsonWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsEnabled(enabled) }
     fun setGeoJsonWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsNetworkEnabled(enabled) }

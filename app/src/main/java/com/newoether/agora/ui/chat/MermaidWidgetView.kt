@@ -146,8 +146,9 @@ fun MermaidWidgetCard(
         sourceText = diagramSource,
         documentHtml = documentHtml,
         allowNetwork = false,
+        allowJavaScript = true,
         transparentBackground = true,
-        onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = false, transparentBackground = true)) },
+        onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = false, allowJavaScript = true, transparentBackground = true)) },
         modifier = modifier
     )
 }

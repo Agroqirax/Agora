@@ -237,6 +237,7 @@ class SettingsManager(private val context: Context) {
         val HTML_WIDGETS_ENABLED = booleanPreferencesKey("html_widgets_enabled")
         val HTML_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("html_widgets_network_enabled")
         val HTML_WIDGETS_THEME_ENABLED = booleanPreferencesKey("html_widgets_theme_enabled")
+        val HTML_WIDGETS_JS_ENABLED = booleanPreferencesKey("html_widgets_js_enabled")
         val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
         val GEOJSON_WIDGETS_ENABLED = booleanPreferencesKey("geojson_widgets_enabled")
         val GEOJSON_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("geojson_widgets_network_enabled")
@@ -435,6 +436,7 @@ class SettingsManager(private val context: Context) {
     val htmlWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_ENABLED] ?: false }
     val htmlWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_NETWORK_ENABLED] ?: false }
     val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: false }
+    val htmlWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_JS_ENABLED] ?: true }
     val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
     val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: false }
     val geoJsonWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_NETWORK_ENABLED] ?: false }
@@ -852,6 +854,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveHtmlWidgetsThemeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[HTML_WIDGETS_THEME_ENABLED] = enabled }
+    }
+    suspend fun saveHtmlWidgetsJsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[HTML_WIDGETS_JS_ENABLED] = enabled }
     }
     suspend fun saveMermaidWidgetsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MERMAID_WIDGETS_ENABLED] = enabled }

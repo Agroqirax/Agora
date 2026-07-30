@@ -121,6 +121,7 @@ fun ChatApp(
     val htmlWidgetsEnabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
+    val htmlWidgetsJsEnabled by viewModel.settings.htmlWidgetsJsEnabled.collectAsState()
     val mermaidWidgetsEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
     val geoJsonWidgetsEnabled by viewModel.settings.geoJsonWidgetsEnabled.collectAsState()
     val geoJsonWidgetsNetworkEnabled by viewModel.settings.geoJsonWidgetsNetworkEnabled.collectAsState()
@@ -605,6 +606,7 @@ fun ChatApp(
                                 htmlWidgetsEnabled = htmlWidgetsEnabled,
                                 htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
                                 htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
+                                htmlWidgetsJsEnabled = htmlWidgetsJsEnabled,
                                 mermaidWidgetsEnabled = mermaidWidgetsEnabled,
                                 geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
                                 geoJsonWidgetsNetworkEnabled = geoJsonWidgetsNetworkEnabled,
