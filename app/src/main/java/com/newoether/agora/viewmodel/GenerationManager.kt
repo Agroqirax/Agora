@@ -101,6 +101,7 @@ data class GenerationContext(
      *  concern (see ChatApp.kt), these only control whether the model is told the syntax exists. */
     val htmlWidgetsEnabled: Boolean = false,
     val mermaidWidgetsEnabled: Boolean = false,
+    val geoJsonWidgetsEnabled: Boolean = false,
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val deviceInfoEnabled: Boolean = true,

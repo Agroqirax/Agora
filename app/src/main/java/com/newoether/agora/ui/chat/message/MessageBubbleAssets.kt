@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.chat.ExpandedWidget
+import com.newoether.agora.ui.chat.GeoJsonWidgetCard
 import com.newoether.agora.ui.chat.HtmlWidgetCard
 import com.newoether.agora.ui.chat.MarkdownWidgetFence
 import com.newoether.agora.ui.chat.MermaidWidgetCard
@@ -56,6 +57,9 @@ internal fun rememberChatMarkdownAssets(
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
     mermaidWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsNetworkEnabled: Boolean = false,
+    geoJsonRouteProvider: String = "osm",
     onWidgetClick: (ExpandedWidget) -> Unit = {},
 ): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
@@ -120,6 +124,9 @@ internal fun rememberChatMarkdownAssets(
         htmlWidgetsNetworkEnabled,
         htmlWidgetsThemeEnabled,
         mermaidWidgetsEnabled,
+        geoJsonWidgetsEnabled,
+        geoJsonWidgetsNetworkEnabled,
+        geoJsonRouteProvider,
         onWidgetClick,
     ) {
         listOf(
@@ -135,6 +142,15 @@ internal fun rememberChatMarkdownAssets(
             WidgetFenceSpec(fenceLanguage = "mermaid-render", enabled = mermaidWidgetsEnabled) { body ->
                 MermaidWidgetCard(
                     diagramSource = body,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            WidgetFenceSpec(fenceLanguage = "geojson-render", enabled = geoJsonWidgetsEnabled) { body ->
+                GeoJsonWidgetCard(
+                    source = body,
+                    networkEnabled = geoJsonWidgetsNetworkEnabled,
+                    routeProvider = geoJsonRouteProvider,
                     onExpand = onWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )

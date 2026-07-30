@@ -15,6 +15,10 @@ object DefaultSkills {
      *  gate in [com.newoether.agora.tool.SkillToolProvider]. */
     const val MERMAID_WIDGETS_SKILL_NAME = "mermaid-render"
 
+    /** Only visible/loadable while GeoJSON maps are enabled — see the `geoJsonWidgetsEnabled`
+     *  gate in [com.newoether.agora.tool.SkillToolProvider]. */
+    const val GEOJSON_WIDGETS_SKILL_NAME = "geojson-render"
+
     val BUILTINS: List<Builtin> = listOf(
         Builtin(
             name = HTML_WIDGETS_SKILL_NAME,
@@ -41,6 +45,23 @@ object DefaultSkills {
                 - The diagram renders automatically right where the fence appears, matching the app's current light/dark theme automatically — do not also paste or explain the diagram source elsewhere in your reply, and do not try to control colors/theme yourself.
                 - Common diagram types: `flowchart TD`/`graph TD` (flowcharts), `sequenceDiagram` (sequence diagrams), `classDiagram`, `erDiagram`, `stateDiagram-v2`, `gantt`, `pie`.
                 - Use a normal ```mermaid fence (not `mermaid-render`) when the user actually wants to see or copy the diagram source instead of seeing it rendered.
+            """.trimIndent()
+        ),
+        Builtin(
+            name = GEOJSON_WIDGETS_SKILL_NAME,
+            description = "How to render a map (pins, routes, areas) inline in the chat from GeoJSON, with buttons to open locations/routes in the user's maps app. Use when the user asks about a place, route, or spatial data.",
+            content = """
+                # GeoJSON maps
+
+                To show a map inline in the chat, write a fenced code block using the language `geojson-render`, e.g. a fence opened with ```geojson-render, containing a single valid GeoJSON `Feature`, `FeatureCollection`, or bare geometry object.
+
+                - The body must be strict, valid JSON: no `//` or `/* */` comments, no trailing commas. GeoJSON is plain JSON and a parse error leaves the map blank.
+                - The map renders automatically right where the fence appears, matching the app's current light/dark theme — do not also paste or explain the GeoJSON elsewhere in your reply.
+                - `Point`/`MultiPoint` geometries render as pins, `LineString`/`MultiLineString` as routes, `Polygon`/`MultiPolygon` as shaded areas. The map auto-fits to the content and supports pan/zoom.
+                - Set a `name` or `title` property on a `Feature` to label its pin/button (e.g. `{"type": "Feature", "properties": {"name": "Eiffel Tower"}, "geometry": {"type": "Point", "coordinates": [2.2945, 48.8584]}}`). Coordinates are `[longitude, latitude]`, per the GeoJSON spec.
+                - Buttons appear automatically below the map to open a pin or route in the device's installed maps app — don't tell the user how to do this manually.
+                - Basemap tile imagery only loads if the user has enabled network access for this widget in settings; the map, pins, routes, and areas still render without it.
+                - Use a normal ```geojson fence (not `geojson-render`) when the user actually wants to see or copy the raw GeoJSON instead of seeing it rendered.
             """.trimIndent()
         )
     )

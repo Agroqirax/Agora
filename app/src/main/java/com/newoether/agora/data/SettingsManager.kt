@@ -238,6 +238,9 @@ class SettingsManager(private val context: Context) {
         val HTML_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("html_widgets_network_enabled")
         val HTML_WIDGETS_THEME_ENABLED = booleanPreferencesKey("html_widgets_theme_enabled")
         val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
+        val GEOJSON_WIDGETS_ENABLED = booleanPreferencesKey("geojson_widgets_enabled")
+        val GEOJSON_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("geojson_widgets_network_enabled")
+        val GEOJSON_ROUTE_PROVIDER = stringPreferencesKey("geojson_route_provider")
         val SEARCH_CONTEXT_WINDOW = intPreferencesKey("search_context_window")
         val SEARCH_MATCH_LIMIT = intPreferencesKey("search_match_limit")
         val RAG_THRESHOLD = stringPreferencesKey("rag_threshold")
@@ -433,6 +436,10 @@ class SettingsManager(private val context: Context) {
     val htmlWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_NETWORK_ENABLED] ?: false }
     val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: false }
     val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
+    val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: false }
+    val geoJsonWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_NETWORK_ENABLED] ?: false }
+    // "osm" (default, no Google dependency) or "google" — which site/app the "Open Route" button deep-links to.
+    val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
     val searchMatchLimit: Flow<Int> = context.dataStore.data.map { it[SEARCH_MATCH_LIMIT] ?: 10 }
     val ragThreshold: Flow<Float> = context.dataStore.data.map { it[RAG_THRESHOLD]?.toFloatOrNull() ?: 0.5f }
@@ -848,6 +855,15 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveMermaidWidgetsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MERMAID_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun saveGeoJsonWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEOJSON_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun saveGeoJsonWidgetsNetworkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEOJSON_WIDGETS_NETWORK_ENABLED] = enabled }
+    }
+    suspend fun saveGeoJsonRouteProvider(provider: String) {
+        context.dataStore.edit { it[GEOJSON_ROUTE_PROVIDER] = provider }
     }
     suspend fun saveImageGenSize(size: String) {
         context.dataStore.edit { it[IMAGE_GEN_SIZE] = size }

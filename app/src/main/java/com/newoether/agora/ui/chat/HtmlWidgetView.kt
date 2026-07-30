@@ -3,8 +3,11 @@ package com.newoether.agora.ui.chat
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.newoether.agora.util.DebugLog
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -111,6 +114,20 @@ private fun configureWidgetWebView(
             }
         }
     }
+    // Model-authored widget JS runs with no debugger attached and no addJavascriptInterface
+    // bridge back to Kotlin — console.log/warn/error is the only way a script failure (or a
+    // deliberate diagnostic) becomes visible, so route it to logcat instead of the void.
+    webView.webChromeClient = object : WebChromeClient() {
+        override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+            val at = "${message.sourceId()}:${message.lineNumber()}"
+            when (message.messageLevel()) {
+                ConsoleMessage.MessageLevel.ERROR -> DebugLog.e("WidgetWebView", "$at ${message.message()}")
+                ConsoleMessage.MessageLevel.WARNING -> DebugLog.w("WidgetWebView", "$at ${message.message()}")
+                else -> DebugLog.d("WidgetWebView", "$at ${message.message()}")
+            }
+            return true
+        }
+    }
 }
 
 internal fun Int.toCssHex(): String = "#%06X".format(0xFFFFFF and this)
@@ -212,7 +229,11 @@ fun WidgetCard(
     allowNetwork: Boolean,
     transparentBackground: Boolean,
     onExpand: (html: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Opt out of the JS scrollHeight auto-sizing below and just use this height. For content with
+    // no natural document height to measure — a map filling its viewport rather than flowing text/
+    // diagram content — that measurement reads as ~0 and collapses the card to WidgetMinHeight.
+    fixedHeight: Dp? = null,
 ) {
     var showSource by remember(documentHtml) { mutableStateOf(false) }
     var contentHeight by remember(documentHtml) { mutableStateOf<Dp?>(null) }
@@ -220,7 +241,7 @@ fun WidgetCard(
     // measurement runs against whatever size this Box currently is, so starting small
     // would make that very measurement come out wrong for content sized in viewport units.
     // Shrinking down after the real height is known reads as "settling", not "getting smaller".
-    val targetHeight = (contentHeight ?: WidgetMaxHeight).coerceIn(WidgetMinHeight, WidgetMaxHeight)
+    val targetHeight = fixedHeight ?: (contentHeight ?: WidgetMaxHeight).coerceIn(WidgetMinHeight, WidgetMaxHeight)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -256,13 +277,16 @@ fun WidgetCard(
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
-                        configureWidgetWebView(this, allowNetwork, transparentBackground) { px ->
-                            // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
-                            // JS coordinate space is device-independent when useWideViewPort is
-                            // off), so wrap it directly — do NOT run it through Density.toDp(),
-                            // which would treat it as physical pixels and divide by density again.
-                            contentHeight = px.dp
-                        }
+                        configureWidgetWebView(
+                            this, allowNetwork, transparentBackground,
+                            onContentHeightPx = if (fixedHeight != null) null else { px ->
+                                // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
+                                // JS coordinate space is device-independent when useWideViewPort is
+                                // off), so wrap it directly — do NOT run it through Density.toDp(),
+                                // which would treat it as physical pixels and divide by density again.
+                                contentHeight = px.dp
+                            }
+                        )
                         loadDataWithBaseURL(null, documentHtml, "text/html", "utf-8", null)
                     }
                 },

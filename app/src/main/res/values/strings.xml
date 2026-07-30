@@ -210,7 +210,7 @@
     <string name="image_gen_no_model">No model selected</string>
     <string name="image_gen_select_model">Select image model</string>
     <string name="settings_widgets">Widgets</string>
-    <string name="settings_widgets_desc">Let the model render interactive HTML widgets and Mermaid diagrams inline in chat</string>
+    <string name="settings_widgets_desc">Let the model render interactive HTML widgets, Mermaid diagrams, and GeoJSON maps inline in chat</string>
     <string name="settings_html_widgets">HTML Widgets</string>
     <string name="settings_html_widgets_desc">Let the model render interactive HTML/CSS/JS widgets</string>
     <string name="html_widgets_enable">Enable HTML Widgets</string>
@@ -222,6 +222,17 @@
     <string name="settings_mermaid_widgets">Mermaid Diagrams</string>
     <string name="mermaid_widgets_enable">Enable Mermaid Diagrams</string>
     <string name="mermaid_widgets_enable_desc">Let the model render flowcharts, sequence diagrams, and other Mermaid diagrams inline. Rendered offline; always matches the app\'s theme.</string>
+    <string name="settings_geojson_widgets">GeoJSON Maps</string>
+    <string name="geojson_widgets_enable">Enable GeoJSON Maps</string>
+    <string name="geojson_widgets_enable_desc">Let the model render maps, routes, and pins from GeoJSON inline, with buttons to open them in your maps app.</string>
+    <string name="geojson_widgets_network_enable">Load Map Tiles Over Network</string>
+    <string name="geojson_widgets_network_enable_desc">Fetch real basemap imagery from OpenStreetMap. Off by default; without it, maps still render pins/routes/areas but with no basemap imagery.</string>
+    <string name="geojson_route_provider_label">Route Links Open In</string>
+    <string name="geojson_select_route_provider">Select Route Provider</string>
+    <string name="geojson_route_provider_osm">OpenStreetMap</string>
+    <string name="geojson_route_provider_osm_desc">Opens directions on openstreetmap.org, or an installed OSM-based app</string>
+    <string name="geojson_route_provider_google">Google Maps</string>
+    <string name="geojson_route_provider_google_desc">Opens directions in Google Maps, or a browser if it isn\'t installed</string>
     <string name="image_gen_size">Default Size</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Show all models</string>

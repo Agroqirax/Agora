@@ -100,6 +100,7 @@ class SkillToolProvider(
         when (skillFileName.removeSuffix(".md")) {
             DefaultSkills.HTML_WIDGETS_SKILL_NAME -> ctx.htmlWidgetsEnabled
             DefaultSkills.MERMAID_WIDGETS_SKILL_NAME -> ctx.mermaidWidgetsEnabled
+            DefaultSkills.GEOJSON_WIDGETS_SKILL_NAME -> ctx.geoJsonWidgetsEnabled
             else -> true
         }
 

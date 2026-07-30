@@ -90,6 +90,9 @@ class SettingsRepository(
     val htmlWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsNetworkEnabled, false)
     val htmlWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsThemeEnabled, false)
     val mermaidWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidWidgetsEnabled, false)
+    val geoJsonWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsEnabled, false)
+    val geoJsonWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsNetworkEnabled, false)
+    val geoJsonRouteProvider: StateFlow<String> = hot(settingsManager.geoJsonRouteProvider, "osm")
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
@@ -379,6 +382,9 @@ class SettingsRepository(
     fun setHtmlWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsNetworkEnabled(enabled) }
     fun setHtmlWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsThemeEnabled(enabled) }
     fun setMermaidWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMermaidWidgetsEnabled(enabled) }
+    fun setGeoJsonWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsEnabled(enabled) }
+    fun setGeoJsonWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsNetworkEnabled(enabled) }
+    fun setGeoJsonRouteProvider(provider: String) = scope.launch { settingsManager.saveGeoJsonRouteProvider(provider) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
     fun setDeviceInfoEnabled(enabled: Boolean) = scope.launch { settingsManager.saveDeviceInfoEnabled(enabled) }

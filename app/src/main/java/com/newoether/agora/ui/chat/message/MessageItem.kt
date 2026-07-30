@@ -57,6 +57,9 @@ fun MessageItem(
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
     mermaidWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsNetworkEnabled: Boolean = false,
+    geoJsonRouteProvider: String = "osm",
     onWidgetClick: (com.newoether.agora.ui.chat.ExpandedWidget) -> Unit = {},
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
@@ -153,6 +156,9 @@ fun MessageItem(
         htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
         htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
         mermaidWidgetsEnabled = mermaidWidgetsEnabled,
+        geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
+        geoJsonWidgetsNetworkEnabled = geoJsonWidgetsNetworkEnabled,
+        geoJsonRouteProvider = geoJsonRouteProvider,
         onWidgetClick = onWidgetClick,
     )
     val markdownRenderContext = markdownAssets.renderContext

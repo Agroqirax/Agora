@@ -57,6 +57,9 @@ fun MessageList(
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
     mermaidWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsEnabled: Boolean = false,
+    geoJsonWidgetsNetworkEnabled: Boolean = false,
+    geoJsonRouteProvider: String = "osm",
     onWidgetClick: (ExpandedWidget) -> Unit = {},
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
@@ -146,6 +149,9 @@ fun MessageList(
                     htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
                     htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
                     mermaidWidgetsEnabled = mermaidWidgetsEnabled,
+                    geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
+                    geoJsonWidgetsNetworkEnabled = geoJsonWidgetsNetworkEnabled,
+                    geoJsonRouteProvider = geoJsonRouteProvider,
                     onWidgetClick = onWidgetClick,
                 )
                 }
