@@ -40,6 +40,8 @@ private const val PillTabWeightVisibilityThreshold = 0.001f
  * @param selectedIndex currently selected tab.
  * @param onSelect invoked with the tapped tab index.
  * @param tabHeight pill height; the selected/edge corner radius is half of this.
+ * @param allowLabelOverflow whether a single-line label may paint beyond its measured bounds
+ * instead of being truncated with an ellipsis.
  */
 @Composable
 fun PillTabSwitcher(
@@ -48,6 +50,7 @@ fun PillTabSwitcher(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
     tabHeight: Dp = 44.dp,
+    allowLabelOverflow: Boolean = false,
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -112,7 +115,7 @@ fun PillTabSwitcher(
                     Text(
                         text = label,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                        overflow = if (allowLabelOverflow) TextOverflow.Visible else TextOverflow.Ellipsis,
                         softWrap = false,
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.labelLarge,

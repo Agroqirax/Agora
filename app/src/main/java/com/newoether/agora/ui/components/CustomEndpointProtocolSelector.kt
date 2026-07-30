@@ -1,14 +1,9 @@
 package com.newoether.agora.ui.components
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.ui.settings.PillTabSwitcher
 
 fun CustomEndpointProtocol.displayName(): String = when (this) {
     CustomEndpointProtocol.OPENAI -> "OpenAI"
@@ -23,17 +18,12 @@ fun CustomEndpointProtocolSelector(
     onSelected: (CustomEndpointProtocol) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        CustomEndpointProtocol.selectable.forEach { protocol ->
-            FilterChip(
-                selected = selected == protocol,
-                onClick = { onSelected(protocol) },
-                label = { Text(protocol.displayName(), maxLines = 1) },
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
+    val protocols = CustomEndpointProtocol.selectable
+    PillTabSwitcher(
+        tabs = protocols.map(CustomEndpointProtocol::displayName),
+        selectedIndex = protocols.indexOf(selected).coerceAtLeast(0),
+        onSelect = { index -> protocols.getOrNull(index)?.let(onSelected) },
+        modifier = modifier,
+        allowLabelOverflow = true,
+    )
 }

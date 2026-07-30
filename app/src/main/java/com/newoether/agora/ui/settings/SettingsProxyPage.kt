@@ -71,7 +71,8 @@ fun SettingsProxyPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 PillTabSwitcher(
                                     tabs = proxyTypes.map { it.second },
                                     selectedIndex = proxyTypes.indexOfFirst { it.first == type }.coerceAtLeast(0),
-                                    onSelect = { viewModel.settings.setProxyType(proxyTypes[it].first) }
+                                    onSelect = { viewModel.settings.setProxyType(proxyTypes[it].first) },
+                                    allowLabelOverflow = true,
                                 )
                             }
                         }

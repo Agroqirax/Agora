@@ -161,7 +161,8 @@ fun SystemPromptEditorPage(
             PillTabSwitcher(
                 tabs = tabLabels,
                 selectedIndex = selectedTab,
-                onSelect = { selectedTab = it }
+                onSelect = { selectedTab = it },
+                allowLabelOverflow = true,
             )
 
             Spacer(modifier = Modifier.height(12.dp))
