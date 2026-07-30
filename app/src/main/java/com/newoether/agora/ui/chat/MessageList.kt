@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +63,64 @@ internal fun calculateTailLayoutHeightPx(
     minimumHeightPx: Int,
     contentHeightPx: Int,
 ): Int = maxOf(minimumHeightPx, contentHeightPx)
+
+/**
+ * One stable LazyColumn item per conversation turn.
+ *
+ * A USER starts a turn and every following non-USER message remains in that turn until the next
+ * USER. This identity must not change when a new turn is appended: otherwise the previous
+ * assistant is disposed from the tail item and recreated as a standalone item, producing a
+ * visible blank/reparse frame on Send.
+ */
+internal data class MessageListTurn(
+    val key: String,
+    val messages: List<ChatMessage>,
+)
+
+internal fun buildMessageListTurns(messages: List<ChatMessage>): List<MessageListTurn> {
+    if (messages.isEmpty()) return emptyList()
+
+    val turns = mutableListOf<MessageListTurn>()
+    var activeTurn = mutableListOf<ChatMessage>()
+
+    fun flushActiveTurn() {
+        if (activeTurn.isEmpty()) return
+        turns += MessageListTurn(
+            key = activeTurn.first().id,
+            messages = activeTurn.toList(),
+        )
+        activeTurn = mutableListOf()
+    }
+
+    messages.forEach { message ->
+        if (message.participant == Participant.USER) {
+            flushActiveTurn()
+            activeTurn += message
+        } else if (activeTurn.firstOrNull()?.participant == Participant.USER) {
+            activeTurn += message
+        } else {
+            // Preserve leading/error-only paths as their own stable items until a USER begins a
+            // normal conversation turn.
+            flushActiveTurn()
+            turns += MessageListTurn(message.id, listOf(message))
+        }
+    }
+    flushActiveTurn()
+    return turns
+}
+
+internal fun messageListTurnIndex(
+    turns: List<MessageListTurn>,
+    messageId: String,
+): Int = turns.indexOfFirst { turn -> turn.messages.any { it.id == messageId } }
+
+internal fun estimateMessageListTurnHeightPx(
+    turn: MessageListTurn,
+    messageHeights: Map<String, Int>,
+    fallbackHeightPx: Float,
+): Float = turn.messages.sumOf { message ->
+    (messageHeights[message.id]?.toDouble() ?: fallbackHeightPx.toDouble())
+}.toFloat()
 
 internal data class MessageListViewportAnchor(
     val messageId: String,
@@ -157,13 +216,14 @@ fun MessageList(
     val contextStartIndex = if (currentPath.size > maxContextWindow) currentPath.size - maxContextWindow else 0
     val inContextIds = currentPath.drop(contextStartIndex).map { it.id }.toSet()
 
-    val lastUserMessageIndex = messages.list.indexOfLast { it.participant == Participant.USER }
+    val turns = remember(messages) { buildMessageListTurns(messages.list) }
+    val lastUserMessage = messages.list.lastOrNull { it.participant == Participant.USER }
 
     val runPresentation = remember(messages, allMessages) {
         RunUiProjection.project(messages.list, allMessages.list)
     }
 
-    val tailMinHeightPx = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
+    val tailMinHeightPx = if (lastUserMessage == null || viewportHeight == 0) {
         0
     } else {
         calculateTailMinHeightPx(
@@ -174,25 +234,17 @@ fun MessageList(
     }
     val tailMinHeight = with(density) { tailMinHeightPx.toDp() }
 
-    fun lazyIndexForMessageIndex(messageIndex: Int): Int =
-        if (lastUserMessageIndex >= 0 && messageIndex >= lastUserMessageIndex) {
-            lastUserMessageIndex
-        } else {
-            messageIndex
-        }
-
     fun restoreAnchor(anchor: MessageListViewportAnchor): Boolean {
-        val messageIndex = messages.list.indexOfFirst { it.id == anchor.messageId }
-        if (messageIndex < 0) return false
+        val turnIndex = messageListTurnIndex(turns, anchor.messageId)
+        if (turnIndex < 0) return false
         state.requestScrollToItem(
-            lazyIndexForMessageIndex(messageIndex),
+            turnIndex,
             anchor.scrollOffsetPx,
         )
         return true
     }
 
     val renderMessage: @Composable (ChatMessage) -> Unit = { message ->
-        val isLastMessage = messages.list.lastOrNull()?.id == message.id
         val isInContext = inContextIds.contains(message.id)
         val presentation = runPresentation[message.id]
 
@@ -202,9 +254,10 @@ fun MessageList(
                 onEditMessage(id, text)
                 editingMessageId = null
             },
-            // isStreaming driven by message status, not isLoading flag
-            isStreaming = isLastMessage && message.participant == Participant.MODEL
-                && message.status in setOf(
+            // Every active MODEL owns its streaming renderer until its own terminal status.
+            // Appending a queued USER must not disable the previous turn's double buffer.
+            isStreaming = message.participant == Participant.MODEL &&
+                message.status in setOf(
                     MessageStatus.SENDING,
                     MessageStatus.THINKING,
                     MessageStatus.TOOL_CALLING,
@@ -271,8 +324,10 @@ fun MessageList(
                         isScrollInProgress = state.isScrollInProgress,
                     ) == MessageListLayoutMode.STABLE
                 ) {
-                    val anchorMessage = messages.list
+                    val anchorMessage = turns
                         .getOrNull(state.firstVisibleItemIndex)
+                        ?.messages
+                        ?.firstOrNull()
                     val anchor = mutationAnchorLock.begin(
                         key = mutationKey,
                         candidate = anchorMessage?.let {
@@ -312,17 +367,6 @@ fun MessageList(
         )
     }
 
-    val headMessages = if (lastUserMessageIndex >= 0) {
-        messages.list.subList(0, lastUserMessageIndex)
-    } else {
-        messages.list
-    }
-    val tailMessages = if (lastUserMessageIndex >= 0) {
-        messages.list.subList(lastUserMessageIndex, messages.list.size)
-    } else {
-        emptyList()
-    }
-
     Box(modifier = modifier) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -331,31 +375,28 @@ fun MessageList(
             state = state,
             userScrollEnabled = userScrollEnabled
         ) {
-            items(headMessages, key = { it.id }) { message ->
-                // Fade newly-appended messages in. Placement/fade-out left off so this
-                // doesn't fight explicit scroll anchoring.
-                Box(modifier = Modifier.animateItem(fadeInSpec = tween(400), placementSpec = null, fadeOutSpec = null)) {
-                    renderMessage(message)
-                }
-            }
-            if (tailMessages.isNotEmpty()) {
-                item(key = tailMessages.first().id) {
-                    Box(
-                        modifier = Modifier.animateItem(
-                            fadeInSpec = tween(400),
-                            placementSpec = null,
-                            fadeOutSpec = null,
-                        ),
+            items(turns, key = { it.key }) { turn ->
+                // A turn's key and composition survive when the next USER is appended. Only the
+                // new turn enters; the previous assistant never moves to a different Lazy item.
+                Box(
+                    modifier = Modifier.animateItem(
+                        fadeInSpec = tween(400),
+                        placementSpec = null,
+                        fadeOutSpec = null,
+                    ),
+                ) {
+                    // The last turn atomically absorbs bottom space. Earlier turns keep the same
+                    // Column call site with a zero minimum, so losing tail status cannot dispose
+                    // or recreate any child message.
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(
+                                min = if (turn.key == lastUserMessage?.id) tailMinHeight else 0.dp,
+                            ),
                     ) {
-                        // Column's minimum height is the former content+Spacer contract expressed
-                        // as one layout constraint. As a card grows, unused bottom space shrinks in
-                        // the same measure pass, so no feedback loop can lag or reverse direction.
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = tailMinHeight),
-                        ) {
-                            tailMessages.forEach { message ->
+                        turn.messages.forEach { message ->
+                            key(message.id) {
                                 renderMessage(message)
                             }
                         }

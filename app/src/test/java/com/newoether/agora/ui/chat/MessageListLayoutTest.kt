@@ -1,10 +1,89 @@
 package com.newoether.agora.ui.chat
 
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.Participant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class MessageListLayoutTest {
+    @Test
+    fun appendingUserKeepsPreviousAssistantInTheSameTurn() {
+        val user1 = message("user-1", Participant.USER)
+        val assistant1 = message("assistant-1", Participant.MODEL)
+        val user2 = message("user-2", Participant.USER)
+
+        val beforeSend = buildMessageListTurns(listOf(user1, assistant1))
+        val afterSend = buildMessageListTurns(listOf(user1, assistant1, user2))
+
+        assertEquals(beforeSend.single(), afterSend.first())
+        assertEquals("user-1", afterSend.first().key)
+        assertEquals(listOf("user-1", "assistant-1"), afterSend.first().messages.map { it.id })
+        assertEquals(listOf("user-2"), afterSend.last().messages.map { it.id })
+    }
+
+    @Test
+    fun everyMessageInATurnMapsToTheSameLazyItemIndex() {
+        val turns = buildMessageListTurns(
+            listOf(
+                message("user-1", Participant.USER),
+                message("assistant-1", Participant.MODEL),
+                message("error-1", Participant.ERROR),
+                message("user-2", Participant.USER),
+                message("assistant-2", Participant.MODEL),
+            ),
+        )
+
+        assertEquals(0, messageListTurnIndex(turns, "user-1"))
+        assertEquals(0, messageListTurnIndex(turns, "assistant-1"))
+        assertEquals(0, messageListTurnIndex(turns, "error-1"))
+        assertEquals(1, messageListTurnIndex(turns, "user-2"))
+        assertEquals(1, messageListTurnIndex(turns, "assistant-2"))
+        assertEquals(-1, messageListTurnIndex(turns, "missing"))
+    }
+
+    @Test
+    fun turnHeightEstimateSumsChildrenForForcedAnimatedScroll() {
+        val turn = buildMessageListTurns(
+            listOf(
+                message("user-1", Participant.USER),
+                message("assistant-1", Participant.MODEL),
+                message("error-1", Participant.ERROR),
+            ),
+        ).single()
+
+        assertEquals(
+            372f,
+            estimateMessageListTurnHeightPx(
+                turn = turn,
+                messageHeights = mapOf("user-1" to 120, "assistant-1" to 180),
+                fallbackHeightPx = 72f,
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun leadingNonUserMessagesRemainStableSingletonItems() {
+        val turns = buildMessageListTurns(
+            listOf(
+                message("error-1", Participant.ERROR),
+                message("assistant-0", Participant.MODEL),
+                message("user-1", Participant.USER),
+                message("assistant-1", Participant.MODEL),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                listOf("error-1"),
+                listOf("assistant-0"),
+                listOf("user-1", "assistant-1"),
+            ),
+            turns.map { turn -> turn.messages.map { it.id } },
+        )
+    }
+
     @Test
     fun shortTailUsesTheAvailableViewportAsItsMinimumHeight() {
         val viewport = 1_000
@@ -112,4 +191,10 @@ class MessageListLayoutTest {
         assertNull(lock.anchor)
         assertNull(lock.finish("thinking-card"))
     }
+
+    private fun message(id: String, participant: Participant) = ChatMessage(
+        id = id,
+        text = id,
+        participant = participant,
+    )
 }

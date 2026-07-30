@@ -235,19 +235,27 @@ fun ChatApp(
     }
 
 
+    fun resolveScrollTargetMessage(
+        currentMessages: List<com.newoether.agora.model.ChatMessage>,
+        targetMessageId: String?,
+    ): com.newoether.agora.model.ChatMessage? = if (targetMessageId != null) {
+            val msg = currentMessages.find { it.id == targetMessageId }
+            if (msg?.participant == Participant.MODEL && msg.parentId != null) {
+                currentMessages.find { it.id == msg.parentId }
+            } else {
+                msg
+            }
+        } else {
+            currentMessages.lastOrNull { it.participant == Participant.USER }
+        }
+
     fun resolveScrollTargetIndex(
         currentMessages: List<com.newoether.agora.model.ChatMessage>,
         targetMessageId: String?,
-    ): Int = if (targetMessageId != null) {
-            val msg = currentMessages.find { it.id == targetMessageId }
-            if (msg?.participant == Participant.MODEL && msg.parentId != null) {
-                currentMessages.indexOfFirst { it.id == msg.parentId }
-            } else {
-                currentMessages.indexOfFirst { it.id == targetMessageId }
-            }
-        } else {
-            currentMessages.indexOfLast { it.participant == Participant.USER }
-        }
+    ): Int {
+        val target = resolveScrollTargetMessage(currentMessages, targetMessageId) ?: return -1
+        return messageListTurnIndex(buildMessageListTurns(currentMessages), target.id)
+    }
 
     /**
      * Historical visible-scroll behavior: tween(600) by default; only the bottom FAB supplies the
@@ -260,6 +268,7 @@ fun ChatApp(
     ): Boolean {
         val currentMessages = messages
         if (currentMessages.isEmpty() || viewportHeightPx == 0) return false
+        val layoutTurns = buildMessageListTurns(currentMessages)
         val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
         if (targetIndex == -1) return false
 
@@ -273,11 +282,9 @@ fun ChatApp(
             ?.toFloat()
             ?: with(density) { 72.dp.toPx() }
         fun heightAt(index: Int): Float {
-            val message = currentMessages.getOrNull(index)
-            return message
-                ?.let { messageHeights[it.id]?.toFloat() }
-                ?: visibleSizes[index]?.toFloat()
-                ?: fallbackHeight
+            visibleSizes[index]?.let { return it.toFloat() }
+            val turn = layoutTurns.getOrNull(index) ?: return fallbackHeight
+            return estimateMessageListTurnHeightPx(turn, messageHeights, fallbackHeight)
         }
 
         val diff = if (targetIndex >= firstVisibleIndex) {
@@ -305,12 +312,12 @@ fun ChatApp(
                 delay(LAYOUT_SAMPLE_INTERVAL_MS)
                 val currentMessages = messages
                 val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                if (targetIndex == -1 || viewportHeightPx <= 0) {
+                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
+                if (targetIndex == -1 || target == null || viewportHeightPx <= 0) {
                     stableSamples = 0
                     previousSignature = null
                     continue
                 }
-                val target = currentMessages[targetIndex]
                 val signature = listOf(
                     target.id,
                     targetIndex,
@@ -337,7 +344,7 @@ fun ChatApp(
                 delay(LAYOUT_SAMPLE_INTERVAL_MS)
                 val currentMessages = messages
                 val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                val target = currentMessages.getOrNull(targetIndex)
+                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
                 val targetHeight = target?.let { messageHeights[it.id] }
                 val positioned =
                     targetIndex >= 0 &&
@@ -401,7 +408,8 @@ fun ChatApp(
                     continue
                 }
                 val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                if (targetIndex == -1 || viewportHeightPx <= 0) {
+                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
+                if (targetIndex == -1 || target == null || viewportHeightPx <= 0) {
                     stableSamples = 0
                     previousSignature = null
                     continue
@@ -441,7 +449,7 @@ fun ChatApp(
 
                 val targetInfo = listState.layoutInfo.visibleItemsInfo
                     .firstOrNull { it.index == targetIndex }
-                val measuredHeight = messageHeights[currentMessages[targetIndex].id]
+                val measuredHeight = messageHeights[target.id]
                 if (targetInfo == null || measuredHeight == null || measuredHeight <= 0) {
                     stableSamples = 0
                     previousSignature = null
