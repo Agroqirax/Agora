@@ -437,14 +437,14 @@ class SettingsManager(private val context: Context) {
     // Selected image model "Provider:modelId" (null = none chosen). Creds reused from that provider.
     val imageGenModel: Flow<String?> = context.dataStore.data.map { it[IMAGE_GEN_MODEL] }
     val imageGenSize: Flow<String> = context.dataStore.data.map { it[IMAGE_GEN_SIZE] ?: "1024x1024" }
-    val htmlWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_ENABLED] ?: false }
-    val htmlWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_NETWORK_ENABLED] ?: false }
-    val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: false }
+    val htmlWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_ENABLED] ?: true }
+    val htmlWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_NETWORK_ENABLED] ?: true }
+    val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: true }
     val htmlWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_JS_ENABLED] ?: true }
-    val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
-    val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: false }
+    val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: true }
+    val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: true }
     val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
-    val geoJsonWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_THEME_ENABLED] ?: false }
+    val geoJsonWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_THEME_ENABLED] ?: true }
     // "osm" (default, no Google dependency) or "google" — which site/app the "Open Route" button deep-links to.
     val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }

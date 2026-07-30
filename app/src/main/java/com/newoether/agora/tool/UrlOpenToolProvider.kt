@@ -28,7 +28,7 @@ class UrlOpenToolProvider(private val app: Application) : ToolProvider {
         return listOf(
             ToolDefinition(function = ToolFunction(
                 name = OPEN_URL,
-                description = "Open a URL in the browser, the same as tapping a link.",
+                description = "Open a URL in the browser of the user, the same as tapping a link.",
                 parameters = ToolParameters(
                     properties = mapOf(
                         "url" to ToolProperty("string", "The URL to open, e.g. \"https://example.com\".")

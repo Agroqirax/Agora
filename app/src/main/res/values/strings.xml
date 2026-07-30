@@ -227,9 +227,9 @@
     <string name="geojson_widgets_enable">Enable GeoJSON Maps</string>
     <string name="geojson_widgets_enable_desc">Let the model render maps inline.</string>
     <string name="geojson_tile_url_label">Map Tile Server</string>
-    <string name="geojson_tile_url_desc">URL template for basemap tile imagery, using {s}/{z}/{x}/{y} placeholders. Defaults to OpenStreetMap.</string>
+    <string name="geojson_tile_url_desc">URL template for basemap tile imagery, using {s}/{z}/{x}/{y} placeholders.</string>
     <string name="geojson_theme_enable">Match App Theme</string>
-    <string name="geojson_theme_enable_desc">In dark mode, invert and recolor map tiles to roughly match the app\'s theme. A lossy filter, not real dark-mode tiles — off by default since some tile servers already ship their own.</string>
+    <string name="geojson_theme_enable_desc">In dark mode, invert and recolor map tiles to roughly match the app\'s theme.</string>
     <string name="geojson_route_provider_label">Route Links Open In</string>
     <string name="geojson_select_route_provider">Select Route Provider</string>
     <string name="geojson_route_provider_osm">OpenStreetMap</string>
