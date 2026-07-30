@@ -11,6 +11,8 @@ object DefaultSkills {
 
     const val MERMAID_WIDGETS_SKILL_NAME = "mermaid-widgets"
 
+    const val VEGA_LITE_WIDGETS_SKILL_NAME = "vega-lite-widgets"
+
     const val GEOJSON_WIDGETS_SKILL_NAME = "geojson-widgets"
 
     val BUILTINS: List<Builtin> = listOf(
@@ -41,17 +43,37 @@ object DefaultSkills {
             """.trimIndent()
         ),
         Builtin(
-            name = GEOJSON_WIDGETS_SKILL_NAME,
-            description = "How to render a map (pins, routes, areas) inline in the chat from GeoJSON, with buttons to open locations/routes in the user's maps app. Use when the user asks about a place, route, or spatial data.",
+            name = VEGA_LITE_WIDGETS_SKILL_NAME,
+            description = "How to render a chart (bar, line, scatter, area, etc.) inline in the chat using a Vega-Lite spec. Use when the user would benefit from a data visualization.",
             content = """
-                # GeoJSON maps
+                # Vega-Lite charts
 
-                To show a map inline in the chat, write a fenced code block using the language `geojson`, e.g. a fence opened with ```geojson, containing a single valid GeoJSON `Feature`, `FeatureCollection`, or bare geometry object.
+                To show a chart inline in the chat, write a fenced code block using the language `vega-lite`, e.g. a fence opened with ```vega-lite, containing a single valid Vega-Lite JSON spec (`mark`, `encoding`, `data`, etc.).
 
-                - The body must be strict, valid JSON: no `//` or `/* */` comments, no trailing commas. GeoJSON is plain JSON and a parse error leaves the map blank.
-                - The map renders automatically right where the fence appears, matching the app's current light/dark theme — do not also paste or explain the GeoJSON elsewhere in your reply.
-                - `Point`/`MultiPoint` geometries render as pins, `LineString`/`MultiLineString` as routes, `Polygon`/`MultiPolygon` as shaded areas. The map auto-fits to the content and supports pan/zoom.
-                - Set a `name` or `title` property on a `Feature` to label its pin/button (e.g. `{"type": "Feature", "properties": {"name": "Eiffel Tower"}, "geometry": {"type": "Point", "coordinates": [2.2945, 48.8584]}}`). Coordinates are `[longitude, latitude]`, per the GeoJSON spec.
+                - The body must be strict, valid JSON: no `//` or `/* */` comments, no trailing commas.
+                - Provide chart data inline via `"data": {"values": [...]}` — network access is off for this widget, so a `"data": {"url": ...}` reference will not load.
+                - The chart renders automatically right where the fence appears, matching the app's current light/dark theme automatically — do not also paste or explain the spec elsewhere in your reply, and do not set your own `background`/text colors.
+                - Omit `width`/`height` unless the chart needs a specific aspect ratio; it otherwise sizes to fit the card.
+            """.trimIndent()
+        ),
+        Builtin(
+            name = GEOJSON_WIDGETS_SKILL_NAME,
+            description = "How to render a map (pins, routes, areas) inline in the chat from GeoJSON, a GPX track/waypoint file, or a KML file, with buttons to open locations/routes in the user's maps app. Use when the user asks about a place, route, or spatial data.",
+            content = """
+                # Maps: GeoJSON, GPX, KML
+
+                To show a map inline in the chat, write a fenced code block using one of three languages, depending on the source data:
+
+                - ```geojson — a single valid GeoJSON `Feature`, `FeatureCollection`, or bare geometry object.
+                - ```gpx — a GPX file (`<gpx>` root, `<wpt>` waypoints, `<trk>`/`<trkseg>` tracks, `<rte>` routes).
+                - ```kml — a KML file (`<kml>` root, `<Placemark>` elements containing `<Point>`, `<LineString>`, or `<Polygon>`).
+
+                All three render through the same map widget and support the same features:
+
+                - GeoJSON bodies must be strict, valid JSON: no `//` or `/* */` comments, no trailing commas. GPX/KML bodies must be well-formed XML. A parse error leaves the map blank / shows an error card.
+                - The map renders automatically right where the fence appears, matching the app's current light/dark theme — do not also paste or explain the source data elsewhere in your reply.
+                - Points/waypoints/`Point` placemarks render as pins, tracks/routes/`LineString` as routes, `Polygon` areas as shaded regions. The map auto-fits to the content and supports pan/zoom.
+                - In GeoJSON, set a `name` or `title` property on a `Feature` to label its pin/button (e.g. `{"type": "Feature", "properties": {"name": "Eiffel Tower"}, "geometry": {"type": "Point", "coordinates": [2.2945, 48.8584]}}`); coordinates are `[longitude, latitude]`, per the GeoJSON spec. In GPX, a `<name>` inside `<wpt>` becomes its label. In KML, a `<name>` inside `<Placemark>` becomes its label.
                 - Buttons appear automatically below the map to open a pin or route in the device's installed maps app — don't tell the user how to do this manually.
                 - Basemap tile imagery only loads if the user has enabled network access for this widget in settings; the map, pins, routes, and areas still render without it.
             """.trimIndent()

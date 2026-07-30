@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Directions
 import androidx.compose.material.icons.filled.Map
@@ -40,6 +41,7 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val htmlThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
     val htmlJsEnabled by viewModel.settings.htmlWidgetsJsEnabled.collectAsState()
     val mermaidEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
+    val vegaLiteEnabled by viewModel.settings.vegaLiteWidgetsEnabled.collectAsState()
     val geoJsonEnabled by viewModel.settings.geoJsonWidgetsEnabled.collectAsState()
     val geoJsonTileUrl by viewModel.settings.geoJsonTileUrl.collectAsState()
     val geoJsonThemeEnabled by viewModel.settings.geoJsonWidgetsThemeEnabled.collectAsState()
@@ -111,6 +113,18 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         Switch(checked = mermaidEnabled, onCheckedChange = { viewModel.settings.setMermaidWidgetsEnabled(it) })
                     },
                     modifier = Modifier.clickable { viewModel.settings.setMermaidWidgetsEnabled(!mermaidEnabled) }
+                )
+            }))
+
+            SettingsGroup(title = stringResource(R.string.settings_vega_lite_widgets), items = listOf({
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.vega_lite_widgets_enable)) },
+                    supportingContent = { Text(stringResource(R.string.vega_lite_widgets_enable_desc)) },
+                    leadingContent = { Icon(Icons.Default.BarChart, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingContent = {
+                        Switch(checked = vegaLiteEnabled, onCheckedChange = { viewModel.settings.setVegaLiteWidgetsEnabled(it) })
+                    },
+                    modifier = Modifier.clickable { viewModel.settings.setVegaLiteWidgetsEnabled(!vegaLiteEnabled) }
                 )
             }))
 

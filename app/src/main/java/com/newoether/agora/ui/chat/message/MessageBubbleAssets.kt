@@ -12,9 +12,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.chat.ExpandedWidget
 import com.newoether.agora.ui.chat.GeoJsonWidgetCard
+import com.newoether.agora.ui.chat.GpxWidgetCard
 import com.newoether.agora.ui.chat.HtmlWidgetCard
+import com.newoether.agora.ui.chat.KmlWidgetCard
 import com.newoether.agora.ui.chat.MarkdownWidgetFence
 import com.newoether.agora.ui.chat.MermaidWidgetCard
+import com.newoether.agora.ui.chat.VegaLiteWidgetCard
 import com.newoether.agora.ui.chat.WidgetFenceSpec
 import com.newoether.agora.ui.components.LatexImageTransformer
 import com.newoether.agora.ui.theme.ChatType
@@ -58,6 +61,7 @@ internal fun rememberChatMarkdownAssets(
     htmlWidgetsThemeEnabled: Boolean = false,
     htmlWidgetsJsEnabled: Boolean = true,
     mermaidWidgetsEnabled: Boolean = false,
+    vegaLiteWidgetsEnabled: Boolean = false,
     geoJsonWidgetsEnabled: Boolean = false,
     geoJsonTileUrl: String = com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL,
     geoJsonWidgetsThemeEnabled: Boolean = false,
@@ -127,6 +131,7 @@ internal fun rememberChatMarkdownAssets(
         htmlWidgetsThemeEnabled,
         htmlWidgetsJsEnabled,
         mermaidWidgetsEnabled,
+        vegaLiteWidgetsEnabled,
         geoJsonWidgetsEnabled,
         geoJsonTileUrl,
         geoJsonWidgetsThemeEnabled,
@@ -151,8 +156,35 @@ internal fun rememberChatMarkdownAssets(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             },
+            WidgetFenceSpec(fenceLanguage = "vega-lite", enabled = vegaLiteWidgetsEnabled) { body ->
+                VegaLiteWidgetCard(
+                    specSource = body,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
             WidgetFenceSpec(fenceLanguage = "geojson", enabled = geoJsonWidgetsEnabled) { body ->
                 GeoJsonWidgetCard(
+                    source = body,
+                    tileUrl = geoJsonTileUrl,
+                    themeTiles = geoJsonWidgetsThemeEnabled,
+                    routeProvider = geoJsonRouteProvider,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            WidgetFenceSpec(fenceLanguage = "gpx", enabled = geoJsonWidgetsEnabled) { body ->
+                GpxWidgetCard(
+                    source = body,
+                    tileUrl = geoJsonTileUrl,
+                    themeTiles = geoJsonWidgetsThemeEnabled,
+                    routeProvider = geoJsonRouteProvider,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            WidgetFenceSpec(fenceLanguage = "kml", enabled = geoJsonWidgetsEnabled) { body ->
+                KmlWidgetCard(
                     source = body,
                     tileUrl = geoJsonTileUrl,
                     themeTiles = geoJsonWidgetsThemeEnabled,

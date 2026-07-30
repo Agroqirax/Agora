@@ -241,6 +241,7 @@ class SettingsManager(private val context: Context) {
         val HTML_WIDGETS_THEME_ENABLED = booleanPreferencesKey("html_widgets_theme_enabled")
         val HTML_WIDGETS_JS_ENABLED = booleanPreferencesKey("html_widgets_js_enabled")
         val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
+        val VEGA_LITE_WIDGETS_ENABLED = booleanPreferencesKey("vega_lite_widgets_enabled")
         val GEOJSON_WIDGETS_ENABLED = booleanPreferencesKey("geojson_widgets_enabled")
         val GEOJSON_TILE_URL = stringPreferencesKey("geojson_tile_url")
         val GEOJSON_WIDGETS_THEME_ENABLED = booleanPreferencesKey("geojson_widgets_theme_enabled")
@@ -442,6 +443,7 @@ class SettingsManager(private val context: Context) {
     val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: true }
     val htmlWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_JS_ENABLED] ?: true }
     val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: true }
+    val vegaLiteWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[VEGA_LITE_WIDGETS_ENABLED] ?: true }
     val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: true }
     val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
     val geoJsonWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_THEME_ENABLED] ?: true }
@@ -867,6 +869,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveMermaidWidgetsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[MERMAID_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun saveVegaLiteWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[VEGA_LITE_WIDGETS_ENABLED] = enabled }
     }
     suspend fun saveGeoJsonWidgetsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[GEOJSON_WIDGETS_ENABLED] = enabled }

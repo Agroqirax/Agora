@@ -223,9 +223,12 @@
     <string name="settings_mermaid_widgets">Mermaid Diagrams</string>
     <string name="mermaid_widgets_enable">Enable Mermaid Diagrams</string>
     <string name="mermaid_widgets_enable_desc">Let the model render Mermaid diagrams inline.</string>
-    <string name="settings_geojson_widgets">GeoJSON Maps</string>
-    <string name="geojson_widgets_enable">Enable GeoJSON Maps</string>
-    <string name="geojson_widgets_enable_desc">Let the model render maps inline.</string>
+    <string name="settings_vega_lite_widgets">Vega-Lite Charts</string>
+    <string name="vega_lite_widgets_enable">Enable Vega-Lite Charts</string>
+    <string name="vega_lite_widgets_enable_desc">Let the model render Vega-Lite charts inline.</string>
+    <string name="settings_geojson_widgets">Maps</string>
+    <string name="geojson_widgets_enable">Enable Maps</string>
+    <string name="geojson_widgets_enable_desc">Let the model render maps inline from GeoJSON, GPX, or KML.</string>
     <string name="geojson_tile_url_label">Map Tile Server</string>
     <string name="geojson_tile_url_desc">URL template for basemap tile imagery, using {s}/{z}/{x}/{y} placeholders.</string>
     <string name="geojson_theme_enable">Match App Theme</string>

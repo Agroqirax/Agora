@@ -297,12 +297,16 @@ fun GeoJsonWidgetCard(
     themeTiles: Boolean,
     routeProvider: String,
     onExpand: (ExpandedWidget) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // The raw-source toggle shows this instead of [source] when set — for gpx/kml input,
+    // [source] is already the converted GeoJSON used to drive Leaflet, but the "view source"
+    // action should show the original GPX/KML text the model actually authored.
+    displaySource: String = source,
 ) {
     val parsed = remember(source) { parseGeoJsonForButtons(source) }
     if (parsed == null) {
         WidgetCard(
-            sourceText = source,
+            sourceText = displaySource,
             documentHtml = "<html><body style=\"font-family:sans-serif;color:#b00020;padding:12px;\">Invalid GeoJSON</body></html>",
             allowNetwork = true,
             allowJavaScript = true,
@@ -327,7 +331,7 @@ fun GeoJsonWidgetCard(
 
     Column(modifier = modifier) {
         WidgetCard(
-            sourceText = source,
+            sourceText = displaySource,
             documentHtml = documentHtml,
             allowNetwork = true,
             allowJavaScript = true,
