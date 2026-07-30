@@ -60,6 +60,7 @@ internal fun rememberChatMarkdownAssets(
     mermaidWidgetsEnabled: Boolean = false,
     geoJsonWidgetsEnabled: Boolean = false,
     geoJsonTileUrl: String = com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL,
+    geoJsonWidgetsThemeEnabled: Boolean = false,
     geoJsonRouteProvider: String = "osm",
     onWidgetClick: (ExpandedWidget) -> Unit = {},
 ): ChatMarkdownAssets {
@@ -128,6 +129,7 @@ internal fun rememberChatMarkdownAssets(
         mermaidWidgetsEnabled,
         geoJsonWidgetsEnabled,
         geoJsonTileUrl,
+        geoJsonWidgetsThemeEnabled,
         geoJsonRouteProvider,
         onWidgetClick,
     ) {
@@ -153,6 +155,7 @@ internal fun rememberChatMarkdownAssets(
                 GeoJsonWidgetCard(
                     source = body,
                     tileUrl = geoJsonTileUrl,
+                    themeTiles = geoJsonWidgetsThemeEnabled,
                     routeProvider = geoJsonRouteProvider,
                     onExpand = onWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)

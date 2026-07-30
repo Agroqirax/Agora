@@ -94,6 +94,7 @@ class SettingsRepository(
     val mermaidWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidWidgetsEnabled, false)
     val geoJsonWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsEnabled, false)
     val geoJsonTileUrl: StateFlow<String> = hot(settingsManager.geoJsonTileUrl, DEFAULT_GEOJSON_TILE_URL)
+    val geoJsonWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsThemeEnabled, false)
     val geoJsonRouteProvider: StateFlow<String> = hot(settingsManager.geoJsonRouteProvider, "osm")
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
@@ -387,6 +388,7 @@ class SettingsRepository(
     fun setMermaidWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMermaidWidgetsEnabled(enabled) }
     fun setGeoJsonWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsEnabled(enabled) }
     fun setGeoJsonTileUrl(url: String) = scope.launch { settingsManager.saveGeoJsonTileUrl(url) }
+    fun setGeoJsonWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsThemeEnabled(enabled) }
     fun setGeoJsonRouteProvider(provider: String) = scope.launch { settingsManager.saveGeoJsonRouteProvider(provider) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }

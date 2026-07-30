@@ -60,6 +60,7 @@ fun MessageItem(
     mermaidWidgetsEnabled: Boolean = false,
     geoJsonWidgetsEnabled: Boolean = false,
     geoJsonTileUrl: String = com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL,
+    geoJsonWidgetsThemeEnabled: Boolean = false,
     geoJsonRouteProvider: String = "osm",
     onWidgetClick: (com.newoether.agora.ui.chat.ExpandedWidget) -> Unit = {},
 ) {
@@ -160,6 +161,7 @@ fun MessageItem(
         mermaidWidgetsEnabled = mermaidWidgetsEnabled,
         geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
         geoJsonTileUrl = geoJsonTileUrl,
+        geoJsonWidgetsThemeEnabled = geoJsonWidgetsThemeEnabled,
         geoJsonRouteProvider = geoJsonRouteProvider,
         onWidgetClick = onWidgetClick,
     )

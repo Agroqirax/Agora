@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -189,10 +190,19 @@ private fun openInMapsApp(context: Context, uri: Uri) {
  * payload is embedded as a `<script type="application/json">` block (not a JS string literal) so
  * odd characters in properties can't need JS-string escaping — only the literal `</script`
  * sequence is escaped, which the HTML parser would otherwise treat as closing the tag early.
+ *
+ * When [themeTiles] is set and the app is currently in dark mode, the tile layer gets a CSS
+ * `filter` that inverts/recolors the (necessarily light-background) raster tiles to roughly match
+ * a dark UI — the same trick as https://github.com/BrendonKoz/gist:b1df234fe3ee388b402cd8e98f7eedbd.
+ * It's a lossy patch (map labels/colors don't actually change, just get inverted+hue-rotated), so
+ * it stays opt-in rather than automatic — many tile servers already ship their own dark styles,
+ * which this would double-invert into something worse.
  */
 private fun buildGeoJsonHtml(
     geoJsonSource: String,
     tileUrl: String,
+    themeTiles: Boolean,
+    darkMode: Boolean,
     leafletCss: String,
     leafletJs: String,
     primaryColor: String,
@@ -203,8 +213,12 @@ private fun buildGeoJsonHtml(
     val safeTileUrl = tileUrl.replace("'", "\\'")
     val tileLayerJs = """L.tileLayer('$safeTileUrl', {
         maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        className: 'map-tiles'
     }).addTo(map);"""
+    val tileFilterCss = if (themeTiles && darkMode) {
+        ".map-tiles { filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7); }"
+    } else ""
     return """
         <html>
         <head>
@@ -214,6 +228,7 @@ private fun buildGeoJsonHtml(
         html, body { background: transparent; margin: 0; padding: 0; height: 100%; overflow: hidden; }
         #map { position: absolute; top: 0; left: 0; background: transparent; }
         .leaflet-control-attribution { font-size: 9px; }
+        $tileFilterCss
         </style>
         </head>
         <body>
@@ -279,6 +294,7 @@ private val GeoJsonMapHeight = 320.dp
 fun GeoJsonWidgetCard(
     source: String,
     tileUrl: String,
+    themeTiles: Boolean,
     routeProvider: String,
     onExpand: (ExpandedWidget) -> Unit,
     modifier: Modifier = Modifier
@@ -304,8 +320,9 @@ fun GeoJsonWidgetCard(
     val primaryColor = scheme.primary.toArgb().toCssHex()
     val onPrimaryColor = scheme.onPrimary.toArgb().toCssHex()
     val surfaceVariantColor = scheme.surfaceVariant.toArgb().toCssHex()
-    val documentHtml = remember(source, tileUrl, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
-        buildGeoJsonHtml(source, tileUrl, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
+    val darkMode = scheme.background.luminance() < 0.5f
+    val documentHtml = remember(source, tileUrl, themeTiles, darkMode, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
+        buildGeoJsonHtml(source, tileUrl, themeTiles, darkMode, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
     }
 
     Column(modifier = modifier) {

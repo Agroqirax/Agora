@@ -42,6 +42,7 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val mermaidEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
     val geoJsonEnabled by viewModel.settings.geoJsonWidgetsEnabled.collectAsState()
     val geoJsonTileUrl by viewModel.settings.geoJsonTileUrl.collectAsState()
+    val geoJsonThemeEnabled by viewModel.settings.geoJsonWidgetsThemeEnabled.collectAsState()
     val geoJsonRouteProvider by viewModel.settings.geoJsonRouteProvider.collectAsState()
     var showRouteProviderDialog by remember { mutableStateOf(false) }
 
@@ -161,6 +162,17 @@ fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
                             )
                         }
+                    }
+                    add {
+                        SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.geojson_theme_enable)) },
+                            supportingContent = { Text(stringResource(R.string.geojson_theme_enable_desc)) },
+                            leadingContent = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
+                            trailingContent = {
+                                Switch(checked = geoJsonThemeEnabled, onCheckedChange = { viewModel.settings.setGeoJsonWidgetsThemeEnabled(it) })
+                            },
+                            modifier = Modifier.clickable { viewModel.settings.setGeoJsonWidgetsThemeEnabled(!geoJsonThemeEnabled) }
+                        )
                     }
                     add {
                         SettingsItem(

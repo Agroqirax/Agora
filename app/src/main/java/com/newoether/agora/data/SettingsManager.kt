@@ -243,6 +243,7 @@ class SettingsManager(private val context: Context) {
         val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
         val GEOJSON_WIDGETS_ENABLED = booleanPreferencesKey("geojson_widgets_enabled")
         val GEOJSON_TILE_URL = stringPreferencesKey("geojson_tile_url")
+        val GEOJSON_WIDGETS_THEME_ENABLED = booleanPreferencesKey("geojson_widgets_theme_enabled")
         val GEOJSON_ROUTE_PROVIDER = stringPreferencesKey("geojson_route_provider")
         val SEARCH_CONTEXT_WINDOW = intPreferencesKey("search_context_window")
         val SEARCH_MATCH_LIMIT = intPreferencesKey("search_match_limit")
@@ -442,6 +443,7 @@ class SettingsManager(private val context: Context) {
     val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
     val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: false }
     val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
+    val geoJsonWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_THEME_ENABLED] ?: false }
     // "osm" (default, no Google dependency) or "google" — which site/app the "Open Route" button deep-links to.
     val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
@@ -868,6 +870,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveGeoJsonTileUrl(url: String) {
         context.dataStore.edit { it[GEOJSON_TILE_URL] = url }
+    }
+    suspend fun saveGeoJsonWidgetsThemeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEOJSON_WIDGETS_THEME_ENABLED] = enabled }
     }
     suspend fun saveGeoJsonRouteProvider(provider: String) {
         context.dataStore.edit { it[GEOJSON_ROUTE_PROVIDER] = provider }
