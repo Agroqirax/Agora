@@ -5,6 +5,7 @@ import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.McpServerConfig
@@ -92,7 +93,7 @@ class SettingsRepository(
     val htmlWidgetsJsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsJsEnabled, true)
     val mermaidWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidWidgetsEnabled, false)
     val geoJsonWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsEnabled, false)
-    val geoJsonWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonWidgetsNetworkEnabled, false)
+    val geoJsonTileUrl: StateFlow<String> = hot(settingsManager.geoJsonTileUrl, DEFAULT_GEOJSON_TILE_URL)
     val geoJsonRouteProvider: StateFlow<String> = hot(settingsManager.geoJsonRouteProvider, "osm")
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
@@ -385,7 +386,7 @@ class SettingsRepository(
     fun setHtmlWidgetsJsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsJsEnabled(enabled) }
     fun setMermaidWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMermaidWidgetsEnabled(enabled) }
     fun setGeoJsonWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsEnabled(enabled) }
-    fun setGeoJsonWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveGeoJsonWidgetsNetworkEnabled(enabled) }
+    fun setGeoJsonTileUrl(url: String) = scope.launch { settingsManager.saveGeoJsonTileUrl(url) }
     fun setGeoJsonRouteProvider(provider: String) = scope.launch { settingsManager.saveGeoJsonRouteProvider(provider) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }

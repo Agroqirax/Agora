@@ -226,8 +226,8 @@
     <string name="settings_geojson_widgets">GeoJSON Maps</string>
     <string name="geojson_widgets_enable">Enable GeoJSON Maps</string>
     <string name="geojson_widgets_enable_desc">Let the model render maps inline.</string>
-    <string name="geojson_widgets_network_enable">Load Map Tiles Over Network</string>
-    <string name="geojson_widgets_network_enable_desc">Fetch real basemap imagery from OpenStreetMap. Off by default; without it, maps still render pins/routes/areas but with no basemap imagery.</string>
+    <string name="geojson_tile_url_label">Map Tile Server</string>
+    <string name="geojson_tile_url_desc">URL template for basemap tile imagery, using {s}/{z}/{x}/{y} placeholders. Defaults to OpenStreetMap.</string>
     <string name="geojson_route_provider_label">Route Links Open In</string>
     <string name="geojson_select_route_provider">Select Route Provider</string>
     <string name="geojson_route_provider_osm">OpenStreetMap</string>

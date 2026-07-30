@@ -124,7 +124,7 @@ fun ChatApp(
     val htmlWidgetsJsEnabled by viewModel.settings.htmlWidgetsJsEnabled.collectAsState()
     val mermaidWidgetsEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
     val geoJsonWidgetsEnabled by viewModel.settings.geoJsonWidgetsEnabled.collectAsState()
-    val geoJsonWidgetsNetworkEnabled by viewModel.settings.geoJsonWidgetsNetworkEnabled.collectAsState()
+    val geoJsonTileUrl by viewModel.settings.geoJsonTileUrl.collectAsState()
     val geoJsonRouteProvider by viewModel.settings.geoJsonRouteProvider.collectAsState()
     val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
     val globalCodeExecution by viewModel.settings.codeExecutionEnabled.collectAsState()
@@ -609,7 +609,7 @@ fun ChatApp(
                                 htmlWidgetsJsEnabled = htmlWidgetsJsEnabled,
                                 mermaidWidgetsEnabled = mermaidWidgetsEnabled,
                                 geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
-                                geoJsonWidgetsNetworkEnabled = geoJsonWidgetsNetworkEnabled,
+                                geoJsonTileUrl = geoJsonTileUrl,
                                 geoJsonRouteProvider = geoJsonRouteProvider,
                                 onWidgetClick = onWidgetClick,
                                 contentPadding = PaddingValues(

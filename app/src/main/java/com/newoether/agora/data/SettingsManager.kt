@@ -24,6 +24,8 @@ import java.util.UUID
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
+const val DEFAULT_GEOJSON_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+
 /**
  * Reads Android's own "Remove animations" accessibility setting (Settings > Accessibility >
  * Remove animations, API 31+; on older versions the same underlying scale is toggled by
@@ -240,7 +242,7 @@ class SettingsManager(private val context: Context) {
         val HTML_WIDGETS_JS_ENABLED = booleanPreferencesKey("html_widgets_js_enabled")
         val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
         val GEOJSON_WIDGETS_ENABLED = booleanPreferencesKey("geojson_widgets_enabled")
-        val GEOJSON_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("geojson_widgets_network_enabled")
+        val GEOJSON_TILE_URL = stringPreferencesKey("geojson_tile_url")
         val GEOJSON_ROUTE_PROVIDER = stringPreferencesKey("geojson_route_provider")
         val SEARCH_CONTEXT_WINDOW = intPreferencesKey("search_context_window")
         val SEARCH_MATCH_LIMIT = intPreferencesKey("search_match_limit")
@@ -439,7 +441,7 @@ class SettingsManager(private val context: Context) {
     val htmlWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_JS_ENABLED] ?: true }
     val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
     val geoJsonWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_ENABLED] ?: false }
-    val geoJsonWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_WIDGETS_NETWORK_ENABLED] ?: false }
+    val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
     // "osm" (default, no Google dependency) or "google" — which site/app the "Open Route" button deep-links to.
     val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
@@ -864,8 +866,8 @@ class SettingsManager(private val context: Context) {
     suspend fun saveGeoJsonWidgetsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[GEOJSON_WIDGETS_ENABLED] = enabled }
     }
-    suspend fun saveGeoJsonWidgetsNetworkEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[GEOJSON_WIDGETS_NETWORK_ENABLED] = enabled }
+    suspend fun saveGeoJsonTileUrl(url: String) {
+        context.dataStore.edit { it[GEOJSON_TILE_URL] = url }
     }
     suspend fun saveGeoJsonRouteProvider(provider: String) {
         context.dataStore.edit { it[GEOJSON_ROUTE_PROVIDER] = provider }

@@ -183,16 +183,16 @@ private fun openInMapsApp(context: Context, uri: Uri) {
 
 /**
  * Builds a self-contained HTML document that inlines the bundled Leaflet and renders
- * [geoJsonSource] on an interactive pan/zoom map. Basemap tile imagery is only requested when
- * [networkEnabled] is true (mirrors the HTML widget's own network opt-in); without it the map
- * still renders pins/routes/areas, just with no tile background. The GeoJSON payload is embedded
- * as a `<script type="application/json">` block (not a JS string literal) so odd characters in
- * properties can't need JS-string escaping — only the literal `</script` sequence is escaped,
- * which the HTML parser would otherwise treat as closing the tag early.
+ * [geoJsonSource] on an interactive pan/zoom map. Basemap tile imagery is always fetched from
+ * [tileUrl] (a `{s}/{z}/{x}/{y}`-style template, defaulting to OpenStreetMap) — tile loading is
+ * not gated behind a network toggle since a map with no basemap isn't a useful map. The GeoJSON
+ * payload is embedded as a `<script type="application/json">` block (not a JS string literal) so
+ * odd characters in properties can't need JS-string escaping — only the literal `</script`
+ * sequence is escaped, which the HTML parser would otherwise treat as closing the tag early.
  */
 private fun buildGeoJsonHtml(
     geoJsonSource: String,
-    networkEnabled: Boolean,
+    tileUrl: String,
     leafletCss: String,
     leafletJs: String,
     primaryColor: String,
@@ -200,12 +200,11 @@ private fun buildGeoJsonHtml(
     surfaceVariantColor: String,
 ): String {
     val safeData = geoJsonSource.replace("</", "<\\/")
-    val tileLayerJs = if (networkEnabled) {
-        """L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }).addTo(map);"""
-    } else ""
+    val safeTileUrl = tileUrl.replace("'", "\\'")
+    val tileLayerJs = """L.tileLayer('$safeTileUrl', {
+        maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);"""
     return """
         <html>
         <head>
@@ -232,7 +231,7 @@ private fun buildGeoJsonHtml(
           }
           sizeMapEl();
           try {
-            var map = L.map(mapEl, { attributionControl: $networkEnabled, zoomControl: true });
+            var map = L.map(mapEl, { attributionControl: true, zoomControl: true });
             $tileLayerJs
             var data = JSON.parse(document.getElementById('geojson-data').textContent);
             var layer = L.geoJSON(data, {
@@ -279,7 +278,7 @@ private val GeoJsonMapHeight = 320.dp
 @Composable
 fun GeoJsonWidgetCard(
     source: String,
-    networkEnabled: Boolean,
+    tileUrl: String,
     routeProvider: String,
     onExpand: (ExpandedWidget) -> Unit,
     modifier: Modifier = Modifier
@@ -289,10 +288,10 @@ fun GeoJsonWidgetCard(
         WidgetCard(
             sourceText = source,
             documentHtml = "<html><body style=\"font-family:sans-serif;color:#b00020;padding:12px;\">Invalid GeoJSON</body></html>",
-            allowNetwork = false,
+            allowNetwork = true,
             allowJavaScript = true,
             transparentBackground = true,
-            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = false, allowJavaScript = true, transparentBackground = true)) },
+            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = true, allowJavaScript = true, transparentBackground = true)) },
             modifier = modifier
         )
         return
@@ -305,18 +304,18 @@ fun GeoJsonWidgetCard(
     val primaryColor = scheme.primary.toArgb().toCssHex()
     val onPrimaryColor = scheme.onPrimary.toArgb().toCssHex()
     val surfaceVariantColor = scheme.surfaceVariant.toArgb().toCssHex()
-    val documentHtml = remember(source, networkEnabled, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
-        buildGeoJsonHtml(source, networkEnabled, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
+    val documentHtml = remember(source, tileUrl, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
+        buildGeoJsonHtml(source, tileUrl, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
     }
 
     Column(modifier = modifier) {
         WidgetCard(
             sourceText = source,
             documentHtml = documentHtml,
-            allowNetwork = networkEnabled,
+            allowNetwork = true,
             allowJavaScript = true,
             transparentBackground = true,
-            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = networkEnabled, allowJavaScript = true, transparentBackground = true)) },
+            onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork = true, allowJavaScript = true, transparentBackground = true)) },
             fixedHeight = GeoJsonMapHeight,
         )
         if (parsed.pins.isNotEmpty() || parsed.routes.isNotEmpty()) {

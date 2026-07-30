@@ -59,7 +59,7 @@ fun MessageList(
     htmlWidgetsJsEnabled: Boolean = true,
     mermaidWidgetsEnabled: Boolean = false,
     geoJsonWidgetsEnabled: Boolean = false,
-    geoJsonWidgetsNetworkEnabled: Boolean = false,
+    geoJsonTileUrl: String = com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL,
     geoJsonRouteProvider: String = "osm",
     onWidgetClick: (ExpandedWidget) -> Unit = {},
 ) {
@@ -152,7 +152,7 @@ fun MessageList(
                     htmlWidgetsJsEnabled = htmlWidgetsJsEnabled,
                     mermaidWidgetsEnabled = mermaidWidgetsEnabled,
                     geoJsonWidgetsEnabled = geoJsonWidgetsEnabled,
-                    geoJsonWidgetsNetworkEnabled = geoJsonWidgetsNetworkEnabled,
+                    geoJsonTileUrl = geoJsonTileUrl,
                     geoJsonRouteProvider = geoJsonRouteProvider,
                     onWidgetClick = onWidgetClick,
                 )
