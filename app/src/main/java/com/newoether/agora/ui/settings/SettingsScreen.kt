@@ -100,6 +100,27 @@ fun SettingsGroup(
     }
 }
 
+/** Shared body for a [SettingsGroup] item with a primary-tinted leading icon and content column. */
+@Composable
+fun SettingsIconContent(
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f), content = content)
+        }
+    }
+}
+
 @Composable
 fun SettingsItem(
     modifier: Modifier = Modifier,

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
@@ -126,23 +127,6 @@ fun SettingsProviderDetailPage(
         }
     ) {
             SettingsGroupColumn {
-                if (customConfig != null) {
-                    SettingsGroup(
-                        title = stringResource(R.string.custom_provider_protocol_label),
-                        items = listOf {
-                            CustomEndpointProtocolSelector(
-                                selected = customConfig.protocol,
-                                onSelected = { protocol ->
-                                    if (protocol != customConfig.protocol) {
-                                        viewModel.updateCustomProviderProtocol(providerName, protocol)
-                                    }
-                                },
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                            )
-                        },
-                    )
-                }
-
                 // Base URL (non-Local only)
                 if (!isLocal) {
                 // Nullable: after deleting a custom provider this page recomposes once more
@@ -175,27 +159,52 @@ fun SettingsProviderDetailPage(
                     }
                 }
                 SettingsGroup(
-                    title = stringResource(R.string.provider_base_url),
-                    items = listOf {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
-                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-                                Icon(painterResource(R.drawable.link_24), null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(16.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(stringResource(R.string.provider_base_url), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
-                                    Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
-                                        OutlinedTextField(
-                                            state = baseUrlState,
-                                            placeholder = { Text(providerInstance?.defaultBaseUrl ?: "", style = MaterialTheme.typography.bodyMedium) },
-                                            shape = RoundedCornerShape(16.dp),
-                                            modifier = Modifier.fillMaxWidth(),
-                                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        )
+                    title = stringResource(
+                        if (customConfig != null) R.string.provider_connection
+                        else R.string.provider_base_url
+                    ),
+                    items = buildList {
+                        add {
+                            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+                                    Icon(painterResource(R.drawable.link_24), null, tint = MaterialTheme.colorScheme.primary)
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(stringResource(R.string.provider_base_url), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium), color = MaterialTheme.colorScheme.onSurface)
+                                        Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
+                                            OutlinedTextField(
+                                                state = baseUrlState,
+                                                placeholder = { Text(providerInstance?.defaultBaseUrl ?: "", style = MaterialTheme.typography.bodyMedium) },
+                                                shape = RoundedCornerShape(16.dp),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            )
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
+                        customConfig?.let { config ->
+                            add {
+                                SettingsIconContent(icon = Icons.Default.DataObject) {
+                                    Text(
+                                        stringResource(R.string.custom_provider_protocol_label),
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Spacer(Modifier.height(10.dp))
+                                    CustomEndpointProtocolSelector(
+                                        selected = config.protocol,
+                                        onSelected = { protocol ->
+                                            if (protocol != config.protocol) {
+                                                viewModel.updateCustomProviderProtocol(providerName, protocol)
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    },
                 )
             }
 

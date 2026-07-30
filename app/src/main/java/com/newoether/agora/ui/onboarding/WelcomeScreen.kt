@@ -596,16 +596,6 @@ private fun ApiKeyPage(
                     Text(provider, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(
-                    stringResource(R.string.custom_provider_protocol_label),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Spacer(Modifier.height(4.dp))
-                CustomEndpointProtocolSelector(
-                    selected = customProtocol,
-                    onSelected = onCustomProtocolChange,
-                )
-                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = apiKeyText, onValueChange = onApiKeyChange, modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text(stringResource(R.string.onboarding_ollama_hint)) },
@@ -620,6 +610,16 @@ private fun ApiKeyPage(
                     Text(provider, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(20.dp))
+                Text(
+                    stringResource(R.string.custom_provider_protocol_label),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Spacer(Modifier.height(8.dp))
+                CustomEndpointProtocolSelector(
+                    selected = customProtocol,
+                    onSelected = onCustomProtocolChange,
+                )
+                Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = baseUrlText, onValueChange = onBaseUrlChange, modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text(stringResource(R.string.onboarding_custom_base_url_hint), maxLines = 1, overflow = TextOverflow.Ellipsis) },

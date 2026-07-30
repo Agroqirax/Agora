@@ -5,7 +5,9 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
@@ -129,12 +131,12 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         SettingsItem(
                                             headlineContent = { Text(config.name) },
                                             supportingContent = {
-                                                Text("${config.protocol.displayName()} · $endpoint")
+                                                Text(endpoint)
                                             },
                                             leadingContent = { Icon(Icons.Default.Cloud, null, tint = if (configured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f), modifier = Modifier.size(24.dp)) },
                                             trailingContent = {
                                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer) { Text(stringResource(R.string.custom_provider_badge), modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer) }
+                                                    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer) { Text(config.protocol.displayName(), modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer) }
                                                     Spacer(modifier = Modifier.width(4.dp))
                                                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
                                                 }
@@ -175,32 +177,108 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     var customProtocol by remember { mutableStateOf(CustomEndpointProtocol.OPENAI) }
                     var nameError by remember { mutableStateOf(false) }; var urlError by remember { mutableStateOf(false) }
                     val allNames = builtInNames + customProviders.map { it.name }
-                    AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showAddCustomDialog = false }, title = { Text(stringResource(R.string.custom_provider_add_title), fontWeight = FontWeight.Bold) }, text = {
-                        Column(Modifier.fillMaxWidth()) {
-                            OutlinedTextField(value = customName, onValueChange = { customName = it; nameError = false }, label = { Text(stringResource(R.string.custom_provider_name_label)) }, isError = nameError, supportingText = if (nameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
-                            Spacer(modifier = Modifier.height(8.dp))
+                    AlertDialog(
+                        modifier = Modifier.clearFocusOnTap(),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        onDismissRequest = { showAddCustomDialog = false },
+                        title = {
                             Text(
-                                stringResource(R.string.custom_provider_protocol_label),
-                                style = MaterialTheme.typography.labelLarge,
+                                stringResource(R.string.custom_provider_add_title),
+                                fontWeight = FontWeight.Bold,
                             )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            CustomEndpointProtocolSelector(
-                                selected = customProtocol,
-                                onSelected = { customProtocol = it },
+                        },
+                        text = {
+                            CustomProviderDialogContent(
+                                name = customName,
+                                onNameChange = { customName = it; nameError = false },
+                                nameError = nameError,
+                                protocol = customProtocol,
+                                onProtocolChange = { customProtocol = it },
+                                baseUrl = customBaseUrl,
+                                onBaseUrlChange = { customBaseUrl = it; urlError = false },
+                                urlError = urlError,
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            OutlinedTextField(value = customBaseUrl, onValueChange = { customBaseUrl = it; urlError = false }, label = { Text(stringResource(R.string.provider_base_url)) }, isError = urlError, supportingText = if (urlError) {{ Text(stringResource(R.string.custom_provider_url_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
-                        }
-                    }, confirmButton = { TextButton(onClick = {
-                        val tn = customName.trim(); val tu = customBaseUrl.trim()
-                        nameError = tn.isBlank() || tn in allNames; urlError = tu.isBlank()
-                        if (!nameError && !urlError) {
-                            viewModel.addCustomProvider(tn, tu, customProtocol)
-                            showAddCustomDialog = false
-                        }
-                    }) { Text(stringResource(R.string.custom_provider_add)) } }, dismissButton = { TextButton(onClick = { showAddCustomDialog = false }) { Text(stringResource(R.string.cancel)) } })
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                val tn = customName.trim()
+                                val tu = customBaseUrl.trim()
+                                nameError = tn.isBlank() || tn in allNames
+                                urlError = tu.isBlank()
+                                if (!nameError && !urlError) {
+                                    viewModel.addCustomProvider(tn, tu, customProtocol)
+                                    showAddCustomDialog = false
+                                }
+                            }) {
+                                Text(stringResource(R.string.custom_provider_add))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showAddCustomDialog = false }) {
+                                Text(stringResource(R.string.cancel))
+                            }
+                        },
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CustomProviderDialogContent(
+    name: String,
+    onNameChange: (String) -> Unit,
+    nameError: Boolean,
+    protocol: CustomEndpointProtocol,
+    onProtocolChange: (CustomEndpointProtocol) -> Unit,
+    baseUrl: String,
+    onBaseUrlChange: (String) -> Unit,
+    urlError: Boolean,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = onNameChange,
+            label = { Text(stringResource(R.string.custom_provider_name_label)) },
+            isError = nameError,
+            supportingText = if (nameError) {
+                { Text(stringResource(R.string.custom_provider_name_error)) }
+            } else {
+                null
+            },
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        OutlinedTextField(
+            value = baseUrl,
+            onValueChange = onBaseUrlChange,
+            label = { Text(stringResource(R.string.provider_base_url)) },
+            isError = urlError,
+            supportingText = if (urlError) {
+                { Text(stringResource(R.string.custom_provider_url_error)) }
+            } else {
+                null
+            },
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+        )
+        Column {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                stringResource(R.string.custom_provider_protocol_label),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Spacer(Modifier.height(8.dp))
+            CustomEndpointProtocolSelector(
+                selected = protocol,
+                onSelected = onProtocolChange,
+            )
         }
     }
 }
