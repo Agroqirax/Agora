@@ -113,7 +113,7 @@ private fun configureWidgetWebView(
     }
 }
 
-private fun Int.toCssHex(): String = "#%06X".format(0xFFFFFF and this)
+internal fun Int.toCssHex(): String = "#%06X".format(0xFFFFFF and this)
 
 /**
  * Builds a `<style>` block exposing the current Material 3 color scheme as CSS custom
@@ -191,17 +191,31 @@ private fun rememberThemedHtml(html: String, matchAppTheme: Boolean): String {
 private val WidgetMinHeight = 64.dp
 private val WidgetMaxHeight = 420.dp
 
+/** A fully-rendered widget's document, plus the sandbox flags it needs — carried from wherever
+ *  it was rendered inline (see [WidgetCard]) to the full-screen viewer, so the viewer never has
+ *  to re-derive per-kind theming/network policy itself; it just reloads the exact same document. */
+data class ExpandedWidget(
+    val html: String,
+    val allowNetwork: Boolean,
+    val transparentBackground: Boolean
+)
+
+/**
+ * Kind-agnostic widget card chrome: the sandboxed WebView host, height animation between
+ * [WidgetMinHeight]/[WidgetMaxHeight], the raw-source toggle, and the expand/view-source action
+ * buttons. Each widget kind (HTML, Mermaid, ...) builds its own [documentHtml] and wraps this.
+ */
 @Composable
-fun HtmlWidgetCard(
-    html: String,
+fun WidgetCard(
+    sourceText: String,
+    documentHtml: String,
     allowNetwork: Boolean,
-    matchAppTheme: Boolean,
-    onExpand: () -> Unit,
+    transparentBackground: Boolean,
+    onExpand: (html: String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showSource by remember(html) { mutableStateOf(false) }
-    val effectiveHtml = rememberThemedHtml(html, matchAppTheme)
-    var contentHeight by remember(html) { mutableStateOf<Dp?>(null) }
+    var showSource by remember(documentHtml) { mutableStateOf(false) }
+    var contentHeight by remember(documentHtml) { mutableStateOf<Dp?>(null) }
     // Start at the roomy end, not the small end: the WebView's own JS-side height
     // measurement runs against whatever size this Box currently is, so starting small
     // would make that very measurement come out wrong for content sized in viewport units.
@@ -222,14 +236,14 @@ fun HtmlWidgetCard(
             )
             .clip(RoundedCornerShape(12.dp))
             .then(
-                if (matchAppTheme && !showSource) Modifier
+                if (transparentBackground && !showSource) Modifier
                 else Modifier.background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
             )
     ) {
         if (showSource) {
             SelectionContainer(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = html,
+                    text = sourceText,
                     style = ChatType.code,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier
@@ -242,14 +256,14 @@ fun HtmlWidgetCard(
             AndroidView(
                 factory = { context ->
                     WebView(context).apply {
-                        configureWidgetWebView(this, allowNetwork, matchAppTheme) { px ->
+                        configureWidgetWebView(this, allowNetwork, transparentBackground) { px ->
                             // scrollHeight is already in dp-equivalent CSS pixels here (WebView's
                             // JS coordinate space is device-independent when useWideViewPort is
                             // off), so wrap it directly — do NOT run it through Density.toDp(),
                             // which would treat it as physical pixels and divide by density again.
                             contentHeight = px.dp
                         }
-                        loadDataWithBaseURL(null, effectiveHtml, "text/html", "utf-8", null)
+                        loadDataWithBaseURL(null, documentHtml, "text/html", "utf-8", null)
                     }
                 },
                 update = { /* html/settings are fixed for the lifetime of a completed tool call */ },
@@ -273,7 +287,7 @@ fun HtmlWidgetCard(
                 )
             }
             Surface(
-                onClick = onExpand,
+                onClick = { onExpand(documentHtml) },
                 shape = CircleShape,
                 color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.85f),
             ) {
@@ -288,37 +302,57 @@ fun HtmlWidgetCard(
     }
 }
 
-/**
- * `markdownComponents(codeFence = ...)` interception point: an `html-render` fenced code block
- * renders as a live [HtmlWidgetCard]; any other language (including plain `html`) — or
- * `html-render` while the setting is off — falls through to the library's own fence rendering,
- * so the model can choose to inline-render or show source just by picking the fence language.
- */
 @Composable
-fun MarkdownHtmlWidgetFence(
-    model: MarkdownComponentModel,
-    widgetsEnabled: Boolean,
+fun HtmlWidgetCard(
+    html: String,
     allowNetwork: Boolean,
     matchAppTheme: Boolean,
-    onExpand: (String) -> Unit,
+    onExpand: (ExpandedWidget) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val effectiveHtml = rememberThemedHtml(html, matchAppTheme)
+    WidgetCard(
+        sourceText = html,
+        documentHtml = effectiveHtml,
+        allowNetwork = allowNetwork,
+        transparentBackground = matchAppTheme,
+        onExpand = { doc -> onExpand(ExpandedWidget(doc, allowNetwork, matchAppTheme)) },
+        modifier = modifier
+    )
+}
+
+/** One fence-triggered widget kind: which `​```<fenceLanguage>` block it claims, whether it's
+ *  currently enabled (per-kind app setting), and how to render the fence body when it is. */
+class WidgetFenceSpec(
+    val fenceLanguage: String,
+    val enabled: Boolean,
+    val render: @Composable (body: String) -> Unit
+)
+
+/**
+ * `markdownComponents(codeFence = ...)` interception point: a fenced code block whose language
+ * matches an enabled [WidgetFenceSpec] renders as that widget; any other language, or a matching
+ * but currently-disabled kind, falls through to the library's own fence rendering — so the model
+ * can choose to inline-render or show source just by picking the fence language, and disabling a
+ * widget kind in settings always degrades to a plain code block rather than breaking.
+ */
+@Composable
+fun MarkdownWidgetFence(
+    model: MarkdownComponentModel,
+    specs: List<WidgetFenceSpec>,
 ) {
     val node = model.node
     val content = model.content
     val language = node.findChildOfType(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content)?.toString()
-    if (widgetsEnabled && language == "html-render" && node.children.size >= 3) {
+    val spec = specs.firstOrNull { it.fenceLanguage == language && it.enabled }
+    if (spec != null && node.children.size >= 3) {
         // Same body-extraction math as the library's own MarkdownCodeFence (MarkdownCode.kt),
         // since that helper isn't exposed with a hook to swap in a different renderer per-fence.
         val start = node.children[2].startOffset
         val minCodeFenceCount = if (language != null && node.children.size > 3) 3 else 2
         val end = node.children[(node.children.size - 2).coerceAtLeast(minCodeFenceCount)].endOffset
         val body = content.subSequence(start, end).toString().replaceIndent()
-        HtmlWidgetCard(
-            html = body,
-            allowNetwork = allowNetwork,
-            matchAppTheme = matchAppTheme,
-            onExpand = { onExpand(body) },
-            modifier = Modifier.padding(vertical = 8.dp)
-        )
+        spec.render(body)
     } else {
         com.mikepenz.markdown.compose.elements.MarkdownCodeFence(
             content = content,
@@ -330,17 +364,14 @@ fun MarkdownHtmlWidgetFence(
 
 @Composable
 fun FullScreenHtmlWebView(
-    html: String,
-    allowNetwork: Boolean,
-    matchAppTheme: Boolean,
+    widget: ExpandedWidget,
     modifier: Modifier = Modifier
 ) {
-    val effectiveHtml = rememberThemedHtml(html, matchAppTheme)
     AndroidView(
         factory = { context ->
             WebView(context).apply {
-                configureWidgetWebView(this, allowNetwork, matchAppTheme)
-                loadDataWithBaseURL(null, effectiveHtml, "text/html", "utf-8", null)
+                configureWidgetWebView(this, widget.allowNetwork, widget.transparentBackground)
+                loadDataWithBaseURL(null, widget.html, "text/html", "utf-8", null)
             }
         },
         modifier = modifier.fillMaxSize()

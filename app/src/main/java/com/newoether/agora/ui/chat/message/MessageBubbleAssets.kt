@@ -1,14 +1,20 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.newoether.agora.ui.chat.MarkdownHtmlWidgetFence
+import com.newoether.agora.ui.chat.ExpandedWidget
+import com.newoether.agora.ui.chat.HtmlWidgetCard
+import com.newoether.agora.ui.chat.MarkdownWidgetFence
+import com.newoether.agora.ui.chat.MermaidWidgetCard
+import com.newoether.agora.ui.chat.WidgetFenceSpec
 import com.newoether.agora.ui.components.LatexImageTransformer
 import com.newoether.agora.ui.theme.ChatType
 import com.mikepenz.markdown.m3.markdownColor
@@ -49,7 +55,8 @@ internal fun rememberChatMarkdownAssets(
     htmlWidgetsEnabled: Boolean = false,
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
-    onWidgetClick: (String) -> Unit = {},
+    mermaidWidgetsEnabled: Boolean = false,
+    onWidgetClick: (ExpandedWidget) -> Unit = {},
 ): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
@@ -108,12 +115,34 @@ internal fun rememberChatMarkdownAssets(
     val customMarkdownPadding = markdownPadding(block = 8.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 5.dp)
 
-    val customMarkdownComponents = remember(
+    val widgetFenceSpecs = remember(
         htmlWidgetsEnabled,
         htmlWidgetsNetworkEnabled,
         htmlWidgetsThemeEnabled,
+        mermaidWidgetsEnabled,
         onWidgetClick,
     ) {
+        listOf(
+            WidgetFenceSpec(fenceLanguage = "html-render", enabled = htmlWidgetsEnabled) { body ->
+                HtmlWidgetCard(
+                    html = body,
+                    allowNetwork = htmlWidgetsNetworkEnabled,
+                    matchAppTheme = htmlWidgetsThemeEnabled,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            WidgetFenceSpec(fenceLanguage = "mermaid-render", enabled = mermaidWidgetsEnabled) { body ->
+                MermaidWidgetCard(
+                    diagramSource = body,
+                    onExpand = onWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+        )
+    }
+
+    val customMarkdownComponents = remember(widgetFenceSpecs) {
         markdownComponents(
             table = { model ->
                 MarkdownTable(
@@ -143,13 +172,7 @@ internal fun rememberChatMarkdownAssets(
                 )
             },
             codeFence = { model ->
-                MarkdownHtmlWidgetFence(
-                    model = model,
-                    widgetsEnabled = htmlWidgetsEnabled,
-                    allowNetwork = htmlWidgetsNetworkEnabled,
-                    matchAppTheme = htmlWidgetsThemeEnabled,
-                    onExpand = onWidgetClick,
-                )
+                MarkdownWidgetFence(model = model, specs = widgetFenceSpecs)
             }
         )
     }

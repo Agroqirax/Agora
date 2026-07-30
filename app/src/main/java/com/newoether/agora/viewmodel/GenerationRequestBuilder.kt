@@ -154,6 +154,7 @@ class GenerationRequestBuilder(
             imageGenModel = resolveImageGenModelId(),
             imageGenSize = settings.imageGenSize.value,
             htmlWidgetsEnabled = settings.htmlWidgetsEnabled.value,
+            mermaidWidgetsEnabled = settings.mermaidWidgetsEnabled.value,
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
             // Disabled devices are still kept in settings (so the toggle round-trips) but
             // never reach the model: excluded from list_shells, execute_shell_command's

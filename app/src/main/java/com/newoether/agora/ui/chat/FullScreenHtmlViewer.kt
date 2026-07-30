@@ -30,16 +30,12 @@ import com.newoether.agora.R
  */
 @Composable
 fun FullScreenHtmlViewer(
-    html: String,
-    allowNetwork: Boolean,
-    matchAppTheme: Boolean,
+    widget: ExpandedWidget,
     onClose: () -> Unit
 ) {
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         FullScreenHtmlWebView(
-            html = html,
-            allowNetwork = allowNetwork,
-            matchAppTheme = matchAppTheme,
+            widget = widget,
             modifier = Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
         )
         Surface(

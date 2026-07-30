@@ -2,6 +2,7 @@ package com.newoether.agora.ui.settings
 
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountTree
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Widgets
@@ -16,13 +17,14 @@ import com.newoether.agora.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsHtmlWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
+fun SettingsWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val enabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val networkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val themeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
+    val mermaidEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
 
     CollapsingSettingsScaffold(
-        title = stringResource(R.string.settings_html_widgets),
+        title = stringResource(R.string.settings_widgets),
         onBack = onBack
     ) {
         SettingsGroupColumn {
@@ -63,6 +65,18 @@ fun SettingsHtmlWidgetsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     )
                 }))
             }
+
+            SettingsGroup(title = stringResource(R.string.settings_mermaid_widgets), items = listOf({
+                SettingsItem(
+                    headlineContent = { Text(stringResource(R.string.mermaid_widgets_enable)) },
+                    supportingContent = { Text(stringResource(R.string.mermaid_widgets_enable_desc)) },
+                    leadingContent = { Icon(Icons.Default.AccountTree, null, tint = MaterialTheme.colorScheme.primary) },
+                    trailingContent = {
+                        Switch(checked = mermaidEnabled, onCheckedChange = { viewModel.settings.setMermaidWidgetsEnabled(it) })
+                    },
+                    modifier = Modifier.clickable { viewModel.settings.setMermaidWidgetsEnabled(!mermaidEnabled) }
+                )
+            }))
         }
     }
 }

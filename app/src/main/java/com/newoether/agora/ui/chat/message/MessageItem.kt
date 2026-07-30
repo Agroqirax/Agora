@@ -56,7 +56,8 @@ fun MessageItem(
     htmlWidgetsEnabled: Boolean = false,
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
-    onWidgetClick: (String) -> Unit = {},
+    mermaidWidgetsEnabled: Boolean = false,
+    onWidgetClick: (com.newoether.agora.ui.chat.ExpandedWidget) -> Unit = {},
 ) {
     var isFirstComposition by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) { isFirstComposition = false }
@@ -151,6 +152,7 @@ fun MessageItem(
         htmlWidgetsEnabled = htmlWidgetsEnabled,
         htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
         htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
+        mermaidWidgetsEnabled = mermaidWidgetsEnabled,
         onWidgetClick = onWidgetClick,
     )
     val markdownRenderContext = markdownAssets.renderContext

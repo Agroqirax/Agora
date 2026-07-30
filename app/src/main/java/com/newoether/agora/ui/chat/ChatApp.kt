@@ -78,7 +78,7 @@ fun ChatApp(
     viewModel: ChatViewModel,
     onOpenSettings: () -> Unit,
     onMediaClick: (List<String>, Int) -> Unit,
-    onWidgetClick: (String) -> Unit = {},
+    onWidgetClick: (ExpandedWidget) -> Unit = {},
     onFileContentClick: ((String, String) -> Unit)? = null,
     onPdfPagesClick: ((List<String>, Int) -> Unit)? = null,
     onPdfPreviewSelect: ((List<String>, Int) -> Unit)? = null,
@@ -121,6 +121,7 @@ fun ChatApp(
     val htmlWidgetsEnabled by viewModel.settings.htmlWidgetsEnabled.collectAsState()
     val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
     val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
+    val mermaidWidgetsEnabled by viewModel.settings.mermaidWidgetsEnabled.collectAsState()
     val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
     val globalCodeExecution by viewModel.settings.codeExecutionEnabled.collectAsState()
     val globalGoogleSearch by viewModel.settings.googleSearchEnabled.collectAsState()
@@ -601,6 +602,7 @@ fun ChatApp(
                                 htmlWidgetsEnabled = htmlWidgetsEnabled,
                                 htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
                                 htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
+                                mermaidWidgetsEnabled = mermaidWidgetsEnabled,
                                 onWidgetClick = onWidgetClick,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,

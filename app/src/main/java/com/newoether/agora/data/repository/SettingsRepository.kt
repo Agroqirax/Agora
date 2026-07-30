@@ -89,6 +89,7 @@ class SettingsRepository(
     val htmlWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsEnabled, false)
     val htmlWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsNetworkEnabled, false)
     val htmlWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.htmlWidgetsThemeEnabled, false)
+    val mermaidWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidWidgetsEnabled, false)
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
@@ -377,6 +378,7 @@ class SettingsRepository(
     fun setHtmlWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsEnabled(enabled) }
     fun setHtmlWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsNetworkEnabled(enabled) }
     fun setHtmlWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHtmlWidgetsThemeEnabled(enabled) }
+    fun setMermaidWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveMermaidWidgetsEnabled(enabled) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
     fun setDeviceInfoEnabled(enabled: Boolean) = scope.launch { settingsManager.saveDeviceInfoEnabled(enabled) }

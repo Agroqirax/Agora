@@ -11,6 +11,10 @@ object DefaultSkills {
      *  gate in [com.newoether.agora.tool.SkillToolProvider]. */
     const val HTML_WIDGETS_SKILL_NAME = "html-widgets"
 
+    /** Only visible/loadable while Mermaid diagrams are enabled — see the `mermaidWidgetsEnabled`
+     *  gate in [com.newoether.agora.tool.SkillToolProvider]. */
+    const val MERMAID_WIDGETS_SKILL_NAME = "mermaid-render"
+
     val BUILTINS: List<Builtin> = listOf(
         Builtin(
             name = HTML_WIDGETS_SKILL_NAME,
@@ -24,6 +28,19 @@ object DefaultSkills {
                 - The app already supplies page layout and Material 3 styling; avoid global CSS, body/html styling, or viewport sizing (100vh, fixed heights, etc.) unless the widget genuinely requires it, and let content size naturally.
                 - The widget renders automatically right where the fence appears — do not also paste or explain the HTML/CSS/JS elsewhere in your reply.
                 - Use a normal ```html fence (not `html-render`) when the user actually wants to see or copy HTML source instead of seeing it rendered.
+            """.trimIndent()
+        ),
+        Builtin(
+            name = MERMAID_WIDGETS_SKILL_NAME,
+            description = "How to render a Mermaid diagram (flowchart, sequence diagram, class diagram, etc.) inline in the chat. Use when the user would benefit from a diagram or visual explanation of a process, structure, or relationship.",
+            content = """
+                # Mermaid diagrams
+
+                To show a diagram inline in the chat, write a fenced code block using the language `mermaid-render`, e.g. a fence opened with ```mermaid-render, containing standard Mermaid.js diagram syntax.
+
+                - The diagram renders automatically right where the fence appears, matching the app's current light/dark theme automatically — do not also paste or explain the diagram source elsewhere in your reply, and do not try to control colors/theme yourself.
+                - Common diagram types: `flowchart TD`/`graph TD` (flowcharts), `sequenceDiagram` (sequence diagrams), `classDiagram`, `erDiagram`, `stateDiagram-v2`, `gantt`, `pie`.
+                - Use a normal ```mermaid fence (not `mermaid-render`) when the user actually wants to see or copy the diagram source instead of seeing it rendered.
             """.trimIndent()
         )
     )

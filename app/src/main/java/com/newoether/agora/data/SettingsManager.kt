@@ -237,6 +237,7 @@ class SettingsManager(private val context: Context) {
         val HTML_WIDGETS_ENABLED = booleanPreferencesKey("html_widgets_enabled")
         val HTML_WIDGETS_NETWORK_ENABLED = booleanPreferencesKey("html_widgets_network_enabled")
         val HTML_WIDGETS_THEME_ENABLED = booleanPreferencesKey("html_widgets_theme_enabled")
+        val MERMAID_WIDGETS_ENABLED = booleanPreferencesKey("mermaid_widgets_enabled")
         val SEARCH_CONTEXT_WINDOW = intPreferencesKey("search_context_window")
         val SEARCH_MATCH_LIMIT = intPreferencesKey("search_match_limit")
         val RAG_THRESHOLD = stringPreferencesKey("rag_threshold")
@@ -431,6 +432,7 @@ class SettingsManager(private val context: Context) {
     val htmlWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_ENABLED] ?: false }
     val htmlWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_NETWORK_ENABLED] ?: false }
     val htmlWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_WIDGETS_THEME_ENABLED] ?: false }
+    val mermaidWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_WIDGETS_ENABLED] ?: false }
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
     val searchMatchLimit: Flow<Int> = context.dataStore.data.map { it[SEARCH_MATCH_LIMIT] ?: 10 }
     val ragThreshold: Flow<Float> = context.dataStore.data.map { it[RAG_THRESHOLD]?.toFloatOrNull() ?: 0.5f }
@@ -843,6 +845,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveHtmlWidgetsThemeEnabled(enabled: Boolean) {
         context.dataStore.edit { it[HTML_WIDGETS_THEME_ENABLED] = enabled }
+    }
+    suspend fun saveMermaidWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[MERMAID_WIDGETS_ENABLED] = enabled }
     }
     suspend fun saveImageGenSize(size: String) {
         context.dataStore.edit { it[IMAGE_GEN_SIZE] = size }

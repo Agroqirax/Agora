@@ -56,7 +56,8 @@ fun MessageList(
     htmlWidgetsEnabled: Boolean = false,
     htmlWidgetsNetworkEnabled: Boolean = false,
     htmlWidgetsThemeEnabled: Boolean = false,
-    onWidgetClick: (String) -> Unit = {},
+    mermaidWidgetsEnabled: Boolean = false,
+    onWidgetClick: (ExpandedWidget) -> Unit = {},
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(isLoading) { if (isLoading) editingMessageId = null }
@@ -144,6 +145,7 @@ fun MessageList(
                     htmlWidgetsEnabled = htmlWidgetsEnabled,
                     htmlWidgetsNetworkEnabled = htmlWidgetsNetworkEnabled,
                     htmlWidgetsThemeEnabled = htmlWidgetsThemeEnabled,
+                    mermaidWidgetsEnabled = mermaidWidgetsEnabled,
                     onWidgetClick = onWidgetClick,
                 )
                 }

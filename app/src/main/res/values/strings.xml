@@ -209,6 +209,8 @@
     <string name="image_gen_model">Image Model</string>
     <string name="image_gen_no_model">No model selected</string>
     <string name="image_gen_select_model">Select image model</string>
+    <string name="settings_widgets">Widgets</string>
+    <string name="settings_widgets_desc">Let the model render interactive HTML widgets and Mermaid diagrams inline in chat</string>
     <string name="settings_html_widgets">HTML Widgets</string>
     <string name="settings_html_widgets_desc">Let the model render interactive HTML/CSS/JS widgets</string>
     <string name="html_widgets_enable">Enable HTML Widgets</string>
@@ -217,6 +219,9 @@
     <string name="html_widgets_network_enable_desc">Let widgets load remote images, fonts, and scripts. Off by default for safety.</string>
     <string name="html_widgets_theme_enable">Match App Theme</string>
     <string name="html_widgets_theme_enable_desc">Transparent background and Material You colors exposed as CSS variables the model can use. If a widget doesn\'t use them, text or controls may be invisible.</string>
+    <string name="settings_mermaid_widgets">Mermaid Diagrams</string>
+    <string name="mermaid_widgets_enable">Enable Mermaid Diagrams</string>
+    <string name="mermaid_widgets_enable_desc">Let the model render flowcharts, sequence diagrams, and other Mermaid diagrams inline. Rendered offline; always matches the app\'s theme.</string>
     <string name="image_gen_size">Default Size</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Show all models</string>

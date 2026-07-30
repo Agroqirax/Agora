@@ -177,7 +177,7 @@ private val settingsGroups = listOf(
     SettingsGroupData(titleRes = R.string.settings_group_multimodal, items = listOf(
         SettingsCategory("transcription", R.string.settings_transcription, R.string.settings_transcription_desc, Icons.Default.ImageSearch),
         SettingsCategory("imagegen", R.string.settings_image_gen, R.string.settings_image_gen_desc, Icons.Default.AddPhotoAlternate),
-        SettingsCategory("htmlwidgets", R.string.settings_html_widgets, R.string.settings_html_widgets_desc, Icons.Default.Widgets),
+        SettingsCategory("widgets", R.string.settings_widgets, R.string.settings_widgets_desc, Icons.Default.Widgets),
     )),
     SettingsGroupData(titleRes = R.string.settings_group_tools, items = listOf(
         SettingsCategory("websearch", R.string.settings_web_search, R.string.settings_web_search_desc, Icons.Default.Language),
@@ -240,7 +240,7 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "weather" -> SettingsWeatherPage(viewModel, onBack = { selectedCategory = null })
                 "imagegen" -> SettingsImageGenPage(viewModel, onBack = { selectedCategory = null })
                 "shell" -> SettingsShellPage(viewModel, onBack = { selectedCategory = null })
-                "htmlwidgets" -> SettingsHtmlWidgetsPage(viewModel, onBack = { selectedCategory = null })
+                "widgets" -> SettingsWidgetsPage(viewModel, onBack = { selectedCategory = null })
                 "mcp" -> SettingsMcpPage(viewModel, onBack = { selectedCategory = null })
                 "device" -> SettingsAndroidPage(viewModel, onBack = { selectedCategory = null })
                 "assistant" -> SettingsAssistantPage(viewModel, onBack = { selectedCategory = null })

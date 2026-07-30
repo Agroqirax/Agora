@@ -573,7 +573,7 @@ fun MainNavigation(
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
     var fullScreenMediaIndex by remember { mutableIntStateOf(0) }
-    var fullScreenHtml by remember { mutableStateOf<String?>(null) }
+    var fullScreenHtml by remember { mutableStateOf<com.newoether.agora.ui.chat.ExpandedWidget?>(null) }
     var pdfViewerSelection by remember { mutableStateOf(setOf<Int>()) }
     val onTogglePdfSelection: (Int) -> Unit = { page ->
         pdfViewerSelection = if (page in pdfViewerSelection) pdfViewerSelection - page else pdfViewerSelection + page
@@ -1087,9 +1087,9 @@ fun MainNavigation(
                     fullScreenMediaUrls = urls
                     fullScreenMediaIndex = index
                 },
-                onWidgetClick = { html ->
+                onWidgetClick = { widget ->
                     focusManager.clearFocus()
-                    fullScreenHtml = html
+                    fullScreenHtml = widget
                 },
                 onFileContentClick = { name, content ->
                     focusManager.clearFocus()
@@ -1168,17 +1168,13 @@ fun MainNavigation(
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
-                var lastHtml by remember { mutableStateOf<String?>(null) }
+                var lastWidget by remember { mutableStateOf<com.newoether.agora.ui.chat.ExpandedWidget?>(null) }
                 LaunchedEffect(fullScreenHtml) {
-                    if (fullScreenHtml != null) lastHtml = fullScreenHtml
+                    if (fullScreenHtml != null) lastWidget = fullScreenHtml
                 }
-                val html = lastHtml ?: return@AnimatedVisibility
-                val htmlWidgetsNetworkEnabled by viewModel.settings.htmlWidgetsNetworkEnabled.collectAsState()
-                val htmlWidgetsThemeEnabled by viewModel.settings.htmlWidgetsThemeEnabled.collectAsState()
+                val widget = lastWidget ?: return@AnimatedVisibility
                 com.newoether.agora.ui.chat.FullScreenHtmlViewer(
-                    html = html,
-                    allowNetwork = htmlWidgetsNetworkEnabled,
-                    matchAppTheme = htmlWidgetsThemeEnabled,
+                    widget = widget,
                     onClose = { fullScreenHtml = null }
                 )
             }
