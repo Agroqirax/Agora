@@ -96,9 +96,8 @@ data class GenerationContext(
     val imageGenBaseUrl: String = "",
     val imageGenModel: String = "gpt-image-1",
     val imageGenSize: String = "1024x1024",
-    /** Gates the html-widgets/mermaid-render skills' visibility in
-     *  [com.newoether.agora.tool.SkillToolProvider] — the fence-rendering itself is a pure UI
-     *  concern (see ChatApp.kt), these only control whether the model is told the syntax exists. */
+    /** Whether each widget kind's fence language renders inline in the chat UI (see
+     *  ChatApp.kt) — a pure rendering concern; the model isn't told about these flags. */
     val htmlWidgetsEnabled: Boolean = false,
     val mermaidWidgetsEnabled: Boolean = false,
     val geoJsonWidgetsEnabled: Boolean = false,

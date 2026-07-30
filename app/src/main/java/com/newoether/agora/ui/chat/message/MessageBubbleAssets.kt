@@ -134,7 +134,7 @@ internal fun rememberChatMarkdownAssets(
         onWidgetClick,
     ) {
         listOf(
-            WidgetFenceSpec(fenceLanguage = "html-render", enabled = htmlWidgetsEnabled) { body ->
+            WidgetFenceSpec(fenceLanguage = "html", enabled = htmlWidgetsEnabled) { body ->
                 HtmlWidgetCard(
                     html = body,
                     allowNetwork = htmlWidgetsNetworkEnabled,
@@ -144,14 +144,14 @@ internal fun rememberChatMarkdownAssets(
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             },
-            WidgetFenceSpec(fenceLanguage = "mermaid-render", enabled = mermaidWidgetsEnabled) { body ->
+            WidgetFenceSpec(fenceLanguage = "mermaid", enabled = mermaidWidgetsEnabled) { body ->
                 MermaidWidgetCard(
                     diagramSource = body,
                     onExpand = onWidgetClick,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             },
-            WidgetFenceSpec(fenceLanguage = "geojson-render", enabled = geoJsonWidgetsEnabled) { body ->
+            WidgetFenceSpec(fenceLanguage = "geojson", enabled = geoJsonWidgetsEnabled) { body ->
                 GeoJsonWidgetCard(
                     source = body,
                     tileUrl = geoJsonTileUrl,

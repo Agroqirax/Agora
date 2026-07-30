@@ -278,7 +278,7 @@ private fun buildGeoJsonHtml(
               setTimeout(fit, 300);
             }
           } catch (e) {
-            console.error('geojson-render map init failed: ' + (e && e.stack ? e.stack : e));
+            console.error('geojson map init failed: ' + (e && e.stack ? e.stack : e));
           }
         </script>
         </body>

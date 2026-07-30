@@ -85,7 +85,7 @@ object DefaultSystemPrompt {
             Call list_skills before non-trivial or specialized tasks such as writing widgets to see if a relevant skill exists, then read_skill to load it before proceeding. Skills contain curated instructions for how to approach specific kinds of tasks — follow a loaded skill's instructions for that task.
             
             Widgets:
-            Widgets let you visualize data such as custom html pages, mermaid charts or maps in the chat. You MUST consult skills before producing widgets.
+            Html, mermaid, and geojson content may render inline in the chat as interactive widgets if the user has enabled it. Check skills for details before producing any of these.
             """.trimIndent()
         )
     )
