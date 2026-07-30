@@ -26,7 +26,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.zIndex
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.unit.Velocity
@@ -72,7 +71,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -537,99 +535,19 @@ private fun RecomposeSafeMarkdownNode(
     modifier: Modifier = Modifier,
     render: @Composable (node: StreamingMarkdownNode) -> Unit
 ) {
-    var buf0 by remember { mutableStateOf<StreamingMarkdownNode?>(content) }
-    var buf1 by remember { mutableStateOf<StreamingMarkdownNode?>(null) }
-    var front by remember { mutableIntStateOf(0) }
-    var fading by remember { mutableStateOf(false) }
-    var fadeAlpha by remember { mutableFloatStateOf(0f) }
-    var fadeKey by remember { mutableIntStateOf(0) }
-
-    fun sameContent(a: StreamingMarkdownNode?, b: StreamingMarkdownNode): Boolean =
-        a?.startOffset == b.startOffset &&
-            a.endOffset == b.endOffset &&
-            a.contentHash == b.contentHash &&
-            a.node.type == b.node.type
-
-    LaunchedEffect(content, isStreaming, fading) {
-        val current = if (front == 0) buf0 else buf1
-        if (sameContent(current, content)) {
-            if (!fading) {
-                if (front == 0) buf1 = null else buf0 = null
-            }
-            return@LaunchedEffect
-        }
-
-        if (current != null && !current.hasSameBlockIdentity(content)) {
-            // The previous tail has been promoted into the stable block list. Reusing its
-            // fade buffer for the next Markdown block would render the promoted block twice:
-            // once in the stable list and once underneath the new tail. Abort any in-flight
-            // fade and install the new logical block as the sole authoritative buffer.
-            if (front == 0) {
-                buf0 = content
-                buf1 = null
-            } else {
-                buf1 = content
-                buf0 = null
-            }
-            fading = false
-            fadeAlpha = 0f
-            fadeKey++
-            return@LaunchedEffect
-        }
-
-        if (isStreaming && !fading) {
-            if (current == null) {
-                if (front == 0) buf0 = content else buf1 = content
-            } else {
-                if (front == 0) buf1 = content else buf0 = content
-                fadeKey++
-                fading = true
-                fadeAlpha = 0f
-            }
-        } else if (!isStreaming && !fading) {
-            // Terminalization must never manufacture one final crossfade. If the latest
-            // provider chunk arrived while a fade was in flight, snap the now-idle buffer
-            // to the authoritative final AST once that fade completes.
-            if (front == 0) {
-                buf0 = content
-                buf1 = null
-            } else {
-                buf1 = content
-                buf0 = null
-            }
-        }
-    }
-
-    LaunchedEffect(fadeKey) {
-        if (!fading) return@LaunchedEffect
-        withFrameNanos { }
-        val startNs = withFrameNanos { it }
-        val durationNs = 180_000_000L
-        while (true) {
-            val nowNs = withFrameNanos { it }
-            val p = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
-            fadeAlpha = p
-            if (p >= 1f) break
-        }
-        front = 1 - front
-        fading = false
-        fadeAlpha = 0f
-    }
-
-    val incoming = 1 - front
-    val z0 = when { fading && incoming == 0 -> 2f; fading && front == 0 -> 0f; front == 0 -> 2f; else -> 0f }
-    val a0 = when { fading && incoming == 0 -> fadeAlpha; fading && front == 0 -> 1f; front == 0 -> 1f; else -> 0f }
-    val z1 = when { fading && incoming == 1 -> 2f; fading && front == 1 -> 0f; front == 1 -> 2f; else -> 0f }
-    val a1 = when { fading && incoming == 1 -> fadeAlpha; fading && front == 1 -> 1f; front == 1 -> 1f; else -> 0f }
-
-    Box(modifier = modifier) {
-        buf0?.let { node ->
-            Box(modifier = Modifier.fillMaxWidth().zIndex(z0).alpha(a0)) { render(node) }
-        }
-        buf1?.let { node ->
-            Box(modifier = Modifier.fillMaxWidth().zIndex(z1).alpha(a1)) { render(node) }
-        }
-    }
+    val animateChanges = remember { isStreaming }
+    LatestWinsCrossfade(
+        content = content,
+        animateChanges = animateChanges,
+        modifier = modifier,
+        sameContent = { first, second ->
+            first.startOffset == second.startOffset &&
+                first.endOffset == second.endOffset &&
+                first.contentHash == second.contentHash &&
+                first.node.type == second.node.type
+        },
+        render = render,
+    )
 }
 
 private fun String.toRenderableMarkdownText(): String {

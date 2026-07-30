@@ -1,95 +1,179 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.zIndex
 
+private const val STREAMING_CROSSFADE_DURATION_MS = 180
+
 /**
- * Double-buffered crossfade Markdown composable.
- * Prevents visual "flash" from AST re-parsing during streaming by maintaining
- * two content buffers and crossfading between them over ~180ms.
+ * Latest-wins state for a two-buffer renderer.
+ *
+ * [front] is always the fully visible snapshot. [incoming] is prepared offscreen for a complete
+ * frame and then faded over [front]. Updates received during that fade replace [pending] instead
+ * of restarting the animation or building a stale queue. Finishing a fade promotes [incoming]
+ * and immediately arms the newest pending value, so terminal provider updates can never snap.
+ */
+internal data class LatestWinsCrossfadeState<T>(
+    val front: T? = null,
+    val incoming: T? = null,
+    val pending: T? = null,
+    val transitionId: Int = 0,
+) {
+    val isFading: Boolean get() = incoming != null
+
+    fun offer(
+        content: T,
+        animateChanges: Boolean,
+        sameContent: (T, T) -> Boolean,
+    ): LatestWinsCrossfadeState<T> {
+        if (!animateChanges) {
+            return if (
+                front != null &&
+                sameContent(front, content) &&
+                incoming == null &&
+                pending == null
+            ) {
+                this
+            } else {
+                LatestWinsCrossfadeState(front = content, transitionId = transitionId)
+            }
+        }
+
+        if (incoming != null) {
+            if (sameContent(incoming, content)) {
+                return if (pending == null) this else copy(pending = null)
+            }
+            if (pending?.let { sameContent(it, content) } == true) {
+                return this
+            }
+            return copy(pending = content)
+        }
+
+        if (front?.let { sameContent(it, content) } == true) return this
+        return copy(
+            incoming = content,
+            pending = null,
+            transitionId = transitionId + 1,
+        )
+    }
+
+    fun finish(sameContent: (T, T) -> Boolean): LatestWinsCrossfadeState<T> {
+        val promoted = incoming ?: return this
+        val latest = pending
+        return if (latest != null && !sameContent(promoted, latest)) {
+            LatestWinsCrossfadeState(
+                front = promoted,
+                incoming = latest,
+                transitionId = transitionId + 1,
+            )
+        } else {
+            LatestWinsCrossfadeState(
+                front = promoted,
+                transitionId = transitionId,
+            )
+        }
+    }
+}
+
+/**
+ * Double-buffered Markdown crossfade.
+ *
+ * The first snapshot keeps the established immediate-render behavior. Every later update from a
+ * live renderer, including its terminal provider snapshot, follows the prepared two-buffer path.
+ * Historical content opts out and renders immediately.
  */
 @Composable
 internal fun RecomposeSafeMarkdown(
     content: String,
     isStreaming: Boolean,
     modifier: Modifier = Modifier,
-    render: @Composable (text: String) -> Unit
+    render: @Composable (text: String) -> Unit,
 ) {
-    var buf0 by remember { mutableStateOf("") }
-    var buf1 by remember { mutableStateOf("") }
-    var front by remember { mutableStateOf(0) }
-    var fading by remember { mutableStateOf(false) }
+    // Capture whether this renderer was born live. A streaming -> terminal status flip must not
+    // disable buffering while the final provider snapshot is still queued behind an active fade.
+    val animateChanges = remember { isStreaming }
+    LatestWinsCrossfade(
+        content = content,
+        animateChanges = animateChanges,
+        modifier = modifier,
+        sameContent = { first, second -> first == second },
+        render = render,
+    )
+}
+
+@Composable
+internal fun <T : Any> LatestWinsCrossfade(
+    content: T,
+    animateChanges: Boolean,
+    modifier: Modifier = Modifier,
+    sameContent: (T, T) -> Boolean,
+    render: @Composable (T) -> Unit,
+) {
+    var buffers: LatestWinsCrossfadeState<T> by remember {
+        // Preserve the established UI contract: the first live snapshot is immediately visible.
+        // Double buffering applies only to subsequent updates and terminal handoff.
+        mutableStateOf(LatestWinsCrossfadeState(front = content))
+    }
     var fadeAlpha by remember { mutableFloatStateOf(0f) }
-    var fadeKey by remember { mutableIntStateOf(0) }
-    // State machine — driven from an effect so composition stays read-only.
-    // Keyed on every input that can trigger a buffer swap / fade transition:
-    // a new content value, a streaming↔idle flip, or a fade completing (fading → false).
-    LaunchedEffect(content, isStreaming, fading) {
-        val current = if (front == 0) buf0 else buf1
-        if (content == current) {
-            if (!fading) {
-                if (front == 0) buf1 = "" else buf0 = ""
-            }
-            return@LaunchedEffect
-        }
 
-        if (isStreaming && !fading) {
-            if (current.isEmpty()) {
-                if (front == 0) buf0 = content else buf1 = content
-            } else {
-                if (front == 0) buf1 = content else buf0 = content
-                fadeKey++
-                fading = true
-                fadeAlpha = 0f
-            }
-        } else if (!isStreaming && !fading) {
-            // A streaming→idle transition is a state change, not new content. Snap only
-            // when the final text genuinely differs, avoiding the completion flash.
-            if (front == 0) {
-                buf0 = content
-                buf1 = ""
-            } else {
-                buf1 = content
-                buf0 = ""
-            }
-        }
+    LaunchedEffect(content, animateChanges) {
+        buffers = buffers.offer(content, animateChanges, sameContent)
     }
 
-    // Fade animation — keyed by fadeKey so every fade gets a fresh LaunchedEffect
-    LaunchedEffect(fadeKey) {
-        if (!fading) return@LaunchedEffect
-        withFrameNanos { }
-        val startNs = withFrameNanos { it }
-        val durationNs = 180_000_000L
-        while (true) {
-            val nowNs = withFrameNanos { it }
-            val p = ((nowNs - startNs).toFloat() / durationNs).coerceAtMost(1f)
-            fadeAlpha = p
-            if (p >= 1f) break
-        }
-        front = 1 - front
-        fading = false
+    LaunchedEffect(buffers.transitionId) {
+        if (!buffers.isFading) return@LaunchedEffect
         fadeAlpha = 0f
+        // The incoming Markdown subtree must be composed and measured before it becomes visible.
+        withFrameNanos { }
+        val startNanos = withFrameNanos { it }
+        val durationNanos = STREAMING_CROSSFADE_DURATION_MS * 1_000_000L
+        while (fadeAlpha < 1f) {
+            val nowNanos = withFrameNanos { it }
+            fadeAlpha = (
+                (nowNanos - startNanos).toFloat() / durationNanos
+                ).coerceIn(0f, 1f)
+        }
+        val finished = buffers.finish(sameContent)
+        // Promotion and alpha reset are one atomic frame. If [finished] immediately arms the
+        // newest pending value, that value must begin invisible rather than inheriting alpha=1
+        // from the transition that just completed.
+        Snapshot.withMutableSnapshot {
+            buffers = finished
+            fadeAlpha = 0f
+        }
     }
-
-    // Visibility / z-order: symmetric for both buffers
-    val incoming = 1 - front
-    val z0 = when { fading && incoming == 0 -> 2f; fading && front == 0 -> 0f; front == 0 -> 2f; else -> 0f }
-    val a0 = when { fading && incoming == 0 -> fadeAlpha; fading && front == 0 -> 1f; front == 0 -> 1f; else -> 0f }
-    val z1 = when { fading && incoming == 1 -> 2f; fading && front == 1 -> 0f; front == 1 -> 2f; else -> 0f }
-    val a1 = when { fading && incoming == 1 -> fadeAlpha; fading && front == 1 -> 1f; front == 1 -> 1f; else -> 0f }
 
     Box(modifier = modifier) {
-        if (buf0.isNotEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth().zIndex(z0).alpha(a0)) { render(buf0) }
+        buffers.front?.let { front ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(0f),
+            ) {
+                render(front)
+            }
         }
-        if (buf1.isNotEmpty()) {
-            Box(modifier = Modifier.fillMaxWidth().zIndex(z1).alpha(a1)) { render(buf1) }
+        buffers.incoming?.let { incoming ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(1f)
+                    .alpha(fadeAlpha),
+            ) {
+                render(incoming)
+            }
         }
     }
 }
