@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -66,6 +67,7 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val notificationsConfirmEnabled by viewModel.settings.notificationsConfirmEnabled.collectAsState()
     val torchEnabled by viewModel.settings.torchEnabled.collectAsState()
     val calculatorEnabled by viewModel.settings.calculatorEnabled.collectAsState()
+    val askUserEnabled by viewModel.settings.askUserEnabled.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -131,6 +133,15 @@ fun SettingsAndroidPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         leadingContent = { Icon(Icons.Default.Calculate, null, tint = MaterialTheme.colorScheme.primary) },
                         trailingContent = { Switch(checked = calculatorEnabled, onCheckedChange = { viewModel.settings.setCalculatorEnabled(it) }) },
                         modifier = Modifier.clickable { viewModel.settings.setCalculatorEnabled(!calculatorEnabled) }
+                    )
+                }
+                add {
+                    SettingsItem(
+                        headlineContent = { Text(stringResource(R.string.ask_user_enable)) },
+                        supportingContent = { Text(stringResource(R.string.ask_user_enable_desc)) },
+                        leadingContent = { Icon(Icons.Default.QuestionAnswer, null, tint = MaterialTheme.colorScheme.primary) },
+                        trailingContent = { Switch(checked = askUserEnabled, onCheckedChange = { viewModel.settings.setAskUserEnabled(it) }) },
+                        modifier = Modifier.clickable { viewModel.settings.setAskUserEnabled(!askUserEnabled) }
                     )
                 }
             })

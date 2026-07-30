@@ -2,6 +2,7 @@ package com.newoether.agora.tool
 
 import com.newoether.agora.viewmodel.GenerationContext
 import io.mockk.mockk
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -110,5 +111,50 @@ class ShellToolProviderTest {
         assertTrue(provider.handles("file_glob"))
         assertTrue(provider.handles("file_grep"))
         assertFalse(provider.handles("unknown"))
+    }
+}
+
+class AskUserToolProviderTest {
+    private val provider = AskUserToolProvider()
+    private val enabledCtx = GenerationContext(askUserEnabled = true)
+    private val disabledCtx = GenerationContext(askUserEnabled = false)
+
+    @Test
+    fun definitions_whenEnabled_returnsOneTool() {
+        val defs = provider.definitions(enabledCtx)
+        assertEquals(1, defs.size)
+        assertEquals("ask_user", defs[0].function.name)
+        assertEquals(listOf("question"), defs[0].function.parameters.required)
+    }
+
+    @Test
+    fun definitions_whenDisabled_returnsEmpty() {
+        assertTrue(provider.definitions(disabledCtx).isEmpty())
+    }
+
+    @Test
+    fun handles_returnsTrueForAskUser() {
+        assertTrue(provider.handles("ask_user"))
+        assertFalse(provider.handles("unknown"))
+    }
+
+    @Test
+    fun execute_whenAnswered_returnsAnswerJson() = runTest {
+        provider.ask = { _, _ -> "blue" }
+        val result = provider.execute("ask_user", """{"question":"favorite color?"}""", enabledCtx)
+        assertTrue(result.contains("\"answer\":\"blue\""))
+    }
+
+    @Test
+    fun execute_whenDismissed_returnsUserCancelledError() = runTest {
+        provider.ask = { _, _ -> null }
+        val result = provider.execute("ask_user", """{"question":"favorite color?"}""", enabledCtx)
+        assertTrue(result.contains("\"error\":\"user_cancelled\""))
+    }
+
+    @Test
+    fun execute_whenDisabled_returnsDisabledError() = runTest {
+        val result = provider.execute("ask_user", """{"question":"favorite color?"}""", disabledCtx)
+        assertTrue(result.contains("\"error\":\"disabled\""))
     }
 }

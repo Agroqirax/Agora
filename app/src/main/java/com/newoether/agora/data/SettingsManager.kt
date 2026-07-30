@@ -280,6 +280,7 @@ class SettingsManager(private val context: Context) {
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val TORCH_ENABLED = booleanPreferencesKey("torch_enabled")
         val CALCULATOR_ENABLED = booleanPreferencesKey("calculator_enabled")
+        val ASK_USER_ENABLED = booleanPreferencesKey("ask_user_enabled")
         val WEATHER_ENABLED = booleanPreferencesKey("weather_enabled")
         val WEATHER_UNITS = stringPreferencesKey("weather_units")
         val WEATHER_BASE_URL = stringPreferencesKey("weather_base_url")
@@ -494,6 +495,8 @@ class SettingsManager(private val context: Context) {
     val torchEnabled: Flow<Boolean> = context.dataStore.data.map { it[TORCH_ENABLED] ?: false }
     // Pure local arithmetic, no permission or device state touched, same reasoning as device info.
     val calculatorEnabled: Flow<Boolean> = context.dataStore.data.map { it[CALCULATOR_ENABLED] ?: true }
+    // No device side effect, same reasoning as calculator/device info.
+    val askUserEnabled: Flow<Boolean> = context.dataStore.data.map { it[ASK_USER_ENABLED] ?: true }
     val weatherEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEATHER_ENABLED] ?: false }
     val weatherUnits: Flow<String> = context.dataStore.data.map { it[WEATHER_UNITS] ?: DEFAULT_WEATHER_UNITS }
     val weatherBaseUrl: Flow<String> = context.dataStore.data.map {
@@ -1032,6 +1035,9 @@ class SettingsManager(private val context: Context) {
     }
     suspend fun saveCalculatorEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CALCULATOR_ENABLED] = enabled }
+    }
+    suspend fun saveAskUserEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[ASK_USER_ENABLED] = enabled }
     }
     suspend fun saveWeatherEnabled(enabled: Boolean) {
         context.dataStore.edit { it[WEATHER_ENABLED] = enabled }

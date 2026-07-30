@@ -859,6 +859,15 @@ fun MainNavigation(
         )
     }
 
+    // Ask-user tool: lets the model pause and ask the user a question, resuming with the answer.
+    val pendingAskUserQuestion by viewModel.pendingAskUserQuestion.collectAsState()
+    pendingAskUserQuestion?.let { pending ->
+        com.newoether.agora.ui.components.AskUserDialog(
+            pending = pending,
+            onResolve = { answer -> viewModel.resolveAskUserQuestion(answer) }
+        )
+    }
+
     // Crash report — opt-in, shown once on the first launch after an unexpected exit
     val crashContext = LocalContext.current
     var pendingCrash by remember { mutableStateOf<String?>(null) }

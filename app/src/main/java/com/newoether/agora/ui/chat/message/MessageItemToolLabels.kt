@@ -53,6 +53,7 @@ internal fun toolDisplayName(toolName: String?): String {
         "set_torch" -> stringResource(R.string.tool_set_torch)
         "get_weather" -> stringResource(R.string.tool_get_weather)
         "calculate" -> stringResource(R.string.tool_calculate)
+        "ask_user" -> stringResource(R.string.tool_ask_user)
         else -> {
             val display = if (toolName != null && toolName.startsWith("mcp__")) mcpDisplayToolName(toolName) else toolName
             (display ?: stringResource(R.string.tool_context)).split("_").joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
@@ -366,6 +367,20 @@ internal fun toolSummary(seg: MessageSegment): String {
                     result != null -> stringResource(R.string.tool_calculate_done, result)
                     else -> stringResource(R.string.tool_done)
                 }
+            }
+        }
+        "ask_user" -> {
+            val obj = try { Json.parseToJsonElement(content.ifBlank { "{}" }).jsonObject } catch (_: Exception) { null }
+            val errorCode = (obj?.get("error") as? JsonPrimitive)?.content
+            val answer = (obj?.get("answer") as? JsonPrimitive)?.content
+            val question = argsJson?.get("question")?.let { (it as? JsonPrimitive)?.content }
+            when {
+                content.isBlank() -> if (question != null) stringResource(R.string.tool_asking_user) + ": " + question.take(80)
+                    else stringResource(R.string.tool_asking_user)
+                errorCode == "user_cancelled" -> stringResource(R.string.tool_ask_user_cancelled)
+                errorCode != null -> stringResource(R.string.tool_call_failed)
+                answer != null -> stringResource(R.string.tool_ask_user_answered, answer.take(80))
+                else -> stringResource(R.string.tool_done)
             }
         }
         else -> {

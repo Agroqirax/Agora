@@ -291,6 +291,7 @@ class ChatViewModel(
                 com.newoether.agora.service.AgoraNotificationAccessService.hasAccessGranted(getApplication())
             }
             gm.onRequestNotificationPostPermission = { notificationPostPermission.request() }
+            gm.onAskUser = { question, options -> askUserController.ask(question, options) }
             gm.mcpOAuthManager = mcpOAuthManager
         }
     }
@@ -516,6 +517,15 @@ class ChatViewModel(
 
     fun resolveNotificationWriteConfirmation(allow: Boolean, alwaysAllow: Boolean = false) =
         notificationWriteConfirmation.resolve(allow, alwaysAllow = alwaysAllow)
+
+    // ── Ask-user question gate ────────────────────────────────
+    /** In-app "answer this question?" prompt for the ask_user tool (see [AskUserController]). */
+    private val askUserController = AskUserController()
+    val pendingAskUserQuestion: StateFlow<AskUserController.PendingQuestion?>
+        get() = askUserController.pending
+
+    /** Called by the UI to resolve a pending ask_user question. */
+    fun resolveAskUserQuestion(answer: String?) = askUserController.resolve(answer)
 
     /** POST_NOTIFICATIONS is an ordinary runtime permission (Android 13+; auto-granted
      *  below that), unlike the notification-*listener* access `list`/`get`/`interact`/

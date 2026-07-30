@@ -296,6 +296,10 @@
     <string name="tool_calculate">Calculate</string>
     <string name="tool_calculating">Calculating…</string>
     <string name="tool_calculate_done">= %1$s</string>
+    <string name="tool_ask_user">Ask User</string>
+    <string name="tool_asking_user">Asking a question</string>
+    <string name="tool_ask_user_answered">Answered: %1$s</string>
+    <string name="tool_ask_user_cancelled">Question skipped</string>
     <string name="tool_weather_no_location">Couldn\'t determine a location</string>
     <string name="img_action_save">Save to gallery</string>
     <string name="img_action_share">Share</string>
@@ -529,6 +533,12 @@
     <string name="torch_enable_desc">Allow the model to turn the flashlight on or off</string>
     <string name="calculator_enable">Enable Calculator Tool</string>
     <string name="calculator_enable_desc">Allow the model to evaluate math expressions for accurate results</string>
+    <string name="ask_user_enable">Enable Ask User Tool</string>
+    <string name="ask_user_enable_desc">Allow the model to pause and ask you a question when it needs your input</string>
+    <string name="ask_user_dialog_title">Question</string>
+    <string name="ask_user_dialog_hint">Type your answer…</string>
+    <string name="ask_user_dialog_send">Send</string>
+    <string name="ask_user_dialog_skip">Skip</string>
     <string name="weather_title">Weather</string>
     <string name="weather_enable">Enable Weather Tool</string>
     <string name="weather_enable_desc">Check current conditions and forecasts via Open-Meteo</string>

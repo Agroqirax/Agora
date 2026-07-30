@@ -120,6 +120,7 @@ data class GenerationContext(
     val notificationsEnabled: Boolean = false,
     val torchEnabled: Boolean = false,
     val calculatorEnabled: Boolean = true,
+    val askUserEnabled: Boolean = true,
     val weatherEnabled: Boolean = false,
     val weatherUnits: String = "metric",
     val weatherBaseUrl: String = com.newoether.agora.tool.WeatherToolProvider.DEFAULT_FORECAST_BASE_URL,
@@ -262,6 +263,10 @@ class GenerationManager(
      *  API 33+. Set by the ViewModel. */
     var onRequestNotificationPostPermission: (suspend () -> Boolean)? = null
 
+    /** Handles the ask_user tool's pause-and-resume round trip. Set by the ViewModel.
+     *  Returns the user's answer, or null if they dismissed without answering. */
+    var onAskUser: (suspend (question: String, options: List<String>) -> String?)? = null
+
     private val memoryToolProvider = MemoryToolProvider(memoryManager)
     private val skillToolProvider = com.newoether.agora.tool.SkillToolProvider(skillManager)
     private val webSearchToolProvider = WebSearchToolProvider()
@@ -322,11 +327,14 @@ class GenerationManager(
         wp.confirm = { confirmLocationShared() }
     }
     private val calculatorToolProvider = CalculatorToolProvider()
+    private val askUserToolProvider = com.newoether.agora.tool.AskUserToolProvider().also { aup ->
+        aup.ask = { question, options -> onAskUser?.invoke(question, options) }
+    }
     private val toolProviders: List<ToolProvider> = listOf(
         memoryToolProvider, skillToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
         contactsToolProvider, alarmToolProvider, appLaunchToolProvider, urlOpenToolProvider, mediaControlToolProvider, notificationToolProvider,
-        torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider
+        torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider, askUserToolProvider
     )
 
     fun buildDeviceInfoTool(ctx: GenerationContext): List<ToolDefinition> =
@@ -334,6 +342,9 @@ class GenerationManager(
 
     fun buildCalculatorTool(ctx: GenerationContext): List<ToolDefinition> =
         calculatorToolProvider.definitions(ctx)
+
+    fun buildAskUserTool(ctx: GenerationContext): List<ToolDefinition> =
+        askUserToolProvider.definitions(ctx)
 
     fun buildPackageQueryTool(ctx: GenerationContext): List<ToolDefinition> =
         packageQueryToolProvider.definitions(ctx)
@@ -601,7 +612,8 @@ class GenerationManager(
         val weatherTool = buildWeatherTool(ctx)
         val calculatorTool = buildCalculatorTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + skillTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
+        val askUserTool = buildAskUserTool(ctx)
+        val allTools = memoryTools + skillTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool + askUserTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,
