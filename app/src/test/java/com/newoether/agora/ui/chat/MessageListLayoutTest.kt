@@ -6,50 +6,49 @@ import org.junit.Test
 
 class MessageListLayoutTest {
     @Test
-    fun shortTailAlwaysFillsExactlyToTheComposerObstruction() {
+    fun shortTailUsesTheAvailableViewportAsItsMinimumHeight() {
         val viewport = 1_000
         val top = 140
         val bottom = 180
         val content = 260
 
-        val spacer = calculateBottomSpacerPx(viewport, top, bottom, content)
+        val minimum = calculateTailMinHeightPx(viewport, top, bottom)
+        val layoutHeight = calculateTailLayoutHeightPx(minimum, content)
 
-        assertEquals(420, spacer)
-        assertEquals(viewport - top, content + spacer + bottom)
+        assertEquals(680, minimum)
+        assertEquals(680, layoutHeight)
+        assertEquals(viewport - top, layoutHeight + bottom)
     }
 
     @Test
-    fun componentShrinkIsAbsorbedByEqualSpacerGrowth() {
+    fun componentGrowthAndShrinkBelowMinimumNeverChangeTailGeometry() {
         val beforeContent = 500
         val afterContent = 220
-        val beforeSpacer = calculateBottomSpacerPx(1_000, 140, 180, beforeContent)
-        val afterSpacer = calculateBottomSpacerPx(1_000, 140, 180, afterContent)
+        val minimum = calculateTailMinHeightPx(1_000, 140, 180)
+        val beforeHeight = calculateTailLayoutHeightPx(minimum, beforeContent)
+        val afterHeight = calculateTailLayoutHeightPx(minimum, afterContent)
 
-        assertEquals(beforeContent + beforeSpacer, afterContent + afterSpacer)
-        assertEquals(beforeSpacer + (beforeContent - afterContent), afterSpacer)
+        assertEquals(minimum, beforeHeight)
+        assertEquals(minimum, afterHeight)
     }
 
     @Test
-    fun bottomBarGrowthIsAbsorbedByEqualSpacerReduction() {
-        val content = 220
+    fun bottomBarGrowthReducesTheTailMinimumDirectly() {
         val beforeBottom = 120
         val afterBottom = 260
-        val beforeSpacer = calculateBottomSpacerPx(1_000, 140, beforeBottom, content)
-        val afterSpacer = calculateBottomSpacerPx(1_000, 140, afterBottom, content)
+        val beforeMinimum = calculateTailMinHeightPx(1_000, 140, beforeBottom)
+        val afterMinimum = calculateTailMinHeightPx(1_000, 140, afterBottom)
 
-        assertEquals(content + beforeSpacer + beforeBottom, content + afterSpacer + afterBottom)
+        assertEquals(140, beforeMinimum - afterMinimum)
     }
 
     @Test
-    fun longTailNeverProducesNegativePadding() {
+    fun longTailGrowsNaturallyPastTheMinimum() {
+        val minimum = calculateTailMinHeightPx(1_000, 140, 180)
+
         assertEquals(
-            0,
-            calculateBottomSpacerPx(
-                viewportHeightPx = 1_000,
-                targetTopPx = 140,
-                bottomObstructionPx = 180,
-                tailContentHeightPx = 2_000,
-            ),
+            2_000,
+            calculateTailLayoutHeightPx(minimum, contentHeightPx = 2_000),
         )
     }
 
@@ -74,11 +73,11 @@ class MessageListLayoutTest {
         val lock = MessageListMutationAnchorLock()
         val original = MessageListViewportAnchor("message-a", 37)
 
-        lock.begin("thinking-card", original)
-        lock.begin(
+        assertEquals(original, lock.begin("thinking-card", original))
+        assertEquals(original, lock.begin(
             "thinking-card",
             MessageListViewportAnchor("already-shifted", 91),
-        )
+        ))
 
         assertEquals(1, lock.activeMutationCount)
         assertEquals(original, lock.anchor)

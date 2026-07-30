@@ -1,10 +1,12 @@
 package com.newoether.agora.ui.chat
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -12,14 +14,16 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
@@ -30,6 +34,8 @@ import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.chat.message.MessageItem
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 internal enum class MessageListLayoutMode {
     STABLE,
@@ -46,16 +52,16 @@ internal fun messageListLayoutMode(
     else -> MessageListLayoutMode.STABLE
 }
 
-internal fun calculateBottomSpacerPx(
+internal fun calculateTailMinHeightPx(
     viewportHeightPx: Int,
     targetTopPx: Int,
     bottomObstructionPx: Int,
-    tailContentHeightPx: Int,
-): Int {
-    val availableTailHeight =
-        viewportHeightPx - targetTopPx - bottomObstructionPx
-    return (availableTailHeight - tailContentHeightPx).coerceAtLeast(0)
-}
+): Int = (viewportHeightPx - targetTopPx - bottomObstructionPx).coerceAtLeast(0)
+
+internal fun calculateTailLayoutHeightPx(
+    minimumHeightPx: Int,
+    contentHeightPx: Int,
+): Int = maxOf(minimumHeightPx, contentHeightPx)
 
 internal data class MessageListViewportAnchor(
     val messageId: String,
@@ -68,9 +74,13 @@ internal class MessageListMutationAnchorLock {
     var anchor: MessageListViewportAnchor? = null
         private set
 
-    fun begin(key: String, candidate: MessageListViewportAnchor?) {
+    fun begin(
+        key: String,
+        candidate: MessageListViewportAnchor?,
+    ): MessageListViewportAnchor? {
         activeMutationKeys += key
         if (anchor == null) anchor = candidate
+        return anchor
     }
 
     /**
@@ -120,14 +130,26 @@ fun MessageList(
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
     val mutationAnchorLock = remember(state) { MessageListMutationAnchorLock() }
+    val mutationScope = rememberCoroutineScope()
+    val pendingMutationSettles = remember(state) { mutableMapOf<String, Job>() }
+
+    fun cancelMutationAnchoring() {
+        pendingMutationSettles.values.forEach { it.cancel() }
+        pendingMutationSettles.clear()
+        mutationAnchorLock.cancel()
+    }
+
     LaunchedEffect(isLoading) { if (isLoading) editingMessageId = null }
     LaunchedEffect(isSwitching) {
-        if (isSwitching) mutationAnchorLock.cancel()
+        if (isSwitching) cancelMutationAnchoring()
     }
     LaunchedEffect(state) {
-        snapshotFlow { state.isScrollInProgress }.collect { scrolling ->
-            if (scrolling) mutationAnchorLock.cancel()
+        state.interactionSource.interactions.collect { interaction ->
+            if (interaction is DragInteraction.Start) cancelMutationAnchoring()
         }
+    }
+    DisposableEffect(state) {
+        onDispose { cancelMutationAnchoring() }
     }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
@@ -141,27 +163,164 @@ fun MessageList(
         RunUiProjection.project(messages.list, allMessages.list)
     }
 
-    val extraPaddingPx = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
+    val tailMinHeightPx = if (lastUserMessageIndex == -1 || viewportHeight == 0) {
         0
     } else {
-        var contentHeightPx = 0
-        for (i in lastUserMessageIndex until messages.list.size) {
-            contentHeightPx += messageHeights[messages.list[i].id] ?: 0
-        }
-        calculateBottomSpacerPx(
+        calculateTailMinHeightPx(
             viewportHeightPx = viewportHeight,
             targetTopPx = with(density) { 140.dp.roundToPx() },
             bottomObstructionPx = with(density) { (bottomBarHeight + 8.dp).roundToPx() },
-            tailContentHeightPx = contentHeightPx,
         )
     }
-    val extraPadding = with(density) { extraPaddingPx.toDp() }
+    val tailMinHeight = with(density) { tailMinHeightPx.toDp() }
+
+    fun lazyIndexForMessageIndex(messageIndex: Int): Int =
+        if (lastUserMessageIndex >= 0 && messageIndex >= lastUserMessageIndex) {
+            lastUserMessageIndex
+        } else {
+            messageIndex
+        }
 
     fun restoreAnchor(anchor: MessageListViewportAnchor): Boolean {
-        val anchorIndex = messages.list.indexOfFirst { it.id == anchor.messageId }
-        if (anchorIndex < 0) return false
-        state.requestScrollToItem(anchorIndex, anchor.scrollOffsetPx)
+        val messageIndex = messages.list.indexOfFirst { it.id == anchor.messageId }
+        if (messageIndex < 0) return false
+        state.requestScrollToItem(
+            lazyIndexForMessageIndex(messageIndex),
+            anchor.scrollOffsetPx,
+        )
         return true
+    }
+
+    val renderMessage: @Composable (ChatMessage) -> Unit = { message ->
+        val isLastMessage = messages.list.lastOrNull()?.id == message.id
+        val isInContext = inContextIds.contains(message.id)
+        val presentation = runPresentation[message.id]
+
+        MessageItem(
+            message = message,
+            onEdit = { id, text ->
+                onEditMessage(id, text)
+                editingMessageId = null
+            },
+            // isStreaming driven by message status, not isLoading flag
+            isStreaming = isLastMessage && message.participant == Participant.MODEL
+                && message.status in setOf(
+                    MessageStatus.SENDING,
+                    MessageStatus.THINKING,
+                    MessageStatus.TOOL_CALLING,
+                    MessageStatus.TRANSCRIBING,
+                ),
+            isLoading = isLoading,
+            isEditingAllowed = (editingMessageId == null || editingMessageId == message.id) && !isLoading,
+            isEditing = editingMessageId == message.id,
+            isSwitching = isSwitching,
+            isInContext = isInContext,
+            modelAliases = modelAliases,
+            visualizeContextRollout = visualizeContextRollout,
+            toolCallDisplayMode = toolCallDisplayMode,
+            onStartEdit = { editingMessageId = message.id },
+            onCancelEdit = { editingMessageId = null },
+            showActions = presentation?.showActions == true,
+            actionCopyText = presentation?.copyText,
+            showBranchSelector = presentation?.showBranchSelector == true,
+            branchIndex = presentation?.branchIndex ?: 0,
+            totalBranches = presentation?.totalBranches ?: 1,
+            onSwitchBranch = { direction ->
+                val anchorId = presentation?.branchAnchorMessageId
+                if (anchorId != null) {
+                    onSwitchBranch(
+                        presentation.branchAnchorParentId,
+                        anchorId,
+                        direction,
+                    )
+                }
+            },
+            onRegenerate = onRegenerate,
+            deleteTargetMessageId = presentation?.deleteTargetMessageId ?: message.id,
+            onDelete = onDelete,
+            onMediaClick = onMediaClick,
+            onFileContentClick = onFileContentClick,
+            onPdfPagesClick = onPdfPagesClick,
+            onHeightChanged = { height ->
+                if (height > 0 && messageHeights[message.id] != height) {
+                    val mode = messageListLayoutMode(
+                        isSwitching = isSwitching,
+                        isScrollInProgress = state.isScrollInProgress,
+                    )
+                    val anchorIndex = state.firstVisibleItemIndex
+                    val anchorOffset = state.firstVisibleItemScrollOffset
+                    // Measurement remains available to explicit scrolling calculations, but
+                    // bottom geometry no longer reads it. The tail's minimum height absorbs
+                    // content changes atomically in the same measure pass.
+                    messageHeights[message.id] = height
+                    if (mode == MessageListLayoutMode.STABLE) {
+                        val lockedAnchor = mutationAnchorLock.anchor
+                        if (lockedAnchor != null) {
+                            restoreAnchor(lockedAnchor)
+                        } else if (anchorIndex < state.layoutInfo.totalItemsCount) {
+                            state.requestScrollToItem(anchorIndex, anchorOffset)
+                        }
+                    }
+                }
+            },
+            onLayoutMutationStarted = { mutationKey ->
+                pendingMutationSettles.remove(mutationKey)?.cancel()
+                if (
+                    messageListLayoutMode(
+                        isSwitching = isSwitching,
+                        isScrollInProgress = state.isScrollInProgress,
+                    ) == MessageListLayoutMode.STABLE
+                ) {
+                    val anchorMessage = messages.list
+                        .getOrNull(state.firstVisibleItemIndex)
+                    val anchor = mutationAnchorLock.begin(
+                        key = mutationKey,
+                        candidate = anchorMessage?.let {
+                            MessageListViewportAnchor(
+                                messageId = it.id,
+                                scrollOffsetPx = state.firstVisibleItemScrollOffset,
+                            )
+                        },
+                    )
+                    // Pre-arm the very first remeasure. Waiting for onSizeChanged is one frame
+                    // too late when an AnimatedVisibility reverses under rapid taps.
+                    if (anchor != null) restoreAnchor(anchor)
+                }
+            },
+            onLayoutMutationSettled = { mutationKey ->
+                pendingMutationSettles.remove(mutationKey)?.cancel()
+                pendingMutationSettles[mutationKey] = mutationScope.launch {
+                    // Transition.isRunning reaches false before the final size has necessarily
+                    // propagated through the parent LazyColumn. Keep the original anchor through
+                    // two complete frames; a reversing tap cancels this pending release.
+                    withFrameNanos { }
+                    withFrameNanos { }
+                    val anchor = mutationAnchorLock.finish(mutationKey)
+                    pendingMutationSettles.remove(mutationKey)
+                    if (
+                        anchor != null &&
+                        messageListLayoutMode(
+                            isSwitching = isSwitching,
+                            isScrollInProgress = state.isScrollInProgress,
+                        ) == MessageListLayoutMode.STABLE
+                    ) {
+                        restoreAnchor(anchor)
+                    }
+                }
+            },
+            thoughtExpandedStates = thoughtExpandedStates,
+        )
+    }
+
+    val headMessages = if (lastUserMessageIndex >= 0) {
+        messages.list.subList(0, lastUserMessageIndex)
+    } else {
+        messages.list
+    }
+    val tailMessages = if (lastUserMessageIndex >= 0) {
+        messages.list.subList(lastUserMessageIndex, messages.list.size)
+    } else {
+        emptyList()
     }
 
     Box(modifier = modifier) {
@@ -172,116 +331,36 @@ fun MessageList(
             state = state,
             userScrollEnabled = userScrollEnabled
         ) {
-            items(messages.list, key = { it.id }) { message ->
-                val isLastMessage = messages.list.lastOrNull()?.id == message.id
-                val isInContext = inContextIds.contains(message.id)
-                val presentation = runPresentation[message.id]
-
+            items(headMessages, key = { it.id }) { message ->
                 // Fade newly-appended messages in. Placement/fade-out left off so this
-                // doesn't fight the manual height/scroll padding management below.
+                // doesn't fight explicit scroll anchoring.
                 Box(modifier = Modifier.animateItem(fadeInSpec = tween(400), placementSpec = null, fadeOutSpec = null)) {
-                MessageItem(
-                    message = message,
-                    onEdit = { id, text ->
-                        onEditMessage(id, text)
-                        editingMessageId = null
-                    },
-                    // isStreaming driven by message status, not isLoading flag
-                    isStreaming = isLastMessage && message.participant == Participant.MODEL
-                        && message.status in setOf(MessageStatus.SENDING, MessageStatus.THINKING, MessageStatus.TOOL_CALLING, MessageStatus.TRANSCRIBING),
-                    isLoading = isLoading,
-                    isEditingAllowed = (editingMessageId == null || editingMessageId == message.id) && !isLoading,
-                    isEditing = editingMessageId == message.id,
-                    isSwitching = isSwitching,
-                    isInContext = isInContext,
-                    modelAliases = modelAliases,
-                    visualizeContextRollout = visualizeContextRollout,
-                    toolCallDisplayMode = toolCallDisplayMode,
-                    onStartEdit = { editingMessageId = message.id },
-                    onCancelEdit = { editingMessageId = null },
-                    showActions = presentation?.showActions == true,
-                    actionCopyText = presentation?.copyText,
-                    showBranchSelector = presentation?.showBranchSelector == true,
-                    branchIndex = presentation?.branchIndex ?: 0,
-                    totalBranches = presentation?.totalBranches ?: 1,
-                    onSwitchBranch = { direction ->
-                        val anchorId = presentation?.branchAnchorMessageId
-                        if (anchorId != null) {
-                            onSwitchBranch(
-                                presentation.branchAnchorParentId,
-                                anchorId,
-                                direction,
-                            )
-                        }
-                    },
-                    onRegenerate = onRegenerate,
-                    deleteTargetMessageId =
-                        presentation?.deleteTargetMessageId ?: message.id,
-                    onDelete = onDelete,
-                    onMediaClick = onMediaClick,
-                    onFileContentClick = onFileContentClick,
-                    onPdfPagesClick = onPdfPagesClick,
-                    onHeightChanged = { height ->
-                        if (height > 0 && messageHeights[message.id] != height) {
-                            val mode = messageListLayoutMode(
-                                isSwitching = isSwitching,
-                                isScrollInProgress = state.isScrollInProgress,
-                            )
-                            val anchorIndex = state.firstVisibleItemIndex
-                            val anchorOffset = state.firstVisibleItemScrollOffset
-                            messageHeights[message.id] = height
-                            if (mode == MessageListLayoutMode.STABLE) {
-                                // Commit the real height and its inverse spacer correction while
-                                // retaining the pre-mutation viewport anchor when an explicit
-                                // component animation is active. The fallback preserves the
-                                // current behavior for unannounced streaming/layout changes.
-                                val lockedAnchor = mutationAnchorLock.anchor
-                                if (lockedAnchor != null) {
-                                    restoreAnchor(lockedAnchor)
-                                } else if (anchorIndex < messages.list.size) {
-                                    state.requestScrollToItem(anchorIndex, anchorOffset)
-                                }
-                            }
-                        }
-                    },
-                    onLayoutMutationStarted = { mutationKey ->
-                        if (
-                            messageListLayoutMode(
-                                isSwitching = isSwitching,
-                                isScrollInProgress = state.isScrollInProgress,
-                            ) == MessageListLayoutMode.STABLE
-                        ) {
-                            val anchorMessage = messages.list
-                                .getOrNull(state.firstVisibleItemIndex)
-                            mutationAnchorLock.begin(
-                                key = mutationKey,
-                                candidate = anchorMessage?.let {
-                                    MessageListViewportAnchor(
-                                        messageId = it.id,
-                                        scrollOffsetPx = state.firstVisibleItemScrollOffset,
-                                    )
-                                },
-                            )
-                        }
-                    },
-                    onLayoutMutationSettled = { mutationKey ->
-                        val anchor = mutationAnchorLock.finish(mutationKey)
-                        if (
-                            anchor != null &&
-                            messageListLayoutMode(
-                                isSwitching = isSwitching,
-                                isScrollInProgress = state.isScrollInProgress,
-                            ) == MessageListLayoutMode.STABLE
-                        ) {
-                            restoreAnchor(anchor)
-                        }
-                    },
-                    thoughtExpandedStates = thoughtExpandedStates
-                )
+                    renderMessage(message)
                 }
             }
-            item {
-                Spacer(modifier = Modifier.height(extraPadding))
+            if (tailMessages.isNotEmpty()) {
+                item(key = tailMessages.first().id) {
+                    Box(
+                        modifier = Modifier.animateItem(
+                            fadeInSpec = tween(400),
+                            placementSpec = null,
+                            fadeOutSpec = null,
+                        ),
+                    ) {
+                        // Column's minimum height is the former content+Spacer contract expressed
+                        // as one layout constraint. As a card grows, unused bottom space shrinks in
+                        // the same measure pass, so no feedback loop can lag or reverse direction.
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = tailMinHeight),
+                        ) {
+                            tailMessages.forEach { message ->
+                                renderMessage(message)
+                            }
+                        }
+                    }
+                }
             }
         }
     }

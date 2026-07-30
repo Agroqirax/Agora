@@ -846,7 +846,7 @@ fun ChatApp(
                             else {
                                 val info = listState.layoutInfo
                                 val total = info.totalItemsCount
-                                total > 1 && info.visibleItemsInfo.none { it.index == total - 2 }
+                                total > 0 && info.visibleItemsInfo.none { it.index == total - 1 }
                             }
                         }
                     }
