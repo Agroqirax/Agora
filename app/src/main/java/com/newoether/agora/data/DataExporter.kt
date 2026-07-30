@@ -21,7 +21,8 @@ class DataExporter(
     private val context: Context,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val memoryManager: MemoryManager
+    private val memoryManager: MemoryManager,
+    private val skillManager: SkillManager
 ) {
     enum class ExportCategory(val manifestKey: String) {
         CONVERSATIONS("conversations"),
@@ -266,6 +267,20 @@ class DataExporter(
                 if (metaJson != "{}") {
                     zip.putNextEntry(ZipEntry("memories/memory_db/memory_meta.json"))
                     zip.write(metaJson.toByteArray())
+                    zip.closeEntry()
+                }
+
+                // Skills travel alongside memories — no separate export category/toggle.
+                for (file in skillManager.listFiles()) {
+                    val content = skillManager.readFile(file.name)
+                    zip.putNextEntry(ZipEntry("skills/skills_db/${file.name}"))
+                    zip.write(content.toByteArray())
+                    zip.closeEntry()
+                }
+                val skillsMetaJson = skillManager.getMetaJson()
+                if (skillsMetaJson != "{}") {
+                    zip.putNextEntry(ZipEntry("skills/skills_db/skills_meta.json"))
+                    zip.write(skillsMetaJson.toByteArray())
                     zip.closeEntry()
                 }
                 step()

@@ -30,7 +30,8 @@ class DataImporter(
     private val context: Context,
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
-    private val memoryManager: MemoryManager
+    private val memoryManager: MemoryManager,
+    private val skillManager: SkillManager
 ) {
     enum class ImportStrategy { MERGE, REPLACE, SKIP }
 
@@ -338,6 +339,32 @@ class DataImporter(
                                 }
                             }
                             memoriesImported++
+                        }
+                    }
+
+                    // Skills travel alongside memories — no separate import category/toggle.
+                    val skillNames = archive.names().filter { it.startsWith("skills/") }
+                    if (memDecision == ImportStrategy.REPLACE) {
+                        for (file in skillManager.listFiles()) {
+                            skillManager.deleteFile(file.name)
+                        }
+                    }
+                    val existingSkillNames = skillManager.listFiles().map { it.name }.toSet()
+                    for (path in skillNames) {
+                        val text = archive.bytes(path)?.decodeToString() ?: continue
+                        if (path == "skills/skills_db/skills_meta.json") {
+                            if (memDecision == ImportStrategy.REPLACE || skillManager.getMetaJson() == "{}") {
+                                skillManager.saveMetaJson(text)
+                            }
+                        } else if (path.startsWith("skills/skills_db/")) {
+                            val name = path.removePrefix("skills/skills_db/")
+                            if (memDecision == ImportStrategy.REPLACE || name !in existingSkillNames) {
+                                try {
+                                    skillManager.createFile(name, text)
+                                } catch (_: Exception) {
+                                    skillManager.editFile(name, text)
+                                }
+                            }
                         }
                     }
                 } catch (e: Exception) {

@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.SkillManager
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.data.repository.ConversationRepository
@@ -36,6 +37,7 @@ class AppContainer(private val appContext: Context) {
 
     val settingsManager: SettingsManager by lazy { SettingsManager(appContext) }
     val memoryManager: MemoryManager by lazy { MemoryManager(appContext) }
+    val skillManager: SkillManager by lazy { SkillManager(appContext) }
     val database: ChatDatabase by lazy { ChatDatabase.build(appContext) }
     val chatDao: ChatDao by lazy { database.chatDao() }
 
@@ -85,14 +87,14 @@ class AppContainer(private val appContext: Context) {
     // ── Auto Backup ───────────────────────────────────────────
 
     val autoBackupManager: AutoBackupManager by lazy {
-        AutoBackupManager(appContext, settingsManager, chatDao, memoryManager)
+        AutoBackupManager(appContext, settingsManager, chatDao, memoryManager, skillManager)
     }
 
     // ── ViewModel Factory ─────────────────────────────────────
 
     fun chatViewModelFactory(): ChatViewModelFactory =
         ChatViewModelFactory(
-            application, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory, packageQueryProvider,
+            application, chatDao, settingsManager, memoryManager, skillManager, appContext, sandboxManagerFactory, packageQueryProvider,
             autoBackupManager, conversationRepository, settingsRepository
         )
 }

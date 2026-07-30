@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModelProvider
 import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.SkillManager
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
@@ -17,6 +18,7 @@ class ChatViewModelFactory(
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager,
+    private val skillManager: SkillManager,
     private val context: Context,
     private val sandboxFactory: SandboxManagerFactory? = null,
     private val packageQueryProvider: com.newoether.agora.tool.PackageQueryProvider,
@@ -28,7 +30,7 @@ class ChatViewModelFactory(
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
             return ChatViewModel(
-                application, chatDao, settingsManager, memoryManager, context, sandboxFactory, packageQueryProvider,
+                application, chatDao, settingsManager, memoryManager, skillManager, context, sandboxFactory, packageQueryProvider,
                 autoBackupManager, conversationRepository, settingsRepository
             ) as T
         }

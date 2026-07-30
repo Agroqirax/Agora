@@ -13,6 +13,7 @@ import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.BackupResult
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.SkillManager
 import com.newoether.agora.data.local.ChatDatabase
 import com.newoether.agora.util.DebugLog
 import java.util.concurrent.TimeUnit
@@ -27,11 +28,13 @@ class AutoBackupWorker(
         val settingsManager = SettingsManager(applicationContext)
         val db = ChatDatabase.build(applicationContext)
         val memoryManager = MemoryManager(applicationContext)
+        val skillManager = SkillManager(applicationContext)
         val manager = AutoBackupManager(
             applicationContext,
             settingsManager,
             db.chatDao(),
-            memoryManager
+            memoryManager,
+            skillManager
         )
 
         return try {

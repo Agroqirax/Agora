@@ -78,6 +78,7 @@ data class GenerationContext(
     val conversationId: String? = null,
     val accessSavedMemories: Boolean = true,
     val accessActiveMemory: Boolean = true,
+    val skillsEnabled: Boolean = true,
     val accessPastConversations: Boolean = true,
     val modelSearchMethod: String = "keyword",
     val activeEmbeddingConfig: com.newoether.agora.data.EmbeddingModelConfig? = null,
@@ -167,6 +168,7 @@ class GenerationManager(
     private val app: Application,
     private val conversations: com.newoether.agora.data.repository.ConversationRepository,
     private val memoryManager: MemoryManager,
+    private val skillManager: com.newoether.agora.data.SkillManager,
     private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
@@ -256,6 +258,7 @@ class GenerationManager(
     var onRequestNotificationPostPermission: (suspend () -> Boolean)? = null
 
     private val memoryToolProvider = MemoryToolProvider(memoryManager)
+    private val skillToolProvider = com.newoether.agora.tool.SkillToolProvider(skillManager)
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider(conversations)
     private val imageGenToolProvider = ImageGenToolProvider(app)
@@ -315,7 +318,7 @@ class GenerationManager(
     }
     private val calculatorToolProvider = CalculatorToolProvider()
     private val toolProviders: List<ToolProvider> = listOf(
-        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
+        memoryToolProvider, skillToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider,
         locationToolProvider, deviceInfoToolProvider, packageQueryToolProvider, calendarToolProvider,
         contactsToolProvider, alarmToolProvider, appLaunchToolProvider, urlOpenToolProvider, mediaControlToolProvider, notificationToolProvider,
         torchToolProvider, weatherToolProvider, calculatorToolProvider, mcpToolProvider
@@ -382,6 +385,9 @@ class GenerationManager(
 
     fun buildMemoryTools(ctx: GenerationContext): List<ToolDefinition> =
         memoryToolProvider.definitions(ctx)
+
+    fun buildSkillTools(ctx: GenerationContext): List<ToolDefinition> =
+        skillToolProvider.definitions(ctx)
 
     fun buildWebSearchTool(ctx: GenerationContext): List<ToolDefinition> =
         webSearchToolProvider.definitions(ctx)
@@ -570,6 +576,7 @@ class GenerationManager(
             }
 
         val memoryTools = buildMemoryTools(ctx)
+        val skillTools = buildSkillTools(ctx)
         val webSearchTool = buildWebSearchTool(ctx)
         val ragTool = buildRagTool(ctx)
         val shellTool = buildShellTool(ctx)
@@ -589,7 +596,7 @@ class GenerationManager(
         val weatherTool = buildWeatherTool(ctx)
         val calculatorTool = buildCalculatorTool(ctx)
         val mcpTool = buildMcpTool(ctx)
-        val allTools = memoryTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
+        val allTools = memoryTools + skillTools + webSearchTool + ragTool + imageGenTool + shellTool + fileTool + locationTool + deviceInfoTool + packageQueryTool + calendarTool + contactsTool + alarmTool + appLaunchTool + urlOpenTool + mediaControlTool + notificationTool + torchTool + weatherTool + calculatorTool + mcpTool
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,

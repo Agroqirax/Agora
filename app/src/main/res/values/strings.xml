@@ -172,6 +172,8 @@
     <string name="settings_transcription_desc">Use a vision model to describe images for non-vision models</string>
     <string name="settings_memory">Memory</string>
     <string name="settings_memory_desc">Active memory and saved files</string>
+    <string name="settings_skills">Skills</string>
+    <string name="settings_skills_desc">Curated instructions the model can read</string>
     <string name="search_title">Conversation Search</string>
     <string name="search_desc">Access to conversation history and search method</string>
 
@@ -645,6 +647,28 @@
     <string name="memory_delete_text">Are you sure you want to delete \'%1$s\'? This cannot be undone.</string>
     <string name="memory_add_title">Add Memory</string>
     <string name="memory_create">Create</string>
+
+    <!-- Settings - Skills Page -->
+    <string name="skills_title">Skills</string>
+    <string name="skills_access">Access Skills</string>
+    <string name="skills_access_desc">Allow the model to list and read skills</string>
+    <string name="skills_saved_title">Skills</string>
+    <string name="skills_add">Add Skill</string>
+    <string name="skills_no_files">No skills yet</string>
+    <string name="skills_create_hint">Create a skill describing how to approach a task</string>
+    <string name="skills_edit">Edit Skill</string>
+    <string name="skills_title_hint">Title</string>
+    <string name="skills_desc_hint">Description</string>
+    <string name="skills_content_hint">Content</string>
+    <string name="skills_delete_title">Delete Skill?</string>
+    <string name="skills_delete_text">Are you sure you want to delete \'%1$s\'? This cannot be undone.</string>
+    <string name="skills_add_title">Add Skill</string>
+    <string name="skills_create">Create</string>
+    <string name="skills_builtin_label">Built-in</string>
+    <string name="skills_reset_default">Reset to default</string>
+    <string name="skills_reset_confirm_title">Reset Skill?</string>
+    <string name="skills_reset_confirm_text">This will discard your changes to \'%1$s\' and restore the built-in content.</string>
+    <string name="skills_reset">Reset</string>
 
     <!-- Snackbar Messages -->
     <string name="snackbar_fetching_models">Fetching available models...</string>

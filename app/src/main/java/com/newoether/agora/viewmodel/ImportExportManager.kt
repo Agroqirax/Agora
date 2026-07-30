@@ -47,6 +47,7 @@ class ImportExportManager(
     private val chatDao: ChatDao,
     private val settingsManager: SettingsManager,
     private val memoryManager: MemoryManager,
+    private val skillManager: com.newoether.agora.data.SkillManager,
     private val scope: CoroutineScope,
     private val emitSnackbar: suspend (SnackbarEvent) -> Unit,
     private val onDataChanged: suspend () -> Unit,
@@ -86,7 +87,7 @@ class ImportExportManager(
     fun exportData(uri: Uri, categories: Set<DataExporter.ExportCategory>, includeApiKeys: Boolean) {
         scope.launch(Dispatchers.IO) {
             try {
-                val exporter = DataExporter(app, chatDao, settingsManager, memoryManager)
+                val exporter = DataExporter(app, chatDao, settingsManager, memoryManager, skillManager)
                 exporter.export(uri, categories, includeApiKeys) { progress ->
                     _exportProgress.value = progress
                 }
@@ -104,7 +105,7 @@ class ImportExportManager(
     fun previewImport(uri: Uri) {
         scope.launch(Dispatchers.IO) {
             try {
-                val importer = DataImporter(app, chatDao, settingsManager, memoryManager)
+                val importer = DataImporter(app, chatDao, settingsManager, memoryManager, skillManager)
                 val manifest = importer.readManifest(uri)
                 if (manifest == null) {
                     emitSnackbar(SnackbarEvent(app.getString(R.string.import_invalid_file)))
@@ -374,7 +375,7 @@ class ImportExportManager(
     fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) {
         scope.launch(Dispatchers.IO) {
             try {
-                val importer = DataImporter(app, chatDao, settingsManager, memoryManager)
+                val importer = DataImporter(app, chatDao, settingsManager, memoryManager, skillManager)
                 val result = importer.import(uri, decisions) { progress ->
                     _importProgress.value = progress
                 }
