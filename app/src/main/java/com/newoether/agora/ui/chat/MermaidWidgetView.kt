@@ -5,9 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import com.newoether.agora.ui.theme.LocalDarkTheme
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -53,7 +53,7 @@ private fun rememberMermaidThemeVariablesJson(): String {
     val outline = scheme.outline.toArgb().toCssHex()
     val error = scheme.error.toArgb().toCssHex()
     val onError = scheme.onError.toArgb().toCssHex()
-    val darkMode = scheme.background.luminance() < 0.5f
+    val darkMode = LocalDarkTheme.current
     return remember(primary, onPrimary, surface, onSurface, surfaceVariant, onSurfaceVariant, outline, error, onError, darkMode) {
         buildJsonObject {
                 put("darkMode", darkMode)

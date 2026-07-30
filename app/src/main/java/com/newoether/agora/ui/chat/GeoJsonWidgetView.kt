@@ -19,10 +19,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.ui.theme.LocalDarkTheme
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -320,7 +320,7 @@ fun GeoJsonWidgetCard(
     val primaryColor = scheme.primary.toArgb().toCssHex()
     val onPrimaryColor = scheme.onPrimary.toArgb().toCssHex()
     val surfaceVariantColor = scheme.surfaceVariant.toArgb().toCssHex()
-    val darkMode = scheme.background.luminance() < 0.5f
+    val darkMode = LocalDarkTheme.current
     val documentHtml = remember(source, tileUrl, themeTiles, darkMode, leafletJs, leafletCss, primaryColor, onPrimaryColor, surfaceVariantColor) {
         buildGeoJsonHtml(source, tileUrl, themeTiles, darkMode, leafletCss, leafletJs, primaryColor, onPrimaryColor, surfaceVariantColor)
     }

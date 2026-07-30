@@ -39,7 +39,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -57,6 +56,7 @@ import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.common.rememberAgoraHaptics
+import com.newoether.agora.ui.theme.LocalDarkTheme
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.cancel
@@ -491,7 +491,7 @@ fun ChatApp(
                 .clearFocusOnTap()
                 .onSizeChanged { viewportHeightPx = it.height }
         ) {
-            val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+            val dark = LocalDarkTheme.current
             val (targetCa, targetQa) = if (!dark) {
                 0.00f to 0.00f
             } else if (isNewChatMode) {
