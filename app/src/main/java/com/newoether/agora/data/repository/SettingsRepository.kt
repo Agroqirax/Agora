@@ -4,6 +4,7 @@ import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
@@ -91,6 +92,8 @@ class SettingsRepository(
     val thinkingBudgetEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingBudgetEnabled, false)
     val thinkingBudgetTokens: StateFlow<Int> = hot(settingsManager.thinkingBudgetTokens, 4096)
     val providerBaseUrls: StateFlow<Map<String, String>> = hot(settingsManager.providerBaseUrls, emptyMap())
+    val customEndpointResolutions: StateFlow<Map<String, CustomEndpointResolution>> =
+        hot(settingsManager.customEndpointResolutions, emptyMap())
     val titleGenerationEnabled: StateFlow<Boolean> = hot(settingsManager.titleGenerationEnabled, true)
     val titleGenerationModel: StateFlow<String?> = hot(settingsManager.titleGenerationModel, null)
     val titleGenerationPrompt: StateFlow<String> = hot(settingsManager.titleGenerationPrompt, BuiltInPrompts.TITLE_GENERATION_SYSTEM)
@@ -274,6 +277,7 @@ class SettingsRepository(
     // Custom provider CRUD. ProviderRegistry owns live instance construction.
     fun addCustomProvider(config: CustomProviderConfig, baseUrl: String) {
         scope.launch {
+            settingsManager.saveCustomEndpointResolution(config.name, null)
             settingsManager.saveProviderBaseUrl(config.name, baseUrl)
             settingsManager.saveCustomProviders(customProviders.value + config)
         }
@@ -287,6 +291,7 @@ class SettingsRepository(
             if (idx >= 0) {
                 updated[idx] = updated[idx].copy(name = newName)
                 settingsManager.saveCustomProviders(updated)
+                settingsManager.renameCustomEndpointResolution(oldName, newName)
                 settingsManager.saveProviderBaseUrl(oldName, "")
                 settingsManager.saveProviderBaseUrl(newName, url)
                 val models = availableModels.value.toMutableMap()
@@ -310,6 +315,7 @@ class SettingsRepository(
             val updated = customProviders.value.map { config ->
                 if (config.name == name) config.copy(protocol = protocol) else config
             }
+            settingsManager.saveCustomEndpointResolution(name, null)
             settingsManager.saveCustomProviders(updated)
         }
     }
@@ -317,6 +323,7 @@ class SettingsRepository(
     fun deleteCustomProvider(name: String) {
         scope.launch {
             settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
+            settingsManager.saveCustomEndpointResolution(name, null)
             settingsManager.saveAvailableModels(name, emptyList())
             settingsManager.saveEnabledModels(enabledModels.value.filter { !it.startsWith("$name:") }.toSet())
             settingsManager.saveModelAliases(modelAliases.value.filterKeys { !it.startsWith("$name:") })
@@ -338,7 +345,10 @@ class SettingsRepository(
     // ── Simple setting toggles ────────────────────────────────
     fun setMaxContextWindow(window: Int) = scope.launch { settingsManager.saveMaxContextWindow(window) }
     fun setVisualizeContextRollout(enabled: Boolean) = scope.launch { settingsManager.saveVisualizeContextRollout(enabled) }
-    fun setProviderBaseUrl(provider: String, url: String) = scope.launch { settingsManager.saveProviderBaseUrl(provider, url) }
+    fun setProviderBaseUrl(provider: String, url: String) = scope.launch {
+        settingsManager.saveCustomEndpointResolution(provider, null)
+        settingsManager.saveProviderBaseUrl(provider, url)
+    }
     fun setTitleGenerationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTitleGenerationEnabled(enabled) }
     fun setTitleGenerationModel(model: String?) = scope.launch { settingsManager.saveTitleGenerationModel(model) }
     fun setTitleGenerationPrompt(prompt: String) = scope.launch { settingsManager.saveTitleGenerationPrompt(prompt) }
@@ -438,6 +448,10 @@ class SettingsRepository(
     suspend fun getActiveEmbeddingModelId(): String = settingsManager.activeEmbeddingModelId.first()
     suspend fun getModelAliases(): Map<String, String> = settingsManager.modelAliases.first()
     suspend fun getProviderBaseUrls(): Map<String, String> = settingsManager.providerBaseUrls.first()
+    suspend fun saveCustomEndpointResolution(
+        provider: String,
+        resolution: CustomEndpointResolution,
+    ) = settingsManager.saveCustomEndpointResolution(provider, resolution)
     suspend fun getAvailableModels(): Map<String, List<String>> = settingsManager.availableModels.first()
     suspend fun getSystemPrompts(): List<SystemPromptEntry> = settingsManager.systemPrompts.first()
 

@@ -4,6 +4,7 @@ import com.newoether.agora.api.anthropic.AnthropicProvider
 import com.newoether.agora.api.gemini.GeminiProvider
 import com.newoether.agora.api.openai.CustomOpenAiProvider
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -80,14 +81,44 @@ class CustomProviderFactoryTest {
     }
 
     @Test
-    fun explicitVersionedBaseUrlIsNeverRewritten() {
+    fun explicitVersionedBaseUrlIsTriedBeforeMigrationFallbacks() {
         val url = "https://example.test/v1beta"
 
-        CustomEndpointProtocol.selectable.forEach { protocol ->
-            assertEquals(
-                listOf(url),
-                customEndpointBaseUrlCandidates(protocol, url),
-            )
-        }
+        assertEquals(
+            listOf(url, "https://example.test/v1", "https://example.test"),
+            customEndpointBaseUrlCandidates(CustomEndpointProtocol.OPENAI, url),
+        )
+        assertEquals(
+            listOf(url, "https://example.test/v1", "https://example.test"),
+            customEndpointBaseUrlCandidates(CustomEndpointProtocol.ANTHROPIC, url),
+        )
+        assertEquals(
+            listOf(url, "https://example.test"),
+            customEndpointBaseUrlCandidates(CustomEndpointProtocol.GOOGLE, url),
+        )
+    }
+
+    @Test
+    fun oldPersistedV1CanRecoverWhenSwitchingToGoogle() {
+        assertEquals(
+            listOf("https://example.test/v1", "https://example.test"),
+            customEndpointBaseUrlCandidates(
+                CustomEndpointProtocol.GOOGLE,
+                "https://example.test/v1",
+            ),
+        )
+    }
+
+    @Test
+    fun resolvedEndpointIsScopedToProtocolAndConfiguredUrl() {
+        val resolution = CustomEndpointResolution(
+            protocol = CustomEndpointProtocol.OPENAI,
+            configuredBaseUrl = "https://example.test/",
+            effectiveBaseUrl = "https://example.test/v1",
+        )
+
+        assertTrue(resolution.matches(CustomEndpointProtocol.OPENAI, "https://example.test"))
+        assertTrue(!resolution.matches(CustomEndpointProtocol.GOOGLE, "https://example.test"))
+        assertTrue(!resolution.matches(CustomEndpointProtocol.OPENAI, "https://other.test"))
     }
 }

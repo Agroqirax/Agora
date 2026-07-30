@@ -1,13 +1,6 @@
 package com.newoether.agora.api
 
-/**
- * Resolves the OpenAI-compatible "should the Base URL include /v1?" ambiguity.
- *
- * Design: the ambiguity is resolved **once, at configuration time**
- * (see [com.newoether.agora.viewmodel.ProviderRegistry.fetchModelsForProvider]),
- * and the canonical Base URL is persisted. The request hot path then uses a single
- * deterministic endpoint instead of trying both forms (and eating a 404) on every call.
- */
+/** Utilities for protocol-specific API version paths on custom endpoint base URLs. */
 object BaseUrlResolver {
     /**
      * Matches an API version segment anywhere in the path: `/v1`, `/v1beta`,
@@ -15,6 +8,7 @@ object BaseUrlResolver {
      * must not have `/v1` appended.
      */
     private val VERSION_SEGMENT = Regex("""/v\d""")
+    private val TRAILING_VERSION_SEGMENT = Regex("""/v\d[A-Za-z0-9._-]*$""", RegexOption.IGNORE_CASE)
 
     fun hasVersionSegment(url: String): Boolean =
         VERSION_SEGMENT.containsMatchIn(url.trimEnd('/'))
@@ -23,5 +17,15 @@ object BaseUrlResolver {
     fun withV1(url: String): String {
         val trimmed = url.trimEnd('/')
         return if (trimmed.isBlank() || hasVersionSegment(trimmed)) trimmed else "$trimmed/v1"
+    }
+
+    /**
+     * Removes only a terminal API version segment. This intentionally leaves URLs such as
+     * `/v1/proxy` untouched: only the old sync behavior could have appended a version at the end.
+     */
+    fun withoutTrailingVersion(url: String): String? {
+        val trimmed = url.trimEnd('/')
+        val match = TRAILING_VERSION_SEGMENT.find(trimmed) ?: return null
+        return trimmed.removeRange(match.range).trimEnd('/').takeIf { it.isNotBlank() }
     }
 }

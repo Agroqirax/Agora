@@ -12,6 +12,7 @@ import com.newoether.agora.api.openai.OpenAiProvider
 import com.newoether.agora.api.openai.OpenRouterProvider
 import com.newoether.agora.api.openai.QwenProvider
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
@@ -38,21 +39,39 @@ internal fun customEndpointBaseUrlCandidates(
     baseUrl: String?,
 ): List<String?> {
     if (baseUrl.isNullOrBlank()) return listOf(baseUrl)
-    if (com.newoether.agora.api.BaseUrlResolver.hasVersionSegment(baseUrl)) {
-        return listOf(baseUrl)
-    }
+    val normalized = baseUrl.trim().trimEnd('/')
+    val resolver = com.newoether.agora.api.BaseUrlResolver
+    val unversioned = resolver.withoutTrailingVersion(normalized)
     return when (protocol) {
         CustomEndpointProtocol.OPENAI,
-        CustomEndpointProtocol.ANTHROPIC -> listOf(
-            com.newoether.agora.api.BaseUrlResolver.withV1(baseUrl),
-            baseUrl,
-        )
+        CustomEndpointProtocol.ANTHROPIC -> buildList {
+            add(normalized)
+            if (!resolver.hasVersionSegment(normalized)) {
+                add(0, resolver.withV1(normalized))
+            } else if (unversioned != null) {
+                add(resolver.withV1(unversioned))
+                add(unversioned)
+            }
+        }.distinct()
         // GeminiProvider owns its v1beta completion so both model discovery and generation
         // use the same exact base URL semantics.
-        CustomEndpointProtocol.GOOGLE -> listOf(baseUrl)
+        CustomEndpointProtocol.GOOGLE -> buildList {
+            add(normalized)
+            // Compatibility with the former sync implementation, which may have persisted
+            // its derived terminal `/v1` into the user-facing Base URL.
+            if (unversioned != null) add(unversioned)
+        }.distinct()
         CustomEndpointProtocol.UNKNOWN -> emptyList()
     }
 }
+
+internal fun CustomEndpointResolution.matches(
+    protocol: CustomEndpointProtocol,
+    configuredBaseUrl: String,
+): Boolean =
+    this.protocol == protocol &&
+        this.configuredBaseUrl.trim().trimEnd('/') == configuredBaseUrl.trim().trimEnd('/') &&
+        effectiveBaseUrl.isNotBlank()
 
 /** Pure policy boundary used by both production code and JVM tests. Missing providers fail shut. */
 internal fun providerConfigurationIsValid(
@@ -99,6 +118,7 @@ class ProviderRegistry(
 
     // Declared as MutableMap so `in`/`contains` keep Map (containsKey) semantics (KT-18053).
     private val providers: MutableMap<String, LlmProvider> = ConcurrentHashMap(builtInProviders)
+    private val runtimeEndpointResolutions = ConcurrentHashMap<String, CustomEndpointResolution>()
     private val initialCustomProviderSync = CompletableDeferred<Unit>()
 
     /** Live, thread-safe read view shared with the generation pipeline. */
@@ -114,9 +134,19 @@ class ProviderRegistry(
      *  its provider was deleted, which must render gracefully, not crash. */
     fun getInstanceOrNull(name: String): LlmProvider? = providers[name]
 
-    fun getEffectiveBaseUrl(providerName: String): String? =
-        settings.providerBaseUrls.value[providerName]?.takeIf { it.isNotBlank() }
-            ?: providers[providerName]?.takeIf { !isBuiltIn(providerName) }?.defaultBaseUrl
+    fun getEffectiveBaseUrl(providerName: String): String? {
+        val configuredBaseUrl = settings.providerBaseUrls.value[providerName]?.takeIf { it.isNotBlank() }
+            ?: return providers[providerName]?.takeIf { !isBuiltIn(providerName) }?.defaultBaseUrl
+        val customConfig = settings.customProviders.value.firstOrNull { it.name == providerName }
+            ?: return configuredBaseUrl
+        val resolution = sequenceOf(
+            runtimeEndpointResolutions[providerName],
+            settings.customEndpointResolutions.value[providerName],
+        ).filterNotNull().firstOrNull {
+            it.matches(customConfig.protocol, configuredBaseUrl)
+        }
+        return resolution?.effectiveBaseUrl ?: configuredBaseUrl
+    }
 
     fun isConfigured(providerName: String, activeKey: String): Boolean =
         providerConfigurationIsValid(
@@ -148,6 +178,7 @@ class ProviderRegistry(
     ) {
         val config = CustomProviderConfig(name = name, protocol = protocol)
         val provider = createCustomProvider(config, baseUrl) ?: return
+        runtimeEndpointResolutions.remove(name)
         providers[name] = provider
         settings.addCustomProvider(config, baseUrl)
     }
@@ -159,6 +190,7 @@ class ProviderRegistry(
         val provider = createCustomProvider(newConfig, url) ?: return
         providers.remove(oldName)
         providers[newName] = provider
+        runtimeEndpointResolutions.remove(oldName)?.let { runtimeEndpointResolutions[newName] = it }
         settings.renameCustomProvider(oldName, newName)
     }
 
@@ -168,11 +200,13 @@ class ProviderRegistry(
         val url = settings.providerBaseUrls.value[name].orEmpty()
         val provider = createCustomProvider(updated, url)
         if (provider == null) providers.remove(name) else providers[name] = provider
+        runtimeEndpointResolutions.remove(name)
         settings.updateCustomProviderProtocol(name, protocol)
     }
 
     fun deleteCustom(name: String) {
         providers.remove(name)
+        runtimeEndpointResolutions.remove(name)
         settings.deleteCustomProvider(name)
     }
 
@@ -210,10 +244,9 @@ class ProviderRegistry(
             settings.providerBaseUrls.value[name]?.takeIf { it.isNotBlank() }
         }
 
-        // Resolve the "/v1" ambiguity ONCE here (config time) and persist the canonical
-        // Base URL, so the request hot path uses a single deterministic endpoint instead
-        // of trying both forms (and eating a 404) on every call. Custom OpenAI-compatible
-        // providers without a version segment are probed /v1-first (the common case).
+        // Resolve protocol-specific versioning once during model sync. The successful
+        // effective URL is cached separately from the user's Base URL and is only reusable
+        // while both the configured URL and protocol still match.
         val customConfig = settings.customProviders.value.firstOrNull { it.name == name }
         val candidates: List<String?> = if (customConfig != null) {
             customEndpointBaseUrlCandidates(customConfig.protocol, baseUrl)
@@ -224,9 +257,15 @@ class ProviderRegistry(
         for (candidate in candidates) {
             val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) { provider.fetchModels(activeKey, candidate) }
             if (raw.isEmpty()) continue
-            // Persist the working form when it differs from what was stored, so the
-            // ambiguity is never re-litigated at request time.
-            if (candidate != null && candidate != baseUrl) settings.setProviderBaseUrl(name, candidate)
+            if (customConfig != null && candidate != null && baseUrl != null) {
+                val resolution = CustomEndpointResolution(
+                    protocol = customConfig.protocol,
+                    configuredBaseUrl = baseUrl,
+                    effectiveBaseUrl = candidate,
+                )
+                runtimeEndpointResolutions[name] = resolution
+                settings.saveCustomEndpointResolution(name, resolution)
+            }
             val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
             settings.saveAvailableModels(name, prefixed)
             return prefixed

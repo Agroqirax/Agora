@@ -114,6 +114,7 @@ class SettingsManager(private val context: Context) {
         val THINKING_BUDGET_ENABLED = booleanPreferencesKey("thinking_budget_enabled")
         val THINKING_BUDGET_TOKENS = intPreferencesKey("thinking_budget_tokens")
         val PROVIDER_BASE_URLS = stringPreferencesKey("provider_base_urls")
+        val CUSTOM_ENDPOINT_RESOLUTIONS_JSON = stringPreferencesKey("custom_endpoint_resolutions_json")
         val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
         val TITLE_GENERATION_MODEL = stringPreferencesKey("title_generation_model")
         val TITLE_GENERATION_PROMPT = stringPreferencesKey("title_generation_prompt")
@@ -201,6 +202,16 @@ class SettingsManager(private val context: Context) {
     val providerBaseUrls: Flow<Map<String, String>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[PROVIDER_BASE_URLS] ?: "{}"
         try { json.decodeFromString<Map<String, String>>(jsonStr) } catch (e: Exception) { DebugLog.e("SettingsManager", "Failed to decode providerBaseUrls", e); emptyMap() }
+    }
+
+    val customEndpointResolutions: Flow<Map<String, CustomEndpointResolution>> = context.dataStore.data.map { pref ->
+        val jsonStr = pref[CUSTOM_ENDPOINT_RESOLUTIONS_JSON] ?: "{}"
+        try {
+            json.decodeFromString<Map<String, CustomEndpointResolution>>(jsonStr)
+        } catch (e: Exception) {
+            DebugLog.e("SettingsManager", "Failed to decode customEndpointResolutions", e)
+            emptyMap()
+        }
     }
 
     val availableModels: Flow<Map<String, List<String>>> = context.dataStore.data.map { pref ->
@@ -374,6 +385,44 @@ class SettingsManager(private val context: Context) {
             val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { mutableMapOf() }
             map[provider] = url
             prefs[PROVIDER_BASE_URLS] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun saveCustomEndpointResolution(
+        provider: String,
+        resolution: CustomEndpointResolution?,
+    ) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[CUSTOM_ENDPOINT_RESOLUTIONS_JSON] ?: "{}"
+            val map = try {
+                json.decodeFromString<MutableMap<String, CustomEndpointResolution>>(current)
+            } catch (e: Exception) {
+                mutableMapOf()
+            }
+            if (resolution == null) {
+                map.remove(provider)
+            } else {
+                map[provider] = resolution
+            }
+            if (map.isEmpty()) {
+                prefs.remove(CUSTOM_ENDPOINT_RESOLUTIONS_JSON)
+            } else {
+                prefs[CUSTOM_ENDPOINT_RESOLUTIONS_JSON] = json.encodeToString(map)
+            }
+        }
+    }
+
+    suspend fun renameCustomEndpointResolution(oldName: String, newName: String) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[CUSTOM_ENDPOINT_RESOLUTIONS_JSON] ?: return@edit
+            val map = try {
+                json.decodeFromString<MutableMap<String, CustomEndpointResolution>>(current)
+            } catch (e: Exception) {
+                return@edit
+            }
+            val resolution = map.remove(oldName) ?: return@edit
+            map[newName] = resolution
+            prefs[CUSTOM_ENDPOINT_RESOLUTIONS_JSON] = json.encodeToString(map)
         }
     }
 

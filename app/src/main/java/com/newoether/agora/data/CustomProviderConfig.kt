@@ -45,3 +45,17 @@ data class CustomProviderConfig(
     // Configs written before protocol selection existed were OpenAI-compatible.
     val protocol: CustomEndpointProtocol = CustomEndpointProtocol.OPENAI,
 )
+
+/**
+ * Derived endpoint discovered during model sync.
+ *
+ * [configuredBaseUrl] remains the user's input. The effective URL is only reusable while
+ * both that input and the selected protocol still match, so changing either cannot leak a
+ * stale `/v1` (or any other protocol-specific path) into subsequent requests.
+ */
+@Serializable
+data class CustomEndpointResolution(
+    val protocol: CustomEndpointProtocol,
+    val configuredBaseUrl: String,
+    val effectiveBaseUrl: String,
+)
