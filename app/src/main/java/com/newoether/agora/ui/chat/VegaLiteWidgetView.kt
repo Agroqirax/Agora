@@ -94,6 +94,42 @@ private fun rememberVegaLiteThemeConfigJson(): String {
 }
 
 /**
+ * CSS for the HTML form controls vega-embed renders for a spec's `bind`ings (sliders, dropdowns,
+ * checkboxes, radio groups) — these are plain `<input>`/`<select>`/`<label>` elements outside the
+ * chart's own SVG, so [rememberVegaLiteThemeConfigJson]'s Vega-Lite `config` (which only styles
+ * marks/axes/legends) never touches them. Left unstyled they render with the browser's default
+ * light-mode form-control chrome, same problem [rememberWidgetThemeCss] fixes for HTML widgets —
+ * this mirrors that same input/select/range/checkbox styling against the app's Material colors.
+ */
+@Composable
+private fun rememberVegaLiteControlsCss(): String {
+    val scheme = MaterialTheme.colorScheme
+    val primary = scheme.primary.toArgb().toCssHex()
+    val onSurface = scheme.onSurface.toArgb().toCssHex()
+    val onSurfaceVariant = scheme.onSurfaceVariant.toArgb().toCssHex()
+    val surfaceVariant = scheme.surfaceVariant.toArgb().toCssHex()
+    val outline = scheme.outline.toArgb().toCssHex()
+    return remember(primary, onSurface, onSurfaceVariant, surfaceVariant, outline) {
+        """
+        .vega-bindings {
+          color: $onSurface;
+          font-family: sans-serif;
+          font-size: 12px;
+        }
+        .vega-bind { margin-top: 6px; }
+        .vega-bind-name { color: $onSurfaceVariant; margin-right: 6px; }
+        select, input[type=text], input[type=number] {
+          font-family: inherit; color: $onSurface;
+          background-color: $surfaceVariant;
+          border: 1px solid $outline; border-radius: 8px; padding: 4px 8px;
+        }
+        input[type=range] { accent-color: $primary; background: transparent; border: none; padding: 0; vertical-align: middle; }
+        input[type=checkbox], input[type=radio] { accent-color: $primary; }
+        """.trimIndent()
+    }
+}
+
+/**
  * Builds a self-contained HTML document that inlines the bundled Vega/Vega-Lite/vega-embed and
  * renders [specJson] into an SVG on load. The spec is embedded as a `<script type="application/
  * json">` block (not a JS string literal), same trick as [buildGeoJsonHtml] uses, so arbitrary
@@ -101,7 +137,7 @@ private fun rememberVegaLiteThemeConfigJson(): String {
  * `actions: false` hides vega-embed's default export/source menu, which would otherwise float a
  * "..." button over model-authored chart content.
  */
-private fun buildVegaLiteHtml(specJson: String, themeConfigJson: String, vegaJs: String, vegaLiteJs: String, vegaEmbedJs: String): String {
+private fun buildVegaLiteHtml(specJson: String, themeConfigJson: String, controlsCss: String, vegaJs: String, vegaLiteJs: String, vegaEmbedJs: String): String {
     val safeSpec = specJson.replace("</", "<\\/")
     return """
         <html>
@@ -109,6 +145,7 @@ private fun buildVegaLiteHtml(specJson: String, themeConfigJson: String, vegaJs:
         <style>
         html, body { background: transparent; margin: 0; padding: 8px; }
         #view { width: 100%; }
+        $controlsCss
         </style>
         </head>
         <body>
@@ -154,8 +191,9 @@ fun VegaLiteWidgetCard(
 
     val (vegaJs, vegaLiteJs, vegaEmbedJs) = rememberVegaJsSources()
     val themeConfigJson = rememberVegaLiteThemeConfigJson()
-    val documentHtml = remember(specSource, themeConfigJson, vegaJs, vegaLiteJs, vegaEmbedJs) {
-        buildVegaLiteHtml(specSource, themeConfigJson, vegaJs, vegaLiteJs, vegaEmbedJs)
+    val controlsCss = rememberVegaLiteControlsCss()
+    val documentHtml = remember(specSource, themeConfigJson, controlsCss, vegaJs, vegaLiteJs, vegaEmbedJs) {
+        buildVegaLiteHtml(specSource, themeConfigJson, controlsCss, vegaJs, vegaLiteJs, vegaEmbedJs)
     }
     WidgetCard(
         sourceText = specSource,
