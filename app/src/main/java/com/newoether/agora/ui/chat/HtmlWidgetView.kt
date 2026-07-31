@@ -368,9 +368,9 @@ class WidgetFenceSpec(
  * can choose to inline-render or show source just by picking the fence language, and disabling a
  * widget kind in settings always degrades to a plain code block rather than breaking.
  *
- * A fence tagged with a generic `json`/`xml` language (models often reach for that instead of the
- * specific widget language) also gets a chance via [sniffGenericFenceLanguage] — its body is
- * inspected and, if it confidently matches a widget's shape, dispatched to that widget's spec.
+ * A fence tagged with a generic `json`/`xml`/`svg` language (models often reach for that instead
+ * of the specific widget language) also gets a chance via [sniffGenericFenceLanguage] — its body
+ * is inspected and, if it confidently matches a widget's shape, dispatched to that widget's spec.
  */
 @Composable
 fun MarkdownWidgetFence(
@@ -385,7 +385,7 @@ fun MarkdownWidgetFence(
     // match or a fence tagged with one of the generic languages sniffing understands — every
     // other fence language (python, bash, an unrelated json/xml example, ...) stays a no-op here,
     // same as before this sniffing was added.
-    val mightSniff = exactSpec == null && (language == "json" || language == "xml")
+    val mightSniff = exactSpec == null && (language == "json" || language == "xml" || language == "svg")
     if ((exactSpec != null || mightSniff) && node.children.size >= 3) {
         // Same body-extraction math as the library's own MarkdownCodeFence (MarkdownCode.kt),
         // since that helper isn't exposed with a hook to swap in a different renderer per-fence.

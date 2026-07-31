@@ -17,16 +17,20 @@ private val VEGA_LITE_TOP_LEVEL_KEYS = setOf(
 )
 
 /**
- * Models frequently tag a GeoJSON/Vega-Lite spec as `json`, or a GPX/KML file as `xml` — not
- * technically wrong, but it means the corresponding widget never activates. For a fence declared
- * as exactly `json` or `xml`, sniff [body]'s actual shape and return the specific widget fence
- * language it matches, so the caller can still dispatch it as that widget. Returns `null` for any
- * other declared language, or when [body] doesn't confidently match a known widget shape — either
- * way the caller falls through to a plain code block, same as today.
+ * Models frequently tag a GeoJSON/Vega-Lite spec as `json`, a GPX/KML file as `xml`, or raw SVG
+ * markup as `svg`/`xml` — not technically wrong, but it means the corresponding widget never
+ * activates. For a fence declared as exactly `json`, `xml`, or `svg`, sniff [body]'s actual shape
+ * and return the specific widget fence language it matches, so the caller can still dispatch it as
+ * that widget. Returns `null` for any other declared language, or when [body] doesn't confidently
+ * match a known widget shape — either way the caller falls through to a plain code block, same as
+ * today.
  */
 fun sniffGenericFenceLanguage(declaredLanguage: String?, body: String): String? = when (declaredLanguage) {
     "json" -> sniffJsonWidgetLanguage(body)
     "xml" -> sniffXmlWidgetLanguage(body)
+    // An `svg` fence is unambiguous on its own — an `<svg>` element is valid HTML fragment
+    // content, so the html widget renders it directly with no further sniffing needed.
+    "svg" -> "html"
     else -> null
 }
 
@@ -56,6 +60,8 @@ private fun sniffXmlWidgetLanguage(body: String): String? {
                 return when (parser.name.lowercase()) {
                     "gpx" -> "gpx"
                     "kml" -> "kml"
+                    // SVG is well-formed XML, and models sometimes tag it `xml` rather than `svg`.
+                    "svg" -> "html"
                     else -> null
                 }
             }
