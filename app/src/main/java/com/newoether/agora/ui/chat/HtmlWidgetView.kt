@@ -367,6 +367,10 @@ class WidgetFenceSpec(
  * but currently-disabled kind, falls through to the library's own fence rendering — so the model
  * can choose to inline-render or show source just by picking the fence language, and disabling a
  * widget kind in settings always degrades to a plain code block rather than breaking.
+ *
+ * A fence tagged with a generic `json`/`xml` language (models often reach for that instead of the
+ * specific widget language) also gets a chance via [sniffGenericFenceLanguage] — its body is
+ * inspected and, if it confidently matches a widget's shape, dispatched to that widget's spec.
  */
 @Composable
 fun MarkdownWidgetFence(
@@ -376,22 +380,32 @@ fun MarkdownWidgetFence(
     val node = model.node
     val content = model.content
     val language = node.findChildOfType(MarkdownTokenTypes.FENCE_LANG)?.getTextInNode(content)?.toString()
-    val spec = specs.firstOrNull { it.fenceLanguage == language && it.enabled }
-    if (spec != null && node.children.size >= 3) {
+    val exactSpec = specs.firstOrNull { it.fenceLanguage == language && it.enabled }
+    // Body extraction below has a real (if small) cost, so it's only attempted for an exact
+    // match or a fence tagged with one of the generic languages sniffing understands — every
+    // other fence language (python, bash, an unrelated json/xml example, ...) stays a no-op here,
+    // same as before this sniffing was added.
+    val mightSniff = exactSpec == null && (language == "json" || language == "xml")
+    if ((exactSpec != null || mightSniff) && node.children.size >= 3) {
         // Same body-extraction math as the library's own MarkdownCodeFence (MarkdownCode.kt),
         // since that helper isn't exposed with a hook to swap in a different renderer per-fence.
         val start = node.children[2].startOffset
         val minCodeFenceCount = if (language != null && node.children.size > 3) 3 else 2
         val end = node.children[(node.children.size - 2).coerceAtLeast(minCodeFenceCount)].endOffset
         val body = content.subSequence(start, end).toString().replaceIndent()
-        spec.render(body)
-    } else {
-        com.mikepenz.markdown.compose.elements.MarkdownCodeFence(
-            content = content,
-            node = node,
-            style = model.typography.code,
-        )
+        val spec = exactSpec ?: specs.firstOrNull {
+            it.fenceLanguage == sniffGenericFenceLanguage(language, body) && it.enabled
+        }
+        if (spec != null) {
+            spec.render(body)
+            return
+        }
     }
+    com.mikepenz.markdown.compose.elements.MarkdownCodeFence(
+        content = content,
+        node = node,
+        style = model.typography.code,
+    )
 }
 
 @Composable

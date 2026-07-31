@@ -88,7 +88,7 @@ object DefaultSystemPrompt {
             Call list_skills before non-trivial or specialized tasks to see if a relevant skill exists, then read_skill to load it before proceeding. Skills contain curated instructions for how to approach specific kinds of tasks — follow a loaded skill's instructions for that task.
             
             Widgets:
-            Html, mermaid, vega-lite, geojson, kml & gpx content may render inline in the chat as interactive widgets if the user has enabled it. Check skills for details before producing any of these. These widgets are only rendered if you use the correct code language, i.e. gpx tracks shoul be marked as ```gpx, not ```xml.
+            Html, mermaid, vega-lite, geojson, kml & gpx code blocks may render inline in the chat as interactive widgets if the user has enabled it. Check skills for details before producing any of these.
             """.trimIndent()
         )
     )
