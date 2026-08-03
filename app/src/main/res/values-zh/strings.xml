@@ -74,7 +74,7 @@
     <string name="task_model_default">应用默认</string>
     <string name="task_run_now">立即运行</string>
     <string name="task_delete">删除任务</string>
-    <string name="task_delete_confirm">删除“%1$s”及其未接管的执行记录？你已接管的会话会保留。</string>
+    <string name="task_delete_confirm">删除“%1$s”及其全部执行记录？</string>
     <string name="import_conversation_graph_counts">对话（%1$d） · 任务（%2$d） · 循环（%3$d）</string>
     <string name="task_enabled">按计划运行</string>
     <string name="task_enabled_desc">关闭后，仅在你点击「立即运行」时执行。</string>
@@ -84,9 +84,12 @@
     <string name="task_schedule_pick">选择计划</string>
     <string name="task_last_run_at">上次运行 %1$s</string>
     <string name="task_never_run">从未运行</string>
-    <string name="task_empty">还没有任务。新建一个，随手运行保存好的提示词。</string>
+    <string name="task_empty">还没有自动化</string>
+    <string name="task_empty_desc">创建自动化，以立即或按计划运行提示词。</string>
+    <string name="task_new_automation">新建自动化</string>
     <string name="task_execution_log">历史</string>
     <string name="task_no_executions">还没有运行过</string>
+    <string name="task_no_executions_desc">运行此自动化后，执行记录会显示在这里。</string>
     <string name="task_running">运行中…</string>
     <string name="task_last_run">上次运行 %1$s</string>
     <string name="task_from_banner">来自任务：%1$s</string>
@@ -122,7 +125,7 @@
 
     <string name="settings_automation">自动化</string>
     <string name="settings_automation_desc">AI 工具、会话循环与调度精度</string>
-    <string name="automation_ai_tools">AI 自动化工具</string>
+    <string name="automation_ai_tools">访问任务与循环</string>
     <string name="automation_ai_tools_desc">允许模型创建和管理任务，或启动、停止会话循环。默认关闭。</string>
     <string name="automation_scheduling">调度</string>
     <string name="automation_exact_execution">精确执行</string>
@@ -225,6 +228,13 @@
     <string name="tool_generated_image">已生成图片</string>
     <string name="img_action_save">保存到相册</string>
     <string name="img_action_share">分享</string>
+    <string name="conversation_fork">分支整个对话</string>
+    <string name="conversation_fork_from_here">从这里创建分支</string>
+    <string name="conversation_share">分享</string>
+    <string name="conversation_search">搜索</string>
+    <string name="conversation_search_hint">搜索…</string>
+    <string name="conversation_fork_failed">无法创建对话分支：%1$s</string>
+    <string name="conversation_share_failed">无法分享对话：%1$s</string>
     <string name="img_saved">已保存到相册</string>
     <string name="img_save_failed">保存失败</string>
     <string name="img_info_dimensions">尺寸</string>

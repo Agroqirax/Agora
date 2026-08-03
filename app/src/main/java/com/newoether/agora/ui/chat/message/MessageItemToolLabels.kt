@@ -94,11 +94,13 @@ private fun runningSummary(
     ToolKind.CONVERSATION_LIST -> stringResource(R.string.tool_listing_conversations)
     ToolKind.CONVERSATION_READ -> stringResource(R.string.tool_reading_conversation)
     ToolKind.SHELL_LIST -> stringResource(R.string.tool_listing_shells)
-    ToolKind.SHELL_EXECUTE -> presentation.liveOutput
-        ?.lineSequence()
-        ?.lastOrNull()
-        ?.take(120)
-        ?: stringResource(R.string.tool_executing_shell, subject ?: "shell")
+    // Live stdout belongs in the expanded result body. The compact summary must remain a stable
+    // one-line command label for the entire active lifecycle; an empty progress frame must never
+    // replace it with a blank string.
+    ToolKind.SHELL_EXECUTE -> stringResource(
+        R.string.tool_executing_shell,
+        singleLineShellCommand(subject),
+    )
     ToolKind.SHELL_JOB_LIST -> stringResource(R.string.tool_listing_shell_jobs)
     ToolKind.SHELL_JOB_GET -> stringResource(R.string.tool_reading_shell_job, subject ?: "job")
     ToolKind.SHELL_JOB_STOP -> stringResource(R.string.tool_stopping_shell_job, subject ?: "job")
@@ -114,6 +116,19 @@ private fun runningSummary(
     ToolKind.LOOP_START -> stringResource(R.string.tool_starting_loop)
     ToolKind.LOOP_STOP -> stringResource(R.string.tool_stopping_loop)
     ToolKind.UNKNOWN -> stringResource(R.string.tool_calling_ellipsis)
+}
+
+internal fun singleLineShellCommand(
+    command: String?,
+    maxCharacters: Int = 120,
+): String {
+    require(maxCharacters > 0)
+    val normalized = command
+        .orEmpty()
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .ifBlank { "shell" }
+    return normalized.take(maxCharacters)
 }
 
 @Composable

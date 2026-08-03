@@ -128,6 +128,7 @@ import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.ui.theme.ChatType
+import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
@@ -232,6 +233,7 @@ internal fun CompactSegmentBlock(
     onBlockHeightChanged: (Int) -> Unit = {}
 ) {
     if (segs.isEmpty()) return
+    val haptics = LocalAgoraHaptics.current
     val isExpanded by remember(expansionKey) {
         derivedStateOf { expandedStates[expansionKey] ?: false }
     }
@@ -289,6 +291,7 @@ internal fun CompactSegmentBlock(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .clickable {
+                        haptics.selection()
                         onExpansionStarted(expansionKey)
                         expandedStates[expansionKey] = !isExpanded
                     }
@@ -358,7 +361,10 @@ internal fun CompactSegmentBlock(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(18.dp))
-                                    .clickable { onSegmentClick(segmentIndices.getOrElse(idx) { idx }) }
+                                    .clickable {
+                                        haptics.tap()
+                                        onSegmentClick(segmentIndices.getOrElse(idx) { idx })
+                                    }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
                                 Text(
@@ -403,7 +409,10 @@ internal fun CompactSegmentBlock(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(18.dp))
-                                    .clickable { onSegmentClick(segmentIndices.getOrElse(idx) { idx }) }
+                                    .clickable {
+                                        haptics.tap()
+                                        onSegmentClick(segmentIndices.getOrElse(idx) { idx })
+                                    }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
                             ) {
                                 Text(
@@ -570,6 +579,7 @@ private fun TimelineInfoSegmentCard(
     topPaddingExtra: Dp = 0.dp,
     onClick: () -> Unit
 ) {
+    val haptics = LocalAgoraHaptics.current
     Surface(
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(18.dp),
@@ -577,7 +587,10 @@ private fun TimelineInfoSegmentCard(
             .fillMaxWidth()
             .padding(top = 8.dp + topPaddingExtra, bottom = 6.dp)
             .clip(RoundedCornerShape(18.dp))
-            .clickable { onClick() }
+            .clickable {
+                haptics.tap()
+                onClick()
+            }
             .noOpBringIntoView()
     ) {
         Row(

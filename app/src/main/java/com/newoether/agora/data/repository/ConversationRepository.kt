@@ -63,17 +63,6 @@ class ConversationRepository(
     fun observeExecutionMessagesForTask(taskId: String): Flow<List<MessageEntity>> =
         chatDao.observeExecutionMessagesForTask(taskId)
 
-    /** Promotes a task/loop execution into the main list once the user takes it over.
-     *  Returns true only for the transition that made the conversation searchable. */
-    suspend fun graduateConversation(id: String): Boolean {
-        val conv = chatDao.getConversation(id) ?: return false
-        if (conv.origin != "user" && !conv.graduated) {
-            chatDao.upsertConversation(conv.copy(graduated = true, lastUpdated = System.currentTimeMillis()))
-            return true
-        }
-        return false
-    }
-
     suspend fun getConversation(id: String): ChatEntity? =
         chatDao.getConversation(id)
 
@@ -117,6 +106,12 @@ class ConversationRepository(
 
     suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) =
         chatDao.importRunGraph(runs, messages)
+
+    suspend fun createForkGraph(
+        conversation: ChatEntity,
+        runs: List<RunEntity>,
+        messages: List<MessageEntity>,
+    ) = chatDao.createForkGraph(conversation, runs, messages)
 
     suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
         ensureRunRecovery()

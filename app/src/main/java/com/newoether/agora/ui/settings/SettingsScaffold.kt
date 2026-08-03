@@ -264,6 +264,7 @@ fun CollapsingSettingsLazyScaffold(
                 .fillMaxSize()
                 .navigationBarsPadding()
                 .imePadding()
+                .clearFocusOnTap()
                 .padding(horizontal = contentHorizontalPadding),
             contentPadding = PaddingValues(top = statusBarTop + SettingsBarHeight)
         ) {

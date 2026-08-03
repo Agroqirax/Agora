@@ -247,9 +247,8 @@ data class IndexableMessage(
 
 @Dao
 interface ChatDao {
-    // Main list hides un-graduated task executions; they surface only via the task's
-    // own execution log until the user takes one over (graduated = 1).
-    @Query("SELECT * FROM conversations WHERE taskId IS NULL OR graduated = 1 ORDER BY lastUpdated DESC")
+    // Task executions always remain in their owning Task's History.
+    @Query("SELECT * FROM conversations WHERE taskId IS NULL ORDER BY lastUpdated DESC")
     fun getAllConversations(): Flow<List<ChatEntity>>
 
     @Query("SELECT * FROM conversations WHERE taskId = :taskId ORDER BY lastUpdated DESC")
@@ -395,6 +394,38 @@ interface ChatDao {
             if (getRun(run.id) == null) insertRun(run)
         }
         messages.forEach { upsertMessage(it) }
+    }
+
+    /**
+     * Creates a fork as one database commit. A cancelled or rejected import must never leave
+     * an empty conversation behind.
+     */
+    @Transaction
+    suspend fun createForkGraph(
+        conversation: ChatEntity,
+        runs: List<RunEntity>,
+        messages: List<MessageEntity>,
+    ) {
+        require(getConversation(conversation.id) == null) {
+            "Fork conversation ${conversation.id} already exists"
+        }
+        require(runs.isNotEmpty())
+        require(messages.isNotEmpty())
+        require(runs.all { it.conversationId == conversation.id })
+        require(messages.all { it.conversationId == conversation.id })
+        val runIds = runs.mapTo(mutableSetOf()) { it.id }
+        val messageIds = messages.mapTo(mutableSetOf()) { it.id }
+        require(runs.all { it.parentRunId == null || it.parentRunId in runIds }) {
+            "Every forked Run must reference another forked Run"
+        }
+        require(messages.all { it.parentId == null || it.parentId in messageIds }) {
+            "Every forked message must reference another forked message"
+        }
+        require(messages.all { it.runId in runIds }) {
+            "Every forked message must reference a forked Run"
+        }
+        upsertConversation(conversation)
+        importRunGraph(runs, messages)
     }
 
     @Transaction
@@ -666,7 +697,7 @@ interface ChatDao {
     suspend fun deleteOrphanedEmbeddings()
 
     /** [query] must be pre-escaped for LIKE (see ConversationRepository.escapeLikePattern). */
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")
@@ -690,16 +721,16 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
-    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
 
     @Query("DELETE FROM embeddings WHERE modelId = :modelId")
     suspend fun deleteEmbeddingsByModel(modelId: String)
 
-    @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getEmbeddingCountByModel(modelId: String): Int
 
-    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getIndexableMessageCount(): Int
 
     @Query(
@@ -707,7 +738,7 @@ interface ChatDao {
         SELECT m.id, m.text
         FROM messages m
         INNER JOIN conversations c ON m.conversationId = c.id
-        WHERE (c.taskId IS NULL OR c.graduated = 1)
+        WHERE c.taskId IS NULL
           AND m.participant IN ('USER', 'MODEL')
           AND m.text != ''
           AND m.id NOT LIKE 'tool_%'
@@ -730,10 +761,10 @@ interface ChatDao {
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
 
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id IN (:ids) AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id IN (:ids) AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
     suspend fun getSearchableMessagesByIds(ids: List<String>): List<MessageEntity>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id = :messageId AND (c.taskId IS NULL OR c.graduated = 1) AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%')")
+    @Query("SELECT EXISTS(SELECT 1 FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id = :messageId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%')")
     suspend fun isMessageSearchable(messageId: String): Boolean
 
     /** Atomically enforces the search-visibility invariant for incremental indexing. */
@@ -747,10 +778,10 @@ interface ChatDao {
         return true
     }
 
-    @Query("SELECT * FROM conversations WHERE id = :conversationId AND (taskId IS NULL OR graduated = 1)")
+    @Query("SELECT * FROM conversations WHERE id = :conversationId AND taskId IS NULL")
     suspend fun getSearchableConversation(conversationId: String): ChatEntity?
 
-    @Query("SELECT * FROM conversations WHERE taskId IS NULL OR graduated = 1 ORDER BY lastUpdated ASC")
+    @Query("SELECT * FROM conversations WHERE taskId IS NULL ORDER BY lastUpdated ASC")
     suspend fun getSearchableConversationsList(): List<ChatEntity>
 
     @Query("UPDATE conversations SET draftText = :text, draftAttachments = :attachments WHERE id = :id")

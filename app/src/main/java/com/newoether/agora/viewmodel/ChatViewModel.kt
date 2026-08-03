@@ -120,6 +120,8 @@ class ChatViewModel(
      * receive the repository (not raw DAO) for a uniform boundary.
      */
     private val convRepo: ConversationRepository = conversationRepository
+    private val conversationForkShare =
+        ConversationForkShareService(conversationRepository, settingsRepository)
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
     val ragManager = RagManager(
@@ -502,6 +504,12 @@ class ChatViewModel(
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
     }
+    private val _conversationShareText = MutableSharedFlow<String>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    val conversationShareText = _conversationShareText.asSharedFlow()
 
     private val _updateDialogData = MutableStateFlow<UpdateInfo?>(null)
     val updateDialogData: StateFlow<UpdateInfo?> = _updateDialogData.asStateFlow()
@@ -676,7 +684,6 @@ class ChatViewModel(
             onSnackbarSuspend = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
             onPersistSelectedChildren = { convId, map -> persistSelectedChildren(convId, map) },
             onConversationCreatedBySend = { suppressNextOpenScroll = true },
-            onConversationGraduated = ragManager::backfillConversationForRag,
             onUserMessagePersisted = ragManager::indexMessageForRag,
             onTreeMutationStart = {
                 val request = _currentConversationId.value?.let {
@@ -709,9 +716,8 @@ class ChatViewModel(
     val switchingScrollRequest: StateFlow<SwitchingScrollRequest?> =
         switchingCoordinator.request
 
-    fun completeSwitchingScroll(requestId: Long) {
+    fun completeSwitchingScroll(requestId: Long): Boolean =
         switchingCoordinator.complete(requestId)
-    }
 
     fun failSwitchingScroll(requestId: Long, reason: String) {
         if (!switchingCoordinator.isCurrent(requestId)) return
@@ -1081,6 +1087,61 @@ class ChatViewModel(
                 DebugLog.e("AgoraVM", "Failed to select conversation $id", e)
                 failSwitchingScroll(request.id, "conversation load failed")
             }
+        }
+    }
+
+    fun forkConversationFrom(messageId: String? = null) {
+        val conversationId = _currentConversationId.value ?: return
+        viewModelScope.launch {
+            when (val result = conversationForkShare.fork(conversationId, messageId)) {
+                is ConversationForkShareService.ForkResult.Success ->
+                    selectConversation(result.conversationId)
+                is ConversationForkShareService.ForkResult.Failure ->
+                    _snackbarMessage.emit(
+                        SnackbarEvent(
+                            appContext.getString(R.string.conversation_fork_failed, result.reason)
+                        )
+                    )
+            }
+        }
+    }
+
+    fun shareConversation() {
+        val conversationId = _currentConversationId.value ?: return
+        viewModelScope.launch {
+            emitShareResult(conversationForkShare.shareAll(conversationId))
+        }
+    }
+
+    fun shareGeneration(assistantMessageId: String) {
+        val conversationId = _currentConversationId.value ?: return
+        viewModelScope.launch {
+            emitShareResult(
+                conversationForkShare.shareRun(conversationId, assistantMessageId)
+            )
+        }
+    }
+
+    fun shareMessages(messageIds: Set<String>) {
+        val conversationId = _currentConversationId.value ?: return
+        if (messageIds.isEmpty()) return
+        viewModelScope.launch {
+            emitShareResult(
+                conversationForkShare.shareMessages(conversationId, messageIds)
+            )
+        }
+    }
+
+    private suspend fun emitShareResult(result: ConversationForkShareService.ShareResult) {
+        when (result) {
+            is ConversationForkShareService.ShareResult.Success ->
+                _conversationShareText.emit(result.text)
+            is ConversationForkShareService.ShareResult.Failure ->
+                _snackbarMessage.emit(
+                    SnackbarEvent(
+                        appContext.getString(R.string.conversation_share_failed, result.reason)
+                    )
+                )
         }
     }
 

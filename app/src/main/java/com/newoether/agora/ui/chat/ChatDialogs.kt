@@ -115,7 +115,7 @@ internal fun ChatSystemPromptDialog(
     AlertDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.conversation_prompt), fontWeight = FontWeight.Bold) },
+        title = { Text(stringResource(R.string.system_prompt), fontWeight = FontWeight.Bold) },
         text = {
             LazyColumn {
                 item {

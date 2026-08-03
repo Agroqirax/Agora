@@ -18,23 +18,32 @@ import com.newoether.agora.service.AppForegroundTracker
 
 @Stable
 interface AgoraHaptics {
-    fun action()
+    fun tap()
     fun selection()
     fun longPress()
-    fun success()
+    fun confirm()
     fun reject()
-    fun generationStopped()
+    fun destructive()
     fun startAnsweringTexture()
     fun stopAnsweringTexture()
+
+    @Deprecated("Use tap()")
+    fun action() = tap()
+
+    @Deprecated("Use confirm()")
+    fun success() = confirm()
+
+    @Deprecated("Use destructive()")
+    fun generationStopped() = destructive()
 }
 
 object NoOpAgoraHaptics : AgoraHaptics {
-    override fun action() = Unit
+    override fun tap() = Unit
     override fun selection() = Unit
     override fun longPress() = Unit
-    override fun success() = Unit
+    override fun confirm() = Unit
     override fun reject() = Unit
-    override fun generationStopped() = Unit
+    override fun destructive() = Unit
     override fun startAnsweringTexture() = Unit
     override fun stopAnsweringTexture() = Unit
 }
@@ -66,22 +75,36 @@ private class PlatformAgoraHaptics(
     private val enabled: () -> Boolean
 ) : AgoraHaptics {
     private val vibrator: Vibrator? = view.context.applicationContext.findVibrator()
+    private var answeringTextureRequested = false
     private var answeringTextureActive = false
+    private val resumeAnsweringTexture = Runnable {
+        textureResumeScheduled = false
+        if (answeringTextureRequested) startAnsweringTextureNow()
+    }
+    private var textureResumeScheduled = false
 
-    override fun action() = perform(HapticFeedbackConstants.VIRTUAL_KEY)
+    override fun tap() = performDiscrete(HapticFeedbackConstants.VIRTUAL_KEY)
 
-    override fun selection() = perform(HapticFeedbackConstants.CLOCK_TICK)
+    override fun selection() = performDiscrete(HapticFeedbackConstants.CLOCK_TICK)
 
-    override fun longPress() = perform(HapticFeedbackConstants.LONG_PRESS)
+    override fun longPress() = performDiscrete(HapticFeedbackConstants.LONG_PRESS)
 
-    override fun success() = perform(confirmFeedback())
+    override fun confirm() = performDiscrete(confirmFeedback())
 
-    override fun reject() = perform(rejectFeedback())
+    override fun reject() = performDiscrete(rejectFeedback())
 
-    override fun generationStopped() = perform(HapticFeedbackConstants.CONTEXT_CLICK)
+    override fun destructive() {
+        stopAnsweringTexture()
+        performDiscrete(HapticFeedbackConstants.CONTEXT_CLICK, resumeTexture = false)
+    }
 
     override fun startAnsweringTexture() {
-        if (!isAllowed() || answeringTextureActive) return
+        answeringTextureRequested = true
+        if (!textureResumeScheduled) startAnsweringTextureNow()
+    }
+
+    private fun startAnsweringTextureNow() {
+        if (!answeringTextureRequested || !isAllowed() || answeringTextureActive) return
         val vibrator = vibrator?.takeIf { it.hasVibrator() } ?: return
         answeringTextureActive = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && vibrator.hasAmplitudeControl()) {
@@ -106,14 +129,26 @@ private class PlatformAgoraHaptics(
     }
 
     override fun stopAnsweringTexture() {
+        answeringTextureRequested = false
+        view.removeCallbacks(resumeAnsweringTexture)
+        textureResumeScheduled = false
         if (!answeringTextureActive) return
         answeringTextureActive = false
         vibrator?.cancel()
     }
 
-    private fun perform(type: Int) {
-        if (isAllowed()) {
-            view.performHapticFeedback(type)
+    private fun performDiscrete(type: Int, resumeTexture: Boolean = true) {
+        if (!isAllowed()) return
+        view.removeCallbacks(resumeAnsweringTexture)
+        textureResumeScheduled = false
+        if (answeringTextureActive) {
+            answeringTextureActive = false
+            vibrator?.cancel()
+        }
+        view.performHapticFeedback(type)
+        if (resumeTexture && answeringTextureRequested) {
+            textureResumeScheduled = true
+            view.postDelayed(resumeAnsweringTexture, TEXTURE_RESUME_DELAY_MS)
         }
     }
 
@@ -132,6 +167,10 @@ private class PlatformAgoraHaptics(
         } else {
             HapticFeedbackConstants.LONG_PRESS
         }
+
+    private companion object {
+        const val TEXTURE_RESUME_DELAY_MS = 90L
+    }
 }
 
 private fun Context.findVibrator(): Vibrator? =

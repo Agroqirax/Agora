@@ -72,6 +72,7 @@ internal fun UserMessageBubble(
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)?,
     onShowInfo: () -> Unit,
     onShowDelete: () -> Unit,
+    searchHighlight: SearchHighlightSpec?,
 ) {
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
@@ -216,10 +217,11 @@ internal fun UserMessageBubble(
                     }
                     if (message.text.isNotEmpty()) {
                         SelectionContainer {
-                            Text(
+                            SearchHighlightedPlainText(
                                 text = message.text,
                                 style = ChatType.userBody,
-                                color = textColor
+                                color = textColor,
+                                spec = searchHighlight,
                             )
                         }
                     }
@@ -253,15 +255,15 @@ internal fun UserMessageBubble(
                 modifier = Modifier.then(contextAlpha)
             ) {
                 if (!actionCopyText.isNullOrBlank()) {
-                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.success() }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.confirm() }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                     }
                 }
-                IconButton(onClick = { onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = { haptics.tap(); onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(16.dp), tint = LocalContentColor.current.copy(alpha = if (isEditingAllowed) 0.6f else 0.3f))
                 }
                 Box {
-                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { haptics.tap(); showMenu = true }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more), modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                     }
                     DropdownMenu(
@@ -273,12 +275,12 @@ internal fun UserMessageBubble(
                     ) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.info)) },
-                            onClick = { showMenu = false; onShowInfo() },
+                            onClick = { haptics.tap(); showMenu = false; onShowInfo() },
                             leadingIcon = { Icon(Icons.Default.Info, null) }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                            onClick = { showMenu = false; onShowDelete() },
+                            onClick = { haptics.tap(); showMenu = false; onShowDelete() },
                             enabled = !isLoading,
                             leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
                         )

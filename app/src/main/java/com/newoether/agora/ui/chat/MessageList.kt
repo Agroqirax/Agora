@@ -37,6 +37,7 @@ import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.chat.message.MessageItem
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 internal enum class MessageListLayoutMode {
     STABLE,
@@ -122,6 +123,31 @@ internal fun estimateMessageListTurnHeightPx(
     (messageHeights[message.id]?.toDouble() ?: fallbackHeightPx.toDouble())
 }.toFloat()
 
+internal fun estimateSearchMatchCenterInTurnPx(
+    turn: MessageListTurn,
+    match: ConversationSearchMatch,
+    messageHeights: Map<String, Int>,
+    fallbackHeightPx: Float,
+): Float {
+    val targetIndex = turn.messages.indexOfFirst { it.id == match.messageId }
+    if (targetIndex < 0) return fallbackHeightPx / 2f
+    val precedingHeight = turn.messages
+        .take(targetIndex)
+        .sumOf { message ->
+            (messageHeights[message.id]?.toDouble() ?: fallbackHeightPx.toDouble())
+        }
+        .toFloat()
+    val target = turn.messages[targetIndex]
+    val targetHeight = messageHeights[target.id]?.toFloat() ?: fallbackHeightPx
+    val characterCenter = (match.start + match.endExclusive) / 2f
+    val textFraction = if (target.text.isEmpty()) {
+        0.5f
+    } else {
+        (characterCenter / target.text.length).coerceIn(0.08f, 0.92f)
+    }
+    return precedingHeight + targetHeight * textFraction
+}
+
 internal data class MessageListViewportAnchor(
     val messageId: String,
     val scrollOffsetPx: Int,
@@ -162,7 +188,7 @@ internal class MessageListMutationAnchorLock {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MessageList(
+internal fun MessageList(
     messages: StableMessageList,
     allMessages: StableMessageList = StableMessageList(),
     modifier: Modifier = Modifier,
@@ -181,7 +207,15 @@ fun MessageList(
     onEditMessage: (String, String) -> Unit = { _, _ -> },
     onSwitchBranch: (String?, String, Int) -> Unit = { _, _, _ -> },
     onRegenerate: (String) -> Unit = {},
+    onFork: (String) -> Unit = {},
+    onShare: (String) -> Unit = {},
     onDelete: (String) -> Unit = {},
+    searchQuery: String = "",
+    activeSearchMatch: ConversationSearchMatch? = null,
+    onSearchMatchDistance: (key: String, distanceToViewportCenter: Float) -> Unit = { _, _ -> },
+    selectionMode: Boolean = false,
+    selectedMessageIds: Set<String> = emptySet(),
+    onToggleMessageSelection: (String) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
@@ -191,6 +225,7 @@ fun MessageList(
     val mutationAnchorLock = remember(state) { MessageListMutationAnchorLock() }
     val mutationScope = rememberCoroutineScope()
     val pendingMutationSettles = remember(state) { mutableMapOf<String, Job>() }
+    val searchMatchCentersInTurn = remember(state) { mutableStateMapOf<String, Float>() }
 
     fun cancelMutationAnchoring() {
         pendingMutationSettles.values.forEach { it.cancel() }
@@ -234,6 +269,30 @@ fun MessageList(
     }
     val tailMinHeight = with(density) { tailMinHeightPx.toDp() }
 
+    // One active match change owns exactly one scroll animation. Exact match offsets are cached
+    // relative to their stable turn item, so centering never needs a visible pre-scroll followed
+    // by a corrective second animation.
+    LaunchedEffect(activeSearchMatch?.key) {
+        val match = activeSearchMatch ?: return@LaunchedEffect
+        val turnIndex = messageListTurnIndex(turns, match.messageId)
+        if (turnIndex < 0) return@LaunchedEffect
+        val topInsetPx = with(density) { 140.dp.toPx() }
+        val bottomInsetPx = with(density) { bottomBarHeight.toPx() }
+        val targetCenterY = topInsetPx +
+            ((viewportHeight - bottomInsetPx - topInsetPx).coerceAtLeast(0f) / 2f)
+        val matchCenterInTurn = searchMatchCentersInTurn[match.key]
+            ?: estimateSearchMatchCenterInTurnPx(
+                turn = turns[turnIndex],
+                match = match,
+                messageHeights = messageHeights,
+                fallbackHeightPx = with(density) { 160.dp.toPx() },
+            )
+        state.animateScrollToItem(
+            index = turnIndex,
+            scrollOffset = (matchCenterInTurn - targetCenterY).roundToInt(),
+        )
+    }
+
     fun restoreAnchor(anchor: MessageListViewportAnchor): Boolean {
         val turnIndex = messageListTurnIndex(turns, anchor.messageId)
         if (turnIndex < 0) return false
@@ -264,7 +323,9 @@ fun MessageList(
                     MessageStatus.TRANSCRIBING,
                 ),
             isLoading = isLoading,
-            isEditingAllowed = (editingMessageId == null || editingMessageId == message.id) && !isLoading,
+            isEditingAllowed = !selectionMode &&
+                (editingMessageId == null || editingMessageId == message.id) &&
+                !isLoading,
             isEditing = editingMessageId == message.id,
             isSwitching = isSwitching,
             isInContext = isInContext,
@@ -273,9 +334,9 @@ fun MessageList(
             toolCallDisplayMode = toolCallDisplayMode,
             onStartEdit = { editingMessageId = message.id },
             onCancelEdit = { editingMessageId = null },
-            showActions = presentation?.showActions == true,
+            showActions = !selectionMode && presentation?.showActions == true,
             actionCopyText = presentation?.copyText,
-            showBranchSelector = presentation?.showBranchSelector == true,
+            showBranchSelector = !selectionMode && presentation?.showBranchSelector == true,
             branchIndex = presentation?.branchIndex ?: 0,
             totalBranches = presentation?.totalBranches ?: 1,
             onSwitchBranch = { direction ->
@@ -289,11 +350,34 @@ fun MessageList(
                 }
             },
             onRegenerate = onRegenerate,
+            onFork = onFork,
+            onShare = onShare,
             deleteTargetMessageId = presentation?.deleteTargetMessageId ?: message.id,
             onDelete = onDelete,
             onMediaClick = onMediaClick,
             onFileContentClick = onFileContentClick,
             onPdfPagesClick = onPdfPagesClick,
+            searchQuery = searchQuery,
+            activeSearchMatch = activeSearchMatch,
+            onSearchMatchPosition = { key, centerY ->
+                val turnIndex = messageListTurnIndex(turns, message.id)
+                val visibleTurn = state.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.index == turnIndex }
+                if (visibleTurn != null) {
+                    searchMatchCentersInTurn[key] = centerY - visibleTurn.offset
+                }
+                val topInsetPx = with(density) { 140.dp.toPx() }
+                val bottomInsetPx = with(density) { bottomBarHeight.toPx() }
+                val viewportCenterY = topInsetPx +
+                    ((viewportHeight - bottomInsetPx - topInsetPx).coerceAtLeast(0f) / 2f)
+                onSearchMatchDistance(
+                    key,
+                    kotlin.math.abs(centerY - viewportCenterY),
+                )
+            },
+            selectionMode = selectionMode,
+            selected = message.id in selectedMessageIds,
+            onToggleSelection = { onToggleMessageSelection(message.id) },
             onHeightChanged = { height ->
                 if (height > 0 && messageHeights[message.id] != height) {
                     val mode = messageListLayoutMode(

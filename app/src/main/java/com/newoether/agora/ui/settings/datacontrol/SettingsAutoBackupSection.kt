@@ -213,9 +213,6 @@ private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
         leadingContent = {
             Icon(Icons.Default.Folder, null, tint = MaterialTheme.colorScheme.primary)
         },
-        trailingContent = {
-            Icon(Icons.Default.FolderOpen, stringResource(R.string.edit), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
-        },
         modifier = Modifier.clickable { dirPickerLauncher.launch(null) }
     )
 }
@@ -237,9 +234,6 @@ private fun AutoBackupCategoriesItem(viewModel: ChatViewModel) {
         supportingContent = { Text(displaySummary, color = MaterialTheme.colorScheme.onSurfaceVariant) },
         leadingContent = {
             Icon(Icons.Default.Topic, null, tint = MaterialTheme.colorScheme.primary)
-        },
-        trailingContent = {
-            Icon(Icons.Default.ChevronRight, stringResource(R.string.edit), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         },
         modifier = Modifier.clickable { showDialog = true }
     )

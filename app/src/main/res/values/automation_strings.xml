@@ -11,7 +11,7 @@
     <string name="task_model_default">App default</string>
     <string name="task_run_now">Run now</string>
     <string name="task_delete">Delete task</string>
-    <string name="task_delete_confirm">Delete “%1$s” and its unclaimed execution history? Conversations you took over will be kept.</string>
+    <string name="task_delete_confirm">Delete “%1$s” and all of its execution history?</string>
     <string name="import_conversation_graph_counts">Conversations (%1$d) · Tasks (%2$d) · Loops (%3$d)</string>
     <string name="task_enabled">Run on schedule</string>
     <string name="task_enabled_desc">Off means the task only runs when you tap Run now.</string>
@@ -21,9 +21,12 @@
     <string name="task_schedule_pick">Choose schedule</string>
     <string name="task_last_run_at">Last run %1$s</string>
     <string name="task_never_run">Never run</string>
-    <string name="task_empty">No tasks yet. Create one to run a saved prompt on demand.</string>
+    <string name="task_empty">No automations yet</string>
+    <string name="task_empty_desc">Create an automation to run a prompt now or on a schedule.</string>
+    <string name="task_new_automation">New Automation</string>
     <string name="task_execution_log">History</string>
     <string name="task_no_executions">No runs yet</string>
+    <string name="task_no_executions_desc">Run this automation to create execution history.</string>
     <string name="task_running">Running…</string>
     <string name="task_last_run">Last run %1$s</string>
     <string name="task_from_banner">From task: %1$s</string>
@@ -61,7 +64,7 @@
 
     <string name="settings_automation">Automation</string>
     <string name="settings_automation_desc">AI tools, loops, and scheduling precision</string>
-    <string name="automation_ai_tools">AI automation tools</string>
+    <string name="automation_ai_tools">Access tasks and loops</string>
     <string name="automation_ai_tools_desc">Let the model create and manage tasks or start and stop conversation loops. Disabled by default.</string>
     <string name="automation_scheduling">Scheduling</string>
     <string name="automation_exact_execution">Exact execution</string>

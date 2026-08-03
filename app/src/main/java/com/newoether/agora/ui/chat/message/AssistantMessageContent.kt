@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Image
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -87,6 +89,8 @@ internal fun AssistantMessageContent(
     totalBranches: Int,
     onSwitchBranch: (Int) -> Unit,
     onRegenerate: (String) -> Unit,
+    onFork: () -> Unit,
+    onShare: () -> Unit,
     onMediaClick: (List<String>, Int) -> Unit,
     onShowInfo: () -> Unit,
     onShowDelete: () -> Unit,
@@ -409,15 +413,47 @@ internal fun AssistantMessageContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             if (!actionCopyText.isNullOrBlank()) {
-                                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.success() }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.confirm() }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                 }
                             }
                             IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Refresh, null, modifier = Modifier.size(19.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                             }
+                            IconButton(
+                                onClick = onFork,
+                                enabled = !isLoading,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.CallSplit,
+                                    contentDescription = stringResource(R.string.conversation_fork_from_here),
+                                    modifier = Modifier.size(18.dp),
+                                    tint = if (isLoading) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    },
+                                )
+                            }
+                            IconButton(
+                                onClick = onShare,
+                                enabled = !isLoading,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Share,
+                                    contentDescription = stringResource(R.string.conversation_share),
+                                    modifier = Modifier.size(18.dp),
+                                    tint = if (isLoading) {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                    },
+                                )
+                            }
                             Box {
-                                IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
+                                IconButton(onClick = { haptics.tap(); showMenu = true }, modifier = Modifier.size(32.dp)) {
                                     Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                                 }
                                 DropdownMenu(
@@ -429,12 +465,12 @@ internal fun AssistantMessageContent(
                                 ) {
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.info)) },
-                                        onClick = { showMenu = false; onShowInfo() },
+                                        onClick = { haptics.tap(); showMenu = false; onShowInfo() },
                                         leadingIcon = { Icon(Icons.Default.Info, null) }
                                     )
                                     DropdownMenuItem(
                                         text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                        onClick = { showMenu = false; onShowDelete() },
+                                        onClick = { haptics.tap(); showMenu = false; onShowDelete() },
                                         enabled = !isLoading,
                                         leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
                                     )

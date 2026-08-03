@@ -9,7 +9,7 @@ import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -103,7 +103,7 @@ fun SettingsAutomationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         headlineContent = { Text(stringResource(R.string.automation_ai_tools)) },
                         supportingContent = { Text(stringResource(R.string.automation_ai_tools_desc)) },
                         leadingContent = {
-                            Icon(Icons.Default.AutoAwesome, null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
                         },
                         trailingContent = {
                             Switch(

@@ -1,15 +1,45 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.semantics.CollectionItemInfo
+import androidx.compose.ui.semantics.collectionItemInfo
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.components.LatexImageTransformer
+import com.newoether.agora.ui.chat.caseInsensitiveMatchRanges
+import com.newoether.agora.ui.chat.visibleMarkdownMatchRanges
 import com.newoether.agora.ui.theme.ChatType
+import com.mikepenz.markdown.compose.LocalMarkdownColors
+import com.mikepenz.markdown.compose.LocalMarkdownDimens
+import com.mikepenz.markdown.compose.LocalMarkdownPadding
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
@@ -17,12 +47,25 @@ import com.mikepenz.markdown.model.MarkdownColors
 import com.mikepenz.markdown.model.MarkdownPadding
 import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.compose.components.MarkdownComponents
+import com.mikepenz.markdown.compose.components.MarkdownComponentModel
 import com.mikepenz.markdown.compose.components.markdownComponents
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBackground
+import com.mikepenz.markdown.compose.elements.MarkdownCodeBlock
+import com.mikepenz.markdown.compose.elements.MarkdownCodeFence
+import com.mikepenz.markdown.compose.elements.MarkdownText
 import com.mikepenz.markdown.compose.elements.MarkdownTable
 import com.mikepenz.markdown.compose.elements.MarkdownTableHeader
 import com.mikepenz.markdown.compose.elements.MarkdownTableRow
+import com.mikepenz.markdown.compose.elements.LocalTableRowIndex
+import com.mikepenz.markdown.compose.elements.material.MarkdownBasicText
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import com.mikepenz.markdown.annotator.annotatorSettings
+import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
+import org.intellij.markdown.MarkdownTokenTypes
+import org.intellij.markdown.ast.ASTNode
+import org.intellij.markdown.ast.findChildOfType
+import org.intellij.markdown.flavours.gfm.GFMTokenTypes.CELL
 
 /**
  * The memoized markdown rendering assets shared by a single [MessageItem]: the main
@@ -44,7 +87,10 @@ internal class ChatMarkdownAssets(
 )
 
 @Composable
-internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
+internal fun rememberChatMarkdownAssets(
+    textColor: Color,
+    searchHighlight: SearchHighlightSpec? = null,
+): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
     // Heading steps of 3sp (h1→h2→h3) and 2sp (h3→h4) create
@@ -101,36 +147,143 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
     )
     val customMarkdownPadding = markdownPadding(block = 8.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 5.dp)
+    val searchHighlightColor = MaterialTheme.colorScheme.tertiaryContainer
+    val activeSearchHighlightColor = MaterialTheme.colorScheme.primaryContainer
 
-    val customMarkdownComponents = remember {
+    val thoughtMarkdownComponents = remember {
         markdownComponents(
             table = { model ->
-                MarkdownTable(
-                    content = model.content,
-                    node = model.node,
-                    style = model.typography.table,
-                    headerBlock = { content, header, tableWidth, style ->
-                        MarkdownTableHeader(
-                            content = content,
-                            header = header,
-                            tableWidth = tableWidth,
-                            style = style,
-                            maxLines = Int.MAX_VALUE,
-                            overflow = TextOverflow.Clip,
-                        )
-                    },
-                    rowBlock = { content, row, tableWidth, style ->
-                        MarkdownTableRow(
-                            content = content,
-                            header = row,
-                            tableWidth = tableWidth,
-                            style = style,
-                            maxLines = Int.MAX_VALUE,
-                            overflow = TextOverflow.Clip,
-                        )
-                    },
+                SearchHighlightedMarkdownTable(
+                    model = model,
+                    spec = searchHighlight,
+                    highlightColor = searchHighlightColor,
+                    activeHighlightColor = activeSearchHighlightColor,
                 )
-            }
+            },
+        )
+    }
+    val customMarkdownComponents = remember(
+        searchHighlight,
+        searchHighlightColor,
+        activeSearchHighlightColor,
+    ) {
+        markdownComponents(
+            text = { model ->
+                SearchHighlightedMarkdownText(
+                    model = model,
+                    spec = searchHighlight,
+                    highlightColor = searchHighlightColor,
+                    activeHighlightColor = activeSearchHighlightColor,
+                )
+            },
+            paragraph = { model ->
+                SearchHighlightedMarkdownText(
+                    model = model,
+                    style = model.typography.paragraph,
+                    spec = searchHighlight,
+                    highlightColor = searchHighlightColor,
+                    activeHighlightColor = activeSearchHighlightColor,
+                )
+            },
+            heading1 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h1,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            heading2 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h2,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            heading3 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h3,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            heading4 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h4,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            heading5 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h5,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            heading6 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h6,
+                    MarkdownTokenTypes.ATX_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            setextHeading1 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h1,
+                    MarkdownTokenTypes.SETEXT_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            setextHeading2 = { model ->
+                SearchHighlightedMarkdownHeading(
+                    model,
+                    model.typography.h2,
+                    MarkdownTokenTypes.SETEXT_CONTENT,
+                    searchHighlight,
+                    searchHighlightColor,
+                    activeSearchHighlightColor,
+                )
+            },
+            codeFence = { model ->
+                SearchHighlightedMarkdownCode(
+                    model = model,
+                    fenced = true,
+                    spec = searchHighlight,
+                    highlightColor = searchHighlightColor,
+                    activeHighlightColor = activeSearchHighlightColor,
+                )
+            },
+            codeBlock = { model ->
+                SearchHighlightedMarkdownCode(
+                    model = model,
+                    fenced = false,
+                    spec = searchHighlight,
+                    highlightColor = searchHighlightColor,
+                    activeHighlightColor = activeSearchHighlightColor,
+                )
+            },
+            table = { model -> OverflowFriendlyMarkdownTable(model) },
         )
     }
 
@@ -162,7 +315,7 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
         customMarkdownColors,
         thoughtTypography,
         thoughtMarkdownPadding,
-        customMarkdownComponents,
+        thoughtMarkdownComponents,
         latexImageTransformer,
         markdownFlavour,
     ) {
@@ -170,7 +323,7 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
             colors = customMarkdownColors,
             typography = thoughtTypography,
             padding = thoughtMarkdownPadding,
-            components = customMarkdownComponents,
+            components = thoughtMarkdownComponents,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
         )
@@ -195,4 +348,381 @@ internal fun rememberChatMarkdownAssets(textColor: Color): ChatMarkdownAssets {
             flavour = markdownFlavour,
         )
     }
+}
+
+@Composable
+private fun OverflowFriendlyMarkdownTable(model: MarkdownComponentModel) {
+    MarkdownTable(
+        content = model.content,
+        node = model.node,
+        style = model.typography.table,
+        headerBlock = { content, header, tableWidth, style ->
+            MarkdownTableHeader(
+                content = content,
+                header = header,
+                tableWidth = tableWidth,
+                style = style,
+                maxLines = Int.MAX_VALUE,
+                overflow = TextOverflow.Clip,
+            )
+        },
+        rowBlock = { content, row, tableWidth, style ->
+            MarkdownTableRow(
+                content = content,
+                header = row,
+                tableWidth = tableWidth,
+                style = style,
+                maxLines = Int.MAX_VALUE,
+                overflow = TextOverflow.Clip,
+            )
+        },
+    )
+}
+
+@Composable
+private fun SearchHighlightedMarkdownTable(
+    model: MarkdownComponentModel,
+    spec: SearchHighlightSpec?,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    if (spec == null) {
+        OverflowFriendlyMarkdownTable(model)
+        return
+    }
+    MarkdownTable(
+        content = model.content,
+        node = model.node,
+        style = model.typography.table,
+        headerBlock = { content, header, tableWidth, style ->
+            SearchHighlightedMarkdownTableRow(
+                content = content,
+                row = header,
+                tableWidth = tableWidth,
+                style = style,
+                typography = model.typography,
+                isHeader = true,
+                spec = spec,
+                highlightColor = highlightColor,
+                activeHighlightColor = activeHighlightColor,
+            )
+        },
+        rowBlock = { content, row, tableWidth, style ->
+            SearchHighlightedMarkdownTableRow(
+                content = content,
+                row = row,
+                tableWidth = tableWidth,
+                style = style,
+                typography = model.typography,
+                isHeader = false,
+                spec = spec,
+                highlightColor = highlightColor,
+                activeHighlightColor = activeHighlightColor,
+            )
+        },
+    )
+}
+
+@Composable
+private fun SearchHighlightedMarkdownTableRow(
+    content: String,
+    row: ASTNode,
+    tableWidth: androidx.compose.ui.unit.Dp,
+    style: TextStyle,
+    typography: MarkdownTypography,
+    isHeader: Boolean,
+    spec: SearchHighlightSpec,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    val rowIndex = if (isHeader) 0 else LocalTableRowIndex.current
+    val rowModifier = if (isHeader) {
+        Modifier.widthIn(tableWidth).height(IntrinsicSize.Max)
+    } else {
+        Modifier.widthIn(tableWidth)
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = rowModifier,
+    ) {
+        row.children.filter { it.type == CELL }.forEachIndexed { columnIndex, cell ->
+            Column(
+                modifier = Modifier
+                    .padding(LocalMarkdownDimens.current.tableCellPadding)
+                    .weight(1f)
+                    .semantics {
+                        if (isHeader) heading()
+                        collectionItemInfo = CollectionItemInfo(
+                            rowIndex = rowIndex,
+                            rowSpan = 1,
+                            columnIndex = columnIndex,
+                            columnSpan = 1,
+                        )
+                    },
+            ) {
+                SearchHighlightedMarkdownText(
+                    model = MarkdownComponentModel(
+                        content = content,
+                        node = cell,
+                        typography = typography,
+                    ),
+                    style = if (isHeader) style.copy(fontWeight = FontWeight.Bold) else style,
+                    spec = spec,
+                    highlightColor = highlightColor,
+                    activeHighlightColor = activeHighlightColor,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchHighlightedMarkdownText(
+    model: MarkdownComponentModel,
+    style: TextStyle = model.typography.text,
+    textNode: ASTNode = model.node,
+    modifier: Modifier = Modifier,
+    spec: SearchHighlightSpec?,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    val settings = annotatorSettings()
+    val base = remember(model.content, textNode, style, settings) {
+        model.content.buildMarkdownAnnotatedString(
+            textNode = textNode,
+            style = style,
+            annotatorSettings = settings,
+        )
+    }
+    if (spec == null) {
+        MarkdownText(
+            content = base,
+            node = model.node,
+            modifier = modifier,
+            style = style,
+            sourceContent = model.content,
+        )
+        return
+    }
+    val sourceMatches = remember(model.content, textNode, spec.query) {
+        sourceMatchesForNode(model.content, textNode, spec.query)
+    }
+    val displayRanges = remember(base.text, spec.query) {
+        caseInsensitiveMatchRanges(base.text, spec.query)
+    }
+    val displayMatches = remember(displayRanges, sourceMatches, spec.matchKeys) {
+        displayRanges.mapIndexedNotNull { index, range ->
+            val sourceOccurrence = sourceMatches.getOrNull(index) ?: return@mapIndexedNotNull null
+            spec.matchKeys.getOrNull(sourceOccurrence)?.let { key ->
+                DisplaySearchMatch(key, range)
+            }
+        }
+    }
+    val activeOccurrence = displayMatches.indexOfFirst { it.key == spec.activeKey }
+        .takeIf { it >= 0 }
+    val highlighted = remember(
+        base,
+        spec.query,
+        activeOccurrence,
+        highlightColor,
+        activeHighlightColor,
+    ) {
+        highlightedSearchText(
+            text = base,
+            query = spec.query,
+            activeOccurrence = activeOccurrence,
+            highlightColor = highlightColor,
+            activeHighlightColor = activeHighlightColor,
+        )
+    }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    ReportSearchPositions(
+        spec = spec,
+        displayMatches = displayMatches,
+        layoutResult = layoutResult,
+        coordinates = coordinates,
+    )
+    MarkdownText(
+        content = highlighted.first,
+        node = model.node,
+        modifier = modifier.onGloballyPositioned { coordinates = it },
+        style = style,
+        onTextLayout = { result, _ -> layoutResult = result },
+        sourceContent = model.content,
+    )
+}
+
+@Composable
+private fun SearchHighlightedMarkdownHeading(
+    model: MarkdownComponentModel,
+    style: TextStyle,
+    contentType: org.intellij.markdown.IElementType,
+    spec: SearchHighlightSpec?,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    SearchHighlightedMarkdownText(
+        model = model,
+        style = style,
+        textNode = model.node.findChildOfType(contentType) ?: model.node,
+        modifier = Modifier.semantics { heading() },
+        spec = spec,
+        highlightColor = highlightColor,
+        activeHighlightColor = activeHighlightColor,
+    )
+}
+
+@Composable
+private fun SearchHighlightedMarkdownCode(
+    model: MarkdownComponentModel,
+    fenced: Boolean,
+    spec: SearchHighlightSpec?,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    if (spec == null) {
+        if (fenced) {
+            MarkdownCodeFence(model.content, model.node, model.typography.code)
+        } else {
+            MarkdownCodeBlock(model.content, model.node, model.typography.code)
+        }
+        return
+    }
+
+    val sourceRange = remember(model.content, model.node, fenced) {
+        markdownCodeSourceRange(model.content, model.node, fenced)
+    }
+    val sourceMatches = remember(model.content, sourceRange, spec.query) {
+        sourceRange?.let { range ->
+            val all = visibleMarkdownMatchRanges(model.content, spec.query)
+            all.indices.filter { index ->
+                val match = all[index]
+                match.first >= range.first && match.last <= range.last
+            }
+        }.orEmpty()
+    }
+    val block: @Composable (String, String?, TextStyle) -> Unit = { code, language, style ->
+        SearchHighlightedMarkdownCodeText(
+            code = code,
+            language = language,
+            style = style,
+            spec = spec,
+            sourceMatches = sourceMatches,
+            highlightColor = highlightColor,
+            activeHighlightColor = activeHighlightColor,
+        )
+    }
+    if (fenced) {
+        MarkdownCodeFence(model.content, model.node, model.typography.code, block)
+    } else {
+        MarkdownCodeBlock(model.content, model.node, model.typography.code, block)
+    }
+}
+
+@Composable
+private fun SearchHighlightedMarkdownCodeText(
+    code: String,
+    language: String?,
+    style: TextStyle,
+    spec: SearchHighlightSpec,
+    sourceMatches: List<Int>,
+    highlightColor: Color,
+    activeHighlightColor: Color,
+) {
+    val displayRanges = remember(code, spec.query) {
+        caseInsensitiveMatchRanges(code, spec.query)
+    }
+    val displayMatches = remember(displayRanges, sourceMatches, spec.matchKeys) {
+        displayRanges.mapIndexedNotNull { index, range ->
+            val sourceOccurrence = sourceMatches.getOrNull(index) ?: return@mapIndexedNotNull null
+            spec.matchKeys.getOrNull(sourceOccurrence)?.let { key ->
+                DisplaySearchMatch(key, range)
+            }
+        }
+    }
+    val activeOccurrence = displayMatches.indexOfFirst { it.key == spec.activeKey }
+        .takeIf { it >= 0 }
+    val highlighted = remember(
+        code,
+        spec.query,
+        activeOccurrence,
+        highlightColor,
+        activeHighlightColor,
+    ) {
+        highlightedSearchText(
+            text = AnnotatedString(code),
+            query = spec.query,
+            activeOccurrence = activeOccurrence,
+            highlightColor = highlightColor,
+            activeHighlightColor = activeHighlightColor,
+        )
+    }
+    var layoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
+    var coordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    ReportSearchPositions(
+        spec = spec,
+        displayMatches = displayMatches,
+        layoutResult = layoutResult,
+        coordinates = coordinates,
+    )
+
+    MarkdownCodeBackground(
+        color = LocalMarkdownColors.current.codeBackground,
+        shape = RoundedCornerShape(LocalMarkdownDimens.current.codeBackgroundCornerSize),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        language = language,
+        code = code,
+    ) {
+        MarkdownBasicText(
+            text = highlighted.first,
+            style = style,
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(LocalMarkdownPadding.current.codeBlock)
+                .onGloballyPositioned { coordinates = it },
+            onTextLayout = { layoutResult = it },
+        )
+    }
+}
+
+private fun sourceMatchesForNode(
+    content: String,
+    node: ASTNode,
+    query: String,
+): List<Int> {
+    val start = node.startOffset.coerceIn(0, content.length)
+    val end = node.endOffset.coerceIn(start, content.length)
+    val matches = visibleMarkdownMatchRanges(content, query)
+    return matches.indices.filter { index ->
+        val match = matches[index]
+        match.first >= start && match.last < end
+    }
+}
+
+private fun markdownCodeSourceRange(
+    content: String,
+    node: ASTNode,
+    fenced: Boolean,
+): IntRange? {
+    if (node.children.isEmpty()) return null
+    val start: Int
+    val endExclusive: Int
+    if (fenced) {
+        if (node.children.size < 3) return null
+        val language = node.findChildOfType(MarkdownTokenTypes.FENCE_LANG)
+        start = node.children[2].startOffset
+        val minimumEndIndex = if (language != null && node.children.size > 3) 3 else 2
+        endExclusive = node.children[
+            (node.children.size - 2).coerceAtLeast(minimumEndIndex)
+        ].endOffset
+    } else {
+        start = node.children.first().startOffset
+        endExclusive = node.children.last().endOffset
+    }
+    val safeStart = start.coerceIn(0, content.length)
+    val safeEnd = endExclusive.coerceIn(safeStart, content.length)
+    return safeStart until safeEnd
 }

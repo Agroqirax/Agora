@@ -159,6 +159,7 @@ class AppContainer(private val appContext: Context) {
             },
             refreshScheduling = { automationScheduler.refresh() },
             conversationExecutionCoordinator = conversationExecutionCoordinator,
+            titleExecutionConversation = taskExecutionEngine::updateTaskExecutionTitle,
         )
     }
 

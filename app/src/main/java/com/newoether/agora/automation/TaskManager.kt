@@ -12,6 +12,7 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -43,6 +44,10 @@ class TaskManager(
     private val refreshScheduling: () -> Unit = {},
     private val conversationExecutionCoordinator: ConversationExecutionCoordinator =
         ConversationExecutionCoordinator(),
+    private val titleExecutionConversation: suspend (
+        conversationId: String,
+        response: String,
+    ) -> Unit = { _, _ -> },
 ) {
     data class ExecutionSummary(
         val conversation: ChatConversation,
@@ -219,19 +224,10 @@ class TaskManager(
             conversationExecutionCoordinator.withConversationLock(execution.id) {
                 val entity = conversationRepository.getConversation(execution.id)
                     ?: return@withConversationLock
-                if (entity.graduated) {
-                    // Graduation is a transfer of ownership to the user. Detach the conversation
-                    // from its deleted template and preserve any Loop the user owns with it.
-                    conversationRepository.upsertConversation(
-                        entity.copy(taskId = null, origin = "user", graduated = true)
-                    )
-                } else {
-                    // A hidden Task execution can itself have an active/enqueued Loop. Stop it
-                    // before the FK cascade removes the loop row and conversation underneath a
-                    // running worker.
-                    cancelConversationLoop(execution.id)
-                    conversationRepository.deleteConversation(execution.id)
-                }
+                // A Task owns all of its execution conversations. Stop a nested Loop before the
+                // FK cascade removes the loop row and conversation underneath a running worker.
+                cancelConversationLoop(execution.id)
+                conversationRepository.deleteConversation(execution.id)
             }
         }
         taskRepository.deleteTask(task.id)
@@ -369,11 +365,6 @@ class TaskManager(
         var conversationId = requestedConversationId
         val existing = conversationRepository.getConversation(conversationId)
         if (existing != null) {
-            if (existing.taskId == task.id && existing.graduated) {
-                return ExecutionResult.Skipped(
-                    "Execution conversation was taken over by the user", advancesSchedule = true,
-                )
-            }
             if (existing.taskId == task.id) {
                 val recovery = recoverExistingExecution(existing)
                 if (recovery != null) return recovery
@@ -401,8 +392,20 @@ class TaskManager(
             foregroundServiceManagedExternally = foregroundServiceManagedExternally,
         )
         val outcome = when (result) {
-            is TaskExecutionEngine.Result.Success ->
+            is TaskExecutionEngine.Result.Success -> {
+                try {
+                    titleExecutionConversation(conversationId, result.text)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    DebugLog.e(
+                        "TaskManager",
+                        "Task execution title update failed for conversation=$conversationId",
+                        e,
+                    )
+                }
                 ExecutionResult.Success(conversationId, result.text)
+            }
             is TaskExecutionEngine.Result.Failure -> {
                 DebugLog.e("TaskManager", "Task '${task.name}' run failed: ${result.reason}")
                 ExecutionResult.Failure(

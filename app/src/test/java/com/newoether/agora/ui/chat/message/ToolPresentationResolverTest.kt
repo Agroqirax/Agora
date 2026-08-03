@@ -8,6 +8,18 @@ import org.junit.Test
 
 class ToolPresentationResolverTest {
     @Test
+    fun shellCommandSummary_isAlwaysSingleLineAndBounded() {
+        val command = "  echo first\r\n   &&   echo second  "
+
+        assertEquals(
+            "echo first && echo second",
+            singleLineShellCommand(command),
+        )
+        assertEquals("shell", singleLineShellCommand(" \n\t "))
+        assertEquals("12345", singleLineShellCommand("123456789", maxCharacters = 5))
+    }
+
+    @Test
     fun emptyGlobJsonIsZeroFilesNotOneLine() {
         val presentation = ToolPresentationResolver.resolve(
             MessageSegment(

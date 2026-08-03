@@ -414,6 +414,7 @@ fun MainNavigation(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showTasks by rememberSaveable { mutableStateOf(false) }
     var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
+    var taskHistoryReturnId by rememberSaveable { mutableStateOf<String?>(null) }
     val notificationTarget by notificationConversationId.collectAsState()
     LaunchedEffect(notificationTarget) {
         val id = notificationTarget ?: return@LaunchedEffect
@@ -426,6 +427,7 @@ fun MainNavigation(
                 showSettings = false
                 showTasks = false
                 taskToOpen = null
+                taskHistoryReturnId = null
                 viewModel.selectConversation(id)
             }
         } finally {
@@ -793,6 +795,13 @@ fun MainNavigation(
         Box(modifier = Modifier.fillMaxSize()) {
             ChatApp(
                 viewModel = viewModel,
+                onNavigateBack = taskHistoryReturnId?.let { taskId ->
+                    {
+                        taskToOpen = taskId
+                        taskHistoryReturnId = null
+                        showTasks = true
+                    }
+                },
                 onOpenSettings = {
                     showSettings = true
                 },
@@ -851,7 +860,8 @@ fun MainNavigation(
                     initialTaskId = taskToOpen,
                     onInitialTaskHandled = { taskToOpen = null },
                     onBack = { showTasks = false },
-                    onOpenConversation = { conversationId ->
+                    onOpenConversation = { taskId, conversationId ->
+                        taskHistoryReturnId = taskId
                         showTasks = false
                         viewModel.selectConversation(conversationId)
                     }

@@ -15,11 +15,13 @@ import com.newoether.agora.model.RunStatus
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ConversationUiState
+import com.newoether.agora.viewmodel.ConversationTitleGenerator
 import com.newoether.agora.viewmodel.GenerationCallbacks
 import com.newoether.agora.viewmodel.GenerationManager
 import com.newoether.agora.viewmodel.GenerationRequestBuilder
 import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
+import com.newoether.agora.viewmodel.fallbackConversationTitle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -69,6 +71,31 @@ class TaskExecutionEngine(
         scope = appScope,
         emitSnackbar = {},
     )
+    private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
+
+    /**
+     * Task-only post-processing. Loop runs share this engine but never call this method, so a
+     * conversation loop cannot repeatedly retitle itself after every cycle.
+     */
+    suspend fun updateTaskExecutionTitle(conversationId: String, response: String) {
+        settings.awaitInitialLoad()
+        providerRegistry.awaitInitialSync()
+        if (settings.titleGenerationEnabled.value) {
+            when (val result = titleGenerator.generateAndPersist(conversationId)) {
+                is ConversationTitleGenerator.Result.Success -> return
+                is ConversationTitleGenerator.Result.Failure ->
+                    DebugLog.w(
+                        "TaskExecutionEngine",
+                        "Task title generation failed; using response fallback: ${result.reason}",
+                    )
+            }
+        }
+        val fallback = fallbackConversationTitle(response)
+        if (fallback.isBlank()) return
+        convRepo.getConversation(conversationId)?.let { conversation ->
+            convRepo.upsertConversation(conversation.copy(title = fallback))
+        }
+    }
 
     private val generationManager = GenerationManager(
         app = application,

@@ -1,8 +1,10 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.input.*
 
 import androidx.compose.material3.*
@@ -20,6 +22,8 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.ui.chat.ConversationSearchMatch
+import com.newoether.agora.ui.chat.conversationSearchMatchRanges
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -28,7 +32,7 @@ private const val STREAMING_MARKDOWN_FLUSH_MS = 250L
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun MessageItem(
+internal fun MessageItem(
     message: ChatMessage, 
     onEdit: (String, String) -> Unit, 
     isStreaming: Boolean = false,
@@ -49,12 +53,20 @@ fun MessageItem(
     totalBranches: Int = 1,
     onSwitchBranch: (Int) -> Unit = {},
     onRegenerate: (String) -> Unit = {},
+    onFork: (String) -> Unit = {},
+    onShare: (String) -> Unit = {},
     deleteTargetMessageId: String = message.id,
     onDelete: (String) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
     onHeightChanged: (Int) -> Unit = {},
+    searchQuery: String = "",
+    activeSearchMatch: ConversationSearchMatch? = null,
+    onSearchMatchPosition: (key: String, centerYInRoot: Float) -> Unit = { _, _ -> },
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
     onLayoutMutationStarted: (String) -> Unit = {},
     onLayoutMutationSettled: (String) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
@@ -81,7 +93,7 @@ fun MessageItem(
         MessageDeleteDialog(
             onConfirm = {
                 showDeleteConfirm = false
-                haptics.reject()
+                haptics.destructive()
                 onDelete(deleteTargetMessageId)
             },
             onDismiss = { showDeleteConfirm = false }
@@ -112,77 +124,118 @@ fun MessageItem(
         Participant.ERROR -> RoundedCornerShape(12.dp)
     }
 
-    val markdownAssets = rememberChatMarkdownAssets(textColor)
+    val searchHighlight = searchQuery.takeIf { it.isNotBlank() }?.let { query ->
+        val active = activeSearchMatch?.takeIf { it.messageId == message.id }
+        val matchKeys = conversationSearchMatchRanges(message, query).map { range ->
+            "${message.id}:${range.first}:${range.last + 1}"
+        }
+        SearchHighlightSpec(
+            query = query,
+            activeRange = active?.let { it.start until it.endExclusive },
+            activeKey = active?.key,
+            matchKeys = matchKeys,
+            onMatchPosition = onSearchMatchPosition,
+        )
+    }
+    val markdownAssets = rememberChatMarkdownAssets(textColor, searchHighlight)
     val markdownRenderContext = markdownAssets.renderContext
     val thoughtMarkdownRenderContext = markdownAssets.thoughtRenderContext
 
     val shouldAnimate = !isFirstComposition && !isSwitching
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .onSizeChanged {
                 onHeightChanged(it.height)
             }
             .padding(vertical = 8.dp),
-        horizontalAlignment = alignment
+        verticalAlignment = Alignment.Top,
     ) {
-        val contextAlpha = if (visualizeContextRollout && !isInContext) Modifier.alpha(0.38f) else Modifier
-        if (message.participant == Participant.USER) {
-            UserMessageBubble(
-                message = message,
-                shape = shape,
-                backgroundColor = backgroundColor,
-                textColor = textColor,
-                contextAlpha = contextAlpha,
-                shouldAnimate = shouldAnimate,
-                isEditing = isEditing,
-                isLoading = isLoading,
-                isEditingAllowed = isEditingAllowed,
-                showActions = showActions,
-                actionCopyText = actionCopyText,
-                showBranchSelector = showBranchSelector,
-                branchIndex = branchIndex,
-                totalBranches = totalBranches,
-                onEdit = onEdit,
-                onCancelEdit = onCancelEdit,
-                onStartEdit = onStartEdit,
-                onSwitchBranch = onSwitchBranch,
-                onMediaClick = onMediaClick,
-                onFileContentClick = onFileContentClick,
-                onPdfPagesClick = onPdfPagesClick,
-                onShowInfo = { showInfoDialog = true },
-                onShowDelete = { showDeleteConfirm = true },
+        AnimatedVisibility(visible = selectionMode) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = { onToggleSelection() },
+                modifier = Modifier.padding(top = 2.dp, end = 4.dp),
             )
-        } else {
-            AssistantMessageContent(
-                message = message,
-                contextAlpha = contextAlpha,
-                isStreaming = isStreaming,
-                isLoading = isLoading,
-                isEditingAllowed = isEditingAllowed,
-                showActions = showActions,
-                actionCopyText = actionCopyText,
-                showBranchSelector = showBranchSelector,
-                toolCallDisplayMode = toolCallDisplayMode,
-                thoughtExpandedStates = thoughtExpandedStates,
-                renderContext = markdownRenderContext,
-                branchIndex = branchIndex,
-                totalBranches = totalBranches,
-                onSwitchBranch = onSwitchBranch,
-                onRegenerate = onRegenerate,
-                onMediaClick = onMediaClick,
-                onShowInfo = { showInfoDialog = true },
-                onShowDelete = { showDeleteConfirm = true },
-                onSegmentSelected = { indices ->
-                    selectedSegmentIndices = indices
-                    selectedSegmentIndex = indices.firstOrNull() ?: -1
-                    showSegmentDetail = true
-                },
-                onLayoutMutationStarted = onLayoutMutationStarted,
-                onLayoutMutationSettled = onLayoutMutationSettled,
-                setThoughtBlockHeight = {},
-            )
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = alignment,
+            ) {
+                val contextAlpha = if (visualizeContextRollout && !isInContext) {
+                    Modifier.alpha(0.38f)
+                } else {
+                    Modifier
+                }
+                if (message.participant == Participant.USER) {
+                    UserMessageBubble(
+                        message = message,
+                        shape = shape,
+                        backgroundColor = backgroundColor,
+                        textColor = textColor,
+                        contextAlpha = contextAlpha,
+                        shouldAnimate = shouldAnimate,
+                        isEditing = isEditing,
+                        isLoading = isLoading,
+                        isEditingAllowed = isEditingAllowed,
+                        showActions = showActions,
+                        actionCopyText = actionCopyText,
+                        showBranchSelector = showBranchSelector,
+                        branchIndex = branchIndex,
+                        totalBranches = totalBranches,
+                        onEdit = onEdit,
+                        onCancelEdit = onCancelEdit,
+                        onStartEdit = onStartEdit,
+                        onSwitchBranch = onSwitchBranch,
+                        onMediaClick = onMediaClick,
+                        onFileContentClick = onFileContentClick,
+                        onPdfPagesClick = onPdfPagesClick,
+                        onShowInfo = { showInfoDialog = true },
+                        onShowDelete = { showDeleteConfirm = true },
+                        searchHighlight = searchHighlight,
+                    )
+                } else {
+                    AssistantMessageContent(
+                        message = message,
+                        contextAlpha = contextAlpha,
+                        isStreaming = isStreaming,
+                        isLoading = isLoading,
+                        isEditingAllowed = isEditingAllowed,
+                        showActions = showActions,
+                        actionCopyText = actionCopyText,
+                        showBranchSelector = showBranchSelector,
+                        toolCallDisplayMode = toolCallDisplayMode,
+                        thoughtExpandedStates = thoughtExpandedStates,
+                        renderContext = markdownRenderContext,
+                        branchIndex = branchIndex,
+                        totalBranches = totalBranches,
+                        onSwitchBranch = onSwitchBranch,
+                        onRegenerate = onRegenerate,
+                        onFork = { onFork(message.id) },
+                        onShare = { onShare(message.id) },
+                        onMediaClick = onMediaClick,
+                        onShowInfo = { showInfoDialog = true },
+                        onShowDelete = { showDeleteConfirm = true },
+                        onSegmentSelected = { indices ->
+                            selectedSegmentIndices = indices
+                            selectedSegmentIndex = indices.firstOrNull() ?: -1
+                            showSegmentDetail = true
+                        },
+                        onLayoutMutationStarted = onLayoutMutationStarted,
+                        onLayoutMutationSettled = onLayoutMutationSettled,
+                        setThoughtBlockHeight = {},
+                    )
+                }
+            }
+            if (selectionMode) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable(onClick = onToggleSelection),
+                )
+            }
         }
     }
 

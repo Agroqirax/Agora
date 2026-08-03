@@ -3,11 +3,8 @@ package com.newoether.agora.viewmodel
 import android.app.Application
 import android.content.Context
 import com.newoether.agora.R
-import com.newoether.agora.api.ProviderConfig
-import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.automation.ConversationExecutionCoordinator
-import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
@@ -17,7 +14,6 @@ import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
-import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.RunStatus
@@ -185,7 +181,6 @@ class MessageGenerationController(
     private val onConversationCreatedBySend: () -> Unit = {},
     // Called once when a hidden task/loop execution becomes searchable. The callback
     // only enqueues background work; embedding computation must not run under the send lock.
-    private val onConversationGraduated: (String) -> Unit = {},
     // Called after a USER message row is persisted (send / edit), so incremental RAG
     // indexing covers the user's side too — the model reply is indexed at generation end
     // via GenerationManager.onMessagePersisted, and without this hook user messages only
@@ -198,6 +193,7 @@ class MessageGenerationController(
     private val onTreeMutationFailed: (requestId: Long?) -> Unit = {},
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
+    private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
 
     /**
      * Run [block] only if the currently-open conversation is [genId]. Guards synchronous
@@ -787,9 +783,6 @@ class MessageGenerationController(
             try {
                 val myPersistId = state.nextPersistId()
                 executionCoordinator.withConversationLock(genId) {
-                    if (convRepo.graduateConversation(genId)) {
-                        onConversationGraduated(genId)
-                    }
                     val snapshotEntities = convRepo.getMessagesForConversationSnapshot(genId)
                     val selectedBeforeSend = convRepo.restoreBranchSelections(genId)
                     val messagesById = snapshotEntities.associateBy { it.id }
@@ -959,9 +952,6 @@ class MessageGenerationController(
         var startTime = 0L
         try {
             executionCoordinator.withConversationLock(genId) {
-                if (convRepo.graduateConversation(genId)) {
-                    onConversationGraduated(genId)
-                }
                 val pendingSettings = pendingConversationSettings.value
                 if (pendingSettings != null) {
                     settings.setConversationSettings(genId, pendingSettings)
@@ -1249,108 +1239,11 @@ class MessageGenerationController(
     fun generateTitle(conversationId: String) {
         viewModelScope.launch {
             onSnackbarSuspend(appContext.getString(R.string.snackbar_generating_title))
-            val conversation = convRepo.getConversation(conversationId) ?: return@launch
-            // Resolve the TARGET conversation's own path — not messages.value, which
-            // is the currently-open conversation. Otherwise a long-press "regenerate
-            // title" on a background conversation would summarize the active one.
-            val entities = convRepo.getMessagesForConversationSnapshot(conversationId)
-            val path = ConversationUiState.resolvePath(
-                allMessages = entities.map {
-                    ChatMessage(
-                        id = it.id,
-                        parentId = it.parentId,
-                        text = it.text,
-                        participant = it.participant,
-                        timestamp = it.timestamp,
-                        status = it.status,
-                        modelName = it.modelName,
-                        runId = it.runId,
-                        runSequence = it.runSequence,
-                        consumedAtPass = it.consumedAtPass,
-                    )
-                },
-                streamingMsg = null,
-                selectedChildren = emptyMap()
-            )
-            val firstUserMsg = path.firstOrNull { it.participant == Participant.USER } ?: return@launch
-            val firstModelMsg = path
-                .filter { it.participant == Participant.MODEL && it.text.isNotBlank() }
-                .firstOrNull()
-
-            val titleModelId = settings.titleGenerationModel.value
-            val modelIdWithPrefix = if (!titleModelId.isNullOrBlank()) titleModelId else (conversation.modelId ?: firstModelMsg?.modelName ?: settings.selectedModel.value)
-            val modelId = ModelId.parse(modelIdWithPrefix).modelName
-            val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelIdWithPrefix) ?: return@launch
-
-            val summaryText = if (firstModelMsg != null) {
-                "User: ${firstUserMsg.text}\nAssistant: ${firstModelMsg.text.take(500)}"
-            } else {
-                firstUserMsg.text
-            }
-
-            val titlePrompt = listOf(
-                ChatMessage(
-                    text = "Generate a short title (5 words maximum) for this conversation:\n\n$summaryText\n\nRespond with ONLY the title text, no quotes, no punctuation, no explanation.",
-                    participant = Participant.USER,
-                    status = MessageStatus.SUCCESS
-                )
-            )
-
-            val provider = providerRegistry.getInstance(providerName)
-            val config = ProviderConfig(
-                apiKey = activeKey,
-                modelId = modelId,
-                systemPrompt = settings.titleGenerationPrompt.value.ifBlank { BuiltInPrompts.TITLE_GENERATION_SYSTEM },
-                maxContextWindow = 1,
-                thinkingEnabled = false,
-                baseUrl = providerRegistry.getEffectiveBaseUrl(providerName)
-            )
-
-            var title = ""
-            try {
-                // Title generation is a real provider call. Remote title gen runs without any
-                // global slot (it's cheap and independent); local title gen takes the shared
-                // LocalModelSerializer mutex so it can't load a model alongside an in-flight
-                // chat/embedding turn (OOM). The mutex is fair and cancellable, so a Stop or a
-                // new send isn't blocked behind it.
-                if (providerName == Constants.PROVIDER_LOCAL) {
-                    com.newoether.agora.api.LocalModelSerializer.mutex.withLock {
-                        withContext(Dispatchers.IO) {
-                            provider.generateResponse(titlePrompt, config).collect { event ->
-                                if (event is StreamEvent.TextChunk) title += event.text
-                                else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                            }
-                        }
-                        // Intentionally do NOT releaseEngine() here. Title generation runs right
-                        // after the first message of a new conversation, on the same model the
-                        // user is actively chatting with; LocalProvider.ensureEngineLoaded reuses
-                        // the already-loaded engine. Releasing here would force the next message
-                        // to re-load a multi-GB model onto a possibly-fragmented native heap,
-                        // which is the leading suspect for the "second message OOM" crash (#53,
-                        // 31 OOM reports) — the text path itself is crash-safe. Keeping the
-                        // engine session-scoped (released only on model switch / RAG / process
-                        // death) eliminates that reload churn. This is an OOM-probability
-                        // reduction, NOT a claimed #53 root-case fix (that needs a logcat).
-                    }
-                } else {
-                    provider.generateResponse(titlePrompt, config).collect { event ->
-                        if (event is StreamEvent.TextChunk) title += event.text
-                        else if (event is StreamEvent.Error) DebugLog.e("AgoraVM", "Title generation error: ${event.message}")
-                    }
-                }
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Title generation failed for provider=$providerName model=$modelId", e)
-                return@launch
-            }
-
-            title = title.trim().replace("\n", " ").take(60)
-            if (title.isNotBlank()) {
-                convRepo.getConversation(conversationId)?.let { existing ->
-                    convRepo.upsertConversation(existing.copy(title = title))
-                }
-                onSnackbarSuspend(appContext.getString(R.string.snackbar_title_generated))
-            } else {
-                onSnackbarSuspend(appContext.getString(R.string.snackbar_title_error))
+            when (titleGenerator.generateAndPersist(conversationId)) {
+                is ConversationTitleGenerator.Result.Success ->
+                    onSnackbarSuspend(appContext.getString(R.string.snackbar_title_generated))
+                is ConversationTitleGenerator.Result.Failure ->
+                    onSnackbarSuspend(appContext.getString(R.string.snackbar_title_error))
             }
         }
     }

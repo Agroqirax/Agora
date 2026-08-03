@@ -8,43 +8,52 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDefaults
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -57,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,13 +81,18 @@ import java.util.Calendar
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
+import com.newoether.agora.ui.chat.ChatDeleteConfirmDialog
+import com.newoether.agora.ui.components.clearFocusOnTap
+import com.newoether.agora.ui.settings.AnimatedActionFab
 import com.newoether.agora.ui.settings.CollapsingSettingsLazyScaffold
 import com.newoether.agora.ui.settings.GuardedAnimatedContent
 import com.newoether.agora.ui.settings.SettingsGroup
+import com.newoether.agora.ui.settings.SettingsIconContent
 import com.newoether.agora.ui.settings.SettingsItem
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 
 /**
@@ -94,7 +109,7 @@ fun TasksScreen(
     initialTaskId: String? = null,
     onInitialTaskHandled: () -> Unit = {},
     onBack: () -> Unit,
-    onOpenConversation: (String) -> Unit,
+    onOpenConversation: (taskId: String, conversationId: String) -> Unit,
 ) {
     val tasks by viewModel.tasks.collectAsState()
     var openTaskId by remember { mutableStateOf<String?>(null) }
@@ -167,24 +182,40 @@ private fun TasksListPage(
     CollapsingSettingsLazyScaffold(
         title = stringResource(R.string.tasks),
         onBack = onBack,
-        actions = {
-            IconButton(onClick = onNewTask) {
-                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.task_new))
-            }
-        }
     ) {
+        val totalRows = tasks.size + 1
         if (tasks.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier.fillMaxWidth().padding(top = 48.dp, start = 24.dp, end = 24.dp),
-                    contentAlignment = Alignment.Center
+            item(key = "tasks_empty") {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = stackedShape(0, 2),
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 1.dp,
                 ) {
-                    Text(
-                        stringResource(R.string.task_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    SettingsItem(
+                        headlineContent = {
+                            Text(
+                                stringResource(R.string.task_empty),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                stringResource(R.string.task_empty_desc),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Repeat,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            )
+                        },
+                        modifier = Modifier.heightIn(min = 64.dp),
                     )
                 }
+                Spacer(Modifier.height(STACK_GAP))
             }
         } else {
             itemsIndexed(tasks, key = { _, task -> task.id }) { index, task ->
@@ -194,14 +225,20 @@ private fun TasksListPage(
                     task = task,
                     isRunning = task.id in running,
                     lastRunAt = executions.firstOrNull()?.timestamp?.takeIf { it > 0L },
-                    shape = stackedShape(index, tasks.size),
+                    shape = stackedShape(index, totalRows),
                     onClick = { onOpenTask(task) },
                     onRun = { viewModel.runTaskNow(task) },
                     onToggleEnabled = { enabled -> viewModel.saveTask(task.copy(enabled = enabled)) },
                     onDelete = { pendingDelete = task },
                 )
-                if (index < tasks.lastIndex) Spacer(Modifier.height(STACK_GAP))
+                Spacer(Modifier.height(STACK_GAP))
             }
+        }
+        item(key = "new_automation") {
+            NewAutomationRow(
+                shape = stackedShape(if (tasks.isEmpty()) 1 else tasks.size, if (tasks.isEmpty()) 2 else totalRows),
+                onClick = onNewTask,
+            )
         }
     }
 
@@ -321,8 +358,8 @@ private fun TaskCard(
             Spacer(Modifier.width(8.dp))
             if (isRunning) {
                 CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
+                    modifier = Modifier.padding(end = 12.dp).size(24.dp),
+                    strokeWidth = 3.dp,
                     color = MaterialTheme.colorScheme.primary,
                 )
             } else {
@@ -353,6 +390,40 @@ private fun TaskCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewAutomationRow(
+    shape: RoundedCornerShape,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = shape,
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+    ) {
+        Box(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    stringResource(R.string.task_new_automation),
+                    color = MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
         }
     }
@@ -398,7 +469,7 @@ private fun TaskDetailPage(
     task: TaskEntity,
     isNew: Boolean,
     onBack: () -> Unit,
-    onOpenConversation: (String) -> Unit,
+    onOpenConversation: (taskId: String, conversationId: String) -> Unit,
 ) {
     val running by viewModel.runningTaskIds.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
@@ -411,6 +482,9 @@ private fun TaskDetailPage(
     var runAt by rememberSaveable(task.id) { mutableStateOf(task.runAt) }
     var enabled by rememberSaveable(task.id) { mutableStateOf(task.enabled) }
     var showModelPicker by remember { mutableStateOf(false) }
+    var executionToDelete by remember { mutableStateOf<com.newoether.agora.automation.TaskManager.ExecutionSummary?>(null) }
+    val listState = rememberLazyListState()
+    val focusManager = LocalFocusManager.current
 
     val isRunning = task.id in running
     val executions by viewModel.executionSummariesForTask(task.id).collectAsState(initial = emptyList())
@@ -430,38 +504,30 @@ private fun TaskDetailPage(
 
     BackHandler { leave() }
 
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) focusManager.clearFocus()
+    }
+
     CollapsingSettingsLazyScaffold(
         title = name.ifBlank { stringResource(if (isNew) R.string.task_new else R.string.task_edit) },
         onBack = { leave() },
+        modifier = Modifier.clearFocusOnTap(),
+        listState = listState,
         actions = {
             IconButton(enabled = isComplete && !saved, onClick = { save() }) {
-                Icon(Icons.Default.Check, contentDescription = stringResource(R.string.task_save))
+                Icon(Icons.Default.Save, contentDescription = stringResource(R.string.task_save))
             }
         },
         floatingActionButton = {
-            // Run is the page's primary action, so it gets the FAB; Save is the confirming
-            // secondary action in the bar.
-            FloatingActionButton(
+            AnimatedActionFab(
+                label = stringResource(if (isRunning) R.string.task_running else R.string.task_run_now),
+                icon = Icons.Default.PlayArrow,
                 onClick = {
-                    if (!isComplete || isRunning) return@FloatingActionButton
-                    viewModel.saveTask(current())
                     viewModel.runTaskNow(current())
                 },
-                containerColor = if (isComplete && !isRunning) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = if (isComplete && !isRunning) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            ) {
-                if (isRunning) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(22.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                } else {
-                    Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.task_run_now))
-                }
-            }
+                enabled = isComplete && !isRunning,
+                loading = isRunning,
+            )
         },
     ) {
         item {
@@ -500,13 +566,6 @@ private fun TaskDetailPage(
                             },
                             leadingContent = {
                                 Icon(Icons.Default.Chat, null, tint = MaterialTheme.colorScheme.primary)
-                            },
-                            trailingContent = {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
                             },
                         )
                     },
@@ -549,6 +608,20 @@ private fun TaskDetailPage(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         },
+                        supportingContent = {
+                            Text(
+                                stringResource(R.string.task_no_executions_desc),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            )
+                        },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            )
+                        },
+                        modifier = Modifier.heightIn(min = 64.dp),
                     )
                 }
             }
@@ -557,10 +630,15 @@ private fun TaskDetailPage(
                 ExecutionRow(
                     execution = execution,
                     shape = stackedShape(index, executions.size),
-                    onClick = { onOpenConversation(execution.conversation.id) },
+                    onClick = { onOpenConversation(task.id, execution.conversation.id) },
+                    menuEnabled = !isRunning,
+                    onDelete = { executionToDelete = execution },
                 )
                 if (index < executions.lastIndex) Spacer(Modifier.height(STACK_GAP))
             }
+        }
+        item(key = "task_detail_fab_spacing") {
+            Spacer(Modifier.height(80.dp))
         }
     }
 
@@ -573,10 +651,19 @@ private fun TaskDetailPage(
             onDismiss = { showModelPicker = false },
         )
     }
+    executionToDelete?.let { execution ->
+        ChatDeleteConfirmDialog(
+            onConfirm = {
+                viewModel.deleteConversation(execution.conversation.id)
+                executionToDelete = null
+            },
+            onDismiss = { executionToDelete = null },
+        )
+    }
 }
 
-/** A group row whose value is typed in place — label on top, field below (the same shape the
- *  provider detail page uses for Base URL), so text entry doesn't break the card rhythm. */
+/** A group row whose value is typed in place. Icon-bearing fields use the same leading-icon
+ *  content column as the Proxy settings page, so the label and field share its left inset. */
 @Composable
 private fun LabeledField(
     label: String,
@@ -589,18 +676,12 @@ private fun LabeledField(
     supporting: String? = null,
     supportingIsError: Boolean = false,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.width(16.dp))
-            }
-            Text(
-                label,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-        }
+    val fieldContent: @Composable () -> Unit = {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = value,
@@ -621,6 +702,15 @@ private fun LabeledField(
                 color = if (supportingIsError) MaterialTheme.colorScheme.error
                 else MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+    }
+    if (icon != null) {
+        SettingsIconContent(icon = icon) {
+            fieldContent()
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp)) {
+            fieldContent()
         }
     }
 }
@@ -697,6 +787,8 @@ private fun ScheduleGroup(
     var showRepeatMenu by remember { mutableStateOf(false) }
     var showWeekdayDialog by remember { mutableStateOf(false) }
     var showDayOfMonthDialog by remember { mutableStateOf(false) }
+    var showDateDialog by remember { mutableStateOf(false) }
+    var showTimeDialog by remember { mutableStateOf(false) }
 
     fun apply(next: TaskSchedule) = onScheduleChange(next.toCron(), next.toRunAt())
 
@@ -722,13 +814,6 @@ private fun ScheduleGroup(
                         leadingContent = {
                             Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
                         },
-                        trailingContent = {
-                            Icon(
-                                Icons.Default.ArrowDropDown,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        },
                     )
                     DropdownMenu(
                         expanded = showRepeatMenu,
@@ -739,7 +824,7 @@ private fun ScheduleGroup(
                         ScheduleType.entries.forEach { type ->
                             DropdownMenuItem(
                                 text = { Text(repeatLabel(type)) },
-                                trailingIcon = {
+                                leadingIcon = {
                                     if (!isCustomCron && schedule.type == type) {
                                         Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                                     }
@@ -771,8 +856,7 @@ private fun ScheduleGroup(
                             when (schedule.type) {
                                 ScheduleType.WEEKLY -> showWeekdayDialog = true
                                 ScheduleType.MONTHLY -> showDayOfMonthDialog = true
-                                ScheduleType.YEARLY, ScheduleType.ONCE ->
-                                    showDatePicker(context, schedule) { apply(it) }
+                                ScheduleType.YEARLY, ScheduleType.ONCE -> showDateDialog = true
                                 ScheduleType.DAILY -> Unit
                             }
                         },
@@ -789,13 +873,6 @@ private fun ScheduleGroup(
                         leadingContent = {
                             Icon(Icons.Default.CalendarMonth, null, tint = MaterialTheme.colorScheme.primary)
                         },
-                        trailingContent = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        },
                     )
                 }
             }
@@ -804,18 +881,11 @@ private fun ScheduleGroup(
             if (!isCustomCron) {
                 add {
                     SettingsItem(
-                        modifier = Modifier.clickable { showTimePicker(context, schedule) { apply(it) } },
+                        modifier = Modifier.clickable { showTimeDialog = true },
                         headlineContent = { Text(stringResource(R.string.task_at)) },
                         supportingContent = { Text(formatTimeOfDay(schedule.hour, schedule.minute)) },
                         leadingContent = {
                             Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
-                        },
-                        trailingContent = {
-                            Icon(
-                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         },
                     )
                 }
@@ -893,55 +963,164 @@ private fun ScheduleGroup(
             onDismiss = { showDayOfMonthDialog = false },
         )
     }
+    if (showDateDialog) {
+        TaskDatePickerDialog(
+            schedule = schedule,
+            onConfirm = {
+                apply(it)
+                showDateDialog = false
+            },
+            onDismiss = { showDateDialog = false },
+        )
+    }
+    if (showTimeDialog) {
+        TaskTimePickerDialog(
+            schedule = schedule,
+            use24HourFormat = android.text.format.DateFormat.is24HourFormat(context),
+            onConfirm = {
+                apply(it)
+                showTimeDialog = false
+            },
+            onDismiss = { showTimeDialog = false },
+        )
+    }
 }
 
-/** Native date picker. YEARLY ignores the picked year (cron has no year field); ONCE keeps it. */
-private fun showDatePicker(
-    context: android.content.Context,
+/** Material 3 date picker. YEARLY ignores the picked year; ONCE stores the absolute date. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskDatePickerDialog(
     schedule: TaskSchedule,
-    onPicked: (TaskSchedule) -> Unit,
+    onConfirm: (TaskSchedule) -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    val cal = Calendar.getInstance().apply {
-        if (schedule.type == ScheduleType.ONCE && schedule.onceAtMillis > 0L) {
-            timeInMillis = schedule.onceAtMillis
-        } else {
-            set(Calendar.MONTH, schedule.month - 1)
-            set(Calendar.DAY_OF_MONTH, schedule.dayOfMonth)
+    val initialLocalDate = remember(schedule) {
+        Calendar.getInstance().apply {
+            if (schedule.type == ScheduleType.ONCE && schedule.onceAtMillis > 0L) {
+                timeInMillis = schedule.onceAtMillis
+            } else {
+                set(Calendar.MONTH, schedule.month - 1)
+                set(Calendar.DAY_OF_MONTH, schedule.dayOfMonth)
+            }
         }
     }
-    android.app.DatePickerDialog(
-        context,
-        { _, year, month, day ->
-            val next = schedule.copy(dayOfMonth = day, month = month + 1)
-            onPicked(
-                if (schedule.type == ScheduleType.ONCE) next.withOnceAt(year, month + 1, day)
-                else next
-            )
-        },
-        cal.get(Calendar.YEAR),
-        cal.get(Calendar.MONTH),
-        cal.get(Calendar.DAY_OF_MONTH),
-    ).apply {
-        // A one-shot in the past can never fire.
-        if (schedule.type == ScheduleType.ONCE) {
-            datePicker.minDate = System.currentTimeMillis() - 60_000L
+    val initialUtcMillis = remember(initialLocalDate) {
+        utcDateMillis(
+            initialLocalDate.get(Calendar.YEAR),
+            initialLocalDate.get(Calendar.MONTH),
+            initialLocalDate.get(Calendar.DAY_OF_MONTH),
+        )
+    }
+    val todayUtcMillis = remember {
+        val today = Calendar.getInstance()
+        utcDateMillis(
+            today.get(Calendar.YEAR),
+            today.get(Calendar.MONTH),
+            today.get(Calendar.DAY_OF_MONTH),
+        )
+    }
+    val selectableDates = remember(schedule.type, todayUtcMillis) {
+        object : SelectableDates {
+            override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+                schedule.type != ScheduleType.ONCE || utcTimeMillis >= todayUtcMillis
         }
-    }.show()
+    }
+    val pickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialUtcMillis,
+        selectableDates = selectableDates,
+    )
+    val pickerColors = DatePickerDefaults.colors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val selected = pickerState.selectedDateMillis ?: return@TextButton
+                    val utc = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                        timeInMillis = selected
+                    }
+                    val year = utc.get(Calendar.YEAR)
+                    val month = utc.get(Calendar.MONTH) + 1
+                    val day = utc.get(Calendar.DAY_OF_MONTH)
+                    val next = schedule.copy(dayOfMonth = day, month = month)
+                    onConfirm(
+                        if (schedule.type == ScheduleType.ONCE) next.withOnceAt(year, month, day)
+                        else next
+                    )
+                },
+                enabled = pickerState.selectedDateMillis != null,
+            ) {
+                Text(stringResource(R.string.ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+        shape = RoundedCornerShape(28.dp),
+        colors = pickerColors,
+    ) {
+        DatePicker(
+            state = pickerState,
+            colors = pickerColors,
+        )
+    }
 }
 
-private fun showTimePicker(
-    context: android.content.Context,
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskTimePickerDialog(
     schedule: TaskSchedule,
-    onPicked: (TaskSchedule) -> Unit,
+    use24HourFormat: Boolean,
+    onConfirm: (TaskSchedule) -> Unit,
+    onDismiss: () -> Unit,
 ) {
-    android.app.TimePickerDialog(
-        context,
-        { _, hour, minute -> onPicked(schedule.withTime(hour, minute)) },
-        schedule.hour,
-        schedule.minute,
-        android.text.format.DateFormat.is24HourFormat(context),
-    ).show()
+    val pickerState = rememberTimePickerState(
+        initialHour = schedule.hour,
+        initialMinute = schedule.minute,
+        is24Hour = use24HourFormat,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        title = {
+            Text(stringResource(R.string.task_at), fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                TimePicker(state = pickerState)
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(schedule.withTime(pickerState.hour, pickerState.minute))
+                },
+            ) {
+                Text(stringResource(R.string.ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
 }
+
+private fun utcDateMillis(year: Int, zeroBasedMonth: Int, day: Int): Long =
+    Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+        clear()
+        set(year, zeroBasedMonth, day)
+    }.timeInMillis
 
 @Composable
 private fun WeekdayDialog(
@@ -1019,7 +1198,10 @@ private fun ExecutionRow(
     execution: com.newoether.agora.automation.TaskManager.ExecutionSummary,
     shape: RoundedCornerShape,
     onClick: () -> Unit,
+    menuEnabled: Boolean,
+    onDelete: () -> Unit,
 ) {
+    var menuOpen by remember(execution.conversation.id) { mutableStateOf(false) }
     Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
@@ -1041,30 +1223,75 @@ private fun ExecutionRow(
         SettingsItem(
             headlineContent = {
                 Text(
-                    text = listOf(statusText, formattedTime).filter { it.isNotBlank() }.joinToString(" · "),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = when (execution.status) {
-                        MessageStatus.ERROR -> MaterialTheme.colorScheme.error
-                        MessageStatus.SUCCESS -> MaterialTheme.colorScheme.primary
-                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    text = execution.conversation.title.ifBlank {
+                        execution.preview.ifBlank { statusText }
                     },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             },
-            supportingContent = if (execution.preview.isNotBlank()) {
-                {
+            supportingContent = {
+                Column {
                     Text(
-                        text = execution.preview,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        text = listOf(statusText, formattedTime)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = when (execution.status) {
+                            MessageStatus.ERROR -> MaterialTheme.colorScheme.error
+                            MessageStatus.SUCCESS -> MaterialTheme.colorScheme.primary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
+                    if (execution.preview.isNotBlank()) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = execution.preview,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-            } else null,
+            },
             trailingContent = {
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Box {
+                    IconButton(
+                        enabled = menuEnabled,
+                        onClick = { menuOpen = true },
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.options),
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        shape = RoundedCornerShape(12.dp),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        tonalElevation = 16.dp,
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    stringResource(R.string.delete),
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onDelete()
+                            },
+                        )
+                    }
+                }
             },
         )
     }

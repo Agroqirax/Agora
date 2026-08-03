@@ -244,6 +244,13 @@
     <string name="tool_generated_image">Generated image</string>
     <string name="img_action_save">Save to gallery</string>
     <string name="img_action_share">Share</string>
+    <string name="conversation_fork">Fork Conversation</string>
+    <string name="conversation_fork_from_here">Fork from here</string>
+    <string name="conversation_share">Share</string>
+    <string name="conversation_search">Search</string>
+    <string name="conversation_search_hint">Search…</string>
+    <string name="conversation_fork_failed">Could not fork conversation: %1$s</string>
+    <string name="conversation_share_failed">Could not share conversation: %1$s</string>
     <string name="img_saved">Saved to gallery</string>
     <string name="img_save_failed">Save failed</string>
     <string name="img_info_dimensions">Dimensions</string>

@@ -1,5 +1,9 @@
 package com.newoether.agora.ui.chat
 
+import android.app.Activity
+import android.content.ClipData
+import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -46,10 +50,12 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.newoether.agora.R
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
@@ -74,12 +80,47 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
+private const val INLINE_SHARE_LIMIT_BYTES = 256 * 1024
+
+private fun launchConversationShare(
+    context: Context,
+    text: String,
+    chooserTitle: String,
+) {
+    val utf8 = text.toByteArray(Charsets.UTF_8)
+    val sendIntent = if (utf8.size <= INLINE_SHARE_LIMIT_BYTES) {
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+    } else {
+        val shareDirectory = File(context.cacheDir, "shared").apply { mkdirs() }
+        val file = File.createTempFile("agora_conversation_", ".md", shareDirectory).apply {
+            writeBytes(utf8)
+        }
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file,
+        )
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/markdown"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            clipData = ClipData.newRawUri("Agora conversation", uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+    val chooser = Intent.createChooser(sendIntent, chooserTitle)
+    if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    context.startActivity(chooser)
+}
 
 // isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
 // MessageItemSegments.kt.
@@ -88,6 +129,7 @@ private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 @Composable
 fun ChatApp(
     viewModel: ChatViewModel,
+    onNavigateBack: (() -> Unit)? = null,
     onOpenSettings: () -> Unit,
     onOpenTasks: (String?) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit,
@@ -103,6 +145,27 @@ fun ChatApp(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+
+    LaunchedEffect(viewModel, context) {
+        viewModel.conversationShareText.collect { text ->
+            try {
+                launchConversationShare(
+                    context = context,
+                    text = text,
+                    chooserTitle = context.getString(R.string.conversation_share),
+                )
+            } catch (e: Exception) {
+                DebugLog.e("ChatShare", "Unable to launch conversation share", e)
+                viewModel.emitSnackbar(
+                    context.getString(
+                        R.string.conversation_share_failed,
+                        e.localizedMessage ?: e.javaClass.simpleName,
+                    )
+                )
+            }
+        }
+    }
 
     val drawerState = rememberDrawerState(
         initialValue = DrawerValue.Closed,
@@ -215,6 +278,85 @@ fun ChatApp(
     }
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
     val listState = rememberLazyListState()
+    var conversationSearchActive by rememberSaveable { mutableStateOf(false) }
+    var conversationSearchQuery by rememberSaveable { mutableStateOf("") }
+    var conversationSearchMatchIndex by remember { mutableIntStateOf(-1) }
+    var shareSelectionActive by remember { mutableStateOf(false) }
+    var selectedShareMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    val selectableShareMessageIds = remember(messages) {
+        messages.mapTo(linkedSetOf()) { it.id }
+    }
+    val shareSelectionBarSpace = if (shareSelectionActive) 68.dp else 0.dp
+    val conversationSearchMatchDistances = remember(currentConversationId) {
+        mutableStateMapOf<String, Float>()
+    }
+    val conversationSearchMatches = remember(messages, conversationSearchQuery) {
+        findConversationSearchMatches(messages, conversationSearchQuery)
+    }
+    val searchTurns = remember(messages) { buildMessageListTurns(messages) }
+    val searchTurnIndexByMessageId = remember(searchTurns) {
+        buildMap {
+            searchTurns.forEachIndexed { index, turn ->
+                turn.messages.forEach { message -> put(message.id, index) }
+            }
+        }
+    }
+    LaunchedEffect(
+        conversationSearchActive,
+        conversationSearchQuery,
+        conversationSearchMatches,
+        currentConversationId,
+    ) {
+        if (!conversationSearchActive || conversationSearchQuery.isBlank() ||
+            conversationSearchMatches.isEmpty()
+        ) {
+            conversationSearchMatchIndex = -1
+            conversationSearchMatchDistances.clear()
+            return@LaunchedEffect
+        }
+        conversationSearchMatchDistances.clear()
+        val visibleDistances = withTimeoutOrNull(250L) {
+            snapshotFlow {
+                conversationSearchMatchDistances
+                    .filterKeys { key -> conversationSearchMatches.any { it.key == key } }
+                    .toMap()
+            }
+                .filter { it.isNotEmpty() }
+                .debounce(32L)
+                .first()
+        }.orEmpty()
+        val exactVisibleIndex = nearestVisibleConversationSearchMatchIndex(
+            conversationSearchMatches,
+            visibleDistances,
+        )
+        if (exactVisibleIndex != null) {
+            conversationSearchMatchIndex = exactVisibleIndex
+            return@LaunchedEffect
+        }
+        val layout = listState.layoutInfo
+        val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+        val anchorTurn = layout.visibleItemsInfo
+            .minByOrNull { item ->
+                kotlin.math.abs((item.offset + item.size / 2) - viewportCenter)
+            }
+            ?.index
+            ?: listState.firstVisibleItemIndex
+        conversationSearchMatchIndex = nearestConversationSearchMatchIndex(
+            matches = conversationSearchMatches,
+            turnIndexByMessageId = searchTurnIndexByMessageId,
+            anchorTurnIndex = anchorTurn,
+        )
+    }
+    LaunchedEffect(currentConversationId) {
+        conversationSearchActive = false
+        conversationSearchQuery = ""
+        conversationSearchMatchIndex = -1
+        shareSelectionActive = false
+        selectedShareMessageIds = emptySet()
+    }
+    LaunchedEffect(selectableShareMessageIds) {
+        selectedShareMessageIds = selectedShareMessageIds.intersect(selectableShareMessageIds)
+    }
     val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
     val composer = com.newoether.agora.ui.chat.bottombar.rememberChatComposerState()
     val inputFocusRequester = remember { FocusRequester() }
@@ -476,17 +618,6 @@ fun ChatApp(
             true
         } == true
 
-    // Second beat of the conversation-switch feedback: the tap tick fires at the drawer item,
-    // this one lands when the target conversation has finished loading and is on screen.
-    // Edge-triggered on true→false so it never fires on first composition. New Chat is exempt
-    // (it lands on the empty composer, with nothing to "finish loading") — and it is exactly the
-    // case where currentConversationId is null once the switch settles.
-    var wasSwitching by remember { mutableStateOf(false) }
-    LaunchedEffect(isSwitching) {
-        if (wasSwitching && !isSwitching && currentConversationId != null) haptics.success()
-        wasSwitching = isSwitching
-    }
-
     val switchingScrollRequest by viewModel.switchingScrollRequest.collectAsState()
 
     LaunchedEffect(switchingScrollRequest?.id, switchingScrollRequest?.readyForUi) {
@@ -535,7 +666,10 @@ fun ChatApp(
             }
 
             if (settleCoveredTransition(request.targetMessageId)) {
-                viewModel.completeSwitchingScroll(request.id)
+                val completed = viewModel.completeSwitchingScroll(request.id)
+                if (completed && request.kind == SwitchingRequestKind.CONVERSATION) {
+                    haptics.confirm()
+                }
             } else {
                 viewModel.failSwitchingScroll(request.id, "layout failed to stabilize")
             }
@@ -630,6 +764,24 @@ fun ChatApp(
         focusManager.clearFocus()
         scope.launch { drawerState.close() }
     }
+    BackHandler(
+        enabled = onNavigateBack != null &&
+            drawerState.currentValue == DrawerValue.Closed &&
+            drawerState.targetValue == DrawerValue.Closed,
+    ) {
+        focusManager.clearFocus()
+        onNavigateBack?.invoke()
+    }
+    BackHandler(enabled = conversationSearchActive) {
+        conversationSearchActive = false
+        conversationSearchQuery = ""
+        conversationSearchMatchIndex = -1
+        focusManager.clearFocus()
+    }
+    BackHandler(enabled = shareSelectionActive) {
+        shareSelectionActive = false
+        selectedShareMessageIds = emptySet()
+    }
 
     LaunchedEffect(drawerState.currentValue) {
         if (drawerState.currentValue != DrawerValue.Closed) {
@@ -705,12 +857,65 @@ fun ChatApp(
                         currentConversationId = currentConversationId,
                         currentConversationTitle = currentConversation?.title,
                         totalTokens = totalTokens,
-                        onOpenDrawer = { haptics.action(); focusManager.clearFocus(); scope.launch { drawerState.open() } },
-                        onSystemPromptClick = { haptics.action(); showPromptDialog = true },
+                        searchActive = conversationSearchActive,
+                        searchQuery = conversationSearchQuery,
+                        searchMatchIndex = conversationSearchMatchIndex,
+                        searchMatchCount = conversationSearchMatches.size,
+                        conversationActionsEnabled =
+                            !isNewChatMode && currentConversationId != null && !isLoading &&
+                                !shareSelectionActive,
+                        onNavigateBack = onNavigateBack,
+                        onOpenDrawer = { haptics.tap(); focusManager.clearFocus(); scope.launch { drawerState.open() } },
+                        onSearchQueryChange = { query ->
+                            conversationSearchMatchIndex = -1
+                            conversationSearchMatchDistances.clear()
+                            conversationSearchQuery = query
+                        },
+                        onSearchPrevious = {
+                            if (conversationSearchMatchIndex > 0) {
+                                haptics.selection()
+                                conversationSearchMatchIndex--
+                            }
+                        },
+                        onSearchNext = {
+                            if (conversationSearchMatchIndex in
+                                0 until conversationSearchMatches.lastIndex
+                            ) {
+                                haptics.selection()
+                                conversationSearchMatchIndex++
+                            }
+                        },
+                        onSearchDismiss = {
+                            haptics.tap()
+                            conversationSearchActive = false
+                            conversationSearchQuery = ""
+                            conversationSearchMatchIndex = -1
+                            focusManager.clearFocus()
+                        },
+                        onSearchClick = {
+                            haptics.tap()
+                            shareSelectionActive = false
+                            selectedShareMessageIds = emptySet()
+                            conversationSearchActive = true
+                        },
+                        onSystemPromptClick = { haptics.tap(); showPromptDialog = true },
+                        onForkConversation = {
+                            haptics.tap()
+                            viewModel.forkConversationFrom()
+                        },
+                        onShareConversation = {
+                            haptics.tap()
+                            conversationSearchActive = false
+                            conversationSearchQuery = ""
+                            conversationSearchMatchIndex = -1
+                            focusManager.clearFocus()
+                            selectedShareMessageIds = emptySet()
+                            shareSelectionActive = true
+                        },
                         onNewChat = {
                             // Haptic = button touch feel, fires on every tap even when the action
                             // is a no-op (already on the new-chat screen), so feedback never feels dead.
-                            haptics.action()
+                            if (!isNewChatMode) haptics.tap()
                             if (!isNewChatMode) {
                                 isExpanded = false
                                 viewModel.createNewChat()
@@ -771,13 +976,13 @@ fun ChatApp(
                                 toolCallDisplayMode = toolCallDisplayMode,
                                 maxContextWindow = contextWindow,
                                 modelAliases = StableModelAliases(modelAliases),
-                                bottomBarHeight = bottomBarHeight,
+                                bottomBarHeight = bottomBarHeight + shareSelectionBarSpace,
                                 viewportHeight = viewportHeightPx,
                                 messageHeights = messageHeights,
                                 onEditMessage = { id, text ->
                                     // Same feel as the composer's Send: an edit re-sends, so it
                                     // gets the identical single confirmation tap.
-                                    haptics.action()
+                                    haptics.tap()
                                     viewModel.editMessage(id, text)
                                 },
                                 onSwitchBranch = { parentId, currentMessageId, direction ->
@@ -785,19 +990,56 @@ fun ChatApp(
                                     viewModel.switchBranch(parentId, currentMessageId, direction)
                                 },
                                 onRegenerate = { id ->
-                                    haptics.action()
+                                    haptics.tap()
                                     viewModel.regenerate(id)
                                 },
+                                onFork = { id ->
+                                    haptics.tap()
+                                    viewModel.forkConversationFrom(id)
+                                },
+                                onShare = { id ->
+                                    haptics.tap()
+                                    viewModel.shareGeneration(id)
+                                },
                                 onDelete = { id -> viewModel.deleteMessage(id) },
-                                onMediaClick = onMediaClick,
-                                onFileContentClick = onFileContentClick,
-                                onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
+                                searchQuery = if (conversationSearchActive) {
+                                    conversationSearchQuery
+                                } else {
+                                    ""
+                                },
+                                activeSearchMatch = conversationSearchMatches
+                                    .getOrNull(conversationSearchMatchIndex),
+                                onSearchMatchDistance = { key, distance ->
+                                    conversationSearchMatchDistances[key] = distance
+                                },
+                                selectionMode = shareSelectionActive,
+                                selectedMessageIds = selectedShareMessageIds,
+                                onToggleMessageSelection = { messageId ->
+                                    haptics.selection()
+                                    selectedShareMessageIds =
+                                        if (messageId in selectedShareMessageIds) {
+                                            selectedShareMessageIds - messageId
+                                        } else {
+                                            selectedShareMessageIds + messageId
+                                        }
+                                },
+                                onMediaClick = { urls, index ->
+                                    haptics.tap()
+                                    onMediaClick(urls, index)
+                                },
+                                onFileContentClick = onFileContentClick?.let { open ->
+                                    { name, content ->
+                                        haptics.tap()
+                                        open(name, content)
+                                    }
+                                },
+                                onPdfPagesClick = { pages, idx -> haptics.tap(); onPdfPagesClick?.invoke(pages, idx) },
                                 thoughtExpandedStates = thoughtExpandedStates,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,
                                     end = 8.dp,
                                     top = 140.dp,
-                                    bottom = bottomBarHeight + 8.dp
+                                    bottom = bottomBarHeight + shareSelectionBarSpace + 8.dp
                                 )
                             )
                             }
@@ -850,7 +1092,7 @@ fun ChatApp(
 
                     val showButton by remember {
                         derivedStateOf {
-                            if (isNewChatMode) false
+                            if (isNewChatMode || shareSelectionActive) false
                             else {
                                 val info = listState.layoutInfo
                                 val total = info.totalItemsCount
@@ -871,10 +1113,59 @@ fun ChatApp(
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarHeight + 8.dp)
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                            FloatingActionButton(onClick = { scope.launch { animateToUserMessage(easing = SCROLL_EASING) } }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
+                            FloatingActionButton(onClick = {
+                                haptics.tap()
+                                scope.launch { animateToUserMessage(easing = SCROLL_EASING) }
+                            }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }
                         }
+                    }
+
+                    AnimatedVisibility(
+                        visible = shareSelectionActive,
+                        enter = fadeIn(tween(220)) + scaleIn(
+                            initialScale = 0.86f,
+                            animationSpec = tween(220),
+                        ),
+                        exit = fadeOut(tween(180)) + scaleOut(
+                            targetScale = 0.86f,
+                            animationSpec = tween(180),
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = bottomBarHeight + 10.dp),
+                    ) {
+                        ShareSelectionFab(
+                            allSelected = selectableShareMessageIds.isNotEmpty() &&
+                                selectedShareMessageIds.containsAll(selectableShareMessageIds),
+                            hasSelection = selectedShareMessageIds.isNotEmpty(),
+                            onDismiss = {
+                                haptics.tap()
+                                shareSelectionActive = false
+                                selectedShareMessageIds = emptySet()
+                            },
+                            onToggleAll = {
+                                haptics.selection()
+                                selectedShareMessageIds =
+                                    if (selectableShareMessageIds.isNotEmpty() &&
+                                        selectedShareMessageIds.containsAll(selectableShareMessageIds)
+                                    ) {
+                                        emptySet()
+                                    } else {
+                                        selectableShareMessageIds
+                                    }
+                            },
+                            onConfirm = {
+                                val selection = selectedShareMessageIds
+                                if (selection.isNotEmpty()) {
+                                    haptics.tap()
+                                    shareSelectionActive = false
+                                    selectedShareMessageIds = emptySet()
+                                    viewModel.shareMessages(selection)
+                                }
+                            },
+                        )
                     }
 
                     AnimatedVisibility(
@@ -961,7 +1252,7 @@ fun ChatApp(
                             viewModel.sendMessage(text, attachments = attachments)
                         },
                         onStopGeneration = {
-                            haptics.generationStopped()
+                            haptics.destructive()
                             viewModel.stopGeneration()
                         },
                         isLoading = isLoading,
@@ -988,10 +1279,12 @@ fun ChatApp(
                         onWebSearchToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(webSearchEnabled = enabled) } },
                         shellEnabled = shellEnabled,
                         onShellToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(shellEnabled = enabled) } },
-                        onModelSelect = { haptics.selection(); viewModel.setActiveModel(it) },
-                        onImageClick = { url -> haptics.action(); onMediaClick(listOf(url), 0) },
-                        onAllMediaClick = { urls, idx -> haptics.action(); onMediaClick(urls, idx) },
-                        onFileContentClick = { name, content -> haptics.action(); viewModel.showFilePreview(name, content) },
+                        // The model row owns its selection tick. Repeating it here produced the
+                        // previous double buzz for one physical tap.
+                        onModelSelect = { viewModel.setActiveModel(it) },
+                        onImageClick = { url -> haptics.tap(); onMediaClick(listOf(url), 0) },
+                        onAllMediaClick = { urls, idx -> haptics.tap(); onMediaClick(urls, idx) },
+                        onFileContentClick = { name, content -> haptics.tap(); viewModel.showFilePreview(name, content) },
                         modifier = Modifier,
                         textFieldState = textFieldState,
                         composerState = composer,
@@ -1002,11 +1295,11 @@ fun ChatApp(
                         // Send felt like a double tap — automatically after a successful send.
                         // The collapse BUTTON does its own haptic, where a press actually happened.
                         onCollapse = { isExpanded = false },
-                        onExpand = { haptics.action(); isExpanded = true },
+                        onExpand = { haptics.tap(); isExpanded = true },
                         showWebSearch = globalWebSearch,
                         showShell = shellDevices.isNotEmpty() && globalShell,
-                        onPdfPagesClick = { pages, idx -> haptics.action(); onPdfPagesClick?.invoke(pages, idx) },
-                        onPdfPreviewSelect = { pages, idx -> haptics.action(); onPdfPreviewSelect?.invoke(pages, idx) },
+                        onPdfPagesClick = { pages, idx -> haptics.tap(); onPdfPagesClick?.invoke(pages, idx) },
+                        onPdfPreviewSelect = { pages, idx -> haptics.tap(); onPdfPreviewSelect?.invoke(pages, idx) },
                         pdfViewerSelection = pdfViewerSelection,
                         onTogglePdfSelection = onTogglePdfSelection,
                         onInitPdfSelection = onInitPdfSelection,
@@ -1038,7 +1331,7 @@ fun ChatApp(
     showDeleteConfirmDialog?.let { id ->
         ChatDeleteConfirmDialog(
             onConfirm = {
-                haptics.reject()
+                haptics.destructive()
                 viewModel.deleteConversation(id)
                 showDeleteConfirmDialog = null
             },
