@@ -14,13 +14,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.*
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -32,7 +25,6 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.input.*
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.CloseFullscreen
@@ -59,7 +51,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
-import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -85,6 +77,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import kotlin.math.roundToInt
@@ -155,8 +148,6 @@ import org.intellij.markdown.parser.MarkdownParser
 // Pure code-motion: these were `private` members of MessageItem.kt; entry points
 // used by MessageItem.kt / the timeline section are `internal`. Behavior unchanged.
 
-private const val STABLE_MARKDOWN_PROMOTION_BATCH_SIZE = 8
-
 @Stable
 internal class ChatMarkdownRenderContext(
     val colors: MarkdownColors,
@@ -165,284 +156,8 @@ internal class ChatMarkdownRenderContext(
     val components: MarkdownComponents,
     val imageTransformer: ImageTransformer,
     val flavour: MarkdownFlavourDescriptor,
+    val plainTextStyle: TextStyle,
 )
-
-@Stable
-internal class StableMarkdownBlock(
-    val startOffset: Int,
-    val endOffset: Int,
-    val contentHash: Int,
-    val node: ASTNode,
-    val sourceContent: String,
-) {
-    fun hasSameIdentity(other: StableMarkdownBlock): Boolean =
-        startOffset == other.startOffset &&
-            endOffset == other.endOffset &&
-            contentHash == other.contentHash &&
-            node.type == other.node.type
-}
-
-@Stable
-internal data class StreamingMarkdownNode(
-    val startOffset: Int,
-    val endOffset: Int,
-    val contentHash: Int,
-    val node: ASTNode,
-    val sourceContent: String,
-)
-
-internal fun StreamingMarkdownNode.hasSameBlockIdentity(other: StreamingMarkdownNode): Boolean =
-    startOffset == other.startOffset && node.type == other.node.type
-
-@Stable
-internal class StreamingMarkdownBlocksState(initialTail: String) {
-    val stableBlocks: SnapshotStateList<StableMarkdownBlock> = mutableStateListOf()
-    var tailNode by mutableStateOf<StreamingMarkdownNode?>(null)
-    var fallbackTail by mutableStateOf(initialTail)
-}
-
-@Immutable
-private data class ParsedStreamingMarkdownBlocks(
-    val stableBlocks: List<StableMarkdownBlock>,
-    val tailNode: StreamingMarkdownNode?,
-    val fallbackTail: String,
-)
-
-@Composable
-internal fun rememberStreamingMarkdownBlocks(
-    content: String,
-    flavour: MarkdownFlavourDescriptor,
-): StreamingMarkdownBlocksState {
-    val state = remember { StreamingMarkdownBlocksState("") }
-
-    LaunchedEffect(content, flavour) {
-        val parsed = withContext(Dispatchers.Default) {
-            val prepared = content.toRenderableMarkdownText()
-            splitStreamingMarkdownBlocks(prepared, flavour)
-        }
-        state.applyParsed(parsed)
-    }
-
-    return state
-}
-
-private suspend fun StreamingMarkdownBlocksState.applyParsed(parsed: ParsedStreamingMarkdownBlocks) {
-    val existing = stableBlocks
-    val parsedBlocks = parsed.stableBlocks
-    val canAppend = existing.size <= parsedBlocks.size &&
-        existing.indices.all { index -> existing[index].hasSameIdentity(parsedBlocks[index]) }
-
-    if (!canAppend) {
-        existing.clear()
-        appendStableBlocksInBatches(parsedBlocks, startIndex = 0)
-    } else if (parsedBlocks.size > existing.size) {
-        appendStableBlocksInBatches(parsedBlocks, startIndex = existing.size)
-    }
-    tailNode = parsed.tailNode
-    fallbackTail = parsed.fallbackTail
-}
-
-private suspend fun StreamingMarkdownBlocksState.appendStableBlocksInBatches(
-    parsedBlocks: List<StableMarkdownBlock>,
-    startIndex: Int
-) {
-    var index = startIndex
-    while (index < parsedBlocks.size) {
-        val end = minOf(index + STABLE_MARKDOWN_PROMOTION_BATCH_SIZE, parsedBlocks.size)
-        stableBlocks.addAll(parsedBlocks.subList(index, end))
-        index = end
-        if (index < parsedBlocks.size) {
-            withFrameNanos { }
-        }
-    }
-}
-
-private fun splitStreamingMarkdownBlocks(
-    content: String,
-    flavour: MarkdownFlavourDescriptor
-): ParsedStreamingMarkdownBlocks {
-    if (content.isBlank()) return ParsedStreamingMarkdownBlocks(emptyList(), null, content)
-
-    return runCatching {
-        val root = MarkdownParser(flavour).buildMarkdownTreeFromString(content)
-        val children = root.children
-        val nonBlankChildren = children.withIndex().filter { indexed ->
-            val node = indexed.value
-            val start = node.startOffset.coerceIn(0, content.length)
-            val end = node.endOffset.coerceIn(start, content.length)
-            content.substring(start, end).isNotBlank()
-        }
-        if (nonBlankChildren.isEmpty()) {
-            ParsedStreamingMarkdownBlocks(emptyList(), null, content)
-        } else {
-            val tailIndex = nonBlankChildren.last().index
-            val stableNodes = children.take(tailIndex)
-            val blocks = stableNodes.map { node ->
-                node.toStableMarkdownBlock(content)
-            }
-            val tailNode = children.getOrNull(tailIndex)?.toStreamingMarkdownNode(content)
-            val tailStart = tailNode?.startOffset?.coerceIn(0, content.length) ?: 0
-            ParsedStreamingMarkdownBlocks(blocks, tailNode, content.substring(tailStart))
-        }
-    }.getOrElse {
-        ParsedStreamingMarkdownBlocks(emptyList(), null, content)
-    }
-}
-
-private fun ASTNode.toStableMarkdownBlock(sourceContent: String): StableMarkdownBlock {
-    val start = startOffset.coerceIn(0, sourceContent.length)
-    val end = endOffset.coerceIn(start, sourceContent.length)
-    return StableMarkdownBlock(
-        startOffset = start,
-        endOffset = end,
-        contentHash = sourceContent.substring(start, end).hashCode(),
-        node = this,
-        sourceContent = sourceContent
-    )
-}
-
-private fun ASTNode.toStreamingMarkdownNode(sourceContent: String): StreamingMarkdownNode {
-    val start = startOffset.coerceIn(0, sourceContent.length)
-    val end = endOffset.coerceIn(start, sourceContent.length)
-    return StreamingMarkdownNode(
-        startOffset = start,
-        endOffset = end,
-        contentHash = sourceContent.substring(start, end).hashCode(),
-        node = this,
-        sourceContent = sourceContent
-    )
-}
-
-@Composable
-internal fun StreamingMarkdownDocument(
-    content: String,
-    isStreaming: Boolean,
-    renderContext: ChatMarkdownRenderContext,
-    modifier: Modifier = Modifier,
-) {
-    val blocks = rememberStreamingMarkdownBlocks(
-        content = content,
-        flavour = renderContext.flavour,
-    )
-    StreamingMarkdownBlockContent(
-        blocks = blocks,
-        renderContext = renderContext,
-        modifier = modifier,
-        tailIsStreaming = isStreaming,
-    )
-}
-
-@Composable
-internal fun StreamingMarkdownBlockContent(
-    blocks: StreamingMarkdownBlocksState,
-    renderContext: ChatMarkdownRenderContext,
-    modifier: Modifier = Modifier,
-    tailIsStreaming: Boolean = false
-) {
-    Column(modifier = modifier) {
-        StableMarkdownBlockList(
-            blocks = blocks.stableBlocks,
-            renderContext = renderContext
-        )
-        val tailNode = blocks.tailNode
-        if (tailNode != null) {
-            key(tailNode.startOffset, tailNode.node.type) {
-                RecomposeSafeMarkdownNode(
-                    content = tailNode,
-                    isStreaming = tailIsStreaming
-                ) { node ->
-                    MarkdownNodeContent(node, renderContext)
-                }
-            }
-        } else if (blocks.fallbackTail.isNotBlank()) {
-            RecomposeSafeMarkdown(
-                content = blocks.fallbackTail,
-                isStreaming = tailIsStreaming
-            ) { text ->
-                MarkdownPreparedTextContent(text, renderContext)
-            }
-        }
-    }
-}
-
-@Composable
-private fun StableMarkdownBlockList(
-    blocks: SnapshotStateList<StableMarkdownBlock>,
-    renderContext: ChatMarkdownRenderContext
-) {
-    blocks.forEach { block ->
-        key(block.startOffset) {
-            StableMarkdownBlockItem(block, renderContext)
-        }
-    }
-}
-
-@Composable
-private fun StableMarkdownBlockItem(
-    block: StableMarkdownBlock,
-    renderContext: ChatMarkdownRenderContext
-) {
-    MarkdownBlockContent(block, renderContext)
-}
-
-@Composable
-private fun MarkdownBlockContent(
-    block: StableMarkdownBlock,
-    renderContext: ChatMarkdownRenderContext
-) {
-    val state = remember(block) {
-        State.Success(
-            node = block.node,
-            content = block.sourceContent,
-            linksLookedUp = false,
-            referenceLinkHandler = ReferenceLinkHandlerImpl()
-        )
-    }
-    MarkdownNodeStateContent(state, renderContext)
-}
-
-@Composable
-private fun MarkdownNodeContent(
-    node: StreamingMarkdownNode,
-    renderContext: ChatMarkdownRenderContext
-) {
-    val state = remember(node) {
-        State.Success(
-            node = node.node,
-            content = node.sourceContent,
-            linksLookedUp = false,
-            referenceLinkHandler = ReferenceLinkHandlerImpl()
-        )
-    }
-    MarkdownNodeStateContent(state, renderContext)
-}
-
-@Composable
-private fun MarkdownNodeStateContent(
-    state: State.Success,
-    renderContext: ChatMarkdownRenderContext
-) {
-    com.mikepenz.markdown.compose.Markdown(
-        state = state,
-        modifier = Modifier.fillMaxWidth(),
-        colors = renderContext.colors,
-        typography = renderContext.typography,
-        padding = renderContext.padding,
-        components = renderContext.components,
-        imageTransformer = renderContext.imageTransformer,
-        animations = markdownAnimations { this },
-        success = { successState, components, modifier ->
-            Column(modifier) {
-                MarkdownElement(
-                    node = successState.node,
-                    components = components,
-                    content = successState.content,
-                    includeSpacer = true
-                )
-            }
-        }
-    )
-}
 
 @Composable
 internal fun MarkdownTextContent(
@@ -528,29 +243,7 @@ private fun MarkdownSuccessWithSpacing(
     }
 }
 
-@Composable
-private fun RecomposeSafeMarkdownNode(
-    content: StreamingMarkdownNode,
-    isStreaming: Boolean,
-    modifier: Modifier = Modifier,
-    render: @Composable (node: StreamingMarkdownNode) -> Unit
-) {
-    val animateChanges = remember { isStreaming }
-    LatestWinsCrossfade(
-        content = content,
-        animateChanges = animateChanges,
-        modifier = modifier,
-        sameContent = { first, second ->
-            first.startOffset == second.startOffset &&
-                first.endOffset == second.endOffset &&
-                first.contentHash == second.contentHash &&
-                first.node.type == second.node.type
-        },
-        render = render,
-    )
-}
-
-private fun String.toRenderableMarkdownText(): String {
+internal fun String.toRenderableMarkdownText(): String {
     val spans = parseLatexSpans(this)
     val markdown = if (spans.all { !it.isLatex }) {
         this

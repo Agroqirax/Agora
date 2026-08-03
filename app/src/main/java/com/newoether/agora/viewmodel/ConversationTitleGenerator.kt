@@ -150,9 +150,19 @@ class ConversationTitleGenerator(
         val cleaned = fallbackConversationTitle(title)
         if (cleaned.isBlank()) return Result.Failure("Provider returned an empty title")
 
-        val latest = conversations.getConversation(conversationId)
+        if (
+            conversations.updateConversationTitleIfUnchanged(
+                id = conversationId,
+                expectedTitle = conversation.title,
+                newTitle = cleaned,
+            )
+        ) {
+            return Result.Success(cleaned)
+        }
+        val current = conversations.getConversation(conversationId)
             ?: return Result.Failure("Conversation was deleted")
-        conversations.upsertConversation(latest.copy(title = cleaned))
-        return Result.Success(cleaned)
+        // A manual rename (or another title generation) won the race. Preserve the newer title
+        // and report success so headless task fallback cannot overwrite it immediately afterward.
+        return Result.Success(current.title)
     }
 }

@@ -228,7 +228,108 @@ abstract class BaseOpenAiProvider : LlmProvider {
             emit(event)
         }
         var structuredToolCallsEmitted = false
+        var textToolCallsEmitted = false
+        val textToolParser = config.tools
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { StreamingTextToolCallParser() }
         var terminalDeadlineNanos: Long? = null
+
+        suspend fun emitPendingStructuredToolCalls() {
+            if (pendingToolCalls.isEmpty()) return
+            val pending = pendingToolCalls.values.toList()
+            pendingToolCalls.clear()
+            val calls = pending
+                .filter { it.name.isNotEmpty() }
+                .map {
+                    StreamEvent.ToolCallRequest(
+                        id = it.id.ifBlank { it.streamKey },
+                        name = it.name,
+                        arguments = it.args.toString(),
+                        streamKey = it.streamKey,
+                    )
+                }
+            if (calls.isEmpty()) {
+                emit(
+                    StreamEvent.Error(
+                        GenerationError.SseParse(
+                            rawLine = "tool_calls",
+                            cause = "Provider ended before the tool name was complete",
+                        )
+                    )
+                )
+                return
+            }
+            structuredToolCallsEmitted = true
+            if (calls.size == 1) emit(calls.first())
+            else emit(StreamEvent.ToolCallsRequest(calls))
+        }
+
+        suspend fun emitFilteredText(text: String) {
+            parseDeltaContent(
+                delta = OpenAiDelta(content = text),
+                config = config,
+                thinkParser = thinkParser,
+                emit = emitAndAccumulate,
+            )
+        }
+
+        suspend fun emitTextToolUpdate(snapshot: StreamingTextToolCallParser.Snapshot) {
+            emit(
+                StreamEvent.ToolCallUpdate(
+                    streamKey = snapshot.streamKey,
+                    id = null,
+                    name = snapshot.name,
+                    arguments = snapshot.arguments,
+                )
+            )
+        }
+
+        suspend fun emitCompletedTextTool(call: StreamingTextToolCallParser.CompletedCall) {
+            textToolCallsEmitted = true
+            emit(
+                StreamEvent.ToolCallRequest(
+                    id = syntheticToolCallId(),
+                    name = call.name,
+                    arguments = call.arguments,
+                    streamKey = call.streamKey,
+                )
+            )
+        }
+
+        suspend fun emitMalformedTextTool(cause: String) {
+            emit(
+                StreamEvent.Error(
+                    GenerationError.SseParse(
+                        rawLine = "tool_call",
+                        cause = cause,
+                    )
+                )
+            )
+        }
+
+        suspend fun parseDeltaWithStreamingTextTools(delta: OpenAiDelta) {
+            val content = delta.content
+            if (textToolParser == null || content.isNullOrEmpty()) {
+                parseDeltaContent(delta, config, thinkParser, emitAndAccumulate)
+                return
+            }
+
+            // Emit provider-specific reasoning fields once, then route only content through the
+            // text-tool parser so split tags never flash as answer text.
+            parseDeltaContent(
+                delta.copy(content = null),
+                config,
+                thinkParser,
+                emitAndAccumulate,
+            )
+            textToolParser.feed(
+                content = content,
+                onText = { emitFilteredText(it) },
+                onUpdate = { emitTextToolUpdate(it) },
+                onComplete = { emitCompletedTextTool(it) },
+                onMalformed = { emitMalformedTextTool(it) },
+            )
+        }
 
         // Read timeouts are tolerated for long thinking pauses (read timeout = 5 min), but a
         // silently-dead connection (NAT drop with no RST) must not hang forever: give up after
@@ -260,36 +361,48 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
             if (!line.startsWith("data: ")) continue
             val jsonStr = line.substring(6).trim()
-            if (jsonStr == "[DONE]") break
+            if (jsonStr == "[DONE]") {
+                emitPendingStructuredToolCalls()
+                break
+            }
 
             try {
                 val response = json.decodeFromString<OpenAiStreamResponse>(jsonStr)
                 val choice = response.choices?.firstOrNull()
 
                 choice?.delta?.let { delta ->
-                    parseDeltaContent(delta, config, thinkParser, emitAndAccumulate)
+                    parseDeltaWithStreamingTextTools(delta)
 
                     delta.toolCalls?.forEach { tc ->
-                        val existing = if (tc.id != null) pendingToolCalls.values.firstOrNull { it.id == tc.id } else null
-                        val pending = if (existing != null) existing else {
-                            val idx = tc.index ?: pendingToolCalls.size
-                            pendingToolCalls.getOrPut(idx) { PendingToolCall() }
+                        val existingEntry = tc.id?.let { id ->
+                            pendingToolCalls.entries.firstOrNull { it.value.id == id }
                         }
+                        val index = tc.index
+                            ?: existingEntry?.key
+                            ?: pendingToolCalls.keys.singleOrNull()
+                            ?: pendingToolCalls.size
+                        val pending = pendingToolCalls.getOrPut(index) { PendingToolCall() }
                         if (tc.id != null) pending.id = tc.id
                         tc.function?.name?.let { if (it.isNotEmpty()) pending.name = it }
                         tc.function?.arguments?.let {
                             pending.args.append(if (it is JsonPrimitive) it.content else it.toString())
                         }
+                        emit(
+                            StreamEvent.ToolCallUpdate(
+                                streamKey = pending.streamKey,
+                                id = pending.id.ifBlank { null },
+                                name = pending.name,
+                                arguments = pending.args.toString(),
+                            )
+                        )
                     }
                 }
 
-                if (choice?.finishReason == "tool_calls" && pendingToolCalls.isNotEmpty()) {
-                    val calls = pendingToolCalls.values.filter { it.name.isNotEmpty() }.map {
-                        StreamEvent.ToolCallRequest(it.id, it.name, it.args.toString())
-                    }
-                    pendingToolCalls.clear()
-                    if (calls.size == 1) { structuredToolCallsEmitted = true; emit(calls.first()) }
-                    else if (calls.size > 1) { structuredToolCallsEmitted = true; emit(StreamEvent.ToolCallsRequest(calls)) }
+                if (!choice?.finishReason.isNullOrBlank()) {
+                    // Several OpenAI-compatible gateways return "stop" (or close directly)
+                    // after streaming a perfectly valid structured tool call. The accumulated
+                    // call is authoritative; never discard it based on the terminal spelling.
+                    emitPendingStructuredToolCalls()
                 }
 
                 response.usage?.let { usage ->
@@ -313,6 +426,17 @@ abstract class BaseOpenAiProvider : LlmProvider {
             }
         }
 
+        // EOF without [DONE]/finish_reason is common on self-hosted compatible endpoints. If a
+        // structured call started, complete that same live segment instead of silently ending.
+        emitPendingStructuredToolCalls()
+
+        textToolParser?.flush(
+            onText = { emitFilteredText(it) },
+            onUpdate = { emitTextToolUpdate(it) },
+            onComplete = { emitCompletedTextTool(it) },
+            onMalformed = { emitMalformedTextTool(it) },
+        )
+
         thinkParser.flush(
             onText = { emitAndAccumulate(StreamEvent.TextChunk(it)) },
             onThought = { emitAndAccumulate(StreamEvent.ThoughtChunk(it)) },
@@ -325,7 +449,11 @@ abstract class BaseOpenAiProvider : LlmProvider {
         // offered, parse them out of the accumulated content so the generation enters the
         // tool-call phase instead of just printing the JSON as an answer. Brings these servers to
         // parity with Ollama, which reads its structured tool_calls field directly.
-        if (!structuredToolCallsEmitted && !config.tools.isNullOrEmpty()) {
+        if (
+            !structuredToolCallsEmitted &&
+            !textToolCallsEmitted &&
+            !config.tools.isNullOrEmpty()
+        ) {
             val parsed = ToolCallTextParser.parse(contentBuf.toString())
             if (parsed.size == 1) {
                 emit(StreamEvent.ToolCallRequest(syntheticToolCallId(), parsed[0].name, parsed[0].arguments))

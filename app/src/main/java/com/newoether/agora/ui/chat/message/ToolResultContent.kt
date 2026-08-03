@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,6 +24,7 @@ import com.newoether.agora.R
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.ui.theme.MonoFamily
+import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -109,7 +109,7 @@ private fun ToolErrorContent(message: String) {
         shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        SelectionContainer {
+        NoAutoScrollSelectionContainer {
             Text(
                 text = message,
                 style = ChatType.thoughtBody,
@@ -214,7 +214,7 @@ private fun FileGrepResult(presentation: ToolPresentation) {
                             )
                         }
                         Spacer(Modifier.width(8.dp))
-                        SelectionContainer(modifier = Modifier.weight(1f)) {
+                        NoAutoScrollSelectionContainer(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = match.content,
                                 style = ChatType.thoughtCodeLarge,
@@ -378,7 +378,7 @@ private fun IndexedCodeLine(index: Int, text: String) {
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
             modifier = Modifier.width(28.dp),
         )
-        SelectionContainer(modifier = Modifier.weight(1f)) {
+        NoAutoScrollSelectionContainer(modifier = Modifier.weight(1f)) {
             Text(
                 text = text,
                 style = ChatType.thoughtCodeLarge,
@@ -396,7 +396,7 @@ private fun TerminalOutput(output: String) {
         shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        SelectionContainer {
+        NoAutoScrollSelectionContainer {
             Text(
                 text = output,
                 style = ChatType.thoughtCodeLarge,

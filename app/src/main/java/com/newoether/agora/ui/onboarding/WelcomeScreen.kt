@@ -61,6 +61,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -89,6 +90,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -112,17 +114,11 @@ data class WelcomePage(
     val title: String,
     val description: String,
     val darkVideoResId: Int? = null,
-    val lightVideoResName: String? = null
+    val lightVideoResId: Int? = null
 )
 
-private fun resolveVideoRes(isDarkTheme: Boolean, darkResId: Int?, lightResName: String?, context: android.content.Context): Int? {
-    if (isDarkTheme) return darkResId
-    if (lightResName != null) {
-        val id = context.resources.getIdentifier(lightResName, "raw", context.packageName)
-        if (id != 0) return id
-    }
-    return darkResId
-}
+private fun resolveVideoRes(isDarkTheme: Boolean, darkResId: Int?, lightResId: Int?): Int? =
+    if (isDarkTheme) darkResId else lightResId ?: darkResId
 
 // Page indices
 private const val PAGE_PROVIDER = 2
@@ -228,23 +224,23 @@ fun WelcomeScreen(
     // ── Pages ──
     val pages = listOf(
         WelcomePage(stringResource(R.string.onboarding_welcome_title), stringResource(R.string.onboarding_welcome_desc),
-            R.raw.welcome_video_1, "welcome_video_1_light"),
+            R.raw.welcome_video_1, R.raw.welcome_video_1_light),
         WelcomePage(stringResource(R.string.onboarding_byok_title), stringResource(R.string.onboarding_byok_desc),
-            R.raw.welcome_video_2, "welcome_video_2_light"),
+            R.raw.welcome_video_2, R.raw.welcome_video_2_light),
         WelcomePage(stringResource(R.string.onboarding_provider_title), stringResource(R.string.onboarding_provider_desc)),
         WelcomePage(stringResource(R.string.onboarding_api_key_title), stringResource(R.string.onboarding_api_key_desc)),
         WelcomePage(stringResource(R.string.onboarding_model_video_title), stringResource(R.string.onboarding_model_video_desc),
-            R.raw.welcome_video_3, "welcome_video_3_light"),
+            R.raw.welcome_video_3, R.raw.welcome_video_3_light),
         WelcomePage(stringResource(R.string.onboarding_model_select_title), stringResource(R.string.onboarding_model_select_desc)),
         WelcomePage(stringResource(R.string.onboarding_auto_backup_title), stringResource(R.string.onboarding_auto_backup_desc)),
         WelcomePage(stringResource(R.string.onboarding_done_title), stringResource(R.string.onboarding_done_desc),
-            R.raw.welcome_video_4, "welcome_video_4_light")
+            R.raw.welcome_video_4, R.raw.welcome_video_4_light)
     )
 
     // ── Video players (null for config pages) ──
-    val players = remember {
+    val players = remember(isDarkTheme) {
         pages.map { page ->
-            val resId = resolveVideoRes(isDarkTheme, page.darkVideoResId, page.lightVideoResName, context)
+            val resId = resolveVideoRes(isDarkTheme, page.darkVideoResId, page.lightVideoResId)
             resId?.let {
                 val uri = "android.resource://${context.packageName}/$it"
                 ExoPlayer.Builder(context).build().apply {
@@ -255,7 +251,7 @@ fun WelcomeScreen(
         }
     }
 
-    DisposableEffect(Unit) { onDispose { players.forEach { it?.release() } } }
+    DisposableEffect(players) { onDispose { players.forEach { it?.release() } } }
 
     val visitedPages = remember { mutableSetOf<Int>() }
     val typedPages = remember { mutableSetOf<Int>() }
@@ -354,10 +350,18 @@ fun WelcomeScreen(
                 }
 
                 HorizontalPager(state = pagerState, modifier = Modifier.weight(1f), userScrollEnabled = showContent, beyondViewportPageCount = 1) { index ->
-                    val pageOffset = (index - pagerState.currentPage) - pagerState.currentPageOffsetFraction
-                    val absOffset = pageOffset.absoluteValue.coerceIn(0f, 1f)
                     Column(
-                        Modifier.fillMaxSize().graphicsLayer { scaleX = 1f - absOffset * 0.12f; scaleY = 1f - absOffset * 0.12f; alpha = 1f - absOffset * 0.4f },
+                        Modifier.fillMaxSize().graphicsLayer {
+                            // Layer reads invalidate only drawing; pager motion no longer
+                            // recomposes the full onboarding page on every scroll frame.
+                            val pageOffset =
+                                (index - pagerState.currentPage) -
+                                    pagerState.currentPageOffsetFraction
+                            val absOffset = pageOffset.absoluteValue.coerceIn(0f, 1f)
+                            scaleX = 1f - absOffset * 0.12f
+                            scaleY = 1f - absOffset * 0.12f
+                            alpha = 1f - absOffset * 0.4f
+                        },
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
@@ -724,9 +728,9 @@ private fun ModelPage(models: List<String>, modelAliases: Map<String, String>, s
 
 @Composable
 private fun TypeInText(text: String, modifier: Modifier = Modifier, style: TextStyle, color: Color, fontWeight: FontWeight? = null, textAlign: TextAlign? = null, speedMs: Int = 50, initialDelayMs: Int = 0, animate: Boolean = true, onDone: () -> Unit = {}, showText: Boolean = true) {
-    var startMs by remember(text) { mutableStateOf(0L) }
+    var startMs by remember(text) { mutableLongStateOf(0L) }
     var started by remember(text) { mutableStateOf(false) }
-    var visible by remember(text, animate) { mutableStateOf(if (animate) 0 else text.length) }
+    var visible by remember(text, animate) { mutableIntStateOf(if (animate) 0 else text.length) }
     var done by remember(text, animate) { mutableStateOf(!animate) }
     // Type by CODE POINT, not by char: a surrogate pair (emoji) or a combining sequence cut in
     // half renders as tofu for one frame. The count is over code points, and the prefix is
@@ -761,6 +765,7 @@ private fun TypeInText(text: String, modifier: Modifier = Modifier, style: TextS
 }
 
 @Composable
+@androidx.annotation.OptIn(UnstableApi::class)
 private fun LoopVideo(player: ExoPlayer) {
     val context = LocalContext.current
     var isReady by remember { mutableStateOf(false) }

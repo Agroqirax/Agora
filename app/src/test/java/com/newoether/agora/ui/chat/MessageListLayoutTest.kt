@@ -1,9 +1,13 @@
 package com.newoether.agora.ui.chat
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class MessageListLayoutTest {
@@ -20,6 +24,23 @@ class MessageListLayoutTest {
         assertEquals("user-1", afterSend.first().key)
         assertEquals(listOf("user-1", "assistant-1"), afterSend.first().messages.map { it.id })
         assertEquals(listOf("user-2"), afterSend.last().messages.map { it.id })
+    }
+
+    @Test
+    fun turnCache_reusesHistoryAndReplacesOnlyTheStreamingTurn() {
+        val cache = MessageListTurnCache()
+        val user1 = message("user-1", Participant.USER)
+        val assistant1 = message("assistant-1", Participant.MODEL)
+        val user2 = message("user-2", Participant.USER)
+        val firstStream = message("assistant-2", Participant.MODEL).copy(text = "a")
+        val before = cache.update(listOf(user1, assistant1, user2, firstStream))
+
+        val nextStream = firstStream.copy(text = "ab")
+        val after = cache.update(listOf(user1, assistant1, user2, nextStream))
+
+        assertSame(before.first(), after.first())
+        assertNotSame(before.last(), after.last())
+        assertEquals("ab", after.last().messages.last().text)
     }
 
     @Test
@@ -190,6 +211,61 @@ class MessageListLayoutTest {
         assertEquals(0, lock.activeMutationCount)
         assertNull(lock.anchor)
         assertNull(lock.finish("thinking-card"))
+    }
+
+    @Test
+    fun appendOnlyTextCanBeCoalescedDuringActiveScroll() {
+        val before = message("assistant", Participant.MODEL).copy(
+            status = MessageStatus.SENDING,
+            text = "a",
+            segments = listOf(MessageSegment(type = "answer", content = "a")),
+        )
+        val after = before.copy(
+            text = "append-only",
+            segments = listOf(MessageSegment(type = "answer", content = "append-only")),
+        )
+
+        assertEquals(
+            true,
+            sameStreamingRenderStructure(listOf(before), listOf(after)),
+        )
+    }
+
+    @Test
+    fun newToolSegmentCannotBeDeferredDuringActiveScroll() {
+        val before = message("assistant", Participant.MODEL).copy(
+            status = MessageStatus.THINKING,
+            segments = listOf(MessageSegment(type = "thought", content = "reasoning")),
+        )
+        val after = before.copy(
+            status = MessageStatus.TOOL_CALLING,
+            segments = checkNotNull(before.segments) + MessageSegment(
+                type = "tool",
+                toolName = "arbitrary_tool",
+                toolCallId = "call",
+            ),
+        )
+
+        assertEquals(
+            false,
+            sameStreamingRenderStructure(listOf(before), listOf(after)),
+        )
+    }
+
+    @Test
+    fun terminalStateCannotBeDeferredDuringActiveScroll() {
+        val before = message("assistant", Participant.MODEL).copy(
+            status = MessageStatus.SENDING,
+            text = "complete",
+        )
+
+        assertEquals(
+            false,
+            sameStreamingRenderStructure(
+                listOf(before),
+                listOf(before.copy(status = MessageStatus.SUCCESS)),
+            ),
+        )
     }
 
     private fun message(id: String, participant: Participant) = ChatMessage(

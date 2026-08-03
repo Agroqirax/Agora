@@ -92,6 +92,13 @@ android {
     buildFeatures {
         compose = true
     }
+    // The app switches locales at runtime without Play Feature Delivery. Keep every
+    // packaged translation available instead of letting App Bundles split languages.
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
 
     // Extract .so files to disk for ProcessBuilder exec (Kai approach)
     @Suppress("UnstableApiUsage")

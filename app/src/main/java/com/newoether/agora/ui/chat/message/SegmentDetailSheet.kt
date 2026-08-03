@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -32,7 +31,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,9 +41,9 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
@@ -60,7 +59,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 // Segment detail bottom sheet (custom implementation).
@@ -90,8 +90,8 @@ internal fun SegmentDetailSheet(
         onDismiss()
     } else {
         val density = LocalDensity.current
-        val configuration = LocalConfiguration.current
-        val screenHeightPx = with(density) { configuration.screenHeightDp.dp.toPx() }
+        val screenHeightPx =
+            LocalWindowInfo.current.containerSize.height.toFloat().coerceAtLeast(1f)
         val coroutineScope = rememberCoroutineScope()
         val scrollState = rememberScrollState()
 
@@ -166,17 +166,25 @@ internal fun SegmentDetailSheet(
             if (abs(target - pos) > 0.01f) animateTo(target)
         }
 
-        // ── Dim: per-frame poll of visualFraction → native Window.dimAmount ──
+        // ── Dim: update the native window only while the sheet is actually moving. ──
+        //
+        // An unconditional frame loop kept both the UI thread and RenderThread awake after the
+        // spring had settled. Animatable is snapshot-backed, so this collector sleeps at rest and
+        // still emits every visual change during drag/snap animations.
         val dialogWindowRef = remember { mutableStateOf<android.view.Window?>(null) }
 
         LaunchedEffect(dialogWindowRef.value) {
             val window = dialogWindowRef.value ?: return@LaunchedEffect
-            while (isActive) {
-                window.attributes = window.attributes.also {
-                    it.dimAmount = (0.32f * visualFraction.value).coerceIn(0f, 1f)
+            snapshotFlow { visualFraction.value }
+                .map { fraction -> (0.32f * fraction).coerceIn(0f, 1f) }
+                .distinctUntilChanged()
+                .collect { dimAmount ->
+                    val attributes = window.attributes
+                    if (attributes.dimAmount != dimAmount) {
+                        attributes.dimAmount = dimAmount
+                        window.attributes = attributes
+                    }
                 }
-                withFrameNanos { }
-            }
         }
 
         // ── NestedScrollConnection ──
@@ -368,14 +376,15 @@ internal fun SegmentDetailSheet(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                         )
                                     } else {
-                                        SelectionContainer {
-                                            StreamingMarkdownDocument(
-                                                content = detailSeg.content,
-                                                isStreaming = isStreaming && index == selectedSegs.lastIndex,
-                                                renderContext = markdownRenderContext,
-                                                modifier = Modifier.fillMaxWidth(),
-                                            )
-                                        }
+                                        val detailIsStreaming =
+                                            isStreaming && index == selectedSegs.lastIndex
+                                        StreamingMarkdownDocument(
+                                            content = detailSeg.content,
+                                            isStreaming = detailIsStreaming,
+                                            renderContext = markdownRenderContext,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            selectionEnabled = !detailIsStreaming,
+                                        )
                                     }
                                     if (index < selectedSegs.lastIndex) {
                                         HorizontalDivider(
@@ -393,23 +402,13 @@ internal fun SegmentDetailSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                 )
                             } else {
-                                if (!isStreaming) {
-                                    SelectionContainer {
-                                        StreamingMarkdownDocument(
-                                            content = seg.content,
-                                            isStreaming = false,
-                                            renderContext = markdownRenderContext,
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                    }
-                                } else {
-                                    StreamingMarkdownDocument(
-                                        content = seg.content,
-                                        isStreaming = true,
-                                        renderContext = markdownRenderContext,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                }
+                                StreamingMarkdownDocument(
+                                    content = seg.content,
+                                    isStreaming = isStreaming,
+                                    renderContext = markdownRenderContext,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selectionEnabled = !isStreaming,
+                                )
                             }
                         }
                     }

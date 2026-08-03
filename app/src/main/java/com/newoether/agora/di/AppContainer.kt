@@ -22,6 +22,7 @@ import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.TaskWorker
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.ChatViewModelFactory
+import com.newoether.agora.viewmodel.ConversationStateRegistry
 import com.newoether.agora.viewmodel.ProviderRegistry
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -91,6 +92,11 @@ class AppContainer(private val appContext: Context) {
     /** Serializes every foreground/background generation touching the same conversation. */
     val conversationExecutionCoordinator: ConversationExecutionCoordinator by lazy {
         ConversationExecutionCoordinator()
+    }
+
+    /** Foreground generation slots survive Activity/ViewModel recreation within this process. */
+    val conversationStateRegistry: ConversationStateRegistry by lazy {
+        ConversationStateRegistry()
     }
 
     /** Lets native import quiesce Task/Loop generation without serializing ordinary executions. */
@@ -200,6 +206,6 @@ class AppContainer(private val appContext: Context) {
             application, database, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory,
             autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
             taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-            automationExecutionGate
+            automationExecutionGate, conversationStateRegistry
         )
 }

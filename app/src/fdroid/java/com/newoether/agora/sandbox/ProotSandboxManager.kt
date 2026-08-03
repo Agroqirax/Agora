@@ -3,21 +3,25 @@ package com.newoether.agora.sandbox
 import android.content.Context
 import android.util.Log
 import com.newoether.agora.R
+import com.newoether.agora.util.PortableGlobMatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.nio.file.FileSystems
 class ProotSandboxManager(private val context: Context) : SandboxManager {
 
     // Serializes every state-mutating operation against the shared Alpine rootfs. The sandbox
@@ -356,10 +360,30 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             pb.environment()["HOME"] = homeMountPath
             pb.environment()["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
             val p = pb.start()
-            val out = p.inputStream.bufferedReader().readText()
-            val ok = p.waitFor(timeoutMs.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
-            if (!ok) { p.destroyForcibly(); SandboxManager.SandboxResult(out, "Timed out", -1) }
-            else SandboxManager.SandboxResult(out, "", p.exitValue())
+            coroutineScope {
+                val output = async(Dispatchers.IO) {
+                    p.inputStream.bufferedReader().use { it.readText() }
+                }
+                val exitCode = withTimeoutOrNull(timeoutMs.toLong().coerceAtLeast(1L)) {
+                    var code: Int? = null
+                    while (code == null) {
+                        code = runCatching { p.exitValue() }.getOrNull()
+                        if (code == null) delay(PROCESS_POLL_INTERVAL_MS)
+                    }
+                    code
+                }
+                if (exitCode == null) {
+                    p.destroy()
+                    runCatching { p.inputStream.close() }
+                    val partial = runCatching {
+                        withTimeoutOrNull(PROCESS_OUTPUT_CLOSE_GRACE_MS) { output.await() }
+                    }.getOrNull().orEmpty()
+                    output.cancel()
+                    SandboxManager.SandboxResult(partial, "Timed out", -1)
+                } else {
+                    SandboxManager.SandboxResult(output.await(), "", exitCode)
+                }
+            }
         } catch (e: Throwable) { SandboxManager.SandboxResult("", e.message ?: "proot failed", -1) }
     }
 
@@ -1071,7 +1095,11 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             cleanPattern.contains("/") -> "/$cleanPattern"
             else -> "/**/$cleanPattern"
         }
-        val matcher = try { FileSystems.getDefault().getPathMatcher("glob:$adjusted") } catch (_: Throwable) { return emptyList() }
-        return files.filter { f -> try { matcher.matches(java.nio.file.Paths.get(f)) } catch (_: Throwable) { false } }
+        return files.filter { file -> PortableGlobMatcher.matches(adjusted, file) }
+    }
+
+    private companion object {
+        const val PROCESS_POLL_INTERVAL_MS = 25L
+        const val PROCESS_OUTPUT_CLOSE_GRACE_MS = 250L
     }
 }

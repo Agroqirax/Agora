@@ -28,8 +28,6 @@ import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.compose.components.markdownComponents
 
-private const val STREAMING_MARKDOWN_FLUSH_MS = 250L
-
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageItem(

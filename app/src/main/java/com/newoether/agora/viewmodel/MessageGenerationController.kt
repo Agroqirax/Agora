@@ -6,6 +6,8 @@ import com.newoether.agora.R
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.data.ConversationSettings
+import com.newoether.agora.data.MessageAttachmentCloneSession
+import com.newoether.agora.data.cloneAttachmentMeta
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
@@ -35,7 +37,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.io.File
 import java.util.UUID
 
 private sealed interface SendPlacement {
@@ -367,7 +368,7 @@ class MessageGenerationController(
         val runId = UUID.randomUUID().toString()
         state.bindRun(myUiToken, runId)
 
-        state.generationJob = state.scope.launch {
+        state.launchGenerationJob(myUiToken) {
             val myPersistId = state.nextPersistId()
             var setupModelMessageId: String? = null
             try {
@@ -484,19 +485,29 @@ class MessageGenerationController(
         pass: Int,
         callerTag: String
     ) {
+        val requestTrace = com.newoether.agora.api.HttpClient.RequestTrace(
+            requestId = modelMessageId,
+            origin = callerTag,
+        )
+        requestTrace.mark(
+            "prepare_start",
+            "acceptedDelayMs=${(System.currentTimeMillis() - startTime).coerceAtLeast(0L)}",
+        )
         val resolved = requestBuilder.buildEffectiveSystemPrompt(currentId, modelId)
         val effectiveSettings = requestBuilder.buildEffectiveConversationSettings(currentId)
-        // Re-resolve the key against on-disk settings here (the suspend convergence
-        // point for all entry paths). The synchronous [activeKey] resolved by the
-        // callers can be blank if DataStore had not finished loading when Send was
-        // tapped, which would build the request with an empty key → 401.
-        val freshKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() } ?: activeKey
+        // The already-loaded key is authoritative on the normal path. Only await DataStore during
+        // the startup race where the eager StateFlow still exposes its empty default; reading both
+        // preference flows on every send unnecessarily lengthened the visible Sending phase.
+        val freshKey = activeKey.takeIf { it.isNotBlank() }
+            ?: settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() }
+            .orEmpty()
         try {
             val (config, genCtx) = requestBuilder.buildGenerationPair(
                 providerName, modelId, freshKey,
                 resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
                 effectiveSettings, currentId
             )
+            requestTrace.mark("request_config_ready")
             // No global slot: remote generations run concurrently (only the per-conversation
             // lock above serializes same-conversation work); local model work is serialized
             // inside LocalProvider via LocalModelSerializer. Stop therefore releases
@@ -517,7 +528,8 @@ class MessageGenerationController(
                 // completes and observe the PREVIOUS job).
                 generationJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job],
                 callbacks = state.callbacksFor(uiToken, persistId),
-                streamScope = state.streamScope
+                streamScope = state.streamScope,
+                requestTrace = requestTrace,
             )
         } catch (e: CancellationException) {
             throw e
@@ -588,7 +600,7 @@ class MessageGenerationController(
         val myUiToken = state.tryAcquireForReplacement() ?: return
         val runId = UUID.randomUUID().toString()
         state.bindRun(myUiToken, runId)
-        state.generationJob = state.scope.launch {
+        state.launchGenerationJob(myUiToken) {
             val myPersistId = state.nextPersistId()
             var setupModelMessageId: String? = null
             try {
@@ -778,7 +790,7 @@ class MessageGenerationController(
         }
         state.loadingChange(myUiToken, true)
 
-        state.generationJob = state.scope.launch {
+        state.launchGenerationJob(myUiToken) {
             var setupModelMessageId: String? = null
             try {
                 val myPersistId = state.nextPersistId()
@@ -1050,7 +1062,7 @@ class MessageGenerationController(
             return null
         }
 
-        state.generationJob = state.scope.launch {
+        state.launchGenerationJob(myUiToken) {
             val myPersistId = state.nextPersistId()
             try {
                 executionCoordinator.withConversationLock(genId) {
@@ -1130,23 +1142,9 @@ class MessageGenerationController(
         textOverrides: Map<String, String> = emptyMap(),
     ): List<MessageEntity> = withContext(Dispatchers.IO) {
         require(sourceInputs.isNotEmpty())
-        val destinationDir = File(application.filesDir, "run-inputs")
-        check(destinationDir.exists() || destinationDir.mkdirs()) {
-            "Cannot create Run input directory"
-        }
-        val copiedBySource = mutableMapOf<String, String>()
-        val createdFiles = mutableListOf<File>()
-
-        fun cloneBackingPath(path: String): String {
-            copiedBySource[path]?.let { return it }
-            val source = File(path)
-            if (!source.isFile) return path
-            val suffix = source.extension.takeIf { it.isNotBlank() }?.let { ".$it" }.orEmpty()
-            val destination = File(destinationDir, "${UUID.randomUUID()}$suffix")
-            source.copyTo(destination, overwrite = false)
-            createdFiles += destination
-            return destination.absolutePath.also { copiedBySource[path] = it }
-        }
+        val attachmentClones = MessageAttachmentCloneSession(
+            java.io.File(application.filesDir, "run-inputs")
+        )
 
         try {
             val now = System.currentTimeMillis()
@@ -1160,13 +1158,15 @@ class MessageGenerationController(
                     timestamp = now + index,
                     destinationRunId = destinationRunId,
                     runSequence = index.toLong(),
-                    cloneBackingPath = ::cloneBackingPath,
+                    cloneBackingPath = { path ->
+                        attachmentClones.cloneBackingPath("edited-run-inputs", path)
+                    },
                 )
                 parentId = cloned.id
                 cloned
-            }
+            }.also { attachmentClones.commit() }
         } catch (e: Exception) {
-            createdFiles.forEach { runCatching { it.delete() } }
+            attachmentClones.rollback()
             throw e
         }
     }
@@ -1183,22 +1183,7 @@ class MessageGenerationController(
             cloneBackingPath: (String) -> String,
         ): MessageEntity {
             val clonedMeta = source.attachmentMeta?.let { raw ->
-                val meta = Json.decodeFromString<AttachmentMeta>(raw)
-                Json.encodeToString(
-                    meta.copy(
-                        items = meta.items.map { item ->
-                            val uri = item.originalUri
-                            if (uri != null && uri.startsWith("file://")) {
-                                item.copy(
-                                    originalUri =
-                                        "file://${cloneBackingPath(uri.removePrefix("file://"))}"
-                                )
-                            } else {
-                                item
-                            }
-                        }
-                    )
-                )
+                cloneAttachmentMeta(raw, cloneBackingPath)
             }
             return source.copy(
                 id = id,

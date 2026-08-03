@@ -990,4 +990,12 @@
     <string name="proxy_password">密碼(選填)</string>
     <string name="proxy_bypass">直連清單</string>
     <string name="proxy_bypass_desc">直接連線、不經過代理的主機與 CIDR 範圍,每行一個</string>
+    <string name="conversation_fork">分支對話</string>
+    <string name="conversation_fork_failed">無法分支對話：%1$s</string>
+    <string name="conversation_fork_from_here">從這裡分支</string>
+    <string name="conversation_search">搜尋</string>
+    <string name="conversation_search_hint">搜尋…</string>
+    <string name="conversation_share">分享</string>
+    <string name="conversation_share_failed">無法分享對話：%1$s</string>
+    <string name="queue_clear_all">全部清除</string>
 </resources>

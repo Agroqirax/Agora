@@ -101,6 +101,7 @@ class ChatViewModel(
     private val automationToolProvider: com.newoether.agora.tool.AutomationToolProvider,
     private val conversationExecutionCoordinator: com.newoether.agora.automation.ConversationExecutionCoordinator,
     private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
+    private val generationRegistry: ConversationStateRegistry,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -121,7 +122,11 @@ class ChatViewModel(
      */
     private val convRepo: ConversationRepository = conversationRepository
     private val conversationForkShare =
-        ConversationForkShareService(conversationRepository, settingsRepository)
+        ConversationForkShareService(
+            conversationRepository,
+            settingsRepository,
+            File(application.filesDir, "fork-attachments"),
+        )
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
     val ragManager = RagManager(
@@ -283,15 +288,23 @@ class ChatViewModel(
                         runCatching { f.delete() }
                     }
                 }
-                java.io.File(
-                    getApplication<Application>().filesDir,
-                    "run-inputs",
-                ).listFiles { file -> file.isFile }?.forEach { file ->
-                    if (
-                        file.absolutePath !in referenced &&
-                        now - file.lastModified() > minAgeMs
-                    ) {
-                        runCatching { file.delete() }
+                listOf(
+                    java.io.File(
+                        getApplication<Application>().filesDir,
+                        "run-inputs",
+                    ),
+                    java.io.File(
+                        getApplication<Application>().filesDir,
+                        "fork-attachments",
+                    ),
+                ).forEach { directory ->
+                    directory.listFiles { file -> file.isFile }?.forEach { file ->
+                        if (
+                            file.absolutePath !in referenced &&
+                            now - file.lastModified() > minAgeMs
+                        ) {
+                            runCatching { file.delete() }
+                        }
                     }
                 }
             } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
@@ -356,7 +369,7 @@ class ChatViewModel(
     override fun onCleared() {
         super.onCleared()
         sandboxManager?.close()
-        generationRegistry.cancelAll()
+        generationRegistry.detachUiCallbacks(generationCallbackOwner)
         autoBackupManager.destroy()
     }
 
@@ -554,10 +567,10 @@ class ChatViewModel(
     /** Per-conversation generation state registry. Each conversation owns an independent
      *  ConversationGenerationState; the global _isLoading/_streamingMessage/_generatingInConversationId
      *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */
-    private val generationRegistry = ConversationStateRegistry().also { registry ->
-        registry.onStateCreated = { state ->
+    private val generationCallbackOwner = Any()
+    private val generationCallbacksAttached = Unit.also {
+        generationRegistry.attachUiCallbacks(generationCallbackOwner) { state ->
             state.onActive = { conversationId ->
-                registry.markActive(conversationId)
                 if (_currentConversationId.value == conversationId) {
                     // Publish the state transition synchronously with the slot claim. Besides
                     // making the Stop button immediate, this closes the one-frame window where
@@ -567,7 +580,6 @@ class ChatViewModel(
                 }
             }
             state.onIdle = { conversationId ->
-                registry.markIdle(conversationId)
                 if (_currentConversationId.value == conversationId) {
                     _isLoading.value = false
                     _generatingInConversationId.value = null
@@ -789,6 +801,23 @@ class ChatViewModel(
                         var generationMirrorStarted = false
                         convRepo.getMessagesForConversation(id).collect { entities ->
                             val mapped = entities.map {
+                                // Synthetic tool/result rows are protocol edges, never visible
+                                // message content. Their id/parent/run metadata is sufficient for
+                                // the UI path walker. Decoding their often-large segment payloads
+                                // on every Room emission duplicated work and amplified long tool
+                                // runs into repeated multi-megabyte allocations on the main feed.
+                                val isSynthetic =
+                                    it.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
+                                        it.id.startsWith(Constants.RESULT_MSG_PREFIX)
+                                val decodedSegments = if (isSynthetic) {
+                                    null
+                                } else {
+                                    it.toolCallJson?.let { raw ->
+                                        runCatching {
+                                            Json.decodeFromString<List<MessageSegment>>(raw)
+                                        }.getOrNull()
+                                    }
+                                }
                                 ChatMessage(
                                     id = it.id,
                                     parentId = it.parentId,
@@ -802,18 +831,30 @@ class ChatViewModel(
                                     timestamp = it.timestamp,
                                     thoughtTimeMs = it.thoughtTimeMs,
                                     modelName = it.modelName,
-                                    segments = it.toolCallJson?.let { json ->
-                                        try { Json.decodeFromString<List<MessageSegment>>(json) } catch (_: Exception) { null }
-                                    } ?: it.thoughts?.takeIf { t -> t.isNotBlank() }?.let { listOf(MessageSegment(type = "thought", content = it)) },
-                                    toolCall = it.toolCallJson?.let { json ->
-                                        try {
-                                            val segs = Json.decodeFromString<List<MessageSegment>>(json)
-                                            segs.lastOrNull { s -> s.type == "tool" }?.let { s ->
-                                                val rawResult = s.toolResult ?: ""
-                                                ToolCallData(s.toolName ?: "", s.toolArgs ?: "{}", SearchResultFormatter.format(rawResult, appContext))
-                                            }
-                                        } catch (_: Exception) { null }
-                                    },
+                                    segments = decodedSegments
+                                        ?: it.thoughts
+                                            ?.takeIf { thought -> thought.isNotBlank() }
+                                            ?.let { thought ->
+                                                listOf(
+                                                    MessageSegment(
+                                                        type = "thought",
+                                                        content = thought,
+                                                    )
+                                                )
+                                            },
+                                    toolCall = decodedSegments
+                                        ?.lastOrNull { segment -> segment.type == "tool" }
+                                        ?.let { segment ->
+                                            val rawResult = segment.toolResult.orEmpty()
+                                            ToolCallData(
+                                                segment.toolName.orEmpty(),
+                                                segment.toolArgs ?: "{}",
+                                                SearchResultFormatter.format(
+                                                    rawResult,
+                                                    appContext,
+                                                ),
+                                            )
+                                        },
                                     attachmentMeta = it.attachmentMeta?.let { json ->
                                         try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
                                     },
@@ -822,17 +863,7 @@ class ChatViewModel(
                                     consumedAtPass = it.consumedAtPass,
                                 )
                             }
-                            // Backfill toolCall for old result_ messages persisted without toolCallJson.
-                            // They inherit the parent tool_ message's ToolCallData so the provider can
-                            // format them as proper "tool" role messages with matching tool_call_id.
-                            _allMessages.value = mapped.map { msg ->
-                                if (msg.id.startsWith(Constants.RESULT_MSG_PREFIX) && msg.toolCall == null) {
-                                    val parentTool = mapped.find { it.id == msg.parentId }
-                                    if (parentTool != null && parentTool.toolCall != null) {
-                                        msg.copy(toolCall = parentTool.toolCall)
-                                    } else msg
-                                } else msg
-                            }
+                            _allMessages.value = mapped
                             _loadedMessagesConversationId.value = id
                             if (!generationMirrorStarted) {
                                 generationMirrorStarted = true
@@ -1147,10 +1178,7 @@ class ChatViewModel(
 
     fun renameConversation(id: String, newTitle: String) {
         viewModelScope.launch {
-            val existing = convRepo.getConversation(id)
-            if (existing != null) {
-                convRepo.upsertConversation(existing.copy(title = newTitle))
-            }
+            convRepo.updateConversationTitle(id, newTitle)
         }
     }
 

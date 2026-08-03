@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -30,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 import com.newoether.agora.ui.theme.MonoFamily
+import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
@@ -72,7 +72,7 @@ fun TextFileViewer(
 
         // Content
         if (isMarkdown) {
-            SelectionContainer {
+            NoAutoScrollSelectionContainer {
                 Column(
                     modifier = Modifier.fillMaxSize()
                         .pointerInput(Unit) {}
@@ -84,7 +84,7 @@ fun TextFileViewer(
             }
         } else {
             val scrollState = rememberScrollState()
-            SelectionContainer {
+            NoAutoScrollSelectionContainer {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()

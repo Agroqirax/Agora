@@ -93,7 +93,11 @@ class TaskExecutionEngine(
         val fallback = fallbackConversationTitle(response)
         if (fallback.isBlank()) return
         convRepo.getConversation(conversationId)?.let { conversation ->
-            convRepo.upsertConversation(conversation.copy(title = fallback))
+            convRepo.updateConversationTitleIfUnchanged(
+                id = conversationId,
+                expectedTitle = conversation.title,
+                newTitle = fallback,
+            )
         }
     }
 

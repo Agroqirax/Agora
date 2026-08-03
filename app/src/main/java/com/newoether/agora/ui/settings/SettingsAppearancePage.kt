@@ -54,6 +54,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    val invalidFontMessage = stringResource(R.string.font_invalid_file)
 
     // Clear custom font when switching away from custom
     LaunchedEffect(fontPreference) {
@@ -87,7 +88,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     if (!validFont) {
                         dest.delete()
                         withContext(Dispatchers.Main) {
-                            viewModel.emitSnackbar(context.getString(R.string.font_invalid_file))
+                            viewModel.emitSnackbar(invalidFontMessage)
                         }
                         return@launch
                     }

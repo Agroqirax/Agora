@@ -37,6 +37,8 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+private const val DUPLICATE_TITLE_TOKEN = "__AGORA_PROMPT_TITLE__"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
@@ -49,6 +51,10 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val templateSheetState = rememberModalBottomSheetState()
+    val duplicateTitleTemplate = stringResource(
+        R.string.prompts_duplicate_title,
+        DUPLICATE_TITLE_TOKEN,
+    )
 
     // Animate the sheet closed first, then flip to the editor page — avoids the sheet popping away
     // at the same instant the page transition starts.
@@ -90,7 +96,10 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 onSelectPrompt = { viewModel.settings.setActiveSystemPrompt(it) },
                 onEdit = { editingEntry = it },
                 onDuplicate = { entry ->
-                    val copyTitle = context.getString(R.string.prompts_duplicate_title, entry.title)
+                    val copyTitle = duplicateTitleTemplate.replace(
+                        DUPLICATE_TITLE_TOKEN,
+                        entry.title,
+                    )
                     editingEntry = entry.duplicateAsDraft(copyTitle)
                 },
                 onAdd = { showTemplatePicker = true },

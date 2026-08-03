@@ -515,7 +515,26 @@ class GeminiProvider(
                                         part.functionCall?.let { fc ->
                                             val argsJson = fc.args?.let { Json.encodeToString(JsonObject.serializer(), it) } ?: "{}"
                                             val sig = part.thoughtSignature ?: fc.thoughtSignature ?: currentThoughtSignature
-                                            emit(StreamEvent.ToolCallRequest(fc.id ?: "call_${UUID.randomUUID()}", fc.name, argsJson, sig))
+                                            val streamKey = "call_stream_${UUID.randomUUID()}"
+                                            val callId = fc.id ?: "call_${UUID.randomUUID()}"
+                                            emit(
+                                                StreamEvent.ToolCallUpdate(
+                                                    streamKey = streamKey,
+                                                    id = callId,
+                                                    name = fc.name,
+                                                    arguments = argsJson,
+                                                    signature = sig,
+                                                )
+                                            )
+                                            emit(
+                                                StreamEvent.ToolCallRequest(
+                                                    id = callId,
+                                                    name = fc.name,
+                                                    arguments = argsJson,
+                                                    signature = sig,
+                                                    streamKey = streamKey,
+                                                )
+                                            )
                                             // A separately-streamed signature belongs to the next function call only.
                                             currentThoughtSignature = null
                                             inThoughtBlock = false

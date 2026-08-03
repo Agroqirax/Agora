@@ -66,9 +66,27 @@ data class TaskSchedule(
             dayOfMonth = dayOfMonth.takeIf { parseHadDate } ?: today.get(Calendar.DAY_OF_MONTH),
             month = month.takeIf { parseHadDate } ?: (today.get(Calendar.MONTH) + 1),
         )
-        // ONCE needs a concrete instant; the next occurrence of the chosen date/time.
+        // ONCE needs a concrete future instant. A date-less type defaults to the next day when
+        // today's time has passed; a type that already carried month/day advances one year.
         return if (newType == ScheduleType.ONCE) {
-            seeded.withOnceAt(today.get(Calendar.YEAR), seeded.month, seeded.dayOfMonth)
+            val exact = seeded.withOnceAt(
+                today.get(Calendar.YEAR),
+                seeded.month,
+                seeded.dayOfMonth,
+            )
+            if (exact.onceAtMillis > System.currentTimeMillis()) {
+                exact
+            } else {
+                val next = Calendar.getInstance().apply {
+                    timeInMillis = exact.onceAtMillis
+                    add(if (parseHadDate) Calendar.YEAR else Calendar.DAY_OF_MONTH, 1)
+                }
+                exact.withOnceAt(
+                    next.get(Calendar.YEAR),
+                    next.get(Calendar.MONTH) + 1,
+                    next.get(Calendar.DAY_OF_MONTH),
+                )
+            }
         } else {
             seeded.copy(onceAtMillis = 0L)
         }
@@ -78,8 +96,8 @@ data class TaskSchedule(
     private val parseHadDate: Boolean
         get() = type == ScheduleType.MONTHLY || type == ScheduleType.YEARLY || type == ScheduleType.ONCE
 
-    /** Rebuilds the one-shot instant from a calendar date plus the current time-of-day, rolling
-     *  to next year if that date already passed (so picking "Jan 2" in December means next Jan). */
+    /** Rebuilds the one-shot instant from the exact calendar date plus current time-of-day.
+     * Past dates stay past so validation can reject them instead of silently changing the year. */
     fun withOnceAt(year: Int, month: Int, day: Int): TaskSchedule {
         val cal = Calendar.getInstance().apply {
             set(Calendar.YEAR, year)
@@ -90,7 +108,6 @@ data class TaskSchedule(
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
         }
-        if (cal.timeInMillis <= System.currentTimeMillis()) cal.add(Calendar.YEAR, 1)
         return copy(dayOfMonth = day, month = month, onceAtMillis = cal.timeInMillis)
     }
 

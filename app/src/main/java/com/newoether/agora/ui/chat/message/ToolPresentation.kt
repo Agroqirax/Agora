@@ -81,12 +81,19 @@ internal object ToolPresentationResolver {
     fun resolve(segment: MessageSegment): ToolPresentation {
         val toolName = segment.toolName.orEmpty()
         val kind = kindFor(toolName)
-        val args = parseObject(segment.toolArgs)
         val resultElement = parseElement(segment.toolResult)
         val resultObject = resultElement as? JsonObject
         val errorCode = resultObject.string("error")
         val exitCode = resultObject.int("exit_code")
         val explicitState = stateFromWire(segment.toolState)
+        // A structured tool-call delta is a valid JSON prefix, not yet a JSON document. Strict
+        // parsing on every 50 ms UI snapshot both fails by definition and repeatedly scans a
+        // growing argument buffer on the main feed. The detail renderer owns prefix parsing
+        // off-main; semantic summaries parse once the call has crossed into execution/final state.
+        val argumentsStillStreaming =
+            segment.toolResult == null &&
+                (explicitState == null || explicitState == ToolPresentationState.CALLING)
+        val args = if (argumentsStillStreaming) null else parseObject(segment.toolArgs)
         val background = resultObject.boolean("background") == true ||
             resultObject.string("state").equals("running", ignoreCase = true) &&
             resultObject.string("job_id") != null

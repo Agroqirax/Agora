@@ -82,12 +82,17 @@ class TaskScheduleTest {
         assertEquals("45 6 * * *", s.toCron())
     }
 
-    @Test fun withOnceAt_pastDate_rollsToNextYear() {
-        val cal = Calendar.getInstance()
-        val lastMonth = (cal.get(Calendar.MONTH) + 1).let { if (it == 1) 12 else it - 1 }
-        val year = cal.get(Calendar.YEAR)
-        val s = TaskSchedule(ScheduleType.ONCE, hour = 9, minute = 0).withOnceAt(year, lastMonth, 15)
-        assertTrue("a past date must roll into the future", s.onceAtMillis > System.currentTimeMillis())
+    @Test fun withOnceAt_pastDateRemainsPastForValidation() {
+        val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_MONTH, -1) }
+        val s = TaskSchedule(ScheduleType.ONCE, hour = 9, minute = 0).withOnceAt(
+            yesterday.get(Calendar.YEAR),
+            yesterday.get(Calendar.MONTH) + 1,
+            yesterday.get(Calendar.DAY_OF_MONTH),
+        )
+        assertTrue(
+            "an explicit past date must not mutate into another year",
+            s.onceAtMillis < System.currentTimeMillis(),
+        )
     }
 
     @Test fun switchedTo_dailyFromMonthly_dropsToPlainCron() {
@@ -98,9 +103,10 @@ class TaskScheduleTest {
     }
 
     @Test fun switchedTo_once_producesFutureInstant() {
-        val daily = TaskSchedule(ScheduleType.DAILY, hour = 9, minute = 0)
+        val daily = TaskSchedule(ScheduleType.DAILY, hour = 0, minute = 0)
         val once = daily.switchedTo(ScheduleType.ONCE)
         assertEquals(ScheduleType.ONCE, once.type)
         assertTrue(once.toRunAt()!! > System.currentTimeMillis())
+        assertTrue(once.toRunAt()!! < System.currentTimeMillis() + 25 * 60 * 60 * 1000L)
     }
 }

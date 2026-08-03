@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import android.os.Build
 import android.os.ParcelFileDescriptor
 import java.io.File
 import java.util.UUID
@@ -21,8 +20,6 @@ object PdfPageRenderer {
      * at full quality. Cancellation-aware: partial files are deleted on cancel.
      */
     suspend fun renderAsImages(context: Context, uri: Uri, pages: Set<Int>? = null): List<String> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyList()
-
         val fd = context.contentResolver.openFileDescriptor(uri, "r") ?: return emptyList()
         val renderer = PdfRenderer(ParcelFileDescriptor(fd))
         val paths = mutableListOf<String>()
@@ -67,8 +64,6 @@ object PdfPageRenderer {
      * no orphaned JPEGs are left behind in filesDir.
      */
     suspend fun renderAllPages(context: Context, uri: Uri, maxPages: Int = 200, onProgress: ((current: Int, total: Int) -> Unit)? = null): List<String> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyList()
-
         val fd = context.contentResolver.openFileDescriptor(uri, "r") ?: return emptyList()
         val renderer = PdfRenderer(ParcelFileDescriptor(fd))
         val paths = mutableListOf<String>()
@@ -101,7 +96,6 @@ object PdfPageRenderer {
     }
 
     fun getPageCount(context: Context, uri: Uri): Int {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return 0
         return try {
             val fd = context.contentResolver.openFileDescriptor(uri, "r") ?: return 0
             val renderer = PdfRenderer(ParcelFileDescriptor(fd))

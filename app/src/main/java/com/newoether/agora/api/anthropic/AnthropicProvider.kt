@@ -115,6 +115,7 @@ internal data class AnthropicContentBlock(
     val id: String? = null,
     val name: String? = null,
     val input: JsonObject? = null,
+    val text: String? = null,
     val thinking: String? = null,
     val signature: String? = null
 )
@@ -129,6 +130,185 @@ internal data class AnthropicUsage(
     @SerialName("input_tokens") val inputTokens: Int? = null,
     @SerialName("output_tokens") val outputTokens: Int? = null
 )
+
+/**
+ * Routes Anthropic SSE deltas by protocol content-block identity. A block is exclusively text,
+ * thinking, or tool-use, so a field carried by a tool block can never enter the answer channel.
+ */
+internal class AnthropicStreamEventRouter {
+    private data class ToolBlock(
+        val streamKey: String,
+        val id: String?,
+        val name: String,
+        val arguments: StringBuilder,
+    )
+
+    private val blockTypes = mutableMapOf<Int, String>()
+    private val toolBlocks = mutableMapOf<Int, ToolBlock>()
+    private val thinkingSignatures = mutableMapOf<Int, String?>()
+    private var lastBlockIndex = -1
+    private var syntheticIndex = 0
+    private var inputTokens = 0
+
+    fun route(event: AnthropicStreamEvent): List<StreamEvent> = buildList {
+        when (event.type) {
+            "message_start" -> {
+                inputTokens = event.message?.usage?.inputTokens ?: inputTokens
+            }
+
+            "content_block_start" -> {
+                val block = event.contentBlock ?: return@buildList
+                val index = indexForStart(event.index)
+                blockTypes[index] = block.type
+                when (block.type) {
+                    "text" -> block.text?.takeIf(String::isNotEmpty)?.let {
+                        add(StreamEvent.TextChunk(it))
+                    }
+
+                    "thinking" -> {
+                        thinkingSignatures[index] = block.signature
+                        block.thinking?.takeIf(String::isNotEmpty)?.let {
+                            add(StreamEvent.ThoughtChunk(it, signature = block.signature))
+                        }
+                    }
+
+                    "tool_use" -> {
+                        val initialArguments = block.input
+                            ?.takeUnless { it.isEmpty() }
+                            ?.toString()
+                            .orEmpty()
+                        val tool = ToolBlock(
+                            streamKey = block.id ?: "call_stream_${java.util.UUID.randomUUID()}",
+                            id = block.id,
+                            name = block.name.orEmpty(),
+                            arguments = StringBuilder(initialArguments),
+                        )
+                        toolBlocks[index] = tool
+                        // Tool identity is complete at block start; the UI segment must exist
+                        // before the first input_json_delta is written.
+                        add(tool.updateEvent())
+                    }
+                }
+            }
+
+            "content_block_delta" -> {
+                val index = indexForContinuation(event.index)
+                val delta = event.delta ?: return@buildList
+                when (delta.type) {
+                    "input_json_delta" -> {
+                        val tool = toolBlocks[index] ?: return@buildList
+                        delta.partialJson?.let(tool.arguments::append)
+                        add(tool.updateEvent())
+                    }
+
+                    "signature_delta" -> {
+                        val signature = delta.signature?.takeIf(String::isNotBlank)
+                            ?: return@buildList
+                        thinkingSignatures[index] = signature
+                        add(StreamEvent.ThoughtChunk(thought = "", signature = signature))
+                    }
+
+                    "thinking_delta" -> {
+                        delta.thinking?.takeIf(String::isNotEmpty)?.let {
+                            add(
+                                StreamEvent.ThoughtChunk(
+                                    thought = it,
+                                    signature = thinkingSignatures[index],
+                                )
+                            )
+                        }
+                    }
+
+                    "text_delta" -> {
+                        if (blockTypes[index] == "text") {
+                            delta.text?.takeIf(String::isNotEmpty)?.let {
+                                add(StreamEvent.TextChunk(it))
+                            }
+                        }
+                    }
+
+                    else -> routeUntypedDelta(index, delta, this)
+                }
+            }
+
+            "content_block_stop" -> {
+                val index = indexForContinuation(event.index)
+                toolBlocks.remove(index)?.let { tool ->
+                    if (tool.name.isNotBlank()) add(tool.completeEvent())
+                }
+                blockTypes.remove(index)
+                thinkingSignatures.remove(index)
+            }
+
+            "message_delta" -> event.usage?.let { usage ->
+                add(StreamEvent.UsageUpdate(inputTokens + (usage.outputTokens ?: 0)))
+            }
+        }
+    }
+
+    /** Complete only blocks that were actually opened as tool_use if a gateway closes at EOF. */
+    fun finish(): List<StreamEvent> = buildList {
+        toolBlocks.toSortedMap().values.forEach { tool ->
+            if (tool.name.isNotBlank()) add(tool.completeEvent())
+        }
+        toolBlocks.clear()
+        blockTypes.clear()
+        thinkingSignatures.clear()
+    }
+
+    private fun routeUntypedDelta(
+        index: Int,
+        delta: AnthropicDelta,
+        output: MutableList<StreamEvent>,
+    ) {
+        when (blockTypes[index]) {
+            "tool_use" -> {
+                val tool = toolBlocks[index] ?: return
+                delta.partialJson?.let(tool.arguments::append)
+                output += tool.updateEvent()
+            }
+
+            "thinking" -> {
+                delta.signature?.takeIf(String::isNotBlank)?.let {
+                    thinkingSignatures[index] = it
+                }
+                (delta.thinking ?: delta.text)?.takeIf(String::isNotEmpty)?.let {
+                    output += StreamEvent.ThoughtChunk(
+                        thought = it,
+                        signature = thinkingSignatures[index],
+                    )
+                }
+            }
+
+            "text" -> delta.text?.takeIf(String::isNotEmpty)?.let {
+                output += StreamEvent.TextChunk(it)
+            }
+        }
+    }
+
+    private fun indexForStart(index: Int?): Int {
+        val resolved = index ?: syntheticIndex++
+        lastBlockIndex = resolved
+        return resolved
+    }
+
+    private fun indexForContinuation(index: Int?): Int =
+        index ?: lastBlockIndex.takeIf { it >= 0 } ?: syntheticIndex++
+
+    private fun ToolBlock.updateEvent() = StreamEvent.ToolCallUpdate(
+        streamKey = streamKey,
+        id = id,
+        name = name,
+        arguments = arguments.toString(),
+    )
+
+    private fun ToolBlock.completeEvent() = StreamEvent.ToolCallRequest(
+        id = id ?: streamKey,
+        name = name,
+        arguments = arguments.toString(),
+        streamKey = streamKey,
+    )
+}
 
 /** Request-shape generations of the Claude model line. Only the LEGACY sets are enumerated;
  *  anything unmatched (opus-5, sonnet-5, fable, mythos, every future family) is
@@ -345,12 +525,7 @@ class AnthropicProvider(
                 if (handle.code == 200) {
                     done = true
                     var line: String? = null
-                    var currentType: String? = null
-                    var toolUseId: String? = null
-                    var toolUseName: String? = null
-                    var toolUseArgs = StringBuilder()
-                    var thinkingSignature: String? = null
-                    var messageInputTokens = 0
+                    val eventRouter = AnthropicStreamEventRouter()
 
                     // Tolerate long thinking pauses, but not a silently-dead connection:
                     // 3 consecutive read timeouts (~15 min without a byte) → give up.
@@ -368,84 +543,17 @@ class AnthropicProvider(
                             }
                             continue
                         }
-                        if (line.startsWith("event: ")) {
-                            currentType = line.substring(7).trim()
-                        } else if (line.startsWith("data: ")) {
+                        if (line.startsWith("data: ")) {
                             val jsonStr = line.substring(6).trim()
                             try {
                                 val event = json.decodeFromString<AnthropicStreamEvent>(jsonStr)
-                                when (event.type) {
-                                    "message_start" -> {
-                                        event.message?.usage?.inputTokens?.let { messageInputTokens = it }
-                                    }
-                                    "content_block_start" -> {
-                                        event.contentBlock?.let { block ->
-                                            when (block.type) {
-                                                "thinking" -> {
-                                                    block.signature?.takeIf { it.isNotBlank() }?.let { thinkingSignature = it }
-                                                }
-                                                "tool_use" -> {
-                                                    toolUseId = block.id
-                                                    toolUseName = block.name
-                                                    toolUseArgs = StringBuilder()
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "content_block_delta" -> {
-                                        event.delta?.let { delta ->
-                                            when (delta.type) {
-                                                "input_json_delta" -> {
-                                                    delta.partialJson?.let { toolUseArgs.append(it) }
-                                                }
-                                                "signature_delta" -> {
-                                                    delta.signature
-                                                        ?.takeIf(String::isNotBlank)
-                                                        ?.let { signature ->
-                                                            thinkingSignature = signature
-                                                            // Signature deltas carry no thinking
-                                                            // text, but must reach persistence
-                                                            // before the following tool_use turn.
-                                                            emit(
-                                                                StreamEvent.ThoughtChunk(
-                                                                    thought = "",
-                                                                    signature = signature,
-                                                                )
-                                                            )
-                                                        }
-                                                }
-                                                else -> {
-                                                    delta.text?.let { emit(StreamEvent.TextChunk(it)) }
-                                                    delta.thinking?.let {
-                                                        if (delta.signature != null) thinkingSignature = delta.signature
-                                                        emit(StreamEvent.ThoughtChunk(it, null, thinkingSignature))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "content_block_stop" -> {
-                                        if (toolUseId != null && toolUseName != null) {
-                                            emit(StreamEvent.ToolCallRequest(
-                                                toolUseId!!, toolUseName!!, toolUseArgs.toString()
-                                            ))
-                                            toolUseId = null
-                                            toolUseName = null
-                                        }
-                                        thinkingSignature = null
-                                    }
-                                    "message_delta" -> {
-                                        event.usage?.let { u ->
-                                            val total = messageInputTokens + (u.outputTokens ?: 0)
-                                            emit(StreamEvent.UsageUpdate(total))
-                                        }
-                                    }
-                                }
+                                eventRouter.route(event).forEach { emit(it) }
                             } catch (e: Exception) {
                                 DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
                             }
                         }
                     }
+                    eventRouter.finish().forEach { emit(it) }
                     if (!currentCoroutineContext().isActive) {
                         throw kotlinx.coroutines.CancellationException("Stream cancelled")
                     }

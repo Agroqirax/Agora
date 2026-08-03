@@ -78,6 +78,43 @@ internal data class MessageListTurn(
     val messages: List<ChatMessage>,
 )
 
+/**
+ * Reuses unchanged turn objects across immutable streaming snapshots. Only the active tail turn
+ * receives a new identity, allowing Compose to skip every historical LazyColumn item.
+ */
+internal class MessageListTurnCache {
+    private var previousByKey: Map<String, MessageListTurn> = emptyMap()
+
+    fun update(messages: List<ChatMessage>): List<MessageListTurn> {
+        val next = buildMessageListTurns(messages).map { candidate ->
+            previousByKey[candidate.key]
+                ?.takeIf { previous -> previous.messages == candidate.messages }
+                ?: candidate
+        }
+        previousByKey = next.associateBy { it.key }
+        return next
+    }
+}
+
+private data class RunProjectionMessageKey(
+    val id: String,
+    val parentId: String?,
+    val participant: Participant,
+    val timestamp: Long,
+    val runId: String?,
+    val runSequence: Long?,
+)
+
+private fun ChatMessage.toRunProjectionKey(): RunProjectionMessageKey =
+    RunProjectionMessageKey(
+        id = id,
+        parentId = parentId,
+        participant = participant,
+        timestamp = timestamp,
+        runId = runId,
+        runSequence = runSequence,
+    )
+
 internal fun buildMessageListTurns(messages: List<ChatMessage>): List<MessageListTurn> {
     if (messages.isEmpty()) return emptyList()
 
@@ -247,14 +284,26 @@ internal fun MessageList(
     }
     val density = androidx.compose.ui.platform.LocalDensity.current
 
-    val currentPath = messages.list.filter { it.participant != Participant.ERROR }
-    val contextStartIndex = if (currentPath.size > maxContextWindow) currentPath.size - maxContextWindow else 0
-    val inContextIds = currentPath.drop(contextStartIndex).map { it.id }.toSet()
+    val visibleProjectionKey = remember(messages) {
+        messages.list.map(ChatMessage::toRunProjectionKey)
+    }
+    val allProjectionKey = remember(allMessages) {
+        allMessages.list.map(ChatMessage::toRunProjectionKey)
+    }
+    val inContextIds = remember(visibleProjectionKey, maxContextWindow) {
+        val currentPath = visibleProjectionKey.filter { it.participant != Participant.ERROR }
+        val contextStartIndex =
+            (currentPath.size - maxContextWindow).coerceAtLeast(0)
+        currentPath.drop(contextStartIndex).mapTo(linkedSetOf()) { it.id }
+    }
 
-    val turns = remember(messages) { buildMessageListTurns(messages.list) }
+    val turnCache = remember { MessageListTurnCache() }
+    val turns = remember(messages) { turnCache.update(messages.list) }
     val lastUserMessage = messages.list.lastOrNull { it.participant == Participant.USER }
 
-    val runPresentation = remember(messages, allMessages) {
+    // Text/status/tool deltas do not change branch/run structure. Cache this O(n) projection by its
+    // structural fields; copy text is read from the live MessageItem below.
+    val runPresentation = remember(visibleProjectionKey, allProjectionKey) {
         RunUiProjection.project(messages.list, allMessages.list)
     }
 
@@ -314,7 +363,7 @@ internal fun MessageList(
                 editingMessageId = null
             },
             // Every active MODEL owns its streaming renderer until its own terminal status.
-            // Appending a queued USER must not disable the previous turn's double buffer.
+            // Appending a queued USER must not dispose the previous turn's incremental renderer.
             isStreaming = message.participant == Participant.MODEL &&
                 message.status in setOf(
                     MessageStatus.SENDING,
@@ -335,7 +384,9 @@ internal fun MessageList(
             onStartEdit = { editingMessageId = message.id },
             onCancelEdit = { editingMessageId = null },
             showActions = !selectionMode && presentation?.showActions == true,
-            actionCopyText = presentation?.copyText,
+            actionCopyText = presentation
+                ?.takeIf { it.showActions }
+                ?.let { message.text.takeIf(String::isNotBlank) },
             showBranchSelector = !selectionMode && presentation?.showBranchSelector == true,
             branchIndex = presentation?.branchIndex ?: 0,
             totalBranches = presentation?.totalBranches ?: 1,
@@ -384,8 +435,6 @@ internal fun MessageList(
                         isSwitching = isSwitching,
                         isScrollInProgress = state.isScrollInProgress,
                     )
-                    val anchorIndex = state.firstVisibleItemIndex
-                    val anchorOffset = state.firstVisibleItemScrollOffset
                     // Measurement remains available to explicit scrolling calculations, but
                     // bottom geometry no longer reads it. The tail's minimum height absorbs
                     // content changes atomically in the same measure pass.
@@ -394,8 +443,6 @@ internal fun MessageList(
                         val lockedAnchor = mutationAnchorLock.anchor
                         if (lockedAnchor != null) {
                             restoreAnchor(lockedAnchor)
-                        } else if (anchorIndex < state.layoutInfo.totalItemsCount) {
-                            state.requestScrollToItem(anchorIndex, anchorOffset)
                         }
                     }
                 }
@@ -434,17 +481,11 @@ internal fun MessageList(
                     // two complete frames; a reversing tap cancels this pending release.
                     withFrameNanos { }
                     withFrameNanos { }
-                    val anchor = mutationAnchorLock.finish(mutationKey)
+                    mutationAnchorLock.finish(mutationKey)
                     pendingMutationSettles.remove(mutationKey)
-                    if (
-                        anchor != null &&
-                        messageListLayoutMode(
-                            isSwitching = isSwitching,
-                            isScrollInProgress = state.isScrollInProgress,
-                        ) == MessageListLayoutMode.STABLE
-                    ) {
-                        restoreAnchor(anchor)
-                    }
+                    // onSizeChanged already held the exact pre-mutation anchor throughout the
+                    // transition. A final requestScrollToItem here produced a visible end-frame
+                    // correction after the animation was otherwise complete.
                 }
             },
             thoughtExpandedStates = thoughtExpandedStates,
@@ -463,11 +504,7 @@ internal fun MessageList(
                 // A turn's key and composition survive when the next USER is appended. Only the
                 // new turn enters; the previous assistant never moves to a different Lazy item.
                 Box(
-                    modifier = Modifier.animateItem(
-                        fadeInSpec = tween(400),
-                        placementSpec = null,
-                        fadeOutSpec = null,
-                    ),
+                    modifier = Modifier,
                 ) {
                     // The last turn atomically absorbs bottom space. Earlier turns keep the same
                     // Column call site with a zero minimum, so losing tail status cannot dispose

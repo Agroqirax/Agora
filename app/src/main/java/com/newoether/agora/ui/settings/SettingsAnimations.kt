@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,7 +69,7 @@ internal fun <T> GuardedAnimatedContent(
             )
         )
     }
-    var nextPageId by remember { mutableStateOf(1) }
+    var nextPageId by remember { mutableIntStateOf(1) }
     var activeForward by remember { mutableStateOf(forward) }
 
     LaunchedEffect(targetState) {

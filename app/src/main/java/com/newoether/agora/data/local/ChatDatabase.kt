@@ -67,7 +67,8 @@ data class ChatEntity(
     val taskId: String? = null,
     /** How this conversation was created: "user" | "task" | "loop". */
     val origin: String = "user",
-    /** True once the user has taken over a task execution, promoting it into the main list. */
+    /** Legacy import provenance: true when an orphaned task execution was promoted into the
+     * ordinary conversation list. Retained for archive compatibility; it drives no UI behavior. */
     val graduated: Boolean = false,
     /** Unsent composer text for per-conversation draft persistence. */
     val draftText: String = "",
@@ -265,6 +266,22 @@ interface ChatDao {
 
     @Upsert
     suspend fun upsertConversation(conversation: ChatEntity)
+
+    @Query("UPDATE conversations SET title = :title WHERE id = :conversationId")
+    suspend fun updateConversationTitle(conversationId: String, title: String): Int
+
+    @Query(
+        """
+        UPDATE conversations
+        SET title = :newTitle
+        WHERE id = :conversationId AND title = :expectedTitle
+        """
+    )
+    suspend fun updateConversationTitleIfUnchanged(
+        conversationId: String,
+        expectedTitle: String,
+        newTitle: String,
+    ): Int
 
     @Upsert
     suspend fun upsertMessage(message: MessageEntity)
@@ -697,7 +714,7 @@ interface ChatDao {
     suspend fun deleteOrphanedEmbeddings()
 
     /** [query] must be pre-escaped for LIKE (see ConversationRepository.escapeLikePattern). */
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' ORDER BY m.timestamp DESC LIMIT :limit")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND (m.text LIKE '%' || :query || '%' ESCAPE '\\' OR c.title LIKE '%' || :query || '%' ESCAPE '\\') AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND substr(m.id, 1, 5) != 'tool_' AND substr(m.id, 1, 7) != 'result_' ORDER BY m.timestamp DESC LIMIT :limit")
     suspend fun searchMessages(query: String, limit: Int = 10): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp DESC LIMIT 1")

@@ -27,6 +27,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -47,10 +48,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,6 +60,7 @@ import androidx.core.content.FileProvider
 import com.newoether.agora.R
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
 import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
 import com.newoether.agora.ui.components.AnimatedBlobBackground
@@ -73,6 +75,8 @@ import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -88,6 +92,111 @@ private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 private const val INLINE_SHARE_LIMIT_BYTES = 256 * 1024
+private const val SHARE_ERROR_DETAIL_TOKEN = "__AGORA_SHARE_ERROR_DETAIL__"
+private const val STREAM_SCROLL_RESUME_DELAY_MS = 160L
+
+/**
+ * Text/argument growth within an existing message tree can be coalesced while LazyColumn owns a
+ * scroll animation. Structural changes remain immediate so a new thinking/tool block or lifecycle
+ * state is never hidden behind the gate.
+ */
+internal fun sameStreamingRenderStructure(
+    previous: List<ChatMessage>,
+    next: List<ChatMessage>,
+): Boolean {
+    if (previous.size != next.size) return false
+    return previous.indices.all { index ->
+        val before = previous[index]
+        val after = next[index]
+        if (before === after) return@all true
+        if (
+            before.id != after.id ||
+            before.parentId != after.parentId ||
+            before.participant != after.participant ||
+            before.status != after.status ||
+            before.images.size != after.images.size ||
+            before.retryText != after.retryText ||
+            before.thoughts.isNullOrBlank() != after.thoughts.isNullOrBlank()
+        ) {
+            return@all false
+        }
+        val beforeSegments = before.segments
+        val afterSegments = after.segments
+        if (beforeSegments == null || afterSegments == null) {
+            return@all beforeSegments == null && afterSegments == null
+        }
+        if (beforeSegments.size != afterSegments.size) return@all false
+        beforeSegments.indices.all { segmentIndex ->
+            val beforeSegment = beforeSegments[segmentIndex]
+            val afterSegment = afterSegments[segmentIndex]
+            beforeSegment.type == afterSegment.type &&
+                beforeSegment.toolCallId == afterSegment.toolCallId &&
+                beforeSegment.toolName == afterSegment.toolName &&
+                beforeSegment.toolState == afterSegment.toolState &&
+                (beforeSegment.toolResult == null) == (afterSegment.toolResult == null)
+        }
+    }
+}
+
+@Composable
+private fun rememberScrollIsolatedMessages(
+    conversationId: String?,
+    upstream: State<List<ChatMessage>>,
+    listState: LazyListState,
+): State<List<ChatMessage>> {
+    val rendered = remember(conversationId, upstream) {
+        mutableStateOf(upstream.value)
+    }
+    LaunchedEffect(conversationId, upstream, listState) {
+        coroutineScope {
+            var latest = upstream.value
+            var deferred = listState.isScrollInProgress
+            var hasOwnedScroll = listState.isScrollInProgress
+            var resumeJob: Job? = null
+
+            launch {
+                snapshotFlow { listState.isScrollInProgress }
+                    .distinctUntilChanged()
+                    .collect { scrolling ->
+                        resumeJob?.cancel()
+                        if (scrolling) {
+                            hasOwnedScroll = true
+                            deferred = true
+                        } else if (hasOwnedScroll) {
+                            deferred = true
+                            resumeJob = launch {
+                                delay(STREAM_SCROLL_RESUME_DELAY_MS)
+                                deferred = false
+                                hasOwnedScroll = false
+                                if (rendered.value !== latest) {
+                                    rendered.value = latest
+                                }
+                            }
+                        } else {
+                            // Initial idle observation: do not impose a synthetic 160 ms delay on
+                            // the first provider token.
+                            deferred = false
+                        }
+                    }
+            }
+
+            launch {
+                snapshotFlow { upstream.value }
+                    .distinctUntilChanged()
+                    .collect { next ->
+                        latest = next
+                        if (
+                            !deferred ||
+                            !sameStreamingRenderStructure(rendered.value, next)
+                        ) {
+                            rendered.value = next
+                        }
+                    }
+            }
+        }
+    }
+    return rendered
+}
 
 private fun launchConversationShare(
     context: Context,
@@ -122,6 +231,33 @@ private fun launchConversationShare(
     context.startActivity(chooser)
 }
 
+@Composable
+private fun AnsweringHapticEffect(
+    messages: State<List<com.newoether.agora.model.ChatMessage>>,
+    isLoading: Boolean,
+    generatingInConversationId: String?,
+    currentConversationId: String?,
+    hapticsEnabled: Boolean,
+    haptics: com.newoether.agora.ui.common.AgoraHaptics,
+) {
+    // Keep the 20 Hz streaming-message read inside this tiny restart group. Reading it at the top
+    // of ChatApp invalidates the drawer, composer, backgrounds, and every overlay for each token.
+    val answeringHapticActive = isLoading &&
+        generatingInConversationId == currentConversationId &&
+        messages.value.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
+            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
+        } == true
+    val appInForeground by com.newoether.agora.service.AppForegroundTracker.foreground.collectAsState()
+    DisposableEffect(answeringHapticActive, hapticsEnabled, appInForeground, haptics) {
+        if (answeringHapticActive && hapticsEnabled && appInForeground) {
+            haptics.startAnsweringTexture()
+        }
+        onDispose {
+            haptics.stopAnsweringTexture()
+        }
+    }
+}
+
 // isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
 // MessageItemSegments.kt.
 
@@ -146,20 +282,25 @@ fun ChatApp(
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    val shareChooserTitle = stringResource(R.string.conversation_share)
+    val shareFailureTemplate = stringResource(
+        R.string.conversation_share_failed,
+        SHARE_ERROR_DETAIL_TOKEN,
+    )
 
-    LaunchedEffect(viewModel, context) {
+    LaunchedEffect(viewModel, context, shareChooserTitle, shareFailureTemplate) {
         viewModel.conversationShareText.collect { text ->
             try {
                 launchConversationShare(
                     context = context,
                     text = text,
-                    chooserTitle = context.getString(R.string.conversation_share),
+                    chooserTitle = shareChooserTitle,
                 )
             } catch (e: Exception) {
                 DebugLog.e("ChatShare", "Unable to launch conversation share", e)
                 viewModel.emitSnackbar(
-                    context.getString(
-                        R.string.conversation_share_failed,
+                    shareFailureTemplate.replace(
+                        SHARE_ERROR_DETAIL_TOKEN,
                         e.localizedMessage ?: e.javaClass.simpleName,
                     )
                 )
@@ -178,8 +319,10 @@ fun ChatApp(
     )
 
     val conversations by viewModel.conversations.collectAsState()
-    val messages by viewModel.messages.collectAsState()
-    val allMessages by viewModel.allMessages.collectAsState()
+    // Defer value reads to the narrow composition regions that actually render messages. The
+    // State objects themselves are stable, so stream snapshots no longer recompose all ChatApp.
+    val messagesState = viewModel.messages.collectAsState()
+    val allMessagesState = viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val queuedSends by viewModel.queuedSends.collectAsState()
     val isStopping by viewModel.isStopping.collectAsState()
@@ -255,8 +398,11 @@ fun ChatApp(
     val outerSpacerHeightPx: Float =
         if (isExpanded) with(density) { 44.dp.toPx() } * (1f - spacerProgress.value) else 0f
 
-    val configuration = LocalConfiguration.current
-    val drawerWidth = configuration.screenWidthDp.dp * 0.8f
+    val windowSize = LocalWindowInfo.current.containerSize
+    val windowHeightDp = with(density) {
+        windowSize.height.toDp().value.coerceAtLeast(1f)
+    }
+    val drawerWidth = with(density) { windowSize.width.toDp() } * 0.8f
     var bottomBarHeightPx by rememberSaveable { mutableFloatStateOf(0f) }
     val bottomBarHeight = with(density) { bottomBarHeightPx.toDp() }
     val drawerWidthPx = with(density) { drawerWidth.toPx() }
@@ -278,22 +424,34 @@ fun ChatApp(
     }
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
     val listState = rememberLazyListState()
+    val renderMessagesState = rememberScrollIsolatedMessages(
+        conversationId = currentConversationId,
+        upstream = messagesState,
+        listState = listState,
+    )
     var conversationSearchActive by rememberSaveable { mutableStateOf(false) }
     var conversationSearchQuery by rememberSaveable { mutableStateOf("") }
     var conversationSearchMatchIndex by remember { mutableIntStateOf(-1) }
     var shareSelectionActive by remember { mutableStateOf(false) }
     var selectedShareMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val selectableShareMessageIds = remember(messages) {
-        messages.mapTo(linkedSetOf()) { it.id }
+    val messagesForSearchAndSelection = if (conversationSearchActive || shareSelectionActive) {
+        messagesState.value
+    } else {
+        emptyList()
+    }
+    val selectableShareMessageIds = remember(messagesForSearchAndSelection) {
+        messagesForSearchAndSelection.mapTo(linkedSetOf()) { it.id }
     }
     val shareSelectionBarSpace = if (shareSelectionActive) 68.dp else 0.dp
     val conversationSearchMatchDistances = remember(currentConversationId) {
         mutableStateMapOf<String, Float>()
     }
-    val conversationSearchMatches = remember(messages, conversationSearchQuery) {
-        findConversationSearchMatches(messages, conversationSearchQuery)
+    val conversationSearchMatches = remember(messagesForSearchAndSelection, conversationSearchQuery) {
+        findConversationSearchMatches(messagesForSearchAndSelection, conversationSearchQuery)
     }
-    val searchTurns = remember(messages) { buildMessageListTurns(messages) }
+    val searchTurns = remember(messagesForSearchAndSelection) {
+        buildMessageListTurns(messagesForSearchAndSelection)
+    }
     val searchTurnIndexByMessageId = remember(searchTurns) {
         buildMap {
             searchTurns.forEachIndexed { index, turn ->
@@ -399,16 +557,11 @@ fun ChatApp(
         return messageListTurnIndex(buildMessageListTurns(currentMessages), target.id)
     }
 
-    /**
-     * Historical visible-scroll behavior: tween(600) by default; only the bottom FAB supplies the
-     * cubic easing. There is deliberately no item-scroll fallback — a caller must wait for the
-     * required bubble/layout measurements instead of silently changing motion semantics.
-     */
     suspend fun animateToUserMessage(
         targetMessageId: String? = null,
         easing: Easing = FastOutSlowInEasing,
     ): Boolean {
-        val currentMessages = messages
+        val currentMessages = messagesState.value
         if (currentMessages.isEmpty() || viewportHeightPx == 0) return false
         val layoutTurns = buildMessageListTurns(currentMessages)
         val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
@@ -429,103 +582,35 @@ fun ChatApp(
             return estimateMessageListTurnHeightPx(turn, messageHeights, fallbackHeight)
         }
 
-        val diff = if (targetIndex >= firstVisibleIndex) {
-            var distance = -listState.firstVisibleItemScrollOffset.toFloat()
-            for (index in firstVisibleIndex until targetIndex) distance += heightAt(index)
-            distance
+        val distance = if (targetIndex >= firstVisibleIndex) {
+            var value = -listState.firstVisibleItemScrollOffset.toFloat()
+            for (index in firstVisibleIndex until targetIndex) value += heightAt(index)
+            value
         } else {
-            var distance = -listState.firstVisibleItemScrollOffset.toFloat()
-            for (index in targetIndex until firstVisibleIndex) distance -= heightAt(index)
-            distance
+            var value = -listState.firstVisibleItemScrollOffset.toFloat()
+            for (index in targetIndex until firstVisibleIndex) value -= heightAt(index)
+            value
         }
-        if (kotlin.math.abs(diff) > 2f) {
-            listState.animateScrollBy(diff, tween(600, easing = easing))
+        if (kotlin.math.abs(distance) > 2f) {
+            // A single continuous distance animation has no animateScrollToItem seek/teleport and
+            // therefore no visible exact-position correction on its final frame.
+            listState.animateScrollBy(distance, tween(600, easing = easing))
         }
-        return listState.firstVisibleItemIndex == targetIndex &&
-            listState.firstVisibleItemScrollOffset <= 2
+        return true
     }
 
-    /** Wait until the committed target occupies a stable position in the LazyColumn data set. */
-    suspend fun waitForTargetCommittedStable(targetMessageId: String?): Boolean =
-        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
-            var stableSamples = 0
-            var previousSignature: List<Any>? = null
-            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
-                delay(LAYOUT_SAMPLE_INTERVAL_MS)
-                val currentMessages = messages
-                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
-                if (targetIndex == -1 || target == null || viewportHeightPx <= 0) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-                val signature = listOf(
-                    target.id,
-                    targetIndex,
-                    currentMessages.size,
-                    listState.layoutInfo.totalItemsCount,
-                    viewportHeightPx,
-                )
-                if (signature == previousSignature) {
-                    stableSamples += 1
-                } else {
-                    previousSignature = signature
-                    stableSamples = 1
-                }
+    suspend fun animateAfterTargetCommitted(targetMessageId: String?): Boolean {
+        val targetCommitted = withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+            snapshotFlow {
+                val index = resolveScrollTargetIndex(messagesState.value, targetMessageId)
+                index to listState.layoutInfo.totalItemsCount
+            }.first { (index, itemCount) ->
+                index >= 0 && index < itemCount
             }
             true
-        } == true
-
-    /** Require the destination and the newly-created bubble measurement to settle three times. */
-    suspend fun waitForAnimatedDestinationStable(targetMessageId: String?): Boolean =
-        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
-            var stableSamples = 0
-            var previousSignature: List<Any>? = null
-            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
-                delay(LAYOUT_SAMPLE_INTERVAL_MS)
-                val currentMessages = messages
-                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
-                val targetHeight = target?.let { messageHeights[it.id] }
-                val positioned =
-                    targetIndex >= 0 &&
-                        listState.firstVisibleItemIndex == targetIndex &&
-                        listState.firstVisibleItemScrollOffset <= 2
-                if (!positioned || targetHeight == null || targetHeight <= 0) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-                val signature = listOf(
-                    target.id,
-                    targetIndex,
-                    targetHeight,
-                    listState.firstVisibleItemIndex,
-                    listState.firstVisibleItemScrollOffset,
-                    viewportHeightPx,
-                )
-                if (signature == previousSignature) stableSamples += 1
-                else {
-                    previousSignature = signature
-                    stableSamples = 1
-                }
-            }
-            true
-        } == true
-
-    suspend fun animateAfterBubbleSettles(
-        targetMessageId: String?,
-        easing: Easing = FastOutSlowInEasing,
-    ): Boolean {
-        if (!waitForTargetCommittedStable(targetMessageId)) return false
-        val positioned = withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
-            while (!animateToUserMessage(targetMessageId, easing)) {
-                delay(LAYOUT_SAMPLE_INTERVAL_MS)
-            }
-            true
-        } == true
-        return positioned && waitForAnimatedDestinationStable(targetMessageId)
+        } ?: return false
+        if (!targetCommitted) return false
+        return animateToUserMessage(targetMessageId)
     }
 
     /**
@@ -539,7 +624,7 @@ fun ChatApp(
             var previousSignature: List<Any>? = null
             while (stableSamples < STABLE_LAYOUT_SAMPLES) {
                 delay(LAYOUT_SAMPLE_INTERVAL_MS)
-                val currentMessages = messages
+                val currentMessages = messagesState.value
                 if (currentMessages.isEmpty()) {
                     val signature = listOf(0, viewportHeightPx)
                     if (signature == previousSignature) stableSamples += 1
@@ -747,17 +832,13 @@ fun ChatApp(
     LaunchedEffect(animatedScrollRequest?.id, currentConversationId) {
         val request = animatedScrollRequest ?: return@LaunchedEffect
         if (request.conversationId != currentConversationId) return@LaunchedEffect
-        while (viewModel.animatedScrollRequest.value?.id == request.id) {
-            if (animateAfterBubbleSettles(request.targetMessageId)) {
-                viewModel.completeAnimatedScroll(request.id)
-                break
-            }
+        if (!animateAfterTargetCommitted(request.targetMessageId)) {
             DebugLog.e(
                 "AgoraUI",
-                "Retrying forced animated scroll target: ${request.targetMessageId}",
+                "Animated scroll target was not committed: ${request.targetMessageId}",
             )
-            delay(LAYOUT_SAMPLE_INTERVAL_MS)
         }
+        viewModel.completeAnimatedScroll(request.id)
     }
 
     BackHandler(enabled = drawerState.currentValue != DrawerValue.Closed || drawerState.targetValue != DrawerValue.Closed) {
@@ -790,23 +871,14 @@ fun ChatApp(
         }
     }
 
-    val answeringHapticActive = isLoading &&
-        generatingInConversationId == currentConversationId &&
-        messages.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
-            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
-        } == true
-    // Re-key on foreground: the tracker cancels the waveform when the app backgrounds, so on
-    // return this effect must re-run to restart it — otherwise the answering texture stays dead
-    // for the rest of the generation after a single background/foreground round-trip.
-    val appInForeground by com.newoether.agora.service.AppForegroundTracker.foreground.collectAsState()
-    DisposableEffect(answeringHapticActive, hapticsEnabled, appInForeground) {
-        if (answeringHapticActive && hapticsEnabled && appInForeground) {
-            haptics.startAnsweringTexture()
-        }
-        onDispose {
-            haptics.stopAnsweringTexture()
-        }
-    }
+    AnsweringHapticEffect(
+        messages = messagesState,
+        isLoading = isLoading,
+        generatingInConversationId = generatingInConversationId,
+        currentConversationId = currentConversationId,
+        hapticsEnabled = hapticsEnabled,
+        haptics = haptics,
+    )
 
     CompositionLocalProvider(LocalAgoraHaptics provides haptics) {
     ModalNavigationDrawer(
@@ -845,7 +917,14 @@ fun ChatApp(
             }
             val ca by animateFloatAsState(targetCa, tween(800))
             val qa by animateFloatAsState(targetQa, tween(800))
-            AnimatedBlobBackground(centerAlpha = ca, quarterAlpha = qa, blurRadius = 40f, dark = dark, blurEnabled = blurEffectsEnabled)
+            AnimatedBlobBackground(
+                centerAlpha = ca,
+                quarterAlpha = qa,
+                blurRadius = 40f,
+                dark = dark,
+                blurEnabled = blurEffectsEnabled,
+                motionEnabled = isNewChatMode && !isLoading && !isSwitching,
+            )
 
             Scaffold(
                 containerColor = Color.Transparent,
@@ -927,7 +1006,9 @@ fun ChatApp(
             ) { padding ->
                 Box(modifier = Modifier.fillMaxSize()) {
                     val topBarH = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 64.dp
-                    val pivotY = ((LocalConfiguration.current.screenHeightDp + topBarH.value / 2f - bottomBarHeight.value) / 2f).coerceAtLeast(0f) / LocalConfiguration.current.screenHeightDp
+                    val pivotY =
+                        ((windowHeightDp + topBarH.value / 2f - bottomBarHeight.value) / 2f)
+                            .coerceAtLeast(0f) / windowHeightDp
                     AnimatedContent(
                         targetState = Pair(isNewChatMode, showLaunchContent),
                         transitionSpec = {
@@ -962,8 +1043,8 @@ fun ChatApp(
                             }
                             Box(modifier = Modifier.fillMaxSize()) {
                             MessageList(
-                                messages = StableMessageList(messages),
-                                allMessages = StableMessageList(allMessages),
+                                messages = StableMessageList(renderMessagesState.value),
+                                allMessages = StableMessageList(allMessagesState.value),
                                 modifier = messageListModifier,
                                 state = listState,
                                 // Per-conversation generation gate: isLoading mirrors the OPEN
@@ -1058,7 +1139,7 @@ fun ChatApp(
                                 ) {
                                     val welcomeText = stringResource(R.string.welcome_to_agora)
                                     val availableWelcomeHeight =
-                                        LocalConfiguration.current.screenHeightDp +
+                                        windowHeightDp +
                                             topBarH.value / 2f -
                                             bottomBarHeight.value
                                     val welcomeTopPadding =

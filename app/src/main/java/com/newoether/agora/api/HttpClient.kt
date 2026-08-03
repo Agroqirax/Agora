@@ -10,8 +10,28 @@ import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 object HttpClient {
+    class RequestTrace(
+        private val requestId: String,
+        private val origin: String,
+    ) {
+        private val startedAtNanos = System.nanoTime()
+        private val markedStages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+        fun mark(stage: String, detail: String = "") {
+            if (!markedStages.add(stage)) return
+            val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
+            val suffix = detail.takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
+            DebugLog.d(
+                "AgoraTTFT",
+                "[req=$requestId origin=$origin] stage=$stage elapsedMs=$elapsedMs$suffix",
+            )
+        }
+    }
+
     data class TextResponse(
         val code: Int,
         val body: String,
@@ -174,24 +194,53 @@ object HttpClient {
 
     class StreamHandle(
         private val call: okhttp3.Call,
-        private val response: okhttp3.Response,
         private val scope: com.newoether.agora.viewmodel.StreamScope?,
+        private val trace: RequestTrace?,
     ) : com.newoether.agora.viewmodel.GenerationCancelHandle {
-        val code: Int get() = response.code
-        val source: BufferedSource? get() = response.body?.source()
-        val errorBody: String? by lazy {
-            try { response.body?.string() } catch (_: Exception) { null }
+        private val response = AtomicReference<okhttp3.Response?>(null)
+        private val cancelled = AtomicBoolean(false)
+        private val closed = AtomicBoolean(false)
+        private val firstLineObserved = AtomicBoolean(false)
+
+        val code: Int get() = checkNotNull(response.get()) { "Response headers are not available" }.code
+        val source: BufferedSource? get() = response.get()?.body?.source()
+        val errorBody: String?
+            get() = try {
+                response.get()?.body?.string()
+            } catch (_: Exception) {
+                null
+            }
+
+        internal fun attach(openedResponse: okhttp3.Response) {
+            if (cancelled.get() || closed.get()) {
+                openedResponse.close()
+                throw IOException("Streaming request was cancelled before response headers")
+            }
+            check(response.compareAndSet(null, openedResponse)) { "Response is already attached" }
+            if (cancelled.get() || closed.get()) {
+                response.getAndSet(null)?.close()
+                throw IOException("Streaming request was cancelled while attaching response")
+            }
         }
+
         fun close() {
+            if (!closed.compareAndSet(false, true)) return
             HttpClient.liveHandles.remove(this)
             scope?.unregister(this)
             // Cancel the Call even on normal completion: a no-op when already done,
             // but guarantees any blocked readLine() on this handle is woken the moment
             // the response is torn down rather than waiting on the read timeout.
             runCatching { call.cancel() }
-            response.close()
+            response.getAndSet(null)?.close()
         }
-        fun readLine(): String? = source?.readUtf8Line()
+
+        fun readLine(): String? {
+            val line = source?.readUtf8Line()
+            if (line != null && firstLineObserved.compareAndSet(false, true)) {
+                trace?.mark("first_wire_line", "chars=${line.length}")
+            }
+            return line
+        }
         /**
          * Shortens subsequent blocking reads on this one response. OpenAI-compatible SSE streams
          * use this after a semantic terminal `finish_reason`: a bounded grace window accepts the
@@ -203,7 +252,11 @@ object HttpClient {
             source?.timeout()?.timeout(timeoutMillis, TimeUnit.MILLISECONDS)
         }
         /** Cancel the underlying HTTP call immediately — unblocks [readLine]. */
-        override fun cancel() = call.cancel()
+        override fun cancel() {
+            cancelled.set(true)
+            call.cancel()
+            response.get()?.close()
+        }
     }
 
     fun streamPost(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): StreamHandle =
@@ -230,25 +283,52 @@ object HttpClient {
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
         val call = client.newCall(requestBuilder.build())
-        val handle = StreamHandle(call, call.execute(), scope)
+        val trace = boundRequestTrace()
+        val handle = StreamHandle(call, scope, trace)
+        // Register before execute(): Stop must be able to cancel DNS, connect, TLS, request upload,
+        // and response-header wait rather than only an already-open response body.
         if (scope != null) scope.register(handle)
         liveHandles.add(handle)
-        return handle
+        return try {
+            val endpoint = runCatching {
+                java.net.URI(url).let { "${it.host.orEmpty()}${it.path.orEmpty()}" }
+            }.getOrDefault("unknown")
+            trace?.mark(
+                "http_execute",
+                "endpoint=$endpoint bodyBytes=${jsonBody.toByteArray(Charsets.UTF_8).size}",
+            )
+            val response = call.execute()
+            handle.attach(response)
+            trace?.mark("response_headers", "code=${response.code}")
+            handle
+        } catch (t: Throwable) {
+            handle.close()
+            throw t
+        }
     }
 
     private val coroutineStreamScope =
         ThreadLocal<com.newoether.agora.viewmodel.StreamScope?>()
+    private val coroutineRequestTrace = ThreadLocal<RequestTrace?>()
 
     /** Bind [scope] to the current generation coroutine. Thread-context propagation keeps the
      * value stable across suspensions/dispatcher hops without exposing process-global mutable
      * ownership to parallel conversations. */
     internal suspend fun <T> withStreamScope(
         scope: com.newoether.agora.viewmodel.StreamScope?,
+        requestTrace: RequestTrace? = null,
         block: suspend () -> T,
-    ): T = withContext(coroutineStreamScope.asContextElement(scope)) { block() }
+    ): T = withContext(
+        coroutineStreamScope.asContextElement(scope) +
+            coroutineRequestTrace.asContextElement(requestTrace)
+    ) {
+        block()
+    }
 
     internal fun boundStreamScope(): com.newoether.agora.viewmodel.StreamScope? =
         coroutineStreamScope.get()
+
+    internal fun boundRequestTrace(): RequestTrace? = coroutineRequestTrace.get()
 
     /** Cancel EVERY in-flight streaming Call in the process — the "stop everything" backstop
      *  (e.g. ViewModel cleared). Per-conversation Stop should use the conversation's

@@ -56,9 +56,46 @@ internal fun resolveConversationBranchPath(
     }
 
     val includedRunIds = orderedRunIds.toSet()
+    val includedMessages = linkedMapOf<String, MessageEntity>()
+    selectedStructuralPath.forEach { includedMessages[it.id] = it }
+
+    // Tool calls are persisted as protocol side chains. A parallel call has one tool_ parent and
+    // multiple result_ siblings, while the visible branch can select only one sibling to continue
+    // traversal. Close the selected path over every synthetic descendant so fork/share never
+    // silently drops another result from the same provider turn.
+    val protocolChildren = messages
+        .asSequence()
+        .filter { it.isSynthetic() && it.runId in includedRunIds }
+        .groupBy { it.parentId }
+    fun includeProtocolDescendants(parentId: String) {
+        protocolChildren[parentId]
+            .orEmpty()
+            .sortedWith(messageOrder)
+            .forEach { child ->
+                if (includedMessages.putIfAbsent(child.id, child) == null) {
+                    includeProtocolDescendants(child.id)
+                }
+            }
+    }
+    selectedStructuralPath.forEach { includeProtocolDescendants(it.id) }
+    val selectedStructuralIds = selectedStructuralPath.mapTo(mutableSetOf()) { it.id }
+
     return ConversationBranchPath(
-        structuralMessages = structuralPath.filter { it.runId in includedRunIds },
-        visibleMessages = visiblePath.filter { it.runId in includedRunIds },
+        // Keep the selected path first. Callers use that order to reproduce explicit branch
+        // selections; protocol siblings are appended deterministically for persistence.
+        structuralMessages = selectedStructuralPath +
+            includedMessages.values
+                .asSequence()
+                .filter { it.id !in selectedStructuralIds }
+                .sortedWith(
+                    compareBy<MessageEntity> {
+                        orderedRunIds.indexOf(it.runId).let { index ->
+                            if (index >= 0) index else Int.MAX_VALUE
+                        }
+                    }.then(messageOrder)
+                )
+                .toList(),
+        visibleMessages = selectedStructuralPath.filterNot { it.isSynthetic() },
         runIds = orderedRunIds.toList(),
     )
 }
@@ -100,3 +137,8 @@ private fun resolveStructuralMessagePath(
 internal fun MessageEntity.isSynthetic(): Boolean =
     id.startsWith(Constants.TOOL_MSG_PREFIX) ||
         id.startsWith(Constants.RESULT_MSG_PREFIX)
+
+private val messageOrder =
+    compareBy<MessageEntity> { it.runSequence }
+        .thenBy { it.timestamp }
+        .thenBy { it.id }

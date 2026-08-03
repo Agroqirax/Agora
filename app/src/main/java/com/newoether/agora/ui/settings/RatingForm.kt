@@ -37,7 +37,7 @@ fun RatingForm(
     onSubmitted: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    var rating by remember { mutableStateOf(0) }
+    var rating by remember { mutableIntStateOf(0) }
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var comment by remember { mutableStateOf("") }

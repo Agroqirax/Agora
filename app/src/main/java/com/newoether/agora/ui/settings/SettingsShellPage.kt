@@ -230,7 +230,7 @@ private fun DeviceEditor(
     var sshPortInput by remember(device.id) { mutableStateOf(device.sshPort.toString()) }
     var sshUserInput by remember(device.id) { mutableStateOf(device.sshUser) }
     var sshPwInput by remember(device.id) { mutableStateOf(device.sshPassword) }
-    var timeoutInput by remember(device.id) { mutableStateOf(device.timeout) }
+    var timeoutInput by remember(device.id) { mutableIntStateOf(device.timeout) }
     var sshHostKeyInput by remember(device.id) { mutableStateOf(device.sshHostKey) }
     val nameFocusRequester = remember { FocusRequester() }
     val urlFocusRequester = remember { FocusRequester() }

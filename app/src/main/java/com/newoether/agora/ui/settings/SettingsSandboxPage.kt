@@ -53,6 +53,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
     val scope = rememberCoroutineScope()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val installFailedMessage = stringResource(R.string.sandbox_install_failed)
 
     // Core state — use fast sync check for instant first paint, confirm async
     var available by remember { mutableStateOf(sandboxManager.isAvailableSync()) }
@@ -102,7 +103,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
             try {
                 available = sandboxManager.isAvailable()
                 if (available) { installError = null; sandboxManager.refreshPackageList() }
-                else installError = sandboxManager.lastError ?: ctx.getString(R.string.sandbox_install_failed)
+                else installError = sandboxManager.lastError ?: installFailedMessage
             } catch (e: Exception) { installError = e.message }
         }
     }
@@ -112,7 +113,7 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
 
     val quickPkgs = listOf("python3", "git", "curl", "wget", "openssh", "nodejs", "build-base", "htop")
     val pkgCount = backendPackages.size
-    var diskUsageMB by remember { mutableStateOf(0L) }
+    var diskUsageMB by remember { mutableLongStateOf(0L) }
     LaunchedEffect(backendPackages.size) {
         try { diskUsageMB = sandboxManager.getDiskUsageMB() } catch (_: Exception) {}
     }

@@ -31,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
 /** Reads the bytes of an image referenced by a file path or content/file Uri string. */
 private fun readImageBytes(context: Context, url: String): ByteArray? = try {
@@ -94,8 +95,8 @@ private fun readImageInfo(context: Context, url: String): ImageInfo? {
 }
 
 private fun formatBytes(n: Long): String = when {
-    n >= 1024 * 1024 -> String.format("%.1f MB", n / (1024.0 * 1024.0))
-    n >= 1024 -> String.format("%.0f KB", n / 1024.0)
+    n >= 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f MB", n / (1024.0 * 1024.0))
+    n >= 1024 -> String.format(Locale.getDefault(), "%.0f KB", n / 1024.0)
     else -> "$n B"
 }
 

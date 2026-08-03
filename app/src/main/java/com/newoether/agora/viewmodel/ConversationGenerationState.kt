@@ -4,9 +4,11 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.SelectedAttachment
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
@@ -44,10 +46,13 @@ import java.util.concurrent.atomic.AtomicLong
  * a terminal user Stop that fully releases it. Stop cancels ONLY this conversation's
  * [generationJob] and in-flight HTTP streams (via [streamScope]) — never another conversation's.
  */
-class ConversationGenerationState(val conversationId: String) {
+class ConversationGenerationState(
+    val conversationId: String,
+    private val onRegistryActive: (String) -> Unit = {},
+    private val onRegistryIdle: (String) -> Unit = {},
+) {
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    var generationJob: Job? = null
 
     /** This conversation's in-flight HTTP streaming handles. Cancelled together on stop. */
     val streamScope: StreamScope = StreamScope()
@@ -68,6 +73,9 @@ class ConversationGenerationState(val conversationId: String) {
 
     // ── Ownership tokens ──
     private val genLock = Any()
+    private enum class SlotPhase { IDLE, ACTIVE, STOPPING }
+    private var slotPhase = SlotPhase.IDLE
+    private var generationJob: Job? = null
     private var uiGenToken = 0L
     /** Token of the generation currently holding the slot; 0 = slot free. Unlike [uiGenToken]
      *  (advanced on every stop to gate late UI writes), this only changes on acquire/release,
@@ -76,10 +84,6 @@ class ConversationGenerationState(val conversationId: String) {
     /** Run owned by the current slot. Bound before provider work or queue acceptance. */
     private var slotRunId: String? = null
     private var suppressNextQueueDrain = false
-    /** Stop keeps the generation slot/tree lock until both the provider coroutine and the single
-     * terminal DB finalizer have completed, whichever finishes last. */
-    private var stopFinalizationPending = false
-    private var stoppedCoroutineUnwound = false
     private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -114,12 +118,13 @@ class ConversationGenerationState(val conversationId: String) {
      * not deep inside the coroutine).
      */
     fun acquireForSend(): Long? = synchronized(genLock) {
-        if (generating.value) return null
+        if (slotPhase != SlotPhase.IDLE) return null
         uiGenToken += 1
         slotOwnerToken = uiGenToken
-        stopFinalizationPending = false
-        stoppedCoroutineUnwound = false
+        slotPhase = SlotPhase.ACTIVE
         generating.value = true
+        stopping.value = false
+        onRegistryActive(conversationId)
         onActive?.invoke(conversationId)
         uiGenToken
     }
@@ -130,15 +135,64 @@ class ConversationGenerationState(val conversationId: String) {
      * switch; enforcing the same rule here makes the state machine authoritative.
      */
     fun tryAcquireForReplacement(): Long? = synchronized(genLock) {
-            if (generating.value) return null
+            if (slotPhase != SlotPhase.IDLE) return null
             uiGenToken += 1
             slotOwnerToken = uiGenToken
-            stopFinalizationPending = false
-            stoppedCoroutineUnwound = false
+            slotPhase = SlotPhase.ACTIVE
             isLoading.value = true
             generating.value = true
+            stopping.value = false
+            onRegistryActive(conversationId)
             onActive?.invoke(conversationId)
             uiGenToken
+    }
+
+    /**
+     * Installs the generation Job before it can execute. This closes the launch-assignment race:
+     * Stop either sees and cancels this exact Job, or marks the pre-launch slot STOPPING and this
+     * method refuses to start it. A completion hook is a final safety net for cancellation that
+     * lands after installation but before the LAZY body gets its first instruction.
+     */
+    fun launchGenerationJob(
+        uiToken: Long,
+        block: suspend CoroutineScope.() -> Unit,
+    ): Job? {
+        val job = scope.launch(start = CoroutineStart.LAZY, block = block)
+        val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+        job.invokeOnCompletion {
+            if (installed.get() && endGeneration(uiToken)) {
+                // A cancelled-before-start coroutine cannot reach the controller's finally.
+                consumeQueueDrainPermission()
+            }
+        }
+
+        val accepted = synchronized(genLock) {
+            if (
+                slotOwnerToken != uiToken ||
+                slotPhase != SlotPhase.ACTIVE ||
+                generationJob != null
+            ) {
+                false
+            } else {
+                generationJob = job
+                installed.set(true)
+                true
+            }
+        }
+        if (!accepted) {
+            job.cancel()
+            val abandonedStoppingLaunch = synchronized(genLock) {
+                slotOwnerToken == uiToken &&
+                    slotPhase == SlotPhase.STOPPING &&
+                    generationJob == null
+            }
+            if (abandonedStoppingLaunch && endGeneration(uiToken)) {
+                consumeQueueDrainPermission()
+            }
+            return null
+        }
+        job.start()
+        return job
     }
 
     /**
@@ -150,21 +204,18 @@ class ConversationGenerationState(val conversationId: String) {
      */
     fun endGeneration(uiToken: Long): Boolean = synchronized(genLock) {
         if (slotOwnerToken != uiToken) return false
-        if (stopping.value) {
-            stoppedCoroutineUnwound = true
-            if (stopFinalizationPending) return false
-        }
         releaseSlotLocked()
     }
 
     private fun releaseSlotLocked(): Boolean {
+        slotPhase = SlotPhase.IDLE
         slotOwnerToken = 0L
         slotRunId = null
-        stopFinalizationPending = false
-        stoppedCoroutineUnwound = false
+        generationJob = null
         isLoading.value = false
         generating.value = false
         stopping.value = false
+        onRegistryIdle(conversationId)
         onIdle?.invoke(conversationId)
         return true
     }
@@ -229,7 +280,7 @@ class ConversationGenerationState(val conversationId: String) {
         val result = synchronized(genLock) {
             previousJob = generationJob
             val boundRunId = slotRunId
-            if (boundRunId != null || generating.value) suppressNextQueueDrain = true
+            if (boundRunId != null || slotPhase != SlotPhase.IDLE) suppressNextQueueDrain = true
             // Revoke DB ownership before cancellation can enter GenerationManager.finally. The
             // stopped coroutine therefore skips its normal NonCancellable terminal upsert; the
             // dedicated stop finalizer below is the only terminal writer.
@@ -240,29 +291,14 @@ class ConversationGenerationState(val conversationId: String) {
             // Accepted interventions already belong to this Run in Room. Stop ends the Run, so
             // they are no longer pending queue work even though their user rows stay visible.
             queuedSends.value = emptyList()
-            stopFinalizationPending = s != null || boundRunId != null
-            stoppedCoroutineUnwound = previousJob == null || previousJob.isCompleted
-            // The slot stays HELD until the cancelled coroutine's finally releases it via
-            // [endGeneration] (slot ownership is keyed to slotOwnerToken, which stop does NOT
-            // advance). Freeing it here would let a new send claim the slot and then block
-            // invisibly on the conversation lock the dying coroutine may still hold (e.g. a
-            // tool stuck in non-cancellable IO) — no bubble, no queue chip, nothing. Instead:
-            // while stopping, the composer keeps the draft and shows the stopping spinner.
-            // Once the old coroutine has fully unwound, the next explicit Send claims a fresh
-            // Run instead of being attached to the terminal one.
-            //
-            // Unless nothing is actually running: with no live coroutine no finally will ever
-            // fire, so holding the slot would strand the composer in the stopping state
-            // forever. Release it here instead — the historical immediate-release behavior,
-            // correct precisely when there is nothing left to wind down.
-            if (generating.value) {
-                if (!stoppedCoroutineUnwound || stopFinalizationPending) {
-                    // STOPPING is still generating for every tree-mutation/UI gate.
-                    isLoading.value = true
-                    stopping.value = true
-                } else {
-                    releaseSlotLocked()
-                }
+            if (slotPhase != SlotPhase.IDLE) {
+                slotPhase = SlotPhase.STOPPING
+                // STOPPING remains occupied for every tree-mutation/UI gate, but only until the
+                // old coroutine exits. DB terminalization is deliberately outside this phase.
+                isLoading.value = true
+                generating.value = true
+                stopping.value = true
+                if (previousJob?.isCompleted == true) releaseSlotLocked()
             }
             StopResult(s, conversationId, boundRunId)
         }
@@ -273,17 +309,9 @@ class ConversationGenerationState(val conversationId: String) {
         return result
     }
 
-    /**
-     * Marks the single STOP terminal transaction complete. The slot/tree lock is released only
-     * when the provider coroutine has also unwound. Returns true when this call performed release.
-     */
+    /** Terminal DB persistence never owns or extends the generation slot. */
     fun finishStopFinalization(): Boolean = synchronized(genLock) {
-        stopFinalizationPending = false
-        if (!stopping.value || !stoppedCoroutineUnwound) return false
-        // If releaseAndDrain already returned while waiting for this finalizer, there is no
-        // matching consumeQueueDrainPermission call left to consume the Stop suppression.
-        suppressNextQueueDrain = false
-        releaseSlotLocked()
+        false
     }
 
     /**

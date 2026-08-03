@@ -14,7 +14,28 @@ sealed class StreamEvent {
     data class Error(val error: GenerationError) : StreamEvent() {
         val message: String get() = error.userMessage()
     }
-    data class ToolCallRequest(val id: String, val name: String, val arguments: String, val signature: String? = null) : StreamEvent()
+    /**
+     * Full accumulated snapshot of a tool call while the model is still writing it.
+     *
+     * [streamKey] is stable even when a compatible provider sends the protocol [id] in a later
+     * delta. UI code keys the live segment by [streamKey], then replaces its protocol id when the
+     * matching [ToolCallRequest] completes.
+     */
+    data class ToolCallUpdate(
+        val streamKey: String,
+        val id: String?,
+        val name: String,
+        val arguments: String,
+        val signature: String? = null,
+    ) : StreamEvent()
+
+    data class ToolCallRequest(
+        val id: String,
+        val name: String,
+        val arguments: String,
+        val signature: String? = null,
+        val streamKey: String = id,
+    ) : StreamEvent()
     data class ToolCallsRequest(val calls: List<ToolCallRequest>) : StreamEvent()
     /** Emitted when the provider is retrying after a transient error (401, 429, 5xx).
      *  [attempt] is 1-based and always < [maxAttempts] (the final attempt does not emit). */
@@ -223,6 +244,7 @@ data class OpenAiErrorResponse(val error: OpenAiError)
 data class OpenAiError(val message: String, val type: String? = null, val code: String? = null)
 
 class PendingToolCall(
+    val streamKey: String = "call_stream_${java.util.UUID.randomUUID()}",
     var id: String = "",
     var name: String = "",
     val args: StringBuilder = StringBuilder()

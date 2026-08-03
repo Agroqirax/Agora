@@ -66,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -745,7 +746,7 @@ private fun repeatLabel(type: ScheduleType): String = stringResource(
 /** Short weekday names in the user's locale, indexed 0=Sunday..6=Saturday to match cron. */
 @Composable
 private fun weekdayNames(): List<String> {
-    val locale = Locale.getDefault()
+    val locale = LocalConfiguration.current.locales[0]
     return remember(locale) {
         val cal = Calendar.getInstance()
         val fmt = java.text.SimpleDateFormat("EEE", locale)
@@ -795,6 +796,7 @@ private fun ScheduleGroup(
     val armable = cronExpr.isNotBlank() || (runAt != null && runAt > 0L)
     val oncePast = schedule.type == ScheduleType.ONCE &&
         (runAt ?: 0L) in 1 until System.currentTimeMillis()
+    val canToggleSchedule = armable && (!oncePast || enabled)
 
     SettingsGroup(
         title = stringResource(R.string.task_schedule),
@@ -917,7 +919,9 @@ private fun ScheduleGroup(
                     }
                 }
                 SettingsItem(
-                    modifier = Modifier.clickable(enabled = armable) { onEnabledChange(!enabled) },
+                    modifier = Modifier.clickable(enabled = canToggleSchedule) {
+                        onEnabledChange(!enabled)
+                    },
                     headlineContent = {
                         Text(
                             stringResource(R.string.task_enabled),
@@ -940,7 +944,7 @@ private fun ScheduleGroup(
                     trailingContent = {
                         Switch(
                             checked = enabled && armable,
-                            enabled = armable,
+                            enabled = canToggleSchedule,
                             onCheckedChange = onEnabledChange,
                         )
                     },

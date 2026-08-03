@@ -15,7 +15,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -33,7 +32,6 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.input.*
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.CloseFullscreen
@@ -133,7 +131,6 @@ import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
-import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.MarkdownColors
@@ -248,7 +245,6 @@ internal fun CompactSegmentBlock(
     val thoughtMs = thoughtDurationMs(segs)
     val hasThought = thoughtMs != null && thoughtMs > 0
     val collapsedTitle = compactSegmentTitle(segs, message, useLiveStatus)
-    val animateTerminalTitle = remember(expansionKey) { isStreaming }
     val expansionTransition = updateTransition(
         targetState = isExpanded,
         label = "compactSegmentExpansion",
@@ -307,25 +303,15 @@ internal fun CompactSegmentBlock(
                     Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                LatestWinsCrossfade(
-                    content = collapsedTitle,
-                    // Preserve direct live title updates. Only the live -> terminal handoff uses
-                    // two buffers, so "Thinking…" can never be replaced by the duration in one
-                    // unanimated frame.
-                    animateChanges = animateTerminalTitle && !isStreaming,
+                Text(
+                    collapsedTitle,
+                    style = ChatType.thoughtTitle,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
-                    sameContent = { first, second -> first == second },
-                ) { title ->
-                    Text(
-                        title,
-                        style = ChatType.thoughtTitle,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                }
+                )
                 Icon(
                     if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     null,
@@ -340,20 +326,10 @@ internal fun CompactSegmentBlock(
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(2.dp))
-                    // Animate only items appended WHILE expanded during streaming — not the
-                    // items already present when the block is first expanded, nor on history.
-                    val seenSegIdx = remember(expansionKey) { mutableSetOf<Int>() }
-                    var seenSegInit by remember(expansionKey) { mutableStateOf(false) }
-                    val newSegIdx = if (isStreaming && seenSegInit)
-                        segs.indices.filterNotTo(linkedSetOf()) { it in seenSegIdx } else emptySet()
-                    SideEffect {
-                        segs.indices.forEach { seenSegIdx.add(it) }
-                        if (!seenSegInit) seenSegInit = true
-                    }
                     segs.forEachIndexed { idx, seg ->
                       AnimatedTimelineBlockAppearance(
                         animationKey = "$expansionKey:seg:$idx",
-                        animate = idx in newSegIdx
+                        animate = false
                       ) {
                        Column {
                         if ((seg.type == "thought" && seg.content.isNotBlank()) || seg.type == "transcription") {
@@ -378,24 +354,13 @@ internal fun CompactSegmentBlock(
                                     val preview = if (isStreaming && useLiveStatus && idx == segs.lastIndex) {
                                         if (flat.length > 60) "…${flat.takeLast(60)}" else flat
                                     } else flat
-                                    val animateTerminalPreview = remember(expansionKey, idx) {
-                                        isStreaming && useLiveStatus && idx == segs.lastIndex
-                                    }
-                                    LatestWinsCrossfade(
-                                        content = preview,
-                                        // Keep the original trailing live preview and full final
-                                        // text semantics; buffer only their terminal handoff.
-                                        animateChanges = animateTerminalPreview && !isStreaming,
-                                        sameContent = { first, second -> first == second },
-                                    ) { bufferedPreview ->
-                                        Text(
-                                            text = bufferedPreview,
-                                            style = ChatType.metaNormal,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
+                                    Text(
+                                        text = preview,
+                                        style = ChatType.metaNormal,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 } else {
                                     Text(
                                         text = "Image transcription is empty.",
@@ -469,28 +434,21 @@ internal fun TimelineSegmentsContent(
             when (seg.type) {
                 "answer" -> {
                     if (seg.content.isNotBlank()) {
+                        val answerIsStreaming = isStreaming && index == segments.lastIndex
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = if (index == 0) 0.dp else 6.dp)
                         ) {
-                            SelectionContainer(modifier = Modifier.noOpBringIntoView()) {
-                                StreamingMarkdownDocument(
-                                    content = seg.content,
-                                    isStreaming = isStreaming && index == segments.lastIndex,
-                                    renderContext = renderContext,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                            if (isStreaming) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .pointerInput(Unit) {
-                                            detectTapGestures(onLongPress = { })
-                                        }
-                                )
-                            }
+                            StreamingMarkdownDocument(
+                                content = seg.content,
+                                isStreaming = answerIsStreaming,
+                                renderContext = renderContext,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .noOpBringIntoView(),
+                                selectionEnabled = !answerIsStreaming,
+                            )
                         }
                         previousVisibleWasAnswer = true
                     }
@@ -629,20 +587,13 @@ private fun TimelineInfoSegmentCard(
                     }
                 }
                 if (summary.isNotBlank()) {
-                    val animateTerminalSummary = remember { isStreaming && seg.type == "thought" }
-                    LatestWinsCrossfade(
-                        content = summary,
-                        animateChanges = animateTerminalSummary && !isStreaming,
-                        sameContent = { first, second -> first == second },
-                    ) { bufferedSummary ->
-                        Text(
-                            text = bufferedSummary,
-                            style = ChatType.metaNormal,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
+                    Text(
+                        text = summary,
+                        style = ChatType.metaNormal,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
             Icon(

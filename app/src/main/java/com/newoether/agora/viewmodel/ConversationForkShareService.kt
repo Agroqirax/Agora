@@ -3,6 +3,7 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
+import com.newoether.agora.data.MessageAttachmentCloneSession
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.AttachmentMeta
@@ -10,8 +11,11 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import java.io.File
 import java.util.UUID
 
 /**
@@ -26,6 +30,7 @@ import java.util.UUID
 class ConversationForkShareService(
     private val conversations: ConversationRepository,
     private val settings: SettingsRepository,
+    private val attachmentRoot: File,
 ) {
     sealed interface ForkResult {
         data class Success(val conversationId: String) : ForkResult
@@ -89,21 +94,36 @@ class ConversationForkShareService(
                 activeSlot = null,
             )
         }
-        val clonedMessages = selectedMessages
+        val attachmentClones = MessageAttachmentCloneSession(attachmentRoot)
+        var graphCommitted = false
+        val clonedMessages = try {
+            withContext(Dispatchers.IO) {
+                selectedMessages
             .sortedWith(
                 compareBy<MessageEntity> { selection.runIds.indexOf(it.runId) }
                     .thenBy { it.runSequence }
                     .thenBy { it.timestamp }
                     .thenBy { it.id }
             )
-            .map { message ->
-                message.copy(
+                    .map { message ->
+                        attachmentClones.cloneMessage(
+                            message.copy(
                     id = checkNotNull(messageIds[message.id]),
                     conversationId = newConversationId,
                     parentId = message.parentId?.let { checkNotNull(messageIds[it]) },
                     runId = checkNotNull(runIds[message.runId]),
-                )
+                            ),
+                            ownerKey = checkNotNull(messageIds[message.id]),
+                        )
+                    }
             }
+        } catch (cancelled: CancellationException) {
+            attachmentClones.rollback()
+            throw cancelled
+        } catch (e: Exception) {
+            attachmentClones.rollback()
+            return ForkResult.Failure(e.localizedMessage ?: "Unable to copy fork attachments")
+        }
         val explicitMessageSelections = buildMap<String?, String> {
             selectedChildren.forEach { (parentId, childId) ->
                 if ((parentId == null || parentId in selectedMessageIds) &&
@@ -113,7 +133,11 @@ class ConversationForkShareService(
                 }
             }
             selection.structuralMessages.zipWithNext { parent, child ->
-                if (parent.id in selectedMessageIds && child.id in selectedMessageIds) {
+                if (
+                    parent.id in selectedMessageIds &&
+                    child.id in selectedMessageIds &&
+                    child.parentId == parent.id
+                ) {
                     put(checkNotNull(messageIds[parent.id]), checkNotNull(messageIds[child.id]))
                 }
             }
@@ -140,15 +164,21 @@ class ConversationForkShareService(
             messages = clonedMessages,
             runs = clonedRuns,
             selectedChildren = explicitMessageSelections,
-        ) ?: return ForkResult.Failure("Fork validation failed")
+        ) ?: run {
+            attachmentClones.rollback()
+            return ForkResult.Failure("Fork validation failed")
+        }
         val expectedVisibleIds = selection.visibleMessages
             .filter { it.id in selectedMessageIds }
             .map { checkNotNull(messageIds[it.id]) }
         if (clonedSelection.visibleMessages.map { it.id } != expectedVisibleIds) {
+            attachmentClones.rollback()
             return ForkResult.Failure("Fork validation found a truncated visible path")
         }
         return try {
             conversations.createForkGraph(forkConversation, clonedRuns, clonedMessages)
+            graphCommitted = true
+            attachmentClones.commit()
             try {
                 settings.conversationSettings.value[conversationId]?.let { sourceSettings ->
                     settings.setConversationSettings(newConversationId, sourceSettings)
@@ -162,8 +192,10 @@ class ConversationForkShareService(
             }
             ForkResult.Success(newConversationId)
         } catch (cancelled: CancellationException) {
+            if (!graphCommitted) attachmentClones.rollback()
             throw cancelled
         } catch (e: Exception) {
+            if (!graphCommitted) attachmentClones.rollback()
             ForkResult.Failure(e.localizedMessage ?: "Unable to fork conversation")
         }
     }

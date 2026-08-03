@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
@@ -13,7 +14,8 @@ import com.newoether.agora.R
 @Composable
 fun DocumentationFab(docPath: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
-    val langTag = java.util.Locale.getDefault().toLanguageTag()
+    val locale = LocalConfiguration.current.locales[0]
+    val langTag = locale.toLanguageTag()
     val baseUrl = "https://newo-ether.github.io/Agora/"
     // Map the resolved locale to the docs URL prefix.
     // "en" and anything unrecognised → root (English); each supported
@@ -22,7 +24,7 @@ fun DocumentationFab(docPath: String, modifier: Modifier = Modifier) {
         langTag == "zh-Hant"  -> "zh-Hant/"
         langTag.startsWith("zh") -> "zh/"
         else -> {
-            val lang = java.util.Locale.getDefault().language
+            val lang = locale.language
             when (lang) {
                 "es", "fr", "de", "ru", "ja", "ko", "ar" -> "$lang/"
                 "pt" -> "pt-BR/"

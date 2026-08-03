@@ -3,7 +3,12 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -38,33 +43,36 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun stop_keepsGeneratingUntilCoroutineThenFinalizerFinish() {
-        val state = activeStateWithStreamingMessage()
-        val token = state.captureUiToken()
+    fun stop_releasesAsSoonAsCoroutineUnwinds_withoutWaitingForFinalizer() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        val token = active.token
 
         state.stop()
 
         assertTrue(state.generating.value)
         assertTrue(state.isLoading.value)
         assertTrue(state.stopping.value)
-        assertFalse(state.endGeneration(token))
-        assertTrue(state.generating.value)
-        assertTrue(state.finishStopFinalization())
+        active.unwind.complete(Unit)
+        active.job.join()
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
+        assertFalse(state.finishStopFinalization())
     }
 
     @Test
-    fun stop_keepsGeneratingUntilFinalizerThenCoroutineFinish() {
-        val state = activeStateWithStreamingMessage()
-        val token = state.captureUiToken()
+    fun stopFinalizer_neverReleasesAnOccupiedCoroutineSlot() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
 
         state.stop()
 
         assertFalse(state.finishStopFinalization())
         assertTrue(state.generating.value)
-        assertTrue(state.endGeneration(token))
+        assertTrue(state.stopping.value)
+        active.unwind.complete(Unit)
+        active.job.join()
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
@@ -72,7 +80,9 @@ class ConversationGenerationStateTest {
 
     @Test
     fun stop_synchronouslyCancelsEveryRegisteredGenerationHandle() {
-        val state = activeStateWithStreamingMessage()
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
         var firstCancelCount = 0
         var secondCancelCount = 0
         state.streamScope.register(GenerationCancelHandle { firstCancelCount += 1 })
@@ -163,11 +173,20 @@ class ConversationGenerationStateTest {
         assertEquals(stopped, state.streamingMessage.value)
     }
 
-    private fun activeStateWithStreamingMessage(): ConversationGenerationState {
+    private fun activeStateWithStreamingMessage(): ActiveGeneration {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
-        state.generationJob = Job()
+        val unwind = CompletableDeferred<Unit>()
+        val job = checkNotNull(
+            state.launchGenerationJob(token) {
+                try {
+                    awaitCancellation()
+                } finally {
+                    withContext(NonCancellable) { unwind.await() }
+                }
+            }
+        )
         state.streamUpdate(
             token,
             ChatMessage(
@@ -177,6 +196,13 @@ class ConversationGenerationStateTest {
                 status = MessageStatus.SENDING,
             )
         )
-        return state
+        return ActiveGeneration(state, token, job, unwind)
     }
+
+    private data class ActiveGeneration(
+        val state: ConversationGenerationState,
+        val token: Long,
+        val job: Job,
+        val unwind: CompletableDeferred<Unit>,
+    )
 }

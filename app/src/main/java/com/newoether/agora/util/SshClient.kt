@@ -1,5 +1,6 @@
 package com.newoether.agora.util
 
+import android.util.Base64
 import com.jcraft.jsch.ChannelExec
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.HostKey
@@ -10,7 +11,6 @@ import com.jcraft.jsch.UserInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.nio.file.FileSystems
 
 /**
  * SSH client using JSch for shell command execution (exec channel)
@@ -64,7 +64,7 @@ class SshClient(
     /** TOFU host-key verifier: captures the presented key and accepts only a match. */
     private inner class TofuHostKeyRepository : HostKeyRepository {
         override fun check(host: String?, key: ByteArray): Int {
-            val incoming = java.util.Base64.getEncoder().encodeToString(key)
+            val incoming = Base64.encodeToString(key, Base64.NO_WRAP)
             capturedHostKey = incoming
             return when {
                 pinnedHostKey.isNotBlank() && pinnedHostKey == incoming -> HostKeyRepository.OK
@@ -83,9 +83,9 @@ class SshClient(
     companion object {
         /** OpenSSH-style "SHA256:…" fingerprint of a base64 host-key blob, for display. */
         fun fingerprintSha256(base64Key: String): String = try {
-            val bytes = java.util.Base64.getDecoder().decode(base64Key)
+            val bytes = Base64.decode(base64Key, Base64.DEFAULT)
             val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
-            "SHA256:" + java.util.Base64.getEncoder().withoutPadding().encodeToString(digest)
+            "SHA256:" + Base64.encodeToString(digest, Base64.NO_WRAP or Base64.NO_PADDING)
         } catch (_: Exception) { "" }
     }
 
@@ -248,14 +248,7 @@ class SshClient(
     private fun globMatch(files: List<String>, basePath: String, pattern: String): List<String> {
         val adjustedPattern = if (pattern.contains('/')) pattern else "**/$pattern"
         val fullPattern = "$basePath/$adjustedPattern"
-        val pathMatcher = try {
-            FileSystems.getDefault().getPathMatcher("glob:$fullPattern")
-        } catch (_: Exception) {
-            return emptyList()
-        }
-        return files.filter { f ->
-            try { pathMatcher.matches(java.nio.file.Paths.get(f)) } catch (_: Exception) { false }
-        }
+        return files.filter { file -> PortableGlobMatcher.matches(fullPattern, file) }
     }
 
     // ── file_grep ──────────────────────────────────────────

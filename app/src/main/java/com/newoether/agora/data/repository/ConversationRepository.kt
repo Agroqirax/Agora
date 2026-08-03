@@ -19,6 +19,7 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
+import com.newoether.agora.model.SelectedAttachment
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -74,12 +75,21 @@ class ConversationRepository(
 
     suspend fun upsertConversation(entity: ChatEntity) = chatDao.upsertConversation(entity)
 
+    suspend fun updateConversationTitle(id: String, title: String): Boolean =
+        chatDao.updateConversationTitle(id, title) == 1
+
+    suspend fun updateConversationTitleIfUnchanged(
+        id: String,
+        expectedTitle: String,
+        newTitle: String,
+    ): Boolean = chatDao.updateConversationTitleIfUnchanged(id, expectedTitle, newTitle) == 1
+
     suspend fun deleteConversation(id: String) {
         val messages = chatDao.getMessagesForConversation(id).first()
-        deleteAttachmentFilesFromEntities(messages)
         chatDao.deleteEmbeddingsByConversation(id)
         chatDao.deleteMessagesByConversation(id)
         chatDao.deleteConversation(id)
+        deleteMessageFiles(messages)
     }
 
     // ── Messages ──────────────────────────────────────────────
@@ -432,45 +442,87 @@ class ConversationRepository(
         chatDao.updateDraft(conversationId, draftText, draftAttachments)
     }
 
-    /** Deletes all on-disk attachment files referenced by [messages]. Safe to call with
-     *  an empty list. Errors per-file are swallowed so one bad path never aborts a delete. */
-    suspend fun deleteMessageFiles(messages: List<MessageEntity>) = deleteAttachmentFilesFromEntities(messages)
-
-    /** Overload for the in-memory [ChatMessage] form used by the VM's cascade-delete path. */
-    fun deleteMessageFiles(messages: List<ChatMessage>) {
-        for (msg in messages) {
-            for (imagePath in msg.images) {
-                runCatching { java.io.File(imagePath).delete() }
-            }
-            msg.attachmentMeta?.items?.forEach { item ->
-                val uri = item.originalUri ?: return@forEach
-                if ((item.type == "video" || item.type == "image" || item.type == "file") &&
-                    uri.startsWith("file://")
-                ) {
-                    runCatching { java.io.File(uri.removePrefix("file://")).delete() }
-                }
-            }
-        }
+    /** Deletes candidate files only after verifying that no remaining message or draft still
+     * references them. This protects legacy forks/imports that share old backing paths. */
+    suspend fun deleteMessageFiles(messages: List<MessageEntity>) {
+        deleteUnreferencedAttachmentFiles(
+            messages.flatMapTo(linkedSetOf()) { it.attachmentFilePaths() }
+        )
     }
 
-    private fun deleteAttachmentFilesFromEntities(messages: List<MessageEntity>) {
-        for (msg in messages) {
-            for (imagePath in msg.images) {
-                runCatching { java.io.File(imagePath).delete() }
-            }
-            if (msg.attachmentMeta != null) {
-                runCatching {
-                    val meta = Json.decodeFromString<AttachmentMeta>(msg.attachmentMeta)
-                    for (item in meta.items) {
-                        val uri = item.originalUri ?: continue
-                        if ((item.type == "video" || item.type == "image" || item.type == "file") &&
-                            uri.startsWith("file://")
-                        ) {
-                            runCatching { java.io.File(uri.removePrefix("file://")).delete() }
-                        }
+    private suspend fun deleteUnreferencedAttachmentFiles(candidates: Set<String>) {
+        if (candidates.isEmpty()) return
+        val referenced = linkedSetOf<String>()
+        var afterMessageId: String? = null
+        while (true) {
+            val page = chatDao.getMessageAttachmentReferencesPage(
+                afterId = afterMessageId,
+                limit = ATTACHMENT_REFERENCE_PAGE_SIZE,
+            )
+            page.forEach { reference ->
+                reference.images.mapTo(referenced, ::normalizeAttachmentPath)
+                reference.attachmentMeta
+                    ?.let { raw ->
+                        runCatching { Json.decodeFromString<AttachmentMeta>(raw) }.getOrNull()
                     }
+                    ?.items
+                    ?.mapNotNullTo(referenced) { item ->
+                        item.originalUri
+                            ?.takeIf { it.startsWith("file://") }
+                            ?.let(::normalizeAttachmentPath)
+                    }
+            }
+            afterMessageId = page.lastOrNull()?.id
+            if (page.size < ATTACHMENT_REFERENCE_PAGE_SIZE) break
+        }
+
+        var afterConversationId: String? = null
+        while (true) {
+            val page = chatDao.getConversationDraftAttachmentReferencesPage(
+                afterId = afterConversationId,
+                limit = ATTACHMENT_REFERENCE_PAGE_SIZE,
+            )
+            page.forEach { reference ->
+                runCatching {
+                    Json.decodeFromString<List<SelectedAttachment>>(reference.draftAttachments)
+                }.getOrNull()?.forEach { attachment ->
+                    attachment.localPath?.let { referenced += normalizeAttachmentPath(it) }
+                    attachment.processedFrames.orEmpty()
+                        .mapTo(referenced, ::normalizeAttachmentPath)
+                    attachment.preRenderedPaths.orEmpty()
+                        .mapTo(referenced, ::normalizeAttachmentPath)
                 }
             }
+            afterConversationId = page.lastOrNull()?.id
+            if (page.size < ATTACHMENT_REFERENCE_PAGE_SIZE) break
         }
+
+        candidates
+            .asSequence()
+            .map(::normalizeAttachmentPath)
+            .filterNot(referenced::contains)
+            .forEach { path -> runCatching { java.io.File(path).delete() } }
+    }
+
+    private fun MessageEntity.attachmentFilePaths(): List<String> = buildList {
+        images.mapTo(this, ::normalizeAttachmentPath)
+        attachmentMeta
+            ?.let { raw -> runCatching { Json.decodeFromString<AttachmentMeta>(raw) }.getOrNull() }
+            ?.items
+            ?.mapNotNullTo(this) { item ->
+                item.originalUri
+                    ?.takeIf { it.startsWith("file://") }
+                    ?.let(::normalizeAttachmentPath)
+            }
+    }
+
+    private fun normalizeAttachmentPath(path: String): String {
+        val raw = path.removePrefix("file://")
+        return runCatching { java.io.File(raw).canonicalPath }
+            .getOrElse { java.io.File(raw).absolutePath }
+    }
+
+    private companion object {
+        const val ATTACHMENT_REFERENCE_PAGE_SIZE = 128
     }
 }

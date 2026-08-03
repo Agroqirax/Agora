@@ -1,11 +1,11 @@
 package com.newoether.agora.util
 
+import android.util.Base64
 import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.spec.X509EncodedKeySpec
-import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.Mac
@@ -18,8 +18,7 @@ object ShellCrypto {
     private const val HKDF_INFO = "conch-agora-v1"
 
     private val secureRandom = SecureRandom()
-    private val b64url = Base64.getUrlEncoder().withoutPadding()
-    private val b64urlDecoder = Base64.getUrlDecoder()
+    private const val B64_URL_FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
     // --- Key Generation (X25519) ---
 
@@ -32,7 +31,7 @@ object ShellCrypto {
         // X25519 SPKI encoding deterministically ends with the 32-byte raw key
         val encoded = publicKey.encoded
         val rawKey = encoded.copyOfRange(encoded.size - 32, encoded.size)
-        return b64url.encodeToString(rawKey)
+        return Base64.encodeToString(rawKey, B64_URL_FLAGS)
     }
 
     private val X25519_SPKI_PREFIX: ByteArray by lazy {
@@ -42,7 +41,7 @@ object ShellCrypto {
     }
 
     fun decodePublicKey(base64urlKey: String): java.security.PublicKey {
-        val rawKey = b64urlDecoder.decode(base64urlKey)
+        val rawKey = Base64.decode(base64urlKey, Base64.URL_SAFE or Base64.NO_WRAP)
         if (rawKey.size != 32) {
             throw IllegalArgumentException("invalid X25519 public key length: ${rawKey.size}")
         }
@@ -96,11 +95,11 @@ object ShellCrypto {
         val combined = ByteArray(nonce.size + ciphertext.size)
         System.arraycopy(nonce, 0, combined, 0, nonce.size)
         System.arraycopy(ciphertext, 0, combined, nonce.size, ciphertext.size)
-        return b64url.encodeToString(combined)
+        return Base64.encodeToString(combined, B64_URL_FLAGS)
     }
 
     fun decrypt(key: ByteArray, encoded: String): ByteArray {
-        val raw = b64urlDecoder.decode(encoded)
+        val raw = Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP)
         if (raw.size < GCM_NONCE_SIZE + 1) {
             throw IllegalArgumentException("ciphertext too short: ${raw.size} bytes")
         }
@@ -129,6 +128,6 @@ object ShellCrypto {
     fun generateNonce(): String {
         val bytes = ByteArray(12)
         secureRandom.nextBytes(bytes)
-        return b64url.encodeToString(bytes)
+        return Base64.encodeToString(bytes, B64_URL_FLAGS)
     }
 }

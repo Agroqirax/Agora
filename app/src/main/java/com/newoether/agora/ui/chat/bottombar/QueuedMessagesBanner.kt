@@ -1,12 +1,5 @@
 package com.newoether.agora.ui.chat.bottombar
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,11 +42,7 @@ internal fun QueuedMessagesBanner(
     onRemove: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AnimatedVisibility(
-        visible = queuedSends.isNotEmpty(),
-        enter = expandVertically(tween(250)) + fadeIn(tween(200)),
-        exit = shrinkVertically(tween(250)) + fadeOut(tween(180)),
-    ) {
+    if (queuedSends.isNotEmpty()) {
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp),
@@ -63,7 +52,6 @@ internal fun QueuedMessagesBanner(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .animateContentSize(tween(400))
                     .padding(vertical = 2.dp),
             ) {
                 queuedSends.forEach { queued ->

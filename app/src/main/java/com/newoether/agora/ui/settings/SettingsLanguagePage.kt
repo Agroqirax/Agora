@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,7 +24,7 @@ private data class LanguageOption(val code: String, val label: String)
 @Composable
 fun SettingsLanguagePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val appLanguage by viewModel.settings.appLanguage.collectAsState()
-    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
+    val activity = LocalActivity.current
 
     val restartMessage = stringResource(R.string.language_restart_message)
     val restartAction = stringResource(R.string.language_restart_action)

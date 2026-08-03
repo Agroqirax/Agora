@@ -1,21 +1,11 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -50,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
+import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
@@ -59,8 +50,6 @@ import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import kotlinx.coroutines.launch
-
-private const val STREAMING_MARKDOWN_FLUSH_MS = 250L
 
 /**
  * The left-aligned assistant (and error) message content: the streaming status header,
@@ -107,8 +96,7 @@ internal fun AssistantMessageContent(
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
     // stop button) pass through normally. Text selection is already
-    // prevented during streaming — SelectionContainer is only in the
-    // else (!isStreaming) branch.
+    // prevented during streaming by the stable Markdown selection host.
     val horizontalScrollEater = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
@@ -127,64 +115,34 @@ internal fun AssistantMessageContent(
             if (message.participant == Participant.MODEL) {
                 val thinkingStatus = stringResource(R.string.thinking_ellipsis)
                 val answeringStatus = stringResource(R.string.answering_ellipsis)
-                // Hold the last non-fallback label so transitions between
-                // "Thinking… → Answering…" don't flash "Sending…" while
-                // the first answer token is still in-flight.
-                var heldLabel by remember { mutableStateOf("") }
-                var heldStatusText by remember { mutableStateOf("") }
-                // Update heldLabel after composition to avoid double-recomposition flash
                 val thinkingNow = message.status == MessageStatus.THINKING
                 val isToolCalling = message.status == MessageStatus.TOOL_CALLING
                 val isTranscribing = message.status == MessageStatus.TRANSCRIBING
                 val hasInFlightStatus = message.status == MessageStatus.SENDING ||
                     thinkingNow || isToolCalling || isTranscribing
                 val hasActiveAnswer = message.hasActiveAnswerSegment()
-                LaunchedEffect(thinkingNow, hasActiveAnswer, message.status) {
-                    heldLabel = when {
-                        thinkingNow -> "thinking"
-                        isToolCalling -> "calling"
-                        isTranscribing -> "transcribing"
-                        hasActiveAnswer -> "answering"
-                        message.status == MessageStatus.SUCCESS || message.status == MessageStatus.ERROR || message.status == MessageStatus.STOPPED -> ""
-                        message.status == MessageStatus.SENDING -> ""
-                        else -> heldLabel
-                    }
-                }
                 val toolCallingStatus = stringResource(R.string.tool_calling_ellipsis)
                 val transcribingStatus = stringResource(R.string.transcription_ellipsis)
-                val statusText = when {
-                    message.status == MessageStatus.SUCCESS -> if (message.tokenCount > 0) stringResource(R.string.cost_tokens, message.tokenCount) else null
+                val displayText = when {
+                    // Keep the header's measured row across stream → terminal even when a
+                    // provider omits usage. Removing it for tokenCount=0 shifts every Markdown
+                    // line upward on the exact frame generation completes.
+                    message.status == MessageStatus.SUCCESS ->
+                        stringResource(R.string.cost_tokens, message.tokenCount.coerceAtLeast(0))
+                    message.status == MessageStatus.STOPPED -> stringResource(R.string.generation_stopped)
                     isStreaming && isTranscribing -> transcribingStatus
                     isStreaming && isToolCalling -> toolCallingStatus
                     isStreaming && thinkingNow -> thinkingStatus
                     isStreaming && hasActiveAnswer -> answeringStatus
-                    isStreaming -> when (heldLabel) {
-                        "thinking" -> thinkingStatus
-                        "calling" -> toolCallingStatus
-                        "transcribing" -> transcribingStatus
-                        "answering" -> answeringStatus
-                        else -> stringResource(R.string.sending_ellipsis)
-                    }
+                    isStreaming -> stringResource(R.string.sending_ellipsis)
                     else -> null
                 }.let { base ->
                     if (base != null && message.retryText != null) "$base (${message.retryText})"
                     else base
                 }
-                // Hold the last non-null label so the status bar doesn't collapse
-                // during the timing gap between isStreaming→false and the DB
-                // emitting the updated message status.
-                val displayText = when {
-                    statusText != null -> statusText.also { heldStatusText = it }
-                    message.status == MessageStatus.SENDING || message.status == MessageStatus.THINKING || message.status == MessageStatus.TOOL_CALLING || message.status == MessageStatus.TRANSCRIBING -> heldStatusText.takeIf { it.isNotEmpty() }
-                    else -> null.also { heldStatusText = "" }
-                }
 
-                AnimatedVisibility(
-                    visible = displayText != null,
-                    enter = fadeIn(tween(300)) + expandVertically(tween(300)),
-                    exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
-                ) {
-                    val text = displayText ?: return@AnimatedVisibility
+                if (displayText != null) {
+                    val text = displayText
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                         Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
                             if (isStreaming || hasInFlightStatus) {
@@ -209,30 +167,11 @@ internal fun AssistantMessageContent(
                 }
             }
 
-            var debouncedText by remember(isStreaming) { mutableStateOf(if (isStreaming) "" else message.text) }
-            if (!isStreaming) {
-                debouncedText = message.text
-            } else {
-                var lastUpdateMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-                var flushJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-                LaunchedEffect(message.text) {
-                    if (message.text.isEmpty()) return@LaunchedEffect
-                    val now = System.currentTimeMillis()
-                    val elapsed = now - lastUpdateMs
-                    if (elapsed >= STREAMING_MARKDOWN_FLUSH_MS) {
-                        flushJob?.cancel()
-                        debouncedText = message.text
-                        lastUpdateMs = now
-                    } else {
-                        flushJob?.cancel()
-                        flushJob = launch {
-                            kotlinx.coroutines.delay(STREAMING_MARKDOWN_FLUSH_MS - elapsed)
-                            debouncedText = message.text
-                            lastUpdateMs = System.currentTimeMillis()
-                        }
-                    }
-                }
-            }
+            // GenerationManager already publishes a bounded stream cadence. A second UI debounce
+            // delayed every chunk, retained a stale text job through Stop, and then replaced the
+            // whole document at terminalization. Feed the latest immutable snapshot directly to
+            // the off-main Markdown parser.
+            val renderedText = message.text
 
             Column {
                 val isError = message.status == MessageStatus.ERROR || message.participant == Participant.ERROR
@@ -250,37 +189,59 @@ internal fun AssistantMessageContent(
                 val useTimelineSegments = normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
                     mergedSegments.any { it.type == "answer" }
                 val groupAdjacentTimelineTools = normalizedToolCallDisplayMode == ToolCallDisplayModes.GROUPED_TIMELINE
-                val timelineBlockKeys = remember(message.id, mergedSegments, groupAdjacentTimelineTools) {
-                    buildTimelineBlockKeys(message.id, mergedSegments, groupAdjacentTimelineTools)
+                val timelineBlockKeys = remember(
+                    message.id,
+                    mergedSegments,
+                    groupAdjacentTimelineTools,
+                ) {
+                    buildTimelineBlockKeys(
+                        message.id,
+                        mergedSegments,
+                        groupAdjacentTimelineTools,
+                    )
                 }
-                val timelineAppearanceSeenKeys = remember(message.id, normalizedToolCallDisplayMode) {
+                val timelineAppearanceSeenKeys = remember(
+                    message.id,
+                    normalizedToolCallDisplayMode,
+                ) {
                     timelineBlockKeys.toMutableSet()
                 }
-                var timelineAppearanceInitialized by remember(message.id, normalizedToolCallDisplayMode) {
+                var timelineAppearanceInitialized by remember(
+                    message.id,
+                    normalizedToolCallDisplayMode,
+                ) {
                     mutableStateOf(false)
                 }
-                val timelineAnimatedBlockKeys = if (isStreaming && timelineAppearanceInitialized) {
-                    timelineBlockKeys.filterNotTo(linkedSetOf()) { it in timelineAppearanceSeenKeys }
+                val timelineAnimatedBlockKeys = if (
+                    isStreaming && timelineAppearanceInitialized
+                ) {
+                    timelineBlockKeys.filterNotTo(linkedSetOf()) {
+                        it in timelineAppearanceSeenKeys
+                    }
                 } else {
                     emptySet()
                 }
+                val detailSegments = remember(mergedSegments) {
+                    mergedSegments.filter { it.type != "answer" }
+                }
+                val compactVisible = !useTimelineSegments && detailSegments.isNotEmpty()
+                var compactAppearanceSeen by remember(
+                    message.id,
+                    normalizedToolCallDisplayMode,
+                ) {
+                    mutableStateOf(compactVisible)
+                }
+                val animateCompactAppearance =
+                    isStreaming && compactVisible && !compactAppearanceSeen
                 SideEffect {
                     timelineAppearanceSeenKeys.addAll(timelineBlockKeys)
                     if (!timelineAppearanceInitialized) {
                         timelineAppearanceInitialized = true
                     }
-                }
-                val detailSegments = remember(mergedSegments) {
-                    mergedSegments.filter { it.type != "answer" }
+                    if (compactVisible) compactAppearanceSeen = true
                 }
 
-                AnimatedVisibility(
-                    visible = useTimelineSegments,
-                    // No container-level expand — each block animates its own alpha+scale
-                    // appearance, so the section must not also unfold vertically from the top.
-                    enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)),
-                    exit = fadeOut(tween(300))
-                ) {
+                if (useTimelineSegments) {
                     TimelineSegmentsContent(
                         segments = mergedSegments,
                         detailSegments = detailSegments,
@@ -301,27 +262,25 @@ internal fun AssistantMessageContent(
                 // Compact segment block: single block, newest title/icon when collapsed.
                 // Answer segments are timeline anchors only; compact mode still renders
                 // message.text below as the complete answer.
-                AnimatedVisibility(
-                    visible = !useTimelineSegments && detailSegments.isNotEmpty(),
-                    // alpha + scale, fast-in slow-out — matches the timeline block appearance.
-                    // Only plays when the block first appears live (visible false→true), not on history.
-                    enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)) +
-                        scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
-                    exit = fadeOut(tween(500)) + shrinkVertically(tween(500))
-                ) {
-                    CompactSegmentBlock(
-                        segs = detailSegments,
-                        segmentIndices = detailSegments.indices.toList(),
-                        message = message,
-                        isStreaming = isStreaming,
-                        useLiveStatus = true,
-                        expandedStates = thoughtExpandedStates,
-                        expansionKey = message.id,
-                        onExpansionStarted = onLayoutMutationStarted,
-                        onExpansionSettled = onLayoutMutationSettled,
-                        onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
-                        onBlockHeightChanged = setThoughtBlockHeight,
-                    )
+                if (compactVisible) {
+                    AnimatedTimelineBlockAppearance(
+                        animationKey = "${message.id}:compact",
+                        animate = animateCompactAppearance,
+                    ) {
+                        CompactSegmentBlock(
+                            segs = detailSegments,
+                            segmentIndices = detailSegments.indices.toList(),
+                            message = message,
+                            isStreaming = isStreaming,
+                            useLiveStatus = true,
+                            expandedStates = thoughtExpandedStates,
+                            expansionKey = message.id,
+                            onExpansionStarted = onLayoutMutationStarted,
+                            onExpansionSettled = onLayoutMutationSettled,
+                            onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
+                            onBlockHeightChanged = setThoughtBlockHeight,
+                        )
+                    }
                 }
 
                 Box(
@@ -334,35 +293,23 @@ internal fun AssistantMessageContent(
                             Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
                                 Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
                                 Spacer(modifier = Modifier.width(12.dp))
-                                SelectionContainer {
+                                NoAutoScrollSelectionContainer {
                                     Text(
-                                        debouncedText.ifEmpty { stringResource(R.string.failed_to_generate) },
+                                        renderedText.ifEmpty { stringResource(R.string.failed_to_generate) },
                                         style = ChatType.errorBody,
                                         color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
                                     )
                                 }
                             }
                         }
-                    } else if (debouncedText.isNotEmpty() && !useTimelineSegments) {
-                        Box {
-                            SelectionContainer {
-                                StreamingMarkdownDocument(
-                                    content = debouncedText,
-                                    isStreaming = isStreaming,
-                                    renderContext = renderContext,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                            if (isStreaming) {
-                                Box(
-                                    modifier = Modifier
-                                        .matchParentSize()
-                                        .pointerInput(Unit) {
-                                            detectTapGestures(onLongPress = { })
-                                        }
-                                )
-                            }
-                        }
+                    } else if (renderedText.isNotEmpty() && !useTimelineSegments) {
+                        StreamingMarkdownDocument(
+                            content = renderedText,
+                            isStreaming = isStreaming,
+                            renderContext = renderContext,
+                            modifier = Modifier.fillMaxWidth(),
+                            selectionEnabled = !isStreaming,
+                        )
                     }
                 }
                 if (message.participant == Participant.MODEL && message.images.isNotEmpty()) {
@@ -371,7 +318,7 @@ internal fun AssistantMessageContent(
                     // render as a full-width square card, image cropped to fill
                     // with rounded corners, tap to view fullscreen.
                     Column(
-                        modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp),
+                        modifier = Modifier.padding(top = if (renderedText.isNotEmpty()) 8.dp else 0.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         genImages.forEachIndexed { idx, path ->
@@ -391,22 +338,8 @@ internal fun AssistantMessageContent(
                         }
                     }
                 }
-                if (!isStreaming && message.status == MessageStatus.STOPPED) {
-                    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), shape = RoundedCornerShape(8.dp), modifier = Modifier.padding(top = if (debouncedText.isNotEmpty()) 8.dp else 0.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-                            Icon(Icons.Default.Info, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.generation_stopped), style = ChatType.meta, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                        }
-                    }
-                }
-
                 if (message.participant == Participant.MODEL) {
-                    AnimatedVisibility(
-                        visible = !isStreaming && showActions,
-                        enter = fadeIn(tween(400)) + expandVertically(tween(400)),
-                        exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
-                    ) {
+                    if (!isStreaming && showActions) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp),

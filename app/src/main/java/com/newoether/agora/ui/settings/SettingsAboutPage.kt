@@ -2,6 +2,7 @@ package com.newoether.agora.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -35,7 +36,12 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         try { context.packageManager.getPackageInfo(context.packageName, 0) } catch (_: Exception) { null }
     }
     val versionName = packageInfo?.versionName ?: "?"
-    val versionCode = packageInfo?.longVersionCode ?: 0
+    @Suppress("DEPRECATION")
+    val versionCode = packageInfo?.let {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) it.longVersionCode
+        else it.versionCode.toLong()
+    } ?: 0L
+    val upToDateStatus = stringResource(R.string.about_up_to_date, versionName)
 
     val autoUpdateCheck by viewModel.settings.autoUpdateCheck.collectAsState()
     var updateStatus by remember { mutableStateOf<String?>(null) }
@@ -92,7 +98,7 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 if (info != null) {
                                     viewModel.showUpdateDialog(info)
                                 } else {
-                                    updateStatus = context.getString(R.string.about_up_to_date, versionName)
+                                    updateStatus = upToDateStatus
                                 }
                                 isChecking = false
                             }

@@ -61,9 +61,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
@@ -103,8 +103,8 @@ internal fun ChatDrawerContent(
 ) {
     val haptics = LocalAgoraHaptics.current
     val focusManager = LocalFocusManager.current
-    val configuration = LocalConfiguration.current
     val density = LocalDensity.current
+    val windowHeightPx = LocalWindowInfo.current.containerSize.height.toFloat()
     val drawerWidthPx = with(density) { drawerWidth.toPx() }
 
     val conversations by viewModel.conversations.collectAsState()
@@ -129,7 +129,12 @@ internal fun ChatDrawerContent(
             }
     ) {
         val drawerListState = rememberLazyListState()
-        val atTop = drawerListState.firstVisibleItemIndex == 0 && drawerListState.firstVisibleItemScrollOffset == 0
+        val atTop by remember {
+            derivedStateOf {
+                drawerListState.firstVisibleItemIndex == 0 &&
+                    drawerListState.firstVisibleItemScrollOffset == 0
+            }
+        }
         val atBottom by remember {
             derivedStateOf {
                 val layoutInfo = drawerListState.layoutInfo
@@ -371,9 +376,8 @@ internal fun ChatDrawerContent(
                     .fillMaxWidth()
                     .height(42.dp)
                     .onGloballyPositioned { coords ->
-                        val screenHeightPx = configuration.screenHeightDp * density.density
                         val buttonTopPx = coords.positionInWindow().y
-                        onSettingsButtonTop((screenHeightPx - buttonTopPx) / density.density)
+                        onSettingsButtonTop((windowHeightPx - buttonTopPx) / density.density)
                     },
                 shape = CircleShape
             ) {

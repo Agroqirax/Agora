@@ -1,13 +1,9 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,6 +11,9 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
@@ -122,25 +121,36 @@ internal fun AnimatedTimelineBlockAppearance(
     content: @Composable () -> Unit
 ) {
     key(animationKey) {
-        // Capture the decision on first composition. The caller flips `animate` to false on
-        // the very next recomposition (the block/item is marked "seen"), and during streaming
-        // that next frame can arrive before the enter animation finishes — so reading `animate`
-        // live would tear the AnimatedVisibility down and the content would just snap in.
-        val play = remember { animate }
-        if (!play) {
-            content()
-        } else {
-            var visible by remember { mutableStateOf(false) }
-            LaunchedEffect(Unit) { visible = true }
-            AnimatedVisibility(
-                visible = visible,
-                // Fast-in, slow-out (decelerate) alpha + scale appearance.
-                enter = fadeIn(tween(350, easing = LinearOutSlowInEasing)) +
-                    scaleIn(initialScale = 0.9f, animationSpec = tween(350, easing = LinearOutSlowInEasing)),
-                exit = fadeOut(tween(200)) + shrinkVertically(tween(200))
-            ) {
-                content()
+        // Latch the first-appearance decision. Subsequent token snapshots remove this key from the
+        // caller's "new" set, but must not cancel an animation already in flight.
+        val play = remember(animationKey) { animate }
+        val progress = remember(animationKey) {
+            Animatable(if (play) 0f else 1f)
+        }
+        LaunchedEffect(animationKey) {
+            if (play) {
+                progress.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(
+                        durationMillis = 350,
+                        easing = LinearOutSlowInEasing,
+                    ),
+                )
             }
+        }
+        Box(
+            modifier = Modifier.graphicsLayer {
+                // This lambda is observed by the layer, so frame updates invalidate drawing only:
+                // the block occupies its final size from frame one and never remeasures the list.
+                val value = progress.value
+                alpha = value
+                val scale = 0.9f + 0.1f * value
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = TransformOrigin.Center
+            },
+        ) {
+            content()
         }
     }
 }

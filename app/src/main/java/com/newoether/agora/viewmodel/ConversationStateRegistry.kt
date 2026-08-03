@@ -24,22 +24,62 @@ import java.util.concurrent.ConcurrentHashMap
 class ConversationStateRegistry {
 
     private val states = ConcurrentHashMap<String, ConversationGenerationState>()
+    private val uiCallbackLock = Any()
+    private var uiCallbackOwner: Any? = null
+    private var uiCallbackBinder: ((ConversationGenerationState) -> Unit)? = null
 
     private val _activeConversationIds = MutableStateFlow<Set<String>>(emptySet())
     /** Conversation ids that currently have an active generation. Drives Stop-button visibility
      *  per conversation and the multi-conversation generating indicator. */
     val activeConversationIds: StateFlow<Set<String>> = _activeConversationIds.asStateFlow()
 
-    /** Invoked once when a new ConversationGenerationState is created, so ChatViewModel can wire
-     *  its onActive/onIdle hooks to markActive/markIdle. */
-    @Volatile var onStateCreated: ((ConversationGenerationState) -> Unit)? = null
-
-    fun getOrCreate(conversationId: String): ConversationGenerationState =
-        states.computeIfAbsent(conversationId) {
-            ConversationGenerationState(it).also { state -> onStateCreated?.invoke(state) }
+    fun getOrCreate(conversationId: String): ConversationGenerationState {
+        val state = states.computeIfAbsent(conversationId) {
+            ConversationGenerationState(
+                conversationId = it,
+                onRegistryActive = ::markActive,
+                onRegistryIdle = ::markIdle,
+            )
         }
+        // Re-applying the current binder is idempotent and closes the race where a state is
+        // created concurrently with an Activity/ViewModel attaching its UI observer.
+        synchronized(uiCallbackLock) {
+            uiCallbackBinder?.invoke(state)
+        }
+        return state
+    }
 
     fun get(conversationId: String): ConversationGenerationState? = states[conversationId]
+
+    /**
+     * Bind process-owned generation states to the currently alive ChatViewModel. Reopening the
+     * Activity replaces only these UI callbacks; jobs, STOPPING ownership, queues and streams stay
+     * in this registry. [owner] prevents a late onCleared from an older ViewModel detaching a newer
+     * observer.
+     */
+    fun attachUiCallbacks(
+        owner: Any,
+        binder: (ConversationGenerationState) -> Unit,
+    ) {
+        synchronized(uiCallbackLock) {
+            uiCallbackOwner = owner
+            uiCallbackBinder = binder
+            states.values.forEach(binder)
+        }
+    }
+
+    fun detachUiCallbacks(owner: Any) {
+        synchronized(uiCallbackLock) {
+            if (uiCallbackOwner !== owner) return
+            states.values.forEach { state ->
+                state.onActive = null
+                state.onIdle = null
+                state.onStreamCommit = null
+            }
+            uiCallbackOwner = null
+            uiCallbackBinder = null
+        }
+    }
 
     /** Mark a conversation as actively generating. */
     fun markActive(conversationId: String) {
@@ -77,6 +117,10 @@ class ConversationStateRegistry {
 
     /** Cancel every conversation's state (e.g. on ViewModel cleared). */
     fun cancelAll() {
+        synchronized(uiCallbackLock) {
+            uiCallbackOwner = null
+            uiCallbackBinder = null
+        }
         states.values.forEach {
             it.streamScope.cancelAll()
             it.cancelScope()

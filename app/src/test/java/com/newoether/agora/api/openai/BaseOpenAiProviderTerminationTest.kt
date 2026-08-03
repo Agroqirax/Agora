@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import com.newoether.agora.api.ProviderConfig
 import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.api.ToolDefinition
+import com.newoether.agora.api.ToolFunction
+import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.DebugLog
@@ -12,6 +15,8 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -106,10 +111,163 @@ class BaseOpenAiProviderTerminationTest {
         assertTrue(events.none { it is StreamEvent.Error })
     }
 
+    @Test
+    fun structuredToolCall_streamsSnapshotsAndStopStillCompletesCall() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"file_edit","arguments":"{"}}]},"finish_reason":null}]}"""
+            )
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}"""
+            )
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"""
+            )
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config).toList()
+            }
+        }
+
+        val updates = events.filterIsInstance<StreamEvent.ToolCallUpdate>()
+        assertEquals(listOf("{", "{}"), updates.map { it.arguments })
+        assertEquals(1, updates.map { it.streamKey }.distinct().size)
+        val call = events.filterIsInstance<StreamEvent.ToolCallRequest>().single()
+        assertEquals("call_1", call.id)
+        assertEquals("file_edit", call.name)
+        assertEquals("{}", call.arguments)
+        assertEquals(updates.first().streamKey, call.streamKey)
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun structuredToolCall_doneWithoutFinishReasonStillCompletesCall() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_done","type":"function","function":{"name":"file_read","arguments":"{}"}}]},"finish_reason":null}]}"""
+            )
+            socket.writeSse("[DONE]")
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config).toList()
+            }
+        }
+
+        assertEquals(1, events.filterIsInstance<StreamEvent.ToolCallUpdate>().size)
+        val call = events.filterIsInstance<StreamEvent.ToolCallRequest>().single()
+        assertEquals("call_done", call.id)
+        assertEquals("file_read", call.name)
+        assertEquals("{}", call.arguments)
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun taggedTextToolCall_streamsIntoOneSegmentWithoutFlashingMarkupAsAnswer() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeContentSse("prefix <tool_")
+            socket.writeContentSse("call>")
+            socket.writeContentSse("{\"name\":\"file_edit\",\"arguments\":{\"path\":\"")
+            socket.writeContentSse("a.txt\"}}</tool_call>", finishReason = "stop")
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config.withTools()).toList()
+            }
+        }
+
+        assertEquals(
+            "prefix ",
+            events.filterIsInstance<StreamEvent.TextChunk>().joinToString("") { it.text },
+        )
+        val updates = events.filterIsInstance<StreamEvent.ToolCallUpdate>()
+        assertTrue(updates.size >= 2)
+        assertEquals(1, updates.map { it.streamKey }.distinct().size)
+        assertEquals("", updates.first().name)
+        assertEquals("", updates.first().arguments)
+        assertEquals("file_edit", updates.last().name)
+        val call = events.filterIsInstance<StreamEvent.ToolCallRequest>().single()
+        assertEquals("file_edit", call.name)
+        assertEquals("""{"path":"a.txt"}""", call.arguments)
+        assertEquals(updates.first().streamKey, call.streamKey)
+    }
+
+    @Test
+    fun incompleteTextToolCall_isDisplayedButNeverExecutedOrLeakedAsAnswer() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeContentSse("<tool_call>")
+            socket.writeContentSse("{\"name\":\"file_edit\",\"arguments\":{\"path\":\"unfinished")
+            socket.writeContentSse("", finishReason = "stop")
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config.withTools()).toList()
+            }
+        }
+
+        val updates = events.filterIsInstance<StreamEvent.ToolCallUpdate>()
+        assertTrue(updates.isNotEmpty())
+        assertEquals("", updates.first().name)
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest })
+        assertTrue(events.none { it is StreamEvent.TextChunk })
+        assertEquals(1, events.filterIsInstance<StreamEvent.Error>().size)
+    }
+
+    @Test
+    fun bareJsonTextToolCall_streamsArgumentsAndNeverBecomesAnswerText() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeContentSse("{\"name\":\"file_read\",\"arguments\":{\"path\":\"")
+            socket.writeContentSse("a.txt\"}}", finishReason = "stop")
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config.withTools()).toList()
+            }
+        }
+
+        assertTrue(events.none { it is StreamEvent.TextChunk })
+        val updates = events.filterIsInstance<StreamEvent.ToolCallUpdate>()
+        assertTrue(updates.isNotEmpty())
+        val call = events.filterIsInstance<StreamEvent.ToolCallRequest>().single()
+        assertEquals("file_read", call.name)
+        assertEquals("""{"path":"a.txt"}""", call.arguments)
+        assertEquals(updates.first().streamKey, call.streamKey)
+    }
+
     private fun messages() = listOf(
         ChatMessage(
             text = "hello",
             participant = Participant.USER,
+        )
+    )
+
+    private fun ProviderConfig.withTools() = copy(
+        tools = listOf(
+            ToolDefinition(
+                function = ToolFunction(
+                    name = "file_edit",
+                    description = "Edit a file",
+                    parameters = ToolParameters(
+                        type = "object",
+                        properties = emptyMap(),
+                    ),
+                )
+            )
         )
     )
 
@@ -210,5 +368,25 @@ class BaseOpenAiProviderTerminationTest {
         output.write(payload)
         output.write("\r\n".toByteArray(StandardCharsets.US_ASCII))
         output.flush()
+    }
+
+    private fun Socket.writeContentSse(content: String, finishReason: String? = null) {
+        writeSse(
+            WIRE_JSON.encodeToString(
+                com.newoether.agora.api.OpenAiStreamResponse(
+                    choices = listOf(
+                        com.newoether.agora.api.OpenAiChoice(
+                            index = 0,
+                            delta = com.newoether.agora.api.OpenAiDelta(content = content),
+                            finishReason = finishReason,
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    private companion object {
+        val WIRE_JSON = Json { explicitNulls = false }
     }
 }

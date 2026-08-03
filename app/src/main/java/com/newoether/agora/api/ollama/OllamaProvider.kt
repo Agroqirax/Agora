@@ -240,10 +240,28 @@ class OllamaProvider : LlmProvider {
                                 // 2. Handle tool calls
                                 msg.toolCalls?.let { toolCalls ->
                                     val calls = toolCalls.mapNotNull { tc ->
-                                        val id = tc.id ?: "${Constants.TOOL_CALL_ID_PREFIX}0"
+                                        val streamKey = "call_stream_${java.util.UUID.randomUUID()}"
+                                        val id = tc.id ?: "${Constants.TOOL_CALL_ID_PREFIX}${java.util.UUID.randomUUID()}"
                                         val name = tc.function?.name ?: ""
                                         val args = tc.function?.arguments?.let { if (it is kotlinx.serialization.json.JsonPrimitive) it.content else it.toString() } ?: ""
-                                        if (name.isNotEmpty()) StreamEvent.ToolCallRequest(id, name, args) else null
+                                        if (name.isEmpty()) {
+                                            null
+                                        } else {
+                                            emit(
+                                                StreamEvent.ToolCallUpdate(
+                                                    streamKey = streamKey,
+                                                    id = id,
+                                                    name = name,
+                                                    arguments = args,
+                                                )
+                                            )
+                                            StreamEvent.ToolCallRequest(
+                                                id = id,
+                                                name = name,
+                                                arguments = args,
+                                                streamKey = streamKey,
+                                            )
+                                        }
                                     }
                                     if (calls.size == 1) emit(calls.first())
                                     else if (calls.size > 1) emit(StreamEvent.ToolCallsRequest(calls))

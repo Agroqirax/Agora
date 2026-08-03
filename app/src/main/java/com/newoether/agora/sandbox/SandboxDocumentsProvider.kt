@@ -2,6 +2,7 @@ package com.newoether.agora.sandbox
 
 import com.newoether.agora.R
 import android.app.Activity
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -62,6 +63,9 @@ class SandboxDocumentsProvider : DocumentsProvider() {
         return true
     }
 
+    // DocumentsProvider reports immediately writable space. Counting cache that could
+    // theoretically be evicted overstates what callers can write without side effects.
+    @SuppressLint("UsableSpace")
     override fun queryRoots(projection: Array<out String>?): Cursor {
         val columns = projection?.toList()?.toTypedArray() ?: DEFAULT_ROOT_PROJECTION
         return MatrixCursor(columns).apply {
@@ -217,7 +221,9 @@ fun Context.openSandboxHome(authority: String = "$packageName.${SandboxDocuments
         Intent.FLAG_GRANT_WRITE_URI_PERMISSION
 
     val viewIntent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(rootUri, DocumentsContract.Root.MIME_TYPE_ITEM)
+        // Root.MIME_TYPE_ITEM was only added to the SDK in API 26, but its wire value is
+        // understood by DocumentsUI on every API Agora supports.
+        setDataAndType(rootUri, "vnd.android.document/root")
         addCategory(Intent.CATEGORY_DEFAULT)
         addFlags(grantFlags)
         if (this@openSandboxHome !is Activity) {
