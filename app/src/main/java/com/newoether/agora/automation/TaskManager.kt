@@ -362,6 +362,10 @@ class TaskManager(
         foregroundServiceManagedExternally: Boolean,
         finishManualSchedule: Boolean,
     ): ExecutionResult {
+        // Existing deterministic execution IDs are meaningful only after orphaned Runs have been
+        // terminalized. Otherwise recovery can misclassify a live-looking SENDING row and replay
+        // or delete the wrong occurrence.
+        conversationRepository.ensureRunRecovery()
         var conversationId = requestedConversationId
         val existing = conversationRepository.getConversation(conversationId)
         if (existing != null) {

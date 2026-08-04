@@ -2,7 +2,10 @@ package com.newoether.agora.ui.chat.message
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
@@ -103,20 +106,51 @@ internal fun buildTimelineBlockKeys(
     return keys
 }
 
+/**
+ * Session-scoped first-appearance memory for thinking/tool timeline blocks.
+ *
+ * This deliberately lives above LazyColumn items: local remember state is lost when an off-screen
+ * message is disposed, which would replay the entrance when it is composed again.
+ */
+@Stable
+internal class SegmentAppearanceRegistry {
+    private val seenKeys = HashSet<String>()
+
+    fun shouldAnimate(key: String, isStreaming: Boolean): Boolean =
+        isStreaming && key !in seenKeys
+
+    fun markSeen(keys: Iterable<String>) {
+        seenKeys.addAll(keys)
+    }
+
+    fun markSeen(key: String) {
+        seenKeys += key
+    }
+}
+
 @Composable
 internal fun AnimatedTimelineBlockAppearance(
     animationKey: String,
-    animate: Boolean,
+    animate: Boolean? = null,
+    appearanceRegistry: SegmentAppearanceRegistry? = null,
+    isStreaming: Boolean = false,
     content: @Composable () -> Unit
 ) {
     key(animationKey) {
-        // The first-appearance decision is latched by the shared lifecycle modifier. Subsequent
-        // token snapshots cannot restart or cancel an in-flight card appearance.
+        // Claim appearance at the component that actually enters composition. A parent-side
+        // bulk mark can consume a key before a conditional child is emitted, silently suppressing
+        // the very first scale/fade.
+        val play = remember(animationKey, appearanceRegistry) {
+            animate ?: appearanceRegistry?.shouldAnimate(animationKey, isStreaming) ?: false
+        }
+        SideEffect {
+            appearanceRegistry?.markSeen(animationKey)
+        }
         val appearanceModifier = generationLifecycleAppearanceModifier(
             animationKey = animationKey,
-            animate = animate,
+            animate = play,
             durationMillis = SEGMENT_ENTER_DURATION_MS,
-            initialScale = 0.94f,
+            initialScale = SEGMENT_ENTER_INITIAL_SCALE,
         )
         Box(
             modifier = appearanceModifier,
@@ -124,6 +158,21 @@ internal fun AnimatedTimelineBlockAppearance(
             content()
         }
     }
+}
+
+@Composable
+internal fun rememberSegmentAppearance(
+    registry: SegmentAppearanceRegistry,
+    animationKey: String,
+    isStreaming: Boolean,
+): Boolean {
+    val play = remember(registry, animationKey) {
+        registry.shouldAnimate(animationKey, isStreaming)
+    }
+    SideEffect {
+        registry.markSeen(animationKey)
+    }
+    return play
 }
 
 // Label a transcription segment; numbers them ("Image Transcription 1/2/…") only

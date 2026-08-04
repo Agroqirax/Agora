@@ -118,6 +118,8 @@ class SettingsManager(private val context: Context) {
         val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
         val TITLE_GENERATION_MODEL = stringPreferencesKey("title_generation_model")
         val TITLE_GENERATION_PROMPT = stringPreferencesKey("title_generation_prompt")
+        val TITLE_GENERATION_NOTIFICATIONS_ENABLED =
+            booleanPreferencesKey("title_generation_notifications_enabled")
         val IMAGE_TRANSCRIPTION_ENABLED_MODELS = stringSetPreferencesKey("image_transcription_enabled_models")
         val IMAGE_TRANSCRIPTION_MODEL = stringPreferencesKey("image_transcription_model")
         val IMAGE_TRANSCRIPTION_BATCH_SIZE = intPreferencesKey("image_transcription_batch_size")
@@ -262,6 +264,9 @@ class SettingsManager(private val context: Context) {
     val titleGenerationModel: Flow<String?> = context.dataStore.data.map { it[TITLE_GENERATION_MODEL] }
     val titleGenerationPrompt: Flow<String> = context.dataStore.data.map { pref ->
         pref[TITLE_GENERATION_PROMPT]?.takeIf { it.isNotBlank() } ?: BuiltInPrompts.TITLE_GENERATION_SYSTEM
+    }
+    val titleGenerationNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[TITLE_GENERATION_NOTIFICATIONS_ENABLED] ?: true
     }
     val imageTranscriptionEnabledModels: Flow<Set<String>> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet() }
     val imageTranscriptionModel: Flow<String?> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_MODEL] }
@@ -566,6 +571,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveTitleGenerationEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TITLE_GENERATION_ENABLED] = enabled }
+    }
+
+    suspend fun saveTitleGenerationNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[TITLE_GENERATION_NOTIFICATIONS_ENABLED] = enabled }
     }
 
     suspend fun saveAccessPastConversations(enabled: Boolean) {

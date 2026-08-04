@@ -56,9 +56,17 @@ private sealed interface SendPlacement {
  */
 sealed interface SendAcceptance {
     val messageId: String
+    val conversationId: String
 
-    data class Direct(override val messageId: String) : SendAcceptance
-    data class Queued(override val messageId: String) : SendAcceptance
+    data class Direct(
+        override val messageId: String,
+        override val conversationId: String,
+    ) : SendAcceptance
+
+    data class Queued(
+        override val messageId: String,
+        override val conversationId: String,
+    ) : SendAcceptance
 }
 
 /**
@@ -150,7 +158,7 @@ internal object UiMessageCommitPolicy {
  * on the open conversation via [ifOpenOn] so a background generation can't
  * clobber the visible conversation's UI.
  */
-class MessageGenerationController(
+internal class MessageGenerationController(
     private val viewModelScope: CoroutineScope,
     private val application: Application,
     private val appContext: Context,
@@ -165,8 +173,7 @@ class MessageGenerationController(
     private val localProvider: LocalProvider,
     private val executionCoordinator: ConversationExecutionCoordinator,
     // ── Shared UI state: the SAME instances ChatViewModel exposes — never recreate ──
-    private val allMessages: MutableStateFlow<List<ChatMessage>>,
-    private val selectedChildren: MutableStateFlow<Map<String?, String>>,
+    private val renderStore: ConversationRenderStore,
     private val currentConversationId: MutableStateFlow<String?>,
     private val isNewChatMode: MutableStateFlow<Boolean>,
     private val pendingConversationSettings: MutableStateFlow<ConversationSettings?>,
@@ -175,11 +182,11 @@ class MessageGenerationController(
     private val messages: StateFlow<List<ChatMessage>>,
     // ── Callbacks into ChatViewModel-owned side effects ──
     private val onScrollToMessage: (String?) -> Unit,
+    private val onScrollToAbsoluteBottomAfter: (String) -> Unit,
     private val onSnackbar: (String) -> Unit,
     private val onSnackbarSuspend: suspend (String) -> Unit,  // sequential emit inside generateTitle
-    private val onPersistSelectedChildren: suspend (String, Map<String?, String>) -> Unit,
     // Called when sendMessage creates a NEW conversation, so the UI can suppress the
-    // conversation-open auto-scroll (the send's own scroll-to-message handles it) and
+    // conversation-open auto-scroll (the send's own physical-bottom scroll handles it) and
     // avoid a double scroll on the first message of a new chat.
     private val onConversationCreatedBySend: () -> Unit = {},
     // Called once when a hidden task/loop execution becomes searchable. The callback
@@ -194,6 +201,7 @@ class MessageGenerationController(
     private val onTreeMutationSettling: (requestId: Long?, targetMessageId: String?) -> Unit =
         { _, _ -> },
     private val onTreeMutationFailed: (requestId: Long?) -> Unit = {},
+    private val regenerationTransitions: RegenerationTransitionCoordinator,
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
@@ -253,7 +261,7 @@ class MessageGenerationController(
         val currentId = currentConversationId.value ?: return 0
         val state = registry.getOrCreate(currentId)
         if (state.generating.value) return 0
-        val snapshot = allMessages.value
+        val snapshot = renderStore.allMessages
         if (snapshot.none { it.id == messageId }) return 0
         val previewIds = structuralDescendantIds(snapshot, messageId)
 
@@ -269,6 +277,7 @@ class MessageGenerationController(
 
                         val runs = convRepo.getRunsForConversationSnapshot(currentId)
                         val allMsgs = convRepo.getMessagesForConversationSnapshot(currentId)
+                        val allChatMessages = allMsgs.map { it.toChatMessage() }
                         val previousSelected = convRepo.restoreBranchSelections(currentId)
                         val previousRunSelections =
                             convRepo.restoreRunBranchSelections(currentId)
@@ -296,14 +305,21 @@ class MessageGenerationController(
                         // Files are external to Room, so remove them only after graph commit.
                         convRepo.deleteMessageFiles(staleList)
                         val remainingChatMessages = remainingMsgs.map { it.toChatMessage() }
-                        val targetAfterDelete = ConversationUiState.resolvePath(
+                        val remainingPath = ConversationUiState.resolvePath(
                             allMessages = remainingChatMessages,
                             streamingMsg = null,
                             selectedChildren = plan.messageSelections,
-                        ).lastOrNull { it.participant == Participant.USER }?.id
+                        )
+                        val targetAfterDelete = deleteSettlementTargetMessageId(
+                            messagesBeforeDelete = allChatMessages,
+                            deletedRootMessageId = messageId,
+                            remainingPath = remainingPath,
+                        )
                         ifOpenOn(currentId) {
-                            allMessages.value = remainingChatMessages
-                            selectedChildren.value = plan.messageSelections
+                            renderStore.replaceGraph(
+                                allMessages = remainingChatMessages,
+                                selectedChildren = plan.messageSelections,
+                            )
                         }
                         committed = true
                         onTreeMutationSettling(switchingRequestId, targetAfterDelete)
@@ -351,6 +367,7 @@ class MessageGenerationController(
         val messageToRegenerate = visiblePath.find { it.id == messageId } ?: return false
         if (messageToRegenerate.participant != Participant.MODEL) return false
         val sourceRunId = messageToRegenerate.runId ?: return false
+        val targetUserMessageId = messageToRegenerate.parentId ?: return false
         val outputBoundary = visiblePath
             .filter {
                 it.runId == sourceRunId &&
@@ -368,14 +385,37 @@ class MessageGenerationController(
         // Regenerate is idle-only by product rule. Enforce it atomically in the state machine in
         // addition to the UI's enabled flag, which can lag during a conversation switch.
         val myUiToken = state.tryAcquireForReplacement() ?: return false
+        val transition = regenerationTransitions.begin(
+            conversationId = genId,
+            oldMessageId = messageId,
+            targetUserMessageId = targetUserMessageId,
+        ) ?: run {
+            state.endGeneration(myUiToken)
+            return false
+        }
         val runId = UUID.randomUUID().toString()
-        state.bindRun(myUiToken, runId)
 
-        val generationJob = state.launchGenerationJob(myUiToken) {
-            val myPersistId = state.nextPersistId()
+        var graphCommitted = false
+        val generationJob = state.launchGenerationJob(myUiToken) generation@ {
             var setupModelMessageId: String? = null
             try {
+                if (!regenerationTransitions.awaitFade(transition.id)) return@generation
+                if (
+                    !state.isCurrentToken(myUiToken) ||
+                    !regenerationTransitions.isAnimating(transition.id) ||
+                    currentConversationId.value != genId
+                ) {
+                    return@generation
+                }
+                val myPersistId = state.nextPersistId()
                 executionCoordinator.withConversationLock(genId) lock@ {
+                if (
+                    !state.isCurrentToken(myUiToken) ||
+                    !regenerationTransitions.isAnimating(transition.id) ||
+                    currentConversationId.value != genId
+                ) {
+                    return@lock
+                }
                 val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
                 val persistedTarget = persistedMessages.find { it.id == messageId } ?: return@lock
                 if (persistedTarget.runId != sourceRunId) return@lock
@@ -386,6 +426,7 @@ class MessageGenerationController(
                 val inputRunId = sourceInput.runId
                 val modelMessageId = UUID.randomUUID().toString()
                 setupModelMessageId = modelMessageId
+                if (!state.tryBindRun(myUiToken, runId)) return@lock
                 val startTime = maxOf(System.currentTimeMillis(), persistedTarget.timestamp + 1)
                 val modelEntity = MessageEntity(
                     id = modelMessageId,
@@ -401,7 +442,7 @@ class MessageGenerationController(
                     runId = runId,
                     runSequence = 0,
                 )
-                convRepo.createRunWithMessages(
+                val graphCommit = convRepo.createRunWithMessages(
                     RunEntity(
                         id = runId,
                         conversationId = genId,
@@ -412,29 +453,23 @@ class MessageGenerationController(
                         lastCheckpointAt = startTime,
                     ),
                     listOf(modelEntity),
+                    messageSelectionUpdates = mapOf(sourceInput.id to modelEntity.id),
                 )
                 val placeholder = modelEntity.toChatMessage()
-                val selectedAfterRegenerate =
-                    convRepo.restoreBranchSelections(genId).toMutableMap().apply {
-                    put(sourceInput.id, modelEntity.id)
-                }.toMap()
-                convRepo.selectRunBranch(
-                    conversationId = genId,
-                    parentRunId = inputRunId,
-                    runId = runId,
-                    messageSelections = selectedAfterRegenerate,
-                )
-                ifOpenOn(genId) {
-                    allMessages.update { existing ->
-                        UiMessageCommitPolicy.upsert(existing, listOf(placeholder))
-                    }
-                    selectedChildren.value = selectedAfterRegenerate
-                    onScrollToMessage(sourceInput.id)
-                }
+                val selectedAfterRegenerate = graphCommit.messageSelections
+                // The overlay is installed before the graph projection. An intermediate combine
+                // frame can therefore only retain the old path; it can never expose an empty
+                // persisted SENDING placeholder.
                 state.streamUpdate(myUiToken, placeholder)
-                convRepo.getConversation(genId)?.let { conv ->
-                    convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
+                ifOpenOn(genId) {
+                    renderStore.commitGraph(
+                        committedMessages = listOf(placeholder),
+                        selectedChildren = selectedAfterRegenerate,
+                        streamingMessage = placeholder,
+                    )
                 }
+                graphCommitted = true
+                regenerationTransitions.markCommitted(transition.id)
                 launchGeneration(
                     genId, modelMessageId, startTime,
                     isRegenerate = false, replaceMessageId = null,
@@ -454,8 +489,14 @@ class MessageGenerationController(
                     error = e,
                 )
             } finally {
+                if (!graphCommitted) {
+                    regenerationTransitions.abort(transition.id)
+                }
                 releaseAndDrain(state, myUiToken, genId)
             }
+        }
+        if (generationJob == null) {
+            regenerationTransitions.abort(transition.id)
         }
         return generationJob != null
     }
@@ -632,7 +673,7 @@ class MessageGenerationController(
                 text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
                 modelName = modelId, runId = runId, runSequence = 1,
             )
-            convRepo.createRunWithMessages(
+            val graphCommit = convRepo.createRunWithMessages(
                 RunEntity(
                     id = runId,
                     conversationId = genId,
@@ -643,24 +684,14 @@ class MessageGenerationController(
                     lastCheckpointAt = startTime,
                 ),
                 listOf(newUser, modelEntity),
+                messageSelectionUpdates = mapOf(
+                    newUser.parentId to newUser.id,
+                    newUser.id to modelEntity.id,
+                ),
             )
-            val selectedAfterModelEdit =
-                convRepo.restoreBranchSelections(genId).toMutableMap().apply {
-                    put(newUser.parentId, newUser.id)
-                    put(newUser.id, modelMessageId)
-                }.toMap()
-            convRepo.selectRunBranch(
-                conversationId = genId,
-                parentRunId = sourceRun.parentRunId,
-                runId = runId,
-                messageSelections = selectedAfterModelEdit,
-            )
+            val selectedAfterModelEdit = graphCommit.messageSelections
             onUserMessagePersisted(newUser.id, newText)
-            convRepo.getConversation(genId)?.let { conv ->
-                convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-            }
-            // Set streamingMessage BEFORE allMessages so the combine never
-            // evaluates with stale allMessages data but no streaming overlay.
+            // Commit the streaming overlay and replacement graph as one render snapshot.
             val placeholder = ChatMessage(
                 id = modelMessageId, parentId = newUser.id, text = "", participant = Participant.MODEL,
                 status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId,
@@ -668,13 +699,11 @@ class MessageGenerationController(
             )
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) {
-                allMessages.update {
-                    UiMessageCommitPolicy.upsert(
-                        existing = it,
-                        committed = listOf(newUser.toChatMessage(), placeholder),
-                    )
-                }
-                selectedChildren.value = selectedAfterModelEdit
+                renderStore.commitGraph(
+                    committedMessages = listOf(newUser.toChatMessage(), placeholder),
+                    selectedChildren = selectedAfterModelEdit,
+                    streamingMessage = placeholder,
+                )
                 onScrollToMessage(newUser.id)
             }
             if (currentConversationId.value == genId) {
@@ -828,7 +857,6 @@ class MessageGenerationController(
                 val myPersistId = state.nextPersistId()
                 executionCoordinator.withConversationLock(genId) {
                     val snapshotEntities = convRepo.getMessagesForConversationSnapshot(genId)
-                    val selectedBeforeSend = convRepo.restoreBranchSelections(genId)
                     val messagesById = snapshotEntities.associateBy { it.id }
                     val queuedMessages = batch.map { queued ->
                         checkNotNull(messagesById[queued.id]) {
@@ -840,10 +868,6 @@ class MessageGenerationController(
                             it.participant == Participant.USER &&
                             it.consumedAtPass == null
                     }) { "Queue contains a non-pending intervention" }
-                    val newChildren = selectedBeforeSend.toMutableMap()
-                    val claimedPass = checkNotNull(convRepo.claimPendingRunInputs(runId)) {
-                        "Queued intervention batch did not advance Run $runId"
-                    }
                     val lastUserMessageId = queuedMessages.last().id
                     val modelMessageId = UUID.randomUUID().toString()
                     setupModelMessageId = modelMessageId
@@ -851,35 +875,46 @@ class MessageGenerationController(
                         System.currentTimeMillis(),
                         queuedMessages.maxOf { it.timestamp } + 1,
                     )
-                    val insertedPlaceholder = convRepo.appendMessageToRun(MessageEntity(
-                        id = modelMessageId, conversationId = genId, parentId = lastUserMessageId,
-                        text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL,
-                        timestamp = startTime, modelName = modelId, runId = runId,
-                    ))
-                    convRepo.getConversation(genId)?.let { conv ->
-                        convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
+                    val passCommit = checkNotNull(
+                        convRepo.claimPendingRunInputsAndAppendPlaceholder(
+                            runId = runId,
+                            expectedInputMessageIds = queuedMessages.map { it.id },
+                            placeholder = MessageEntity(
+                                id = modelMessageId,
+                                conversationId = genId,
+                                parentId = lastUserMessageId,
+                                text = "",
+                                thoughts = null,
+                                status = MessageStatus.SENDING,
+                                participant = Participant.MODEL,
+                                timestamp = startTime,
+                                modelName = modelId,
+                                runId = runId,
+                            ),
+                        )
+                    ) {
+                        "Queued intervention batch did not advance Run $runId"
                     }
-                    val placeholder = ChatMessage(
-                        id = modelMessageId, parentId = lastUserMessageId, text = "", participant = Participant.MODEL,
-                        status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId,
-                        runId = runId, runSequence = insertedPlaceholder.runSequence,
-                    )
+                    val placeholder = passCommit.placeholder.toChatMessage()
+                    val newChildren = passCommit.messageSelections
                     state.streamUpdate(myUiToken, placeholder)
                     ifOpenOn(genId) {
-                        allMessages.update {
-                            UiMessageCommitPolicy.upsert(it, listOf(placeholder))
-                        }
+                        renderStore.commitGraph(
+                            committedMessages = listOf(placeholder),
+                            selectedChildren = newChildren,
+                            streamingMessage = placeholder,
+                        )
+                        onScrollToMessage(lastUserMessageId)
                     }
-                    newChildren[lastUserMessageId] = modelMessageId
-                    onPersistSelectedChildren(genId, newChildren)
-                    ifOpenOn(genId) { selectedChildren.value = newChildren }
-                    ifOpenOn(genId) { onScrollToMessage(lastUserMessageId) }
 
                     launchGeneration(
                         genId, modelMessageId, startTime,
                         isRegenerate = false, replaceMessageId = null,
                         providerName, modelId, activeKey, myUiToken, myPersistId,
-                        state, runId = runId, pass = claimedPass.pass, callerTag = "queueDrain"
+                        state,
+                        runId = runId,
+                        pass = passCommit.claimedPass.pass,
+                        callerTag = "queueDrain",
                     )
                 }
             } catch (e: CancellationException) {
@@ -941,6 +976,8 @@ class MessageGenerationController(
                     val runId = UUID.randomUUID().toString()
                     state.bindRun(uiToken, runId)
                     SendPlacement.Direct(uiToken, runId)
+                } else if (state.stopping.value) {
+                    SendPlacement.RetryAfterRelease
                 } else {
                     val runId = state.currentRunId() ?: return@withLock SendPlacement.RetryAfterRelease
                     val run = convRepo.getRun(runId)
@@ -983,12 +1020,11 @@ class MessageGenerationController(
         }
 
         if (placement is SendPlacement.Queued) {
-            return SendAcceptance.Queued(placement.messageId)
+            return SendAcceptance.Queued(placement.messageId, genId)
         }
         val direct = placement as SendPlacement.Direct
         val myUiToken = direct.uiToken
         val runId = direct.runId
-        state.loadingChange(myUiToken, true)
 
         lateinit var modelMessageId: String
         lateinit var userMessageId: String
@@ -1041,7 +1077,7 @@ class MessageGenerationController(
                     runId = runId,
                     runSequence = 1,
                 )
-                convRepo.createRunWithMessages(
+                val graphCommit = convRepo.createRunWithMessages(
                     RunEntity(
                         id = runId,
                         conversationId = genId,
@@ -1052,33 +1088,27 @@ class MessageGenerationController(
                         lastCheckpointAt = startTime,
                     ),
                     listOf(userEntity, modelEntity),
+                    messageSelectionUpdates = mapOf(
+                        userEntity.parentId to userEntity.id,
+                        userEntity.id to modelEntity.id,
+                    ),
                 )
-                convRepo.selectRunBranch(genId, lastMessage?.runId, runId)
                 if (text.isNotBlank()) onUserMessagePersisted(userMessageId, text)
                 settings.incrementMessagesSent()
-                convRepo.getConversation(genId)?.let { conv ->
-                    convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-                }
                 val placeholder = modelEntity.toChatMessage()
+                // Publish the one explicit scroll owner before loading/stream state can activate
+                // the tail follower. The request waits for the target commit below.
+                ifOpenOn(genId) {
+                    onScrollToAbsoluteBottomAfter(userMessageId)
+                }
+                state.loadingChange(myUiToken, true)
                 state.streamUpdate(myUiToken, placeholder)
                 ifOpenOn(genId) {
-                    allMessages.update { existing ->
-                        UiMessageCommitPolicy.upsert(
-                            existing = existing,
-                            committed = listOf(userEntity.toChatMessage(), placeholder),
-                        )
-                    }
-                }
-                val newChildren = selectedBeforeSend.toMutableMap().apply {
-                    put(userEntity.parentId, userEntity.id)
-                    put(userEntity.id, modelEntity.id)
-                }
-                onPersistSelectedChildren(genId, newChildren)
-                ifOpenOn(genId) {
-                    selectedChildren.value = newChildren
-                    // The bubble commit owns its scroll request. A callback issued later by the
-                    // composer's coroutine can be lost when new-chat UI leaves composition.
-                    onScrollToMessage(userMessageId)
+                    renderStore.commitGraph(
+                        committedMessages = listOf(userEntity.toChatMessage(), placeholder),
+                        selectedChildren = graphCommit.messageSelections,
+                        streamingMessage = placeholder,
+                    )
                 }
             }
         } catch (e: Exception) {
@@ -1119,7 +1149,7 @@ class MessageGenerationController(
                 releaseAndDrain(state, myUiToken, genId)
             }
         }
-        return SendAcceptance.Direct(userMessageId)
+        return SendAcceptance.Direct(userMessageId, genId)
     }
 
     private suspend fun persistIntervention(
@@ -1134,7 +1164,7 @@ class MessageGenerationController(
             .filter { it.runId == runId }
             .maxWithOrNull(compareBy<MessageEntity> { it.runSequence }.thenBy { it.id })
             ?.id
-        val message = convRepo.appendMessageToRun(
+        val commit = convRepo.appendPendingInputToRun(
             MessageEntity(
                 id = queued.id,
                 conversationId = conversationId,
@@ -1150,17 +1180,11 @@ class MessageGenerationController(
                 consumedAtPass = null,
             )
         )
+        val message = commit.message
         if (queued.text.isNotBlank()) onUserMessagePersisted(message.id, message.text)
         settings.incrementMessagesSent()
-        convRepo.getConversation(conversationId)?.let { conversation ->
-            convRepo.upsertConversation(conversation.copy(lastUpdated = System.currentTimeMillis()))
-        }
-        val updatedBranches = convRepo.restoreBranchSelections(conversationId).toMutableMap().apply {
-            put(message.parentId, message.id)
-        }
-        onPersistSelectedChildren(conversationId, updatedBranches)
         ifOpenOn(conversationId) {
-            selectedChildren.value = updatedBranches
+            renderStore.setSelectedChildren(commit.messageSelections)
         }
     }
 
@@ -1255,12 +1279,21 @@ class MessageGenerationController(
 
     fun generateTitle(conversationId: String) {
         viewModelScope.launch {
-            onSnackbarSuspend(appContext.getString(R.string.snackbar_generating_title))
+            settings.awaitInitialLoad()
+            if (settings.titleGenerationNotificationsEnabled.value) {
+                onSnackbarSuspend(appContext.getString(R.string.snackbar_generating_title))
+            }
             when (titleGenerator.generateAndPersist(conversationId)) {
-                is ConversationTitleGenerator.Result.Success ->
-                    onSnackbarSuspend(appContext.getString(R.string.snackbar_title_generated))
-                is ConversationTitleGenerator.Result.Failure ->
-                    onSnackbarSuspend(appContext.getString(R.string.snackbar_title_error))
+                is ConversationTitleGenerator.Result.Success -> {
+                    if (settings.titleGenerationNotificationsEnabled.value) {
+                        onSnackbarSuspend(appContext.getString(R.string.snackbar_title_generated))
+                    }
+                }
+                is ConversationTitleGenerator.Result.Failure -> {
+                    if (settings.titleGenerationNotificationsEnabled.value) {
+                        onSnackbarSuspend(appContext.getString(R.string.snackbar_title_error))
+                    }
+                }
             }
         }
     }

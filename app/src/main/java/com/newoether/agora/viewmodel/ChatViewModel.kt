@@ -57,11 +57,13 @@ import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -71,10 +73,34 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 
+enum class AnimatedScrollDestination {
+    MESSAGE,
+    ABSOLUTE_BOTTOM,
+}
+
 data class AnimatedScrollRequest(
     val id: Long,
     val conversationId: String,
     val targetMessageId: String?,
+    val destination: AnimatedScrollDestination = AnimatedScrollDestination.MESSAGE,
+)
+
+data class LoadedComposerDraft(
+    val text: String,
+    val attachments: List<SelectedAttachment>,
+    val revision: Long,
+)
+
+data class DraftPersistResult(
+    val revision: Long,
+    val succeeded: Boolean,
+    val matchesRequested: Boolean,
+)
+
+private data class PersistedComposerDraft(
+    val text: String,
+    val attachments: List<SelectedAttachment>,
+    val revision: Long,
 )
 
 private fun MessageEntity.toUiChatMessage(context: Context): ChatMessage {
@@ -164,6 +190,7 @@ class ChatViewModel(
     private val conversationExecutionCoordinator: com.newoether.agora.automation.ConversationExecutionCoordinator,
     private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
     private val generationRegistry: ConversationStateRegistry,
+    private val shellConfirmation: ShellConfirmationController,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -350,6 +377,19 @@ class ChatViewModel(
                         runCatching { f.delete() }
                     }
                 }
+                java.io.File(
+                    getApplication<Application>().filesDir,
+                    "images",
+                ).listFiles { file ->
+                    file.isFile && file.name.startsWith("camera_")
+                }?.forEach { file ->
+                    if (
+                        file.absolutePath !in referenced &&
+                        now - file.lastModified() > minAgeMs
+                    ) {
+                        runCatching { file.delete() }
+                    }
+                }
                 listOf(
                     java.io.File(
                         getApplication<Application>().filesDir,
@@ -466,6 +506,16 @@ class ChatViewModel(
         )
     }
 
+    fun triggerScrollToAbsoluteBottomAfter(messageId: String) {
+        val conversationId = _currentConversationId.value ?: return
+        _animatedScrollRequest.value = AnimatedScrollRequest(
+            id = animatedScrollIds.incrementAndGet(),
+            conversationId = conversationId,
+            targetMessageId = messageId,
+            destination = AnimatedScrollDestination.ABSOLUTE_BOTTOM,
+        )
+    }
+
     fun completeAnimatedScroll(requestId: Long) {
         if (_animatedScrollRequest.value?.id == requestId) {
             _animatedScrollRequest.value = null
@@ -489,7 +539,6 @@ class ChatViewModel(
 
     // ── Remote shell command confirmation gate ───────────────────────────
     /** Shell-command confirmation policy + pending-prompt handshake (see [ShellConfirmationController]). */
-    private val shellConfirmation = ShellConfirmationController(settings)
     val pendingShellCommand: StateFlow<ShellConfirmationController.PendingShellCommand?>
         get() = shellConfirmation.pendingShellCommand
 
@@ -553,11 +602,14 @@ class ChatViewModel(
         viewModelScope.launch { loopManager.stopLoop(id) }
     }
 
-    private val _allMessages = MutableStateFlow<List<ChatMessage>>(emptyList())
-    val allMessages: StateFlow<List<ChatMessage>> = _allMessages.asStateFlow()
+    private val renderStore = ConversationRenderStore()
+    val allMessages: StateFlow<List<ChatMessage>> = renderStore.snapshot
+        .map { it.allMessages }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     /**
      * Identity of the conversation whose first Room message snapshot has been installed into
-     * [_allMessages]. This stays meaningful for an empty conversation, unlike checking whether
+     * [renderStore]. This stays meaningful for an empty conversation, unlike checking whether
      * the list is non-empty, and prevents a switch from settling against the previous tree.
      */
     private val _loadedMessagesConversationId = MutableStateFlow<String?>(null)
@@ -602,23 +654,21 @@ class ChatViewModel(
     fun showFilePreview(fileName: String, content: String) = mediaPreview.showFile(fileName, content)
     fun clearPreviews() = mediaPreview.clear()
 
-    private val _streamingMessage = MutableStateFlow<ChatMessage?>(null)
-    private val _selectedChildren = MutableStateFlow<Map<String?, String>>(emptyMap())
-
-    val messages: StateFlow<List<ChatMessage>> = combine(
-        _allMessages,
-        _streamingMessage,
-        _selectedChildren
-    ) { allMsgs, streaming, selectedChildren ->
+    val messages: StateFlow<List<ChatMessage>> = renderStore.snapshot.mapLatest { snapshot ->
         // Single source of truth for the visible-path walk: the tested
         // ConversationUiState.resolvePath (covered by ConversationUiStateTest).
-        ConversationUiState.resolvePath(allMsgs, streaming, selectedChildren)
+        withContext(Dispatchers.Default) {
+            ConversationUiState.resolvePath(
+                snapshot.allMessages,
+                snapshot.streamingMessage,
+                snapshot.selectedChildren,
+            )
+        }
     }.distinctUntilChanged()
-    .flowOn(Dispatchers.Default)
     .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val totalTokens: StateFlow<Int> = _allMessages.map { list ->
-        list.sumOf { it.tokenCount }
+    val totalTokens: StateFlow<Int> = renderStore.snapshot.map { snapshot ->
+        snapshot.allMessages.sumOf { it.tokenCount }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     private val _isLoading = MutableStateFlow(false)
@@ -627,7 +677,7 @@ class ChatViewModel(
     val generatingInConversationId: StateFlow<String?> = _generatingInConversationId.asStateFlow()
 
     /** Per-conversation generation state registry. Each conversation owns an independent
-     *  ConversationGenerationState; the global _isLoading/_streamingMessage/_generatingInConversationId
+     *  ConversationGenerationState; the global loading/render mirrors
      *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */
     private val generationCallbackOwner = Any()
     private val generationCallbacksAttached = Unit.also {
@@ -649,7 +699,7 @@ class ChatViewModel(
             }
             state.onStreamCommit = { conversationId, message ->
                 if (_currentConversationId.value == conversationId) {
-                    _allMessages.update { messages ->
+                    renderStore.updateAllMessages { messages ->
                         UiMessageCommitPolicy.upsert(messages, listOf(message))
                     }
                 }
@@ -670,7 +720,7 @@ class ChatViewModel(
     private val generationMirror = ConversationGenerationMirror(
         currentConversationId = _currentConversationId,
         onSnapshot = { conversationId, snapshot ->
-            _streamingMessage.value = snapshot.streamingMessage
+            renderStore.setStreamingMessage(snapshot.streamingMessage)
             _isLoading.value = snapshot.isLoading
             _generatingInConversationId.value =
                 if (snapshot.isGenerating) conversationId else null
@@ -684,6 +734,22 @@ class ChatViewModel(
 
     private val switchingCoordinator = SwitchingCoordinator()
     val isSwitching: StateFlow<Boolean> = switchingCoordinator.isSwitching
+
+    private val regenerationTransitions = RegenerationTransitionCoordinator()
+    internal val regenerationTransition: StateFlow<RegenerationTransitionRequest?> =
+        regenerationTransitions.request
+
+    fun acknowledgeRegenerationFade(requestId: Long) {
+        regenerationTransitions.acknowledgeFade(requestId)
+    }
+
+    fun acknowledgeRegenerationScroll(requestId: Long, success: Boolean) {
+        regenerationTransitions.acknowledgeScroll(requestId, success)
+    }
+
+    fun completeRegenerationTransition(requestId: Long) {
+        regenerationTransitions.complete(requestId)
+    }
 
     private var switchingJob: Job? = null
 
@@ -745,8 +811,7 @@ class ChatViewModel(
             providerRegistry = providerRegistry,
             localProvider = localProvider,
             executionCoordinator = conversationExecutionCoordinator,
-            allMessages = _allMessages,
-            selectedChildren = _selectedChildren,
+            renderStore = renderStore,
             currentConversationId = _currentConversationId,
             isNewChatMode = _isNewChatMode,
             pendingConversationSettings = _pendingConversationSettings,
@@ -754,9 +819,9 @@ class ChatViewModel(
             currentActiveModel = currentActiveModel,
             messages = messages,
             onScrollToMessage = { id -> triggerScrollToMessage(id) },
+            onScrollToAbsoluteBottomAfter = ::triggerScrollToAbsoluteBottomAfter,
             onSnackbar = { msg -> emitSnackbar(msg) },
             onSnackbarSuspend = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
-            onPersistSelectedChildren = { convId, map -> persistSelectedChildren(convId, map) },
             onConversationCreatedBySend = { suppressNextOpenScroll = true },
             onUserMessagePersisted = ragManager::indexMessageForRag,
             onTreeMutationStart = {
@@ -774,6 +839,7 @@ class ChatViewModel(
             onTreeMutationFailed = { requestId ->
                 requestId?.let { switchingCoordinator.complete(it) }
             },
+            regenerationTransitions = regenerationTransitions,
         )
     }
 
@@ -828,6 +894,10 @@ class ChatViewModel(
                 _loadedMessagesConversationId.value = null
                 if (id != null) {
                     coroutineScope {
+                        // Do not expose Room's pre-recovery graph to Compose. Recovery marks the
+                        // model row, its unfinished tool segments, and its Run terminal in one
+                        // transaction, so the first rendered snapshot is already self-consistent.
+                        convRepo.ensureRunRecovery()
                         val switchScope = this
                         val state = generationRegistry.getOrCreate(id)
                         // Fix stuck sending states when loading a conversation. Read THIS conversation's
@@ -856,10 +926,14 @@ class ChatViewModel(
                                 }.getOrNull()
                             }.orEmpty()
                         }
-                        _selectedChildren.value = restoredChildren
-
                         var generationMirrorStarted = false
-                        convRepo.getUiMessagesForConversation(id)
+                        state.streamingMessage
+                            .map { message -> message?.id }
+                            .distinctUntilChanged()
+                            .flatMapLatest { streamingMessageId ->
+                                convRepo.getUiMessagesForConversation(id, streamingMessageId)
+                            }
+                            .distinctUntilChanged()
                             .mapLatest { entities ->
                                 // Room republishes the complete list for every persisted stream
                                 // checkpoint. JSON/format projection is CPU work, and stale
@@ -871,7 +945,19 @@ class ChatViewModel(
                                 }
                             }
                             .collect { mapped ->
-                            _allMessages.value = mapped
+                            if (!generationMirrorStarted) {
+                                // Conversation graph + selected edges become visible as one
+                                // snapshot. The previous conversation can never be paired with
+                                // this conversation's selections, even for one combine frame.
+                                renderStore.replaceConversation(
+                                    allMessages = mapped,
+                                    selectedChildren = restoredChildren,
+                                )
+                            } else {
+                                // Room checkpoints replace message payloads but preserve the
+                                // current in-process selection and streaming overlay.
+                                renderStore.setAllMessages(mapped)
+                            }
                             _loadedMessagesConversationId.value = id
                             if (!generationMirrorStarted) {
                                 generationMirrorStarted = true
@@ -887,28 +973,14 @@ class ChatViewModel(
                             }
                     }
                 } else {
-                    _allMessages.value = emptyList()
+                    renderStore.clear()
                     _loadedMessagesConversationId.value = null
-                    _selectedChildren.value = emptyMap()
-                    _streamingMessage.value = null
                     _isLoading.value = false
                     _generatingInConversationId.value = null
                 }
             }
         }
         
-        viewModelScope.launch {
-            _selectedChildren.collect { childrenMap ->
-                val id = _currentConversationId.value
-                if (id != null) {
-                    persistSelectedChildren(id, childrenMap)
-                }
-            }
-        }
-    }
-
-    private suspend fun persistSelectedChildren(conversationId: String, childrenMap: Map<String?, String>) {
-        convRepo.saveBranchSelections(conversationId, childrenMap)
     }
 
     // ── Custom providers ──────────────────────────────────────
@@ -1067,6 +1139,7 @@ class ChatViewModel(
         // Already on the new-chat screen: ignore (both the drawer and the top-bar capsule route
         // here; behaviour must be identical and a no-op when there's nothing to reset).
         if (_isNewChatMode.value) return
+        regenerationTransitions.abortCurrent()
         val previousJob = switchingJob
         val request = switchingCoordinator.beginNewChat()
         previousJob?.cancel()
@@ -1084,9 +1157,8 @@ class ChatViewModel(
                 _currentConversationId.value = null
                 _currentActiveModel.value = null
                 _pendingConversationSettings.value = null
-                _allMessages.value = emptyList()
+                renderStore.clear()
                 _loadedMessagesConversationId.value = null
-                _selectedChildren.value = emptyMap()
             } finally {
                 if (switchingCoordinator.complete(request.id)) {
                     _isTransitioningToNewChat.value = false
@@ -1097,6 +1169,7 @@ class ChatViewModel(
 
     fun selectConversation(id: String) {
         if (_currentConversationId.value == id && !_isNewChatMode.value) return
+        regenerationTransitions.abortCurrent()
 
         val previousJob = switchingJob
         val request = switchingCoordinator.beginConversation(id)
@@ -1272,7 +1345,7 @@ class ChatViewModel(
                         removed != null &&
                         _currentConversationId.value == conversationId
                     ) {
-                        _selectedChildren.value = removed.repairedSelections
+                        renderStore.setSelectedChildren(removed.repairedSelections)
                     }
                 } finally {
                     state.removeQueuedSend(queued.id)
@@ -1297,30 +1370,43 @@ class ChatViewModel(
         val stoppedMsg = result.stoppedMessage
         val messages = if (stoppedMsg != null) listOf(stoppedMsg) else {
             // streamingMessage was null — mark any in-flight model message in the open list directly.
-            _allMessages.value.mapNotNull { m ->
+            renderStore.allMessages.mapNotNull { m ->
                 if (m.participant == Participant.MODEL &&
                     (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING ||
                         m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
                 ) {
                     val stopped = m.copy(status = MessageStatus.STOPPED)
-                    _allMessages.update { list -> list.map { if (it.id == m.id) stopped else it } }
+                    renderStore.updateAllMessages { list ->
+                        list.map { if (it.id == m.id) stopped else it }
+                    }
                     stopped
                 } else null
             }
         }
-        if (messages.isNotEmpty() || result.runId != null) {
+        if (result.shouldFinalize) {
             // Release the STOPPED overlay once the terminal row is in Room — otherwise the stale
             // snapshot lives on in the state and resolvePath resurrects it as a ghost bubble
             // after the persisted message is later deleted.
             generationFinalizer.launchStopFinalization(
                 state.scope, result.conversationId, result.runId, messages,
-                onFinalized = {
-                    state.clearStoppedOverlay()
-                    state.finishStopFinalization()
+                onFinalized = { success ->
+                    if (success) {
+                        // Room invalidation and the generation-state mirror are asynchronous.
+                        // Commit the exact STOPPED overlay into the visible graph and remove that
+                        // overlay as one snapshot before releasing the private state copy.
+                        if (
+                            stoppedMsg != null &&
+                            _currentConversationId.value == result.conversationId
+                        ) {
+                            renderStore.commitTerminalStreamingMessage(stoppedMsg)
+                        }
+                        state.clearStoppedOverlay()
+                    } else {
+                        emitSnackbar(getApplication<Application>().getString(R.string.failed_to_generate))
+                    }
+                    state.finishStopFinalization(success)
                 },
             )
-        } else {
-            state.finishStopFinalization()
         }
     }
 
@@ -1331,11 +1417,11 @@ class ChatViewModel(
         val conversationId = _currentConversationId.value ?: return
         val state = generationRegistry.getOrCreate(conversationId)
         if (state.generating.value) return
-        val currentAnchor = _allMessages.value.firstOrNull { it.id == currentMessageId }
+        val currentAnchor = renderStore.allMessages.firstOrNull { it.id == currentMessageId }
             ?: return
         // Edit branches are USER siblings; Regenerate branches are MODEL siblings. Never mix
         // another structural edge that happens to share the same parent into this selector.
-        val siblings = _allMessages.value.filter {
+        val siblings = renderStore.allMessages.filter {
             it.parentId == parentId &&
                 it.participant == currentAnchor.participant &&
                 !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
@@ -1344,14 +1430,14 @@ class ChatViewModel(
         if (siblings.size < 2) return
         var currentIndex = siblings.indexOfFirst { it.id == currentMessageId }
         if (currentIndex == -1) {
-            val selectedId = _selectedChildren.value[parentId]
+            val selectedId = renderStore.selectedChildren[parentId]
             currentIndex = siblings.indexOfFirst { it.id == selectedId }
         }
         if (currentIndex == -1) return
         val newIndex = (currentIndex + direction).coerceIn(0, siblings.size - 1)
         if (newIndex == currentIndex) return
         val parentRunId = parentId?.let { pid ->
-            _allMessages.value.firstOrNull { it.id == pid }?.runId
+            renderStore.allMessages.firstOrNull { it.id == pid }?.runId
         }
         
         val previousJob = switchingJob
@@ -1369,7 +1455,7 @@ class ChatViewModel(
                         switchingCoordinator.complete(request.id)
                         return@withLock
                     }
-                    val newMap = _selectedChildren.value.toMutableMap()
+                    val newMap = renderStore.selectedChildren.toMutableMap()
                     val targetMessage = siblings[newIndex]
                     val targetRunId = targetMessage.runId ?: run {
                         switchingCoordinator.complete(request.id)
@@ -1382,7 +1468,7 @@ class ChatViewModel(
                         runId = targetRunId,
                         messageSelections = newMap,
                     )
-                    _selectedChildren.value = newMap
+                    renderStore.setSelectedChildren(newMap)
                     switchingCoordinator.markTreeMutationReady(request.id, targetMessage.id)
                 }
             } catch (e: CancellationException) {
@@ -1404,15 +1490,11 @@ class ChatViewModel(
     ): SendAcceptance? {
         val acceptance = generationController.sendMessage(text, images, attachments)
         if (acceptance != null) {
-            // The message has left the composer (launched or queued) — clear this conversation's
-            // persisted draft so switching back doesn't restore text the user already sent.
-            val id = _currentConversationId.value
-            if (id != null) {
-                viewModelScope.launch {
-                    runCatching { convRepo.updateDraft(id, "", null) }
-                    // Reset the anti-loop snapshot so the next real edit writes through.
-                    lastLoadedDraft = Triple(id, "", emptyList())
-                }
+            // Durable message acceptance transfers attachment ownership before the composer
+            // clears. Invalidate older draft revisions synchronously so a cancelled UI tail-flush
+            // can never restore the submitted payload, even if the user switched conversations.
+            withContext(NonCancellable) {
+                clearAcceptedComposerDraft(acceptance.conversationId)
             }
         }
         return acceptance
@@ -1525,42 +1607,154 @@ class ChatViewModel(
 
     // ── Per-conversation draft persistence ─────────────────────
 
-    /** Snapshot of the last loaded draft, TAGGED with its conversation id; used to suppress
-     *  write-back of unchanged values (anti-loop: loading from DB must not trigger a write back).
-     *  The id tag matters: a global snapshot let conversation A's debounced clear be skipped
-     *  because it happened to equal conversation B's freshly-loaded draft. */
-    @Volatile
-    var lastLoadedDraft: Triple<String, String, List<SelectedAttachment>>? = null
+    private val draftPersistenceMutex = Mutex()
+    private val persistedComposerDrafts = mutableMapOf<String, PersistedComposerDraft>()
 
-    /** Persist the composer text and attachment list for a conversation. Fire-and-forget on
-     *  viewModelScope; the UI call site handles debouncing before calling this. */
-    fun updateDraft(conversationId: String, text: String, attachments: List<SelectedAttachment>) {
-        val last = lastLoadedDraft
-        if (last != null && last.first == conversationId && last.second == text && last.third == attachments) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val json = if (attachments.isEmpty()) null
-            else Json.encodeToString(attachments)
-            convRepo.updateDraft(conversationId, text, json)
+    /**
+     * Persists one revision-checked composer snapshot. Once a write starts it is atomic with
+     * respect to cancellation; newer UI snapshots wait behind the mutex instead of overtaking it.
+     */
+    suspend fun persistDraft(
+        conversationId: String,
+        expectedRevision: Long,
+        text: String,
+        attachments: List<SelectedAttachment>,
+        explicitlyRemovedAttachments: List<SelectedAttachment> = emptyList(),
+    ): DraftPersistResult = withContext(Dispatchers.IO + NonCancellable) {
+        draftPersistenceMutex.withLock {
+            val current = try {
+                persistedComposerDrafts[conversationId]
+                    ?: readComposerDraft(conversationId).also {
+                        persistedComposerDrafts[conversationId] = it
+                    }
+            } catch (e: Exception) {
+                DebugLog.e("ChatViewModel", "Failed to read draft for $conversationId", e)
+                return@withLock DraftPersistResult(
+                    revision = persistedComposerDrafts[conversationId]?.revision
+                        ?: expectedRevision,
+                    succeeded = false,
+                    matchesRequested = false,
+                )
+            }
+            if (current.revision != expectedRevision) {
+                reclaimDraftAttachmentFiles(explicitlyRemovedAttachments)
+                return@withLock DraftPersistResult(
+                    revision = current.revision,
+                    succeeded = true,
+                    matchesRequested =
+                        current.text == text && current.attachments == attachments,
+                )
+            }
+
+            if (current.text == text && current.attachments == attachments) {
+                reclaimDraftAttachmentFiles(explicitlyRemovedAttachments)
+                return@withLock DraftPersistResult(
+                    revision = current.revision,
+                    succeeded = true,
+                    matchesRequested = true,
+                )
+            }
+
+            try {
+                val json = if (attachments.isEmpty()) {
+                    null
+                } else {
+                    Json.encodeToString(attachments)
+                }
+                convRepo.updateDraft(conversationId, text, json)
+                val next = PersistedComposerDraft(
+                    text = text,
+                    attachments = attachments,
+                    revision = current.revision + 1L,
+                )
+                persistedComposerDrafts[conversationId] = next
+                reclaimDraftAttachmentFiles(
+                    current.attachments + explicitlyRemovedAttachments,
+                )
+                DraftPersistResult(
+                    revision = next.revision,
+                    succeeded = true,
+                    matchesRequested = true,
+                )
+            } catch (e: Exception) {
+                DebugLog.e("ChatViewModel", "Failed to persist draft for $conversationId", e)
+                DraftPersistResult(
+                    revision = current.revision,
+                    succeeded = false,
+                    matchesRequested = false,
+                )
+            }
         }
     }
 
-    /** Load a stored draft for [conversationId]. Returns [draftText] and deserialized
-     *  [SelectedAttachment] list (empty if none stored). The caller must set [loadingDraft] before
-     *  mutating UI fields with the result, to suppress the write-back snapshotFlow. */
+    /**
+     * A successfully accepted send owns the submitted files through its durable MessageEntity.
+     * Force-clearing advances the revision, invalidating every older UI tail-flush.
+     */
+    private suspend fun clearAcceptedComposerDraft(conversationId: String) =
+        withContext(Dispatchers.IO + NonCancellable) {
+            draftPersistenceMutex.withLock {
+                try {
+                    val current = persistedComposerDrafts[conversationId]
+                        ?: readComposerDraft(conversationId)
+                    convRepo.updateDraft(conversationId, "", null)
+                    persistedComposerDrafts[conversationId] = PersistedComposerDraft(
+                        text = "",
+                        attachments = emptyList(),
+                        revision = current.revision + 1L,
+                    )
+                    reclaimDraftAttachmentFiles(current.attachments)
+                } catch (e: Exception) {
+                    DebugLog.e(
+                        "ChatViewModel",
+                        "Failed to clear accepted draft for $conversationId",
+                        e,
+                    )
+                }
+            }
+        }
+
+    /** Loads and revision-tags the stored draft under the same serialization boundary as writes. */
     suspend fun loadDraft(
         conversationId: String,
-    ): Pair<String, List<SelectedAttachment>> = withContext(Dispatchers.Default) {
-        val entity = convRepo.getConversation(conversationId) ?: run {
-            lastLoadedDraft = Triple(conversationId, "", emptyList())
-            return@withContext "" to emptyList()
+    ): LoadedComposerDraft = withContext(Dispatchers.IO) {
+        draftPersistenceMutex.withLock {
+            val loaded = readComposerDraft(conversationId)
+            persistedComposerDrafts[conversationId] = loaded
+            LoadedComposerDraft(
+                text = loaded.text,
+                attachments = loaded.attachments,
+                revision = loaded.revision,
+            )
         }
+    }
+
+    private suspend fun readComposerDraft(conversationId: String): PersistedComposerDraft {
+        val priorRevision = persistedComposerDrafts[conversationId]?.revision ?: 0L
+        val entity = convRepo.getConversation(conversationId)
         val attachments: List<SelectedAttachment> = try {
-            entity.draftAttachments?.let { Json.decodeFromString<List<SelectedAttachment>>(it) } ?: emptyList()
+            entity?.draftAttachments
+                ?.let { Json.decodeFromString<List<SelectedAttachment>>(it) }
+                ?: emptyList()
         } catch (e: Exception) {
             DebugLog.w("ChatViewModel", "Failed to deserialize draft attachments for $conversationId", e)
             emptyList()
         }
-        lastLoadedDraft = Triple(conversationId, entity.draftText, attachments)
-        entity.draftText to attachments
+        return PersistedComposerDraft(
+            text = entity?.draftText.orEmpty(),
+            attachments = attachments,
+            revision = priorRevision,
+        )
+    }
+
+    private suspend fun reclaimDraftAttachmentFiles(attachments: List<SelectedAttachment>) {
+        if (attachments.isEmpty()) return
+        try {
+            convRepo.deleteUnreferencedDraftAttachmentFiles(attachments)
+        } catch (e: Exception) {
+            // The durable reference update already succeeded. A cleanup failure may leak a private
+            // file, but must never roll the draft back to a now-invalid attachment.
+            DebugLog.w("ChatViewModel", "Failed to reclaim draft attachment files", e)
+        }
     }
 }

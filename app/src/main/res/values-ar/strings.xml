@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">إضافة مرفق</string>
+    <string name="camera">الكاميرا</string>
     <string name="photos">الصور</string>
     <string name="videos">الفيديوهات</string>
     <string name="files">الملفات</string>
@@ -137,7 +138,7 @@
     <string name="thought_for_minutes_called_tools">فكّر لمدة %1$d د %2$d ث، واستدعى %3$d أداة</string>
     <string name="called_n_tools">استدعى %1$d أداة</string>
     <string name="failed_to_generate">فشل التوليد.</string>
-    <string name="generation_stopped">تم إيقاف التوليد.</string>
+    <string name="generation_stopped">تم إيقاف التوليد</string>
     <string name="import_invalid_gguf_title">ملف GGUF غير صالح</string>
     <string name="import_invalid_gguf_desc">الملف المحدد ليس نموذج GGUF صالحًا.</string>
     <string name="ok">موافق</string>
@@ -458,6 +459,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">توليد العنوان تلقائيًا</string>
     <string name="title_gen_auto_desc">توليد عنوان بعد الرد الأول</string>
+    <string name="title_gen_notifications">إظهار إشعارات توليد العنوان</string>
+    <string name="title_gen_notifications_desc">إظهار رسائل التقدم والنتيجة أثناء توليد العناوين</string>
     <string name="title_gen_model">نموذج العناوين</string>
     <string name="title_gen_current_model">استخدام النموذج الحالي</string>
     <string name="title_gen_select_model">اختيار نموذج العناوين</string>

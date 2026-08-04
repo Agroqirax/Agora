@@ -12,6 +12,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
@@ -30,8 +31,10 @@ import com.mikepenz.markdown.compose.components.markdownComponents
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageItem(
-    message: ChatMessage, 
-    onEdit: (String, String) -> Unit, 
+    message: ChatMessage,
+    onEdit: (String, String) -> Unit,
+    segmentAppearanceRegistry: SegmentAppearanceRegistry,
+    modifier: Modifier = Modifier,
     animateEntrance: Boolean = false,
     isStreaming: Boolean = false,
     isLoading: Boolean = false,
@@ -118,6 +121,10 @@ internal fun MessageItem(
         Participant.MODEL -> RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp)
         Participant.ERROR -> RoundedCornerShape(12.dp)
     }
+    val selectionRippleShape = when (message.participant) {
+        Participant.MODEL -> RoundedCornerShape(20.dp)
+        else -> shape
+    }
 
     val searchHighlight = searchQuery.takeIf { it.isNotBlank() }?.let { query ->
         val active = activeSearchMatch?.takeIf { it.messageId == message.id }
@@ -143,7 +150,7 @@ internal fun MessageItem(
     )
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .onSizeChanged {
                 onHeightChanged(it.height)
@@ -198,6 +205,7 @@ internal fun MessageItem(
                 } else {
                     AssistantMessageContent(
                         message = message,
+                        segmentAppearanceRegistry = segmentAppearanceRegistry,
                         contextAlpha = contextAlpha,
                         isStreaming = isStreaming,
                         isLoading = isLoading,
@@ -232,6 +240,7 @@ internal fun MessageItem(
                 Box(
                     modifier = Modifier
                         .matchParentSize()
+                        .clip(selectionRippleShape)
                         .clickable(onClick = onToggleSelection),
                 )
             }

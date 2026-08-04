@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -42,9 +42,9 @@ private fun isBlockString(value: StreamingJsonNode): Boolean =
         (value.content.length > 40 || value.content.contains('\n'))
 
 @Composable
-private fun KeyChip(label: String, color: androidx.compose.ui.graphics.Color) {
+private fun JsonLabelPill(label: String, color: androidx.compose.ui.graphics.Color) {
     Surface(
-        shape = RoundedCornerShape(4.dp),
+        shape = CircleShape,
         color = MaterialTheme.colorScheme.surfaceContainerHighest
     ) {
         Text(
@@ -75,7 +75,7 @@ private fun JsonObjectView(obj: StreamingJsonObject, depth: Int) {
                 Column(modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                         if (entry.key.isNotEmpty() || entry.keyComplete) {
-                            KeyChip(entry.key, MaterialTheme.colorScheme.primary)
+                            JsonLabelPill(entry.key, MaterialTheme.colorScheme.primary)
                         }
                         if (value != null && !blockString) {
                             Spacer(Modifier.width(8.dp))
@@ -139,7 +139,7 @@ private fun JsonArrayView(arr: StreamingJsonArray, depth: Int) {
                     modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                     verticalAlignment = Alignment.Top,
                 ) {
-                    KeyChip("${index + 1}", MaterialTheme.colorScheme.onSurfaceVariant)
+                    JsonLabelPill("${index + 1}", MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(Modifier.width(8.dp))
                     when (item) {
                         is StreamingJsonScalar -> JsonScalarView(

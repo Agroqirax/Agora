@@ -21,6 +21,7 @@ import com.newoether.agora.viewmodel.GenerationManager
 import com.newoether.agora.viewmodel.GenerationRequestBuilder
 import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
+import com.newoether.agora.viewmodel.ShellConfirmationController
 import com.newoether.agora.viewmodel.fallbackConversationTitle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +55,7 @@ class TaskExecutionEngine(
     sandboxFactory: SandboxManagerFactory?,
     private val appScope: CoroutineScope,
     private val executionCoordinator: ConversationExecutionCoordinator,
+    shellConfirmation: ShellConfirmationController,
     private val automationExecutionGate: AutomationExecutionGate = AutomationExecutionGate(),
 ) {
     sealed interface Result {
@@ -109,8 +111,9 @@ class TaskExecutionEngine(
         context = appContext,
         sandboxFactory = sandboxFactory,
     ).also {
-        // A headless worker cannot ask the user to approve a remote mutation. Fail closed.
-        it.onConfirmShellCommand = { _, _ -> false }
+        // Foreground Task/Loop executions share the exact same prompt and session trust state as
+        // Chat. ShellConfirmationController itself fails fast when no Activity is visible.
+        it.onConfirmShellCommand = shellConfirmation::confirm
     }
 
     /**
@@ -179,6 +182,9 @@ class TaskExecutionEngine(
         // custom providers before resolving either the model or request configuration.
         settings.awaitInitialLoad()
         providerRegistry.awaitInitialSync()
+        // Process-death recovery is a startup barrier, not a best-effort background cleanup.
+        // A Worker must never inspect/reuse an orphaned live Run before that barrier commits.
+        convRepo.ensureRunRecovery()
         if (!precondition()) {
             return Result.Failure("Execution cancelled")
         }
@@ -234,11 +240,11 @@ class TaskExecutionEngine(
                 lastCheckpointAt = startTime,
             ),
             listOf(userMessage, modelMessage),
+            messageSelectionUpdates = mapOf(
+                leafId to userMessageId,
+                userMessageId to modelMessageId,
+            ),
         )
-        convRepo.selectRunBranch(conversationId, parentRunId, runId)
-        convRepo.getConversation(conversationId)?.let { conv ->
-            convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-        }
 
         return try {
             suspend fun fail(reason: String): Result.Failure {

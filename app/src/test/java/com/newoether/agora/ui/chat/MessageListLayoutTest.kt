@@ -4,6 +4,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.chat.message.assistantActionsVisible
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,6 +15,42 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageListLayoutTest {
+    @Test
+    fun attachmentDraftMutationsBypassTheTextDebounce() {
+        val attachment = SelectedAttachment(uri = "file:///draft", type = "file")
+
+        assertEquals(
+            0L,
+            composerDraftWriteDelayMillis(
+                previousAttachments = emptyList(),
+                nextAttachments = listOf(attachment),
+                hasPendingRemovals = false,
+            ),
+        )
+        assertEquals(
+            0L,
+            composerDraftWriteDelayMillis(
+                previousAttachments = listOf(attachment),
+                nextAttachments = emptyList(),
+                hasPendingRemovals = true,
+            ),
+        )
+    }
+
+    @Test
+    fun textOnlyDraftMutationsRemainCoalesced() {
+        val attachment = SelectedAttachment(uri = "file:///draft", type = "file")
+
+        assertEquals(
+            300L,
+            composerDraftWriteDelayMillis(
+                previousAttachments = listOf(attachment),
+                nextAttachments = listOf(attachment),
+                hasPendingRemovals = false,
+            ),
+        )
+    }
+
     @Test
     fun appendingUserKeepsPreviousAssistantInTheSameTurn() {
         val user1 = message("user-1", Participant.USER)
@@ -152,6 +189,426 @@ class MessageListLayoutTest {
         assertEquals(
             2_000,
             calculateTailLayoutHeightPx(minimum, contentHeightPx = 2_000),
+        )
+    }
+
+    @Test
+    fun embeddedTailAnchorLeavesBlankSpaceAfterCurrentContent() {
+        val viewport = 1_000
+        val top = 140
+        val composer = 180
+
+        val messageTail = calculateTailMinHeightPx(
+            viewportHeightPx = viewport,
+            targetTopPx = top,
+            bottomObstructionPx = composer,
+        )
+
+        assertEquals(viewport - top, messageTail + composer)
+    }
+
+    @Test
+    fun absoluteBottomStateRetargetsWhenStreamingExtentChanges() {
+        var phase = reduceAbsoluteBottomScroll(
+            AbsoluteBottomScrollPhase.IDLE,
+            AbsoluteBottomScrollEvent.Requested,
+        )
+        assertEquals(AbsoluteBottomScrollPhase.SEEKING, phase)
+
+        phase = reduceAbsoluteBottomScroll(
+            phase,
+            AbsoluteBottomScrollEvent.TargetAvailable,
+        )
+        assertEquals(AbsoluteBottomScrollPhase.FOLLOWING, phase)
+
+        phase = reduceAbsoluteBottomScroll(
+            phase,
+            AbsoluteBottomScrollEvent.BottomReached,
+        )
+        assertEquals(AbsoluteBottomScrollPhase.SETTLING, phase)
+
+        phase = reduceAbsoluteBottomScroll(
+            phase,
+            AbsoluteBottomScrollEvent.ExtentChanged,
+        )
+        assertEquals(AbsoluteBottomScrollPhase.FOLLOWING, phase)
+
+        phase = reduceAbsoluteBottomScroll(
+            phase,
+            AbsoluteBottomScrollEvent.BottomReached,
+        )
+        phase = reduceAbsoluteBottomScroll(
+            phase,
+            AbsoluteBottomScrollEvent.Finished,
+        )
+        assertEquals(AbsoluteBottomScrollPhase.IDLE, phase)
+    }
+
+    @Test
+    fun userCancellationReleasesEveryAbsoluteBottomPhase() {
+        AbsoluteBottomScrollPhase.entries
+            .filter { phase -> phase.isActive }
+            .forEach { phase ->
+                assertEquals(
+                    AbsoluteBottomScrollPhase.IDLE,
+                    reduceAbsoluteBottomScroll(
+                        phase,
+                        AbsoluteBottomScrollEvent.Cancelled,
+                    ),
+                )
+            }
+    }
+
+    @Test
+    fun absoluteBottomDistanceIncludesAfterContentPadding() {
+        val snapshot = AbsoluteBottomLayoutSnapshot(
+            totalItemsCount = 4,
+            canScrollForward = true,
+            viewportStartOffsetPx = -8,
+            viewportEndOffsetPx = 1_000,
+            afterContentPaddingPx = 24,
+            sentinelOffsetPx = 1_040,
+            sentinelSizePx = 1,
+        )
+
+        assertEquals(65f, snapshot.remainingDistancePx ?: -1f, 0f)
+    }
+
+    @Test
+    fun coarseAbsoluteBottomEstimateTargetsThePhysicalEnd() {
+        assertEquals(
+            421f,
+            estimateAbsoluteBottomDistancePx(
+                lastVisibleIndex = 2,
+                lastVisibleEndOffsetPx = 900,
+                viewportEndOffsetPx = 1_000,
+                afterContentPaddingPx = 20,
+                totalItemsCount = 6,
+                estimatedItemSizePx = { index ->
+                    when (index) {
+                        3 -> 200f
+                        4 -> 300f
+                        else -> 1f
+                    }
+                },
+            ),
+            0f,
+        )
+    }
+
+    @Test
+    fun scrollToBottomButtonUsesRealScrollableExtentAndLocksDuringSeek() {
+        assertTrue(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+            ),
+        )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.SEEKING,
+            ),
+        )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = false,
+                isNearBottom = true,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+            ),
+        )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = true,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+            ),
+        )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = true,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+            ),
+        )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = false,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+            ),
+        )
+    }
+
+    @Test
+    fun scrollToBottomProximityUsesHysteresis() {
+        var nearBottom = reduceAbsoluteBottomProximity(
+            wasNearBottom = false,
+            canScrollForward = true,
+            remainingDistancePx = 63f,
+            hideThresholdPx = 64f,
+            showThresholdPx = 96f,
+        )
+        assertTrue(nearBottom)
+
+        nearBottom = reduceAbsoluteBottomProximity(
+            wasNearBottom = nearBottom,
+            canScrollForward = true,
+            remainingDistancePx = 80f,
+            hideThresholdPx = 64f,
+            showThresholdPx = 96f,
+        )
+        assertTrue(nearBottom)
+
+        nearBottom = reduceAbsoluteBottomProximity(
+            wasNearBottom = nearBottom,
+            canScrollForward = true,
+            remainingDistancePx = 97f,
+            hideThresholdPx = 64f,
+            showThresholdPx = 96f,
+        )
+        assertFalse(nearBottom)
+    }
+
+    @Test
+    fun attachedStreamingTailSurvivesContentGrowth() {
+        var mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.INACTIVE,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = true,
+                atAbsoluteBottom = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.ATTACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = false,
+                userDragInProgress = false,
+            ),
+        )
+
+        assertEquals(StreamingTailFollowMode.ATTACHED, mode)
+    }
+
+    @Test
+    fun realUserDragDetachesUntilTheViewportReturnsToBottom() {
+        var mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.INACTIVE,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = true,
+                atAbsoluteBottom = true,
+            ),
+        )
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.UserDragStarted,
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = true,
+                userDragInProgress = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = false,
+                userDragInProgress = false,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = true,
+                userDragInProgress = false,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ExplicitBottomReached(
+                atAbsoluteBottom = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.ATTACHED, mode)
+    }
+
+    @Test
+    fun detachedTailIgnoresStreamingGeometryUntilExplicitUserReturn() {
+        var mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.DETACHED,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = true,
+                atAbsoluteBottom = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = true,
+                userDragInProgress = false,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+    }
+
+    @Test
+    fun attachedGenerationSettlesFinalLayoutBeforeReleasingTailFollow() {
+        var mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.ATTACHED,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = false,
+                atAbsoluteBottom = true,
+            ),
+        )
+
+        assertEquals(StreamingTailFollowMode.SETTLING, mode)
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.SettlingFinished,
+        )
+        assertEquals(StreamingTailFollowMode.INACTIVE, mode)
+    }
+
+    @Test
+    fun detachedGenerationDoesNotReattachWhileFinishing() {
+        val mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.DETACHED,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = false,
+                atAbsoluteBottom = true,
+            ),
+        )
+
+        assertEquals(StreamingTailFollowMode.INACTIVE, mode)
+    }
+
+    @Test
+    fun streamingTailArmsUntilThePageReachesAbsoluteBottom() {
+        var mode = reduceStreamingTailFollow(
+            StreamingTailFollowMode.INACTIVE,
+            StreamingTailFollowEvent.GenerationChanged(
+                active = true,
+                atAbsoluteBottom = false,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.ARMED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportSettled(
+                atAbsoluteBottom = true,
+                userDragInProgress = false,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.ATTACHED, mode)
+    }
+
+    @Test
+    fun programmaticSendScrollPausesTailWithoutCreatingASecondScrollOwner() {
+        var mode = reduceStreamingTailGenerationAvailability(
+            current = StreamingTailFollowMode.INACTIVE,
+            active = true,
+            autoFollowEnabled = false,
+            autoFollowPaused = true,
+            atAbsoluteBottom = false,
+        )
+        assertEquals(StreamingTailFollowMode.INACTIVE, mode)
+
+        mode = reduceStreamingTailGenerationAvailability(
+            current = mode,
+            active = true,
+            autoFollowEnabled = true,
+            autoFollowPaused = false,
+            atAbsoluteBottom = false,
+        )
+        assertEquals(StreamingTailFollowMode.ARMED, mode)
+    }
+
+    @Test
+    fun nonScrollCompetitionStillDetachesStreamingTail() {
+        val mode = reduceStreamingTailGenerationAvailability(
+            current = StreamingTailFollowMode.ATTACHED,
+            active = true,
+            autoFollowEnabled = false,
+            autoFollowPaused = false,
+            atAbsoluteBottom = true,
+        )
+
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+    }
+
+    @Test
+    fun coalescedTailStepIsBoundedAndMovesTowardTarget() {
+        assertEquals(
+            32f,
+            coalescedScrollStep(
+                errorPx = 500f,
+                elapsedSeconds = 0.016f,
+                timeConstantSeconds = 0.055f,
+                maximumVelocityPxPerSecond = 2_000f,
+                minimumStepPx = 2f,
+            ),
+            0.001f,
+        )
+        assertTrue(
+            coalescedScrollStep(
+                errorPx = -20f,
+                elapsedSeconds = 0.016f,
+                timeConstantSeconds = 0.055f,
+                maximumVelocityPxPerSecond = 2_000f,
+                minimumStepPx = 2f,
+            ) < 0f,
         )
     }
 
@@ -377,6 +834,102 @@ class MessageListLayoutTest {
                 isStreaming = false,
                 regenerateRequested = true,
             )
+        )
+    }
+
+    @Test
+    fun editReplacementResolvesOnlyAfterTheSourceLeavesTheVisiblePath() {
+        val source = message("source", Participant.USER).copy(
+            parentId = "parent",
+            text = "old",
+        )
+        val pending = PendingEditVisualReplacement(
+            sourceMessageId = source.id,
+            sourceParentId = source.parentId,
+            submittedText = "edited",
+            stableVisualKey = source.id,
+        )
+        val replacement = message("replacement", Participant.USER).copy(
+            parentId = "parent",
+            text = "edited",
+        )
+
+        assertNull(
+            resolvePendingEditReplacement(
+                messages = listOf(source, replacement),
+                pending = pending,
+            ),
+        )
+        assertEquals(
+            replacement,
+            resolvePendingEditReplacement(
+                messages = listOf(replacement),
+                pending = pending,
+            ),
+        )
+    }
+
+    @Test
+    fun editReplacementRejectsAnUnrelatedUserWithTheSameText() {
+        val pending = PendingEditVisualReplacement(
+            sourceMessageId = "source",
+            sourceParentId = "parent",
+            submittedText = "edited",
+            stableVisualKey = "source",
+        )
+        val unrelated = message("unrelated", Participant.USER).copy(
+            parentId = "different-parent",
+            text = "edited",
+        )
+
+        assertNull(
+            resolvePendingEditReplacement(
+                messages = listOf(unrelated),
+                pending = pending,
+            ),
+        )
+    }
+
+    @Test
+    fun regenerationExitIncludesEveryVisibleElementAfterTheOldAnswer() {
+        val messages = listOf(
+            message("user-1", Participant.USER),
+            message("answer-1", Participant.MODEL),
+            message("user-2", Participant.USER),
+            message("answer-2", Participant.MODEL),
+        )
+
+        assertEquals(
+            linkedSetOf("answer-1", "user-2", "answer-2"),
+            regenerationExitMessageIds(messages, oldMessageId = "answer-1"),
+        )
+    }
+
+    @Test
+    fun regenerationKeepsFadedComponentsAfterTheNewSendingMessage() {
+        val user = message("user-1", Participant.USER)
+        val oldAnswer = message("answer-old", Participant.MODEL)
+        val downstreamUser = message("user-2", Participant.USER)
+        val downstreamAnswer = message("answer-2", Participant.MODEL)
+        val oldPath = listOf(user, oldAnswer, downstreamUser, downstreamAnswer)
+        val retained = regenerationExitMessages(oldPath, oldAnswer.id)
+        val sending = message("answer-new", Participant.MODEL).copy(
+            status = MessageStatus.SENDING,
+        )
+
+        assertEquals(
+            listOf("user-1", "answer-new", "answer-old", "user-2", "answer-2"),
+            mergeRegenerationPresentationMessages(
+                activeMessages = listOf(user, sending),
+                retainedExitMessages = retained,
+            ).map { message -> message.id },
+        )
+        assertEquals(
+            oldPath,
+            mergeRegenerationPresentationMessages(
+                activeMessages = oldPath,
+                retainedExitMessages = retained,
+            ),
         )
     }
 

@@ -13,6 +13,7 @@ class ConversationStateRegistryTest {
         registry.attachUiCallbacks(firstOwner) { }
         val state = registry.getOrCreate("conversation")
         val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
 
         state.stop()
         registry.detachUiCallbacks(firstOwner)
@@ -24,7 +25,8 @@ class ConversationStateRegistryTest {
         assertTrue(state.stopping.value)
         assertTrue("conversation" in registry.activeConversationIds.value)
 
-        assertTrue(state.endGeneration(token))
+        assertFalse(state.endGeneration(token))
+        assertTrue(state.finishStopFinalization(success = true))
         assertFalse(state.generating.value)
         assertFalse(state.stopping.value)
         assertFalse("conversation" in registry.activeConversationIds.value)

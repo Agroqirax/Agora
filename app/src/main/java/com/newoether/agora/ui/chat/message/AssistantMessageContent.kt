@@ -45,6 +45,8 @@ import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 
+internal val AssistantMessageHorizontalInset = 8.dp
+
 private enum class AssistantStatusKind {
     ACTIVE,
     THINKING,
@@ -120,6 +122,7 @@ private fun AssistantStatusRow(status: AssistantStatusPresentation) {
 @Composable
 internal fun AssistantMessageContent(
     message: ChatMessage,
+    segmentAppearanceRegistry: SegmentAppearanceRegistry,
     contextAlpha: Modifier,
     isStreaming: Boolean,
     isLoading: Boolean,
@@ -148,25 +151,6 @@ internal fun AssistantMessageContent(
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
     var showMenu by remember { mutableStateOf(false) }
-    var regenerateRequested by remember(message.id) { mutableStateOf(false) }
-    LaunchedEffect(regenerateRequested, isLoading, isStreaming) {
-        if (regenerateRequested && !isLoading && !isStreaming) {
-            regenerateRequested = false
-        }
-    }
-    val statusChromeAlpha by animateFloatAsState(
-        targetValue = if (regenerateRequested) 0f else 1f,
-        animationSpec = tween(
-            durationMillis = if (regenerateRequested) {
-                ACTIONS_EXIT_DURATION_MS
-            } else {
-                ACTIONS_ENTER_DURATION_MS
-            },
-            easing = LinearEasing,
-        ),
-        label = "assistantStatusChrome:${message.id}",
-    )
-
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
     // stop button) pass through normally. Text selection is already
@@ -180,7 +164,7 @@ internal fun AssistantMessageContent(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp)
+            .padding(horizontal = AssistantMessageHorizontalInset)
             .then(contextAlpha)
             .then(if (isStreaming) Modifier.nestedScroll(horizontalScrollEater) else Modifier)
     ) {
@@ -226,7 +210,6 @@ internal fun AssistantMessageContent(
                     }
                     Crossfade(
                         targetState = AssistantStatusPresentation(displayText, statusKind),
-                        modifier = Modifier.graphicsLayer { alpha = statusChromeAlpha },
                         animationSpec = tween(
                             durationMillis = STATUS_CROSSFADE_DURATION_MS,
                             easing = LinearEasing,
@@ -260,57 +243,12 @@ internal fun AssistantMessageContent(
                 val useTimelineSegments = normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
                     mergedSegments.any { it.type == "answer" }
                 val groupAdjacentTimelineTools = normalizedToolCallDisplayMode == ToolCallDisplayModes.GROUPED_TIMELINE
-                val timelineBlockKeys = remember(
-                    message.id,
-                    mergedSegments,
-                    groupAdjacentTimelineTools,
-                ) {
-                    buildTimelineBlockKeys(
-                        message.id,
-                        mergedSegments,
-                        groupAdjacentTimelineTools,
-                    )
-                }
-                val timelineAppearanceSeenKeys = remember(
-                    message.id,
-                    normalizedToolCallDisplayMode,
-                ) {
-                    timelineBlockKeys.toMutableSet()
-                }
-                var timelineAppearanceInitialized by remember(
-                    message.id,
-                    normalizedToolCallDisplayMode,
-                ) {
-                    mutableStateOf(false)
-                }
-                val timelineAnimatedBlockKeys = if (
-                    isStreaming && timelineAppearanceInitialized
-                ) {
-                    timelineBlockKeys.filterNotTo(linkedSetOf()) {
-                        it in timelineAppearanceSeenKeys
-                    }
-                } else {
-                    emptySet()
-                }
                 val detailSegments = remember(mergedSegments) {
                     mergedSegments.filter { it.type != "answer" }
                 }
                 val compactVisible = !useTimelineSegments && detailSegments.isNotEmpty()
-                var compactAppearanceSeen by remember(
-                    message.id,
-                    normalizedToolCallDisplayMode,
-                ) {
-                    mutableStateOf(compactVisible)
-                }
-                val animateCompactAppearance =
-                    isStreaming && compactVisible && !compactAppearanceSeen
-                SideEffect {
-                    timelineAppearanceSeenKeys.addAll(timelineBlockKeys)
-                    if (!timelineAppearanceInitialized) {
-                        timelineAppearanceInitialized = true
-                    }
-                    if (compactVisible) compactAppearanceSeen = true
-                }
+                val compactAppearanceKey = "${message.id}:compact"
+                val compactCardAppearanceKey = "$compactAppearanceKey:card"
 
                 if (useTimelineSegments) {
                     TimelineSegmentsContent(
@@ -321,7 +259,7 @@ internal fun AssistantMessageContent(
                         groupAdjacentBlocks = groupAdjacentTimelineTools,
                         expandedStates = thoughtExpandedStates,
                         renderContext = renderContext,
-                        animatedBlockKeys = timelineAnimatedBlockKeys,
+                        segmentAppearanceRegistry = segmentAppearanceRegistry,
                         onLayoutMutationStarted = onLayoutMutationStarted,
                         onLayoutMutationSettled = onLayoutMutationSettled,
                         onSegmentClick = { indices ->
@@ -335,8 +273,9 @@ internal fun AssistantMessageContent(
                 // message.text below as the complete answer.
                 if (compactVisible) {
                     AnimatedTimelineBlockAppearance(
-                        animationKey = "${message.id}:compact",
-                        animate = animateCompactAppearance,
+                        animationKey = compactAppearanceKey,
+                        appearanceRegistry = segmentAppearanceRegistry,
+                        isStreaming = isStreaming,
                     ) {
                         CompactSegmentBlock(
                             segs = detailSegments,
@@ -346,6 +285,8 @@ internal fun AssistantMessageContent(
                             useLiveStatus = true,
                             expandedStates = thoughtExpandedStates,
                             expansionKey = message.id,
+                            cardAppearanceKey = compactCardAppearanceKey,
+                            segmentAppearanceRegistry = segmentAppearanceRegistry,
                             onExpansionStarted = onLayoutMutationStarted,
                             onExpansionSettled = onLayoutMutationSettled,
                             onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
@@ -412,7 +353,7 @@ internal fun AssistantMessageContent(
                 if (message.participant == Participant.MODEL && showActions) {
                     val actionsVisible = assistantActionsVisible(
                         isStreaming = isStreaming,
-                        regenerateRequested = regenerateRequested,
+                        regenerateRequested = false,
                     )
                     val actionsEnabled = actionsVisible && !isLoading
                     val actionsAlpha by animateFloatAsState(
@@ -464,9 +405,7 @@ internal fun AssistantMessageContent(
                         }
                         IconButton(
                             onClick = {
-                                if (onRegenerate(message.id)) {
-                                    regenerateRequested = true
-                                }
+                                onRegenerate(message.id)
                             },
                             enabled = actionsEnabled,
                             modifier = Modifier.size(32.dp),
@@ -498,7 +437,7 @@ internal fun AssistantMessageContent(
                             Icon(
                                 Icons.Default.Share,
                                 contentDescription = stringResource(R.string.conversation_share),
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(16.dp),
                                 tint = actionTint,
                             )
                         }

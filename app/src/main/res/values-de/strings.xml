@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">Anhang hinzufügen</string>
+    <string name="camera">Kamera</string>
     <string name="photos">Fotos</string>
     <string name="videos">Videos</string>
     <string name="files">Dateien</string>
@@ -137,7 +138,7 @@
     <string name="thought_for_minutes_called_tools">%1$dm %2$ds nachgedacht, %3$d Werkzeuge aufgerufen</string>
     <string name="called_n_tools">%1$d Werkzeuge aufgerufen</string>
     <string name="failed_to_generate">Generierung fehlgeschlagen.</string>
-    <string name="generation_stopped">Generierung gestoppt.</string>
+    <string name="generation_stopped">Generierung gestoppt</string>
     <string name="import_invalid_gguf_title">Ungültige GGUF-Datei</string>
     <string name="import_invalid_gguf_desc">Die ausgewählte Datei ist kein gültiges GGUF-Modell.</string>
     <string name="ok">OK</string>
@@ -458,6 +459,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Titel automatisch generieren</string>
     <string name="title_gen_auto_desc">Nach der ersten Antwort einen Titel generieren</string>
+    <string name="title_gen_notifications">Benachrichtigungen zur Titelgenerierung anzeigen</string>
+    <string name="title_gen_notifications_desc">Fortschritts- und Ergebnismeldungen bei der Titelgenerierung anzeigen</string>
     <string name="title_gen_model">Titelmodell</string>
     <string name="title_gen_current_model">Aktuelles Modell verwenden</string>
     <string name="title_gen_select_model">Titelmodell auswählen</string>

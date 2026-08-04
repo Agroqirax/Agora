@@ -52,7 +52,8 @@ class MessagePayloadBuilder(
                 "image" -> {
                     mediaUris.add(att.localPath ?: att.uri)
                     metaItems.add(AttachmentItem(
-                        originalUri = att.uri, type = "image", mimeType = att.mimeType,
+                        originalUri = att.localPath?.let { "file://$it" } ?: att.uri,
+                        type = "image", mimeType = att.mimeType,
                         imageIndex = nextImageIndex
                     ))
                     nextImageIndex++

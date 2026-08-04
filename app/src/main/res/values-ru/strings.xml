@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">Добавить вложение</string>
+    <string name="camera">Камера</string>
     <string name="photos">Фото</string>
     <string name="videos">Видео</string>
     <string name="files">Файлы</string>
@@ -137,7 +138,7 @@
     <string name="thought_for_minutes_called_tools">Размышление %1$d мин %2$d с, вызвано инструментов: %3$d</string>
     <string name="called_n_tools">Вызвано инструментов: %1$d</string>
     <string name="failed_to_generate">Не удалось сгенерировать.</string>
-    <string name="generation_stopped">Генерация остановлена.</string>
+    <string name="generation_stopped">Генерация остановлена</string>
     <string name="import_invalid_gguf_title">Недопустимый файл GGUF</string>
     <string name="import_invalid_gguf_desc">Выбранный файл не является допустимой моделью GGUF.</string>
     <string name="ok">ОК</string>
@@ -458,6 +459,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Автоматически генерировать заголовок</string>
     <string name="title_gen_auto_desc">Генерировать заголовок после первого ответа</string>
+    <string name="title_gen_notifications">Показывать уведомления о создании заголовка</string>
+    <string name="title_gen_notifications_desc">Показывать ход выполнения и результат при создании заголовков</string>
     <string name="title_gen_model">Модель заголовков</string>
     <string name="title_gen_current_model">Использовать текущую модель</string>
     <string name="title_gen_select_model">Выбрать модель заголовков</string>

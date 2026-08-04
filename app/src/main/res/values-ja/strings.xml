@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">添付を追加</string>
+    <string name="camera">カメラ</string>
     <string name="photos">写真</string>
     <string name="videos">動画</string>
     <string name="files">ファイル</string>
@@ -137,7 +138,7 @@
     <string name="thought_for_minutes_called_tools">%1$d 分 %2$d 秒思考し、%3$d 個のツールを呼び出しました</string>
     <string name="called_n_tools">%1$d 個のツールを呼び出しました</string>
     <string name="failed_to_generate">生成に失敗しました。</string>
-    <string name="generation_stopped">生成を停止しました。</string>
+    <string name="generation_stopped">生成を停止しました</string>
     <string name="import_invalid_gguf_title">無効な GGUF ファイル</string>
     <string name="import_invalid_gguf_desc">選択したファイルは有効な GGUF モデルではありません。</string>
     <string name="ok">OK</string>
@@ -458,6 +459,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">タイトルを自動生成</string>
     <string name="title_gen_auto_desc">最初の応答後にタイトルを生成</string>
+    <string name="title_gen_notifications">タイトル生成の通知を表示</string>
+    <string name="title_gen_notifications_desc">タイトル生成中の進行状況と結果メッセージを表示します</string>
     <string name="title_gen_model">タイトルモデル</string>
     <string name="title_gen_current_model">現在のモデルを使用</string>
     <string name="title_gen_select_model">タイトルモデルを選択</string>

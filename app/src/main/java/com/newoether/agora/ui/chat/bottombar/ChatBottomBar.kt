@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Image
 
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Language
@@ -39,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -59,6 +62,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -129,6 +134,11 @@ fun ChatBottomBar(
     val context = LocalContext.current
     val haptics = LocalAgoraHaptics.current
     var showThinkingSheet by rememberSaveable { mutableStateOf(false) }
+    val composerOcclusionColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
+    val composerOcclusionShape = RoundedCornerShape(
+        topStart = 20.dp,
+        topEnd = 20.dp,
+    )
 
     // Restore PDF dialog after viewer closes
     LaunchedEffect(fullScreenViewerUrls) {
@@ -147,6 +157,44 @@ fun ChatBottomBar(
     val fileLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris -> composer.onPickFiles(uris, onInitPdfSelection) }
+    val activityLaunchScope = rememberCoroutineScope()
+    var pendingCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingCameraPermissionPath by rememberSaveable { mutableStateOf<String?>(null) }
+    var internalCameraPath by rememberSaveable { mutableStateOf<String?>(null) }
+    val cameraLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.TakePicture()
+    ) { captured ->
+        pendingCameraPath?.let { privatePath ->
+            composer.completeCameraCapture(privatePath, captured)
+        }
+        pendingCameraPath = null
+    }
+    val cameraPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val privatePath = pendingCameraPermissionPath
+        pendingCameraPermissionPath = null
+        if (granted && privatePath != null) {
+            internalCameraPath = privatePath
+        } else if (privatePath != null) {
+            composer.completeCameraCapture(privatePath, captured = false)
+            composer.reportCameraPreparationFailure()
+        }
+    }
+
+    fun launchInternalCamera(privatePath: String) {
+        if (
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.CAMERA,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            internalCameraPath = privatePath
+        } else {
+            pendingCameraPermissionPath = privatePath
+            cameraPermissionLauncher.launch(android.Manifest.permission.CAMERA)
+        }
+    }
 
     Box(modifier = modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier).padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 12.dp)) {
         Column(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)) {
@@ -158,16 +206,24 @@ fun ChatBottomBar(
                 Spacer(modifier = Modifier.height(44.dp))
             }
 
-            Column(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier)) {
-        AnimatedVisibility(
-            visible = activeLoop != null,
-            enter = androidx.compose.animation.expandVertically(tween(250)) + fadeIn(tween(200)),
-            exit = shrinkVertically(tween(250)) + fadeOut(tween(180)),
-        ) {
-            activeLoop?.let { loop ->
-                LoopControlBar(loop = loop, isRunning = loopRunning, onStop = onStopLoop)
-            }
-        }
+            ComposerStatusColumn(
+                activeLoop = activeLoop,
+                loopRunning = loopRunning,
+                onStopLoop = onStopLoop,
+                queuedSends = queuedSends,
+                onRemoveQueuedSend = onRemoveQueuedSend,
+                modifier = Modifier.zIndex(0f),
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (isExpanded) Modifier.weight(1f) else Modifier)
+                    .animateContentSize(animationSpec = tween(durationMillis = 400))
+                    .clip(composerOcclusionShape)
+                    .background(composerOcclusionColor)
+                    .zIndex(1f),
+            ) {
         // Also shown while expanded: hiding it there meant a full-screen composer gave no sign
         // that attachments were about to be sent.
         if (composer.selectedAttachments.isNotEmpty()) {
@@ -178,12 +234,6 @@ fun ChatBottomBar(
                 onPdfPagesClick = onPdfPagesClick,
             )
         }
-        // Directly above the text field (below the attachment preview) so the queue banner hugs
-        // the input — matching ChatGPT/Claude desktop and the LoopControlBar cron banner.
-        QueuedMessagesBanner(
-            queuedSends = queuedSends,
-            onRemove = onRemoveQueuedSend,
-        )
 
         Box(modifier = Modifier.fillMaxWidth().then(if (isExpanded) Modifier.weight(1f) else Modifier).noOpBringIntoView()) {
             TextField(
@@ -262,6 +312,42 @@ fun ChatBottomBar(
                         matchTextFieldWidth = false,
                         shape = RoundedCornerShape(16.dp)
                     ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.PhotoCamera,
+                                        null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(stringResource(R.string.camera))
+                                }
+                            },
+                            onClick = {
+                                haptics.selection()
+                                showAddMenu = false
+                                lastAddDismissTime = 0L
+                                activityLaunchScope.launch {
+                                    val target = composer.createCameraCaptureTarget()
+                                    if (target == null) {
+                                        composer.reportCameraPreparationFailure()
+                                        return@launch
+                                    }
+                                    if (canLaunchSystemImageCapture(context)) {
+                                        pendingCameraPath = target.privatePath
+                                        runCatching {
+                                            cameraLauncher.launch(target.uri)
+                                        }.onFailure {
+                                            pendingCameraPath = null
+                                            launchInternalCamera(target.privatePath)
+                                        }
+                                    } else {
+                                        launchInternalCamera(target.privatePath)
+                                    }
+                                }
+                            },
+                        )
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -612,12 +698,31 @@ fun ChatBottomBar(
         }
     }
 
-    // File rejection dialog
+    internalCameraPath?.let { privatePath ->
+        InternalCameraCaptureDialog(
+            targetPath = privatePath,
+            onCaptured = {
+                internalCameraPath = null
+                composer.completeCameraCapture(privatePath, captured = true)
+            },
+            onCancelled = {
+                internalCameraPath = null
+                composer.completeCameraCapture(privatePath, captured = false)
+            },
+            onFailure = {
+                internalCameraPath = null
+                composer.completeCameraCapture(privatePath, captured = false)
+                composer.reportCameraPreparationFailure()
+            },
+        )
+    }
+
+    // Attachment rejection / camera failure dialog
     if (composer.rejectedMessage != null) {
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { composer.rejectedMessage = null },
-            title = { Text(stringResource(R.string.file_unsupported_title), fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(composer.rejectedTitleRes), fontWeight = FontWeight.Bold) },
             text = { Text(composer.rejectedMessage!!) },
             confirmButton = {
                 TextButton(onClick = { composer.rejectedMessage = null }) {

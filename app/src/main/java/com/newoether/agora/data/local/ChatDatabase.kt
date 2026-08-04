@@ -8,6 +8,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.repairSelectionsAfterQueuedRemoval
+import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.RunRecoveryPolicy
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.data.local.migration.MIGRATION_16_17
@@ -246,6 +248,36 @@ data class IndexableMessage(
     val text: String,
 )
 
+data class RunGraphCommit(
+    val messages: List<MessageEntity>,
+    val messageSelections: Map<String?, String>,
+    val runSelections: Map<String?, String>,
+)
+
+data class PendingRunInputCommit(
+    val message: MessageEntity,
+    val messageSelections: Map<String?, String>,
+)
+
+data class ClaimedRunPassCommit(
+    val claimedPass: ClaimedRunPass,
+    val placeholder: MessageEntity,
+    val messageSelections: Map<String?, String>,
+)
+
+private fun decodeSelectionMap(raw: String?): MutableMap<String?, String> =
+    raw?.let {
+        runCatching {
+            Json.decodeFromString<Map<String, String>>(it)
+                .mapKeysTo(mutableMapOf()) { entry ->
+                    if (entry.key == "null") null else entry.key
+                }
+        }.getOrDefault(mutableMapOf())
+    } ?: mutableMapOf()
+
+private fun encodeSelectionMap(selections: Map<String?, String>): String =
+    Json.encodeToString(selections.mapKeys { it.key ?: "null" })
+
 @Dao
 interface ChatDao {
     // Task executions always remain in their owning Task's History.
@@ -266,8 +298,11 @@ interface ChatDao {
 
     /**
      * UI projection of the message graph. Synthetic protocol rows are required for parent-path
-     * traversal, but their text/segments can be very large and are never rendered. Keeping those
-     * payloads out of the invalidation query avoids reloading them for each streaming checkpoint.
+     * traversal, but their text/segments can be very large and are never rendered. While an
+     * in-memory overlay owns [streamingMessageId], that row is also projected as a stable,
+     * lightweight SENDING placeholder. Room may re-run this table query after a checkpoint, but
+     * the equal result is suppressed before JSON projection/Compose and no large live payload
+     * crosses the Cursor boundary.
      */
     @Query(
         """
@@ -276,39 +311,55 @@ interface ChatDao {
             conversationId,
             parentId,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN ''
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN ''
                 ELSE text
             END AS text,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN '[]'
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN '[]'
                 ELSE images
             END AS images,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
                 ELSE thoughts
             END AS thoughts,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
                 ELSE thoughtTitle
             END AS thoughtTitle,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN 0
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN 0
                 ELSE tokenCount
             END AS tokenCount,
-            status,
+            CASE WHEN id = :streamingMessageId THEN 'SENDING' ELSE status END AS status,
             participant,
             timestamp,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
                 ELSE thoughtTimeMs
             END AS thoughtTimeMs,
             modelName,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
                 ELSE toolCallJson
             END AS toolCallJson,
             CASE
-                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
                 ELSE attachmentMeta
             END AS attachmentMeta,
             runId,
@@ -319,7 +370,10 @@ interface ChatDao {
         ORDER BY timestamp ASC
         """
     )
-    fun getUiMessagesForConversation(conversationId: String): Flow<List<MessageEntity>>
+    fun getUiMessagesForConversation(
+        conversationId: String,
+        streamingMessageId: String?,
+    ): Flow<List<MessageEntity>>
 
     @Upsert
     suspend fun upsertConversation(conversation: ChatEntity)
@@ -445,14 +499,45 @@ interface ChatDao {
     suspend fun touchRun(runId: String, at: Long): Int
 
     @Transaction
-    suspend fun createRunWithMessages(run: RunEntity, messages: List<MessageEntity>) {
+    suspend fun createRunWithMessages(
+        run: RunEntity,
+        messages: List<MessageEntity>,
+        messageSelectionUpdates: Map<String?, String>,
+        at: Long,
+    ): RunGraphCommit {
         require(run.status == RunStatus.ACTIVE)
         require(run.activeSlot == 1)
         require(messages.isNotEmpty())
         require(messages.all { it.runId == run.id })
         require(messages.map { it.runSequence } == messages.indices.map { it.toLong() })
+        val conversation = checkNotNull(getConversation(run.conversationId)) {
+            "Conversation ${run.conversationId} does not exist"
+        }
+        check(getLiveRun(run.conversationId) == null) {
+            "Conversation ${run.conversationId} already has a live Run"
+        }
+        val insertedMessageIds = messages.mapTo(mutableSetOf()) { it.id }
+        require(messageSelectionUpdates.values.all { it in insertedMessageIds }) {
+            "A new Run may only select messages committed in the same transaction"
+        }
         insertRun(run)
         messages.forEach { insertMessage(it) }
+
+        val messageSelections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
+            putAll(messageSelectionUpdates)
+        }
+        val runSelections = decodeSelectionMap(conversation.selectedRunBranchesJson).apply {
+            put(run.parentRunId, run.id)
+        }
+        check(
+            updateSelectionsForRunDeletion(
+                conversationId = run.conversationId,
+                selectedBranchesJson = encodeSelectionMap(messageSelections),
+                selectedRunBranchesJson = encodeSelectionMap(runSelections),
+                at = at,
+            ) == 1
+        ) { "Conversation ${run.conversationId} disappeared during Run creation" }
+        return RunGraphCommit(messages, messageSelections, runSelections)
     }
 
     @Transaction
@@ -510,6 +595,40 @@ interface ChatDao {
         insertMessage(assigned)
         touchRun(run.id, maxOf(run.lastCheckpointAt, assigned.timestamp))
         return assigned
+    }
+
+    /**
+     * Accepts one queued user intervention as a single graph commit. The visible edge and the
+     * message row can therefore never disagree after process death.
+     */
+    @Transaction
+    suspend fun appendPendingInputToRun(
+        message: MessageEntity,
+        at: Long,
+    ): PendingRunInputCommit {
+        require(message.participant == Participant.USER)
+        require(message.consumedAtPass == null)
+        val run = getRun(message.runId) ?: error("Run ${message.runId} does not exist")
+        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
+        check(run.conversationId == message.conversationId)
+        val assigned = message.copy(runSequence = nextRunSequence(run.id))
+        insertMessage(assigned)
+        touchRun(run.id, maxOf(run.lastCheckpointAt, assigned.timestamp))
+
+        val conversation = checkNotNull(getConversation(message.conversationId)) {
+            "Conversation ${message.conversationId} disappeared during queue append"
+        }
+        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
+            put(assigned.parentId, assigned.id)
+        }
+        check(
+            updateMessageSelectionsAfterPendingRemoval(
+                conversationId = message.conversationId,
+                selectedBranchesJson = encodeSelectionMap(selections),
+                at = at,
+            ) == 1
+        )
+        return PendingRunInputCommit(assigned, selections)
     }
 
     /** A provider tool round is protocol-atomic: assistant tool_calls and every result commit
@@ -710,31 +829,61 @@ interface ChatDao {
     )
     suspend fun advanceRunPass(runId: String, previousPass: Int, pass: Int, at: Long): Int
 
+    @Query(
+        """
+        SELECT id FROM runs
+        WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
+        """
+    )
+    suspend fun getOrphanedLiveRunIds(): List<String>
+
+    /**
+     * Claims exactly the queue batch observed by the state machine, advances the Run Pass, creates
+     * its model placeholder, and selects that placeholder in one transaction.
+     */
     @Transaction
-    suspend fun claimPendingRunInputs(runId: String, at: Long): ClaimedRunPass? {
+    suspend fun claimPendingRunInputsAndAppendPlaceholder(
+        runId: String,
+        expectedInputMessageIds: List<String>,
+        placeholder: MessageEntity,
+        at: Long,
+    ): ClaimedRunPassCommit? {
+        require(placeholder.runId == runId)
+        require(placeholder.participant == Participant.MODEL)
         val run = getRun(runId) ?: return null
         if (run.status != RunStatus.ACTIVE) return null
         val pending = getPendingRunInputs(runId)
         if (pending.isEmpty()) return null
-        val pass = run.currentPass + 1
-        check(markInputsConsumed(pending.map { it.id }, pass) == pending.size)
-        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
-        return ClaimedRunPass(runId, pass, pending.map { it.id })
-    }
+        check(pending.map { it.id } == expectedInputMessageIds) {
+            "The durable Run queue changed before Pass ${run.currentPass + 1} was claimed"
+        }
 
-    @Query(
-        """
-        UPDATE messages
-        SET status = 'STOPPED'
-        WHERE runId IN (
-            SELECT id FROM runs
-            WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
+        val pass = run.currentPass + 1
+        check(markInputsConsumed(expectedInputMessageIds, pass) == expectedInputMessageIds.size)
+        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
+        val assignedPlaceholder = placeholder.copy(runSequence = nextRunSequence(runId))
+        insertMessage(assignedPlaceholder)
+        touchRun(runId, maxOf(run.lastCheckpointAt, assignedPlaceholder.timestamp, at))
+
+        val conversation = checkNotNull(getConversation(run.conversationId)) {
+            "Conversation ${run.conversationId} disappeared during queue drain"
+        }
+        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
+            put(assignedPlaceholder.parentId, assignedPlaceholder.id)
+        }
+        check(
+            updateMessageSelectionsAfterPendingRemoval(
+                conversationId = run.conversationId,
+                selectedBranchesJson = encodeSelectionMap(selections),
+                at = at,
+            ) == 1
         )
-        AND participant = 'MODEL'
-        AND status IN ('SENDING', 'THINKING', 'TOOL_CALLING', 'TRANSCRIBING')
-        """
-    )
-    suspend fun markOrphanedRunMessagesStopped(): Int
+        return ClaimedRunPassCommit(
+            claimedPass = ClaimedRunPass(runId, pass, expectedInputMessageIds),
+            placeholder = assignedPlaceholder,
+            messageSelections = selections,
+        )
+    }
 
     @Query(
         """
@@ -748,7 +897,45 @@ interface ChatDao {
 
     @Transaction
     suspend fun recoverOrphanedRuns(at: Long): Int {
-        markOrphanedRunMessagesStopped()
+        val orphanedRunIds = getOrphanedLiveRunIds()
+        if (orphanedRunIds.isEmpty()) return 0
+        getMessagesForRuns(orphanedRunIds).forEach { message ->
+            val recoveredStatus = if (
+                message.participant == Participant.MODEL &&
+                message.status in setOf(
+                    MessageStatus.SENDING,
+                    MessageStatus.THINKING,
+                    MessageStatus.TOOL_CALLING,
+                    MessageStatus.TRANSCRIBING,
+                )
+            ) {
+                MessageStatus.STOPPED
+            } else {
+                message.status
+            }
+            val recoveredToolJson = message.toolCallJson?.let { raw ->
+                runCatching {
+                    val segments = Json.decodeFromString<List<MessageSegment>>(raw)
+                    val recovered = RunRecoveryPolicy.stopIncompleteTools(segments)
+                    if (recovered == segments) raw else Json.encodeToString(recovered)
+                }.getOrDefault(raw)
+            }
+            if (recoveredStatus != message.status || recoveredToolJson != message.toolCallJson) {
+                updateMessageCheckpoint(
+                    MessageStreamCheckpoint(
+                        id = message.id,
+                        text = message.text,
+                        images = message.images,
+                        thoughts = message.thoughts,
+                        thoughtTitle = message.thoughtTitle,
+                        tokenCount = message.tokenCount,
+                        status = recoveredStatus,
+                        thoughtTimeMs = message.thoughtTimeMs,
+                        toolCallJson = recoveredToolJson,
+                    )
+                )
+            }
+        }
         return terminalizeOrphanedRuns(at)
     }
 

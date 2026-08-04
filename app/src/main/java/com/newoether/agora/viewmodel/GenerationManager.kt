@@ -643,21 +643,23 @@ class GenerationManager(
         var toolPath = emptyList<ChatMessage>()
         var latestTranscriptionSnapshot: ChatMessage? = null
         var transcriptionReturned = false
-        var checkpointTargetExists = true
         val checkpointGate = StreamingCheckpointGate()
+        val checkpointWriter = StreamingCheckpointWriter(
+            scope = CoroutineScope(currentCoroutineContext()),
+            persist = { message ->
+                isLatestPersist() &&
+                    conversations.updateStreamingMessageCheckpoint(message)
+            },
+            onFailure = { error ->
+                DebugLog.e("AgoraVM", "Failed to persist streaming checkpoint", error)
+            },
+        )
 
         suspend fun persistStreamingCheckpoint(message: ChatMessage, force: Boolean = false) {
-            if (!checkpointTargetExists || !isLatestPersist()) return
+            if (!isLatestPersist()) return
             val now = System.currentTimeMillis()
             if (!checkpointGate.shouldCheckpoint(now, force)) return
-            try {
-                checkpointTargetExists = conversations.updateStreamingMessageCheckpoint(message)
-            } catch (e: Exception) {
-                // A checkpoint is best-effort and must never interrupt the provider stream.
-                // The gate already advanced, so a transient failure retries on the next interval
-                // instead of logging once per token.
-                DebugLog.e("AgoraVM", "Failed to persist streaming checkpoint", e)
-            }
+            if (force) checkpointWriter.flush(message) else checkpointWriter.enqueue(message)
         }
 
         fun adoptIncompleteTranscriptionSnapshot() {
@@ -1120,9 +1122,11 @@ class GenerationManager(
             }
             finishCurrentThoughtTiming()
             executeCompletedToolCalls()
-            // Always emit final state after collection completes
+            // Publish the final in-memory snapshot without waiting for another Room round trip.
+            // The terminal transaction below persists this exact state after fencing the
+            // checkpoint writer, while genuine tool lifecycle boundaries remain forced.
             if (generationJob?.isCancelled != true) {
-                publishStreamUpdate(forceCheckpoint = true)
+                publishStreamUpdate()
             }
 
             // Multi-tool loop
@@ -1235,8 +1239,10 @@ class GenerationManager(
                 }
                 finishCurrentThoughtTiming()
                 executeCompletedToolCalls()
-                // Always emit final state after tool round completes
-                publishStreamUpdate(forceCheckpoint = true)
+                // Publish the round's final UI state immediately. The next loop boundary or the
+                // terminal transaction supplies durability, so blocking here would only duplicate
+                // I/O and visibly delay the transition out of generating.
+                publishStreamUpdate()
             }
 
             if (!currentCoroutineContext().isActive) {
@@ -1277,6 +1283,12 @@ class GenerationManager(
                 totalText = "Error: ${e.localizedMessage ?: "An unexpected error occurred."}"
             }
         } finally {
+            // Fence the asynchronous checkpoint lane before any terminal transaction. Without
+            // this join, an older SENDING snapshot could finish after SUCCESS/STOPPED and revive
+            // the exact UI state the terminal write just closed.
+            withContext(NonCancellable) {
+                checkpointWriter.cancelAndJoin()
+            }
             // Critical non-cancellable section: only the terminal DB upsert (and the
             // image drain that feeds it). A stopped/superseded generation MUST still
             // write its final row so it isn't left as SENDING. Everything else — RAG

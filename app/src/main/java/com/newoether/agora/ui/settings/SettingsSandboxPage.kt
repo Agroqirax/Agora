@@ -43,7 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
-import com.newoether.agora.sandbox.openSandboxHome
+import com.newoether.agora.sandbox.openSandboxRoot
 import com.newoether.agora.sandbox.SandboxManager
 import kotlinx.coroutines.launch
 
@@ -269,14 +269,10 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                                         )
                                     },
                                     modifier = Modifier.clickable {
-                                        val homeDir = sandboxManager.getSandboxHomeDir()
-                                        if (homeDir != null) {
-                                            homeDir.mkdirs()
-                                            try {
-                                                ctx.openSandboxHome()
-                                            } catch (e: Exception) {
-                                                Log.w("SettingsSandboxPage", "Failed to open file manager", e)
-                                            }
+                                        try {
+                                            ctx.openSandboxRoot()
+                                        } catch (e: Exception) {
+                                            Log.w("SettingsSandboxPage", "Failed to open sandbox root", e)
                                         }
                                     }
                                 )

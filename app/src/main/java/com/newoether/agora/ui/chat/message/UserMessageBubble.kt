@@ -1,5 +1,7 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -82,6 +84,10 @@ internal fun UserMessageBubble(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .then(contextAlpha)
+                // Keep size interpolation local to the stable user-bubble surface. Initial
+                // measurement is immediate; subsequent editor enter/exit changes animate
+                // without involving the message row or assistant streaming layout.
+                .animateContentSize(animationSpec = tween(durationMillis = 500))
         ) {
             if (isEditing) {
                 val editState = rememberTextFieldState(message.text)

@@ -84,6 +84,10 @@ class ConversationGenerationState(
     /** Run owned by the current slot. Bound before provider work or queue acceptance. */
     private var slotRunId: String? = null
     private var suppressNextQueueDrain = false
+    /** STOPPING releases only after both the provider coroutine and the durable terminal
+     * transaction complete. Whichever finishes first records its half of the barrier. */
+    private var stopFinalizationPending = false
+    private var stoppedCoroutineUnwound = false
     private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -95,12 +99,19 @@ class ConversationGenerationState(
     /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
     fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
 
-    fun bindRun(uiToken: Long, runId: String) = synchronized(genLock) {
+    fun tryBindRun(uiToken: Long, runId: String): Boolean = synchronized(genLock) {
         require(runId.isNotBlank())
-        check(slotOwnerToken == uiToken) { "Only the slot owner can bind a Run" }
+        if (slotOwnerToken != uiToken || slotPhase != SlotPhase.ACTIVE) return false
         val existing = slotRunId
-        check(existing == null || existing == runId) { "Generation slot is already bound to $existing" }
+        if (existing != null && existing != runId) return false
         slotRunId = runId
+        true
+    }
+
+    fun bindRun(uiToken: Long, runId: String) {
+        check(tryBindRun(uiToken, runId)) {
+            "Only the active slot owner can bind Run $runId"
+        }
     }
 
     fun currentRunId(): String? = synchronized(genLock) { slotRunId }
@@ -122,6 +133,8 @@ class ConversationGenerationState(
         uiGenToken += 1
         slotOwnerToken = uiGenToken
         slotPhase = SlotPhase.ACTIVE
+        stopFinalizationPending = false
+        stoppedCoroutineUnwound = false
         generating.value = true
         stopping.value = false
         onRegistryActive(conversationId)
@@ -139,6 +152,8 @@ class ConversationGenerationState(
             uiGenToken += 1
             slotOwnerToken = uiGenToken
             slotPhase = SlotPhase.ACTIVE
+            stopFinalizationPending = false
+            stoppedCoroutineUnwound = false
             isLoading.value = true
             generating.value = true
             stopping.value = false
@@ -204,6 +219,10 @@ class ConversationGenerationState(
      */
     fun endGeneration(uiToken: Long): Boolean = synchronized(genLock) {
         if (slotOwnerToken != uiToken) return false
+        if (slotPhase == SlotPhase.STOPPING) {
+            stoppedCoroutineUnwound = true
+            if (stopFinalizationPending) return false
+        }
         releaseSlotLocked()
     }
 
@@ -212,6 +231,8 @@ class ConversationGenerationState(
         slotOwnerToken = 0L
         slotRunId = null
         generationJob = null
+        stopFinalizationPending = false
+        stoppedCoroutineUnwound = false
         isLoading.value = false
         generating.value = false
         stopping.value = false
@@ -280,6 +301,22 @@ class ConversationGenerationState(
         val result = synchronized(genLock) {
             previousJob = generationJob
             val boundRunId = slotRunId
+            if (slotPhase == SlotPhase.IDLE) {
+                return@synchronized StopResult(
+                    stoppedMessage = null,
+                    conversationId = conversationId,
+                    runId = null,
+                    shouldFinalize = false,
+                )
+            }
+            if (slotPhase == SlotPhase.STOPPING) {
+                return@synchronized StopResult(
+                    stoppedMessage = streamingMessage.value,
+                    conversationId = conversationId,
+                    runId = boundRunId,
+                    shouldFinalize = false,
+                )
+            }
             if (boundRunId != null || slotPhase != SlotPhase.IDLE) suppressNextQueueDrain = true
             // Revoke DB ownership before cancellation can enter GenerationManager.finally. The
             // stopped coroutine therefore skips its normal NonCancellable terminal upsert; the
@@ -293,14 +330,21 @@ class ConversationGenerationState(
             queuedSends.value = emptyList()
             if (slotPhase != SlotPhase.IDLE) {
                 slotPhase = SlotPhase.STOPPING
-                // STOPPING remains occupied for every tree-mutation/UI gate, but only until the
-                // old coroutine exits. DB terminalization is deliberately outside this phase.
+                stopFinalizationPending = s != null || boundRunId != null
+                stoppedCoroutineUnwound = previousJob == null || previousJob.isCompleted
+                // STOPPING remains occupied for every tree-mutation/UI gate until the old
+                // coroutine and the durable terminal transaction have both completed.
                 isLoading.value = true
                 generating.value = true
                 stopping.value = true
-                if (previousJob?.isCompleted == true) releaseSlotLocked()
+                if (stoppedCoroutineUnwound && !stopFinalizationPending) releaseSlotLocked()
             }
-            StopResult(s, conversationId, boundRunId)
+            StopResult(
+                stoppedMessage = s,
+                conversationId = conversationId,
+                runId = boundRunId,
+                shouldFinalize = s != null || boundRunId != null,
+            )
         }
         // Hard kill after the ownership cutoff: synchronous cancellation handles wake blocking
         // HTTP/native reads immediately, then Job cancellation tears down every remaining child.
@@ -309,9 +353,19 @@ class ConversationGenerationState(
         return result
     }
 
-    /** Terminal DB persistence never owns or extends the generation slot. */
-    fun finishStopFinalization(): Boolean = synchronized(genLock) {
-        false
+    /**
+     * Completes the durable half of the Stop barrier. A failed terminal write deliberately keeps
+     * STOPPING occupied: the unique live-Run slot is still unavailable, so reporting IDLE would
+     * make the next Send fail or attach to the doomed Run.
+     */
+    fun finishStopFinalization(success: Boolean): Boolean = synchronized(genLock) {
+        if (!success) return false
+        stopFinalizationPending = false
+        if (slotPhase != SlotPhase.STOPPING || !stoppedCoroutineUnwound) return false
+        // The controller's releaseAndDrain already returned while waiting for this finalizer, so
+        // no matching queue-drain decision remains to consume the Stop suppression.
+        suppressNextQueueDrain = false
+        releaseSlotLocked()
     }
 
     /**
@@ -362,6 +416,7 @@ class ConversationGenerationState(
         val stoppedMessage: ChatMessage?,
         val conversationId: String,
         val runId: String?,
+        val shouldFinalize: Boolean,
     )
 
 }

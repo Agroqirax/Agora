@@ -3,12 +3,12 @@ package com.newoether.agora.ui.chat.bottombar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.StopCircle
@@ -39,6 +39,7 @@ internal fun LoopControlBar(
     loop: LoopEntity,
     isRunning: Boolean,
     onStop: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var now by remember(loop.conversationId, loop.nextFireAt) {
         mutableLongStateOf(System.currentTimeMillis())
@@ -62,13 +63,17 @@ internal fun LoopControlBar(
     }
 
     Surface(
-        modifier = Modifier.fillMaxWidth().heightIn(min = 36.dp),
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 6.dp, bottomEnd = 6.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(COMPOSER_STATUS_ROW_HEIGHT),
+        shape = COMPOSER_STATUS_ROW_SHAPE,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 14.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start,
         ) {

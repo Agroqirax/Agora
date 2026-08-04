@@ -24,6 +24,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.ChatViewModelFactory
 import com.newoether.agora.viewmodel.ConversationStateRegistry
 import com.newoether.agora.viewmodel.ProviderRegistry
+import com.newoether.agora.viewmodel.ShellConfirmationController
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -65,9 +66,14 @@ class AppContainer(private val appContext: Context) {
         ConversationRepository(chatDao)
     }
 
-    fun startRunRecovery() {
+    /**
+     * Starts process services behind the durable Run-recovery barrier. Scheduling before recovery
+     * lets an overdue Worker race the orphan cleanup and inspect an impossible half-live graph.
+     */
+    fun startProcessServices() {
         appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             conversationRepository.ensureRunRecovery()
+            automationScheduler.start()
         }
     }
     val taskRepository: TaskRepository by lazy {
@@ -75,6 +81,11 @@ class AppContainer(private val appContext: Context) {
     }
     val settingsRepository: SettingsRepository by lazy {
         SettingsRepository(settingsManager, appScope)
+    }
+
+    /** One process-wide confirmation queue shared by Chat, Task, and Loop generation. */
+    val shellConfirmationController: ShellConfirmationController by lazy {
+        ShellConfirmationController(settingsRepository)
     }
 
     // ── Generation singletons (process-scoped) ────────────────
@@ -146,6 +157,7 @@ class AppContainer(private val appContext: Context) {
             sandboxFactory = sandboxManagerFactory,
             appScope = appScope,
             executionCoordinator = conversationExecutionCoordinator,
+            shellConfirmation = shellConfirmationController,
             automationExecutionGate = automationExecutionGate,
         )
     }
@@ -206,6 +218,6 @@ class AppContainer(private val appContext: Context) {
             application, database, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory,
             autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
             taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-            automationExecutionGate, conversationStateRegistry
+            automationExecutionGate, conversationStateRegistry, shellConfirmationController
         )
 }

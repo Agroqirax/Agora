@@ -155,6 +155,7 @@ class DataExporter(
         val titleGenerationEnabled: Boolean,
         val titleGenerationModel: String?,
         val titleGenerationPrompt: String? = null,
+        val titleGenerationNotificationsEnabled: Boolean = true,
         val accessPastConversations: Boolean,
         val accessSavedMemories: Boolean,
         val accessActiveMemory: Boolean,
@@ -532,6 +533,8 @@ class DataExporter(
                     titleGenerationEnabled = settingsManager.titleGenerationEnabled.first(),
                     titleGenerationModel = settingsManager.titleGenerationModel.first(),
                     titleGenerationPrompt = settingsManager.titleGenerationPrompt.first(),
+                    titleGenerationNotificationsEnabled =
+                        settingsManager.titleGenerationNotificationsEnabled.first(),
                     accessPastConversations = settingsManager.accessPastConversations.first(),
                     accessSavedMemories = settingsManager.accessSavedMemories.first(),
                     accessActiveMemory = settingsManager.accessActiveMemory.first(),

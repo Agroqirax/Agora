@@ -177,13 +177,44 @@ internal fun MarkdownTextContent(
     )
 }
 
+/**
+ * Detail pages can contain tens of thousands of Markdown characters. Parsing already happens off
+ * the main thread; this variant also virtualizes top-level AST nodes so only visible blocks are
+ * composed and measured.
+ */
+@Composable
+internal fun LazyMarkdownTextContent(
+    text: String,
+    renderContext: ChatMarkdownRenderContext,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+    includeFirstSpacer: Boolean = true,
+    onReady: () -> Unit = {},
+) {
+    val markdownText = remember(text) { text.toRenderableMarkdownText() }
+    MarkdownPreparedTextContent(
+        text = markdownText,
+        renderContext = renderContext,
+        immediate = false,
+        includeFirstSpacer = includeFirstSpacer,
+        onReady = onReady,
+        modifier = modifier,
+        lazyListState = listState,
+        lazyContentPadding = contentPadding,
+    )
+}
+
 @Composable
 private fun MarkdownPreparedTextContent(
     text: String,
     renderContext: ChatMarkdownRenderContext,
     immediate: Boolean = false,
     includeFirstSpacer: Boolean = true,
-    onReady: () -> Unit = {}
+    onReady: () -> Unit = {},
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    lazyListState: LazyListState? = null,
+    lazyContentPadding: PaddingValues = PaddingValues(),
 ) {
     val markdownText = text
     val markdownParser = remember(markdownText, renderContext.flavour) {
@@ -201,12 +232,14 @@ private fun MarkdownPreparedTextContent(
     val currentOnReady by rememberUpdatedState(onReady)
 
     LaunchedEffect(state) {
-        if (state is State.Success) currentOnReady()
+        // Error is terminal too: reveal the renderer's error UI instead of leaving a loading
+        // indicator over it forever.
+        if (state is State.Success || state is State.Error) currentOnReady()
     }
 
     com.mikepenz.markdown.compose.Markdown(
         state = state,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier,
         colors = renderContext.colors,
         typography = renderContext.typography,
         padding = renderContext.padding,
@@ -214,12 +247,23 @@ private fun MarkdownPreparedTextContent(
         imageTransformer = renderContext.imageTransformer,
         animations = markdownAnimations { this },
         success = { successState, components, modifier ->
-            MarkdownSuccessWithSpacing(
-                state = successState,
-                components = components,
-                modifier = modifier,
-                includeFirstSpacer = includeFirstSpacer
-            )
+            if (lazyListState == null) {
+                MarkdownSuccessWithSpacing(
+                    state = successState,
+                    components = components,
+                    modifier = modifier,
+                    includeFirstSpacer = includeFirstSpacer,
+                )
+            } else {
+                LazyMarkdownSuccessWithSpacing(
+                    state = successState,
+                    components = components,
+                    listState = lazyListState,
+                    modifier = modifier,
+                    contentPadding = lazyContentPadding,
+                    includeFirstSpacer = includeFirstSpacer,
+                )
+            }
         }
     )
 }
@@ -238,6 +282,36 @@ private fun MarkdownSuccessWithSpacing(
                 components = components,
                 content = state.content,
                 includeSpacer = includeFirstSpacer || index > 0
+            )
+        }
+    }
+}
+
+@Composable
+private fun LazyMarkdownSuccessWithSpacing(
+    state: State.Success,
+    components: MarkdownComponents,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(),
+    includeFirstSpacer: Boolean = true,
+) {
+    LazyColumn(
+        modifier = modifier,
+        state = listState,
+        contentPadding = contentPadding,
+    ) {
+        itemsIndexed(
+            items = state.node.children,
+            key = { index, node ->
+                "${node.startOffset}:${node.endOffset}:${node.type}:$index"
+            },
+        ) { index, node ->
+            MarkdownElement(
+                node = node,
+                components = components,
+                content = state.content,
+                includeSpacer = includeFirstSpacer || index > 0,
             )
         }
     }

@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">Add Attachment</string>
+    <string name="camera">Camera</string>
     <string name="photos">Photos</string>
     <string name="videos">Videos</string>
     <string name="files">Files</string>
@@ -166,7 +167,7 @@
     <string name="thought_for_minutes_called_tools">Thought for %1$dm %2$ds, called %3$d tools</string>
     <string name="called_n_tools">Called %1$d tools</string>
     <string name="failed_to_generate">Failed to generate.</string>
-    <string name="generation_stopped">Generation stopped.</string>
+    <string name="generation_stopped">Generation stopped</string>
     <string name="import_invalid_gguf_title">Invalid GGUF File</string>
     <string name="import_invalid_gguf_desc">The selected file is not a valid GGUF model.</string>
     <string name="ok">OK</string>
@@ -491,6 +492,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Auto-Generate Title</string>
     <string name="title_gen_auto_desc">Generate a title after the first response</string>
+    <string name="title_gen_notifications">Show title-generation notifications</string>
+    <string name="title_gen_notifications_desc">Show progress and result messages while generating titles</string>
     <string name="title_gen_model">Title Model</string>
     <string name="title_gen_current_model">Use Current Model</string>
     <string name="title_gen_select_model">Select Title Model</string>

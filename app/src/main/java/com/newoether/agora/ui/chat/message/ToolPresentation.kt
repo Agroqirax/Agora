@@ -78,6 +78,8 @@ internal data class ToolPresentation(
 internal object ToolPresentationResolver {
     private val json = Json { ignoreUnknownKeys = true }
 
+    fun kindForToolName(toolName: String?): ToolKind = kindFor(toolName.orEmpty())
+
     fun resolve(segment: MessageSegment): ToolPresentation {
         val toolName = segment.toolName.orEmpty()
         val kind = kindFor(toolName)
@@ -86,14 +88,13 @@ internal object ToolPresentationResolver {
         val errorCode = resultObject.string("error")
         val exitCode = resultObject.int("exit_code")
         val explicitState = stateFromWire(segment.toolState)
-        // A structured tool-call delta is a valid JSON prefix, not yet a JSON document. Strict
-        // parsing on every 50 ms UI snapshot both fails by definition and repeatedly scans a
-        // growing argument buffer on the main feed. The detail renderer owns prefix parsing
-        // off-main; semantic summaries parse once the call has crossed into execution/final state.
-        val argumentsStillStreaming =
-            segment.toolResult == null &&
-                (explicitState == null || explicitState == ToolPresentationState.CALLING)
-        val args = if (argumentsStillStreaming) null else parseObject(segment.toolArgs)
+        // Until a result arrives, arguments can still be a JSON prefix and can also contain a very
+        // large file payload. Never strictly parse that growing buffer on the UI thread. The
+        // bounded prefix resolver below extracts only live summary hints; final semantic parsing
+        // remains available once the call has produced a result.
+        val argumentsAwaitingResult = segment.toolResult == null
+        val args = if (argumentsAwaitingResult) null else parseObject(segment.toolArgs)
+        val streamingHints = StreamingToolArgumentHintResolver.resolve(kind, segment.toolArgs)
         val background = resultObject.boolean("background") == true ||
             resultObject.string("state").equals("running", ignoreCase = true) &&
             resultObject.string("job_id") != null
@@ -137,10 +138,13 @@ internal object ToolPresentationResolver {
             rawArguments = segment.toolArgs,
             rawResult = segment.toolResult,
             liveOutput = segment.toolProgress,
-            subject = subject(kind, args, resultObject),
+            subject = normalizeToolSummarySubject(
+                subject(kind, args, resultObject) ?: streamingHints.subject,
+            ),
             device = resultObject.string("server")
                 ?: segment.toolTarget
-                ?: args.string("server"),
+                ?: args.string("server")
+                ?: streamingHints.server,
             count = count,
             errorMessage = error,
             exitCode = exitCode,
@@ -257,11 +261,12 @@ internal object ToolPresentationResolver {
         ToolKind.FILE_GREP -> arguments.string("pattern")
             ?: result.string("pattern")
         ToolKind.IMAGE_GENERATE -> arguments.string("prompt")
-        ToolKind.TASK_CREATE,
-        ToolKind.TASK_DELETE -> arguments.string("name")
+        ToolKind.TASK_CREATE -> arguments.string("name")
+        ToolKind.TASK_DELETE -> arguments.string("id_or_name")
+            ?: arguments.string("name")
             ?: arguments.string("task_id")
         else -> null
-    }?.take(120)
+    }
 
     private fun JsonObject?.string(key: String): String? =
         (this?.get(key) as? JsonPrimitive)?.contentOrNull

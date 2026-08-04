@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -53,12 +54,12 @@ internal fun ToolDetailContent(segment: MessageSegment) {
     }
     when (presentation.state) {
         ToolPresentationState.CALLING -> ToolActiveContent(
-            text = stringResource(R.string.tool_calling_ellipsis),
+            text = toolSummary(presentation),
             output = presentation.liveOutput,
         )
         ToolPresentationState.RUNNING,
         ToolPresentationState.BACKGROUND_RUNNING -> ToolActiveContent(
-            text = toolSummary(segment),
+            text = toolSummary(presentation),
             output = presentation.liveOutput ?: resultOutput(presentation.result),
         )
         ToolPresentationState.FAILED -> {
@@ -74,7 +75,7 @@ internal fun ToolDetailContent(segment: MessageSegment) {
             stringResource(R.string.tool_execution_stopped),
         )
         ToolPresentationState.EMPTY,
-        ToolPresentationState.SUCCEEDED -> ToolCompletedContent(presentation, segment)
+        ToolPresentationState.SUCCEEDED -> ToolCompletedContent(presentation)
     }
 }
 
@@ -131,17 +132,16 @@ private fun ToolMutedContent(message: String) {
 @Composable
 private fun ToolCompletedContent(
     presentation: ToolPresentation,
-    segment: MessageSegment,
 ) {
     when (presentation.kind) {
         ToolKind.FILE_GLOB -> FileGlobResult(presentation)
         ToolKind.FILE_GREP -> FileGrepResult(presentation)
         ToolKind.FILE_READ -> FileReadResult(presentation)
-        ToolKind.WEB_SEARCH -> WebSearchResult(presentation, segment)
+        ToolKind.WEB_SEARCH -> WebSearchResult(presentation)
         else -> {
             val result = presentation.rawResult
             if (result.isNullOrEmpty()) {
-                ToolMutedContent(toolSummary(segment))
+                ToolMutedContent(toolSummary(presentation))
             } else {
                 JsonOrPlainView(result)
             }
@@ -237,7 +237,10 @@ private fun ShellResult(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MetaPill(shellStatusLabel(presentation))
+        MetaPill(
+            text = shellStatusLabel(presentation),
+            emphasized = true,
+        )
         MetaPill(
             presentation.device
                 ?.takeIf { it.isNotBlank() }
@@ -306,7 +309,13 @@ private fun FileReadResult(presentation: ToolPresentation) {
     }
     val content = result.string("content").orEmpty()
     if (content.isEmpty()) {
-        ToolMutedContent(stringResource(R.string.tool_read_file_empty, path ?: "file"))
+        ToolMutedContent(
+            if (path == null) {
+                stringResource(R.string.tool_read_file_empty_default)
+            } else {
+                stringResource(R.string.tool_read_file_empty, path)
+            },
+        )
     } else {
         TerminalOutput(content)
     }
@@ -315,12 +324,11 @@ private fun FileReadResult(presentation: ToolPresentation) {
 @Composable
 private fun WebSearchResult(
     presentation: ToolPresentation,
-    segment: MessageSegment,
 ) {
     val results = ((presentation.result as? JsonObject)?.get("results") as? JsonArray)
         .orEmpty()
     if (results.isEmpty()) {
-        ToolMutedContent(toolSummary(segment))
+        ToolMutedContent(toolSummary(presentation))
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -409,15 +417,28 @@ private fun TerminalOutput(output: String) {
 }
 
 @Composable
-private fun MetaPill(text: String) {
+private fun MetaPill(
+    text: String,
+    emphasized: Boolean = false,
+) {
+    val containerColor = if (emphasized) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val contentColor = if (emphasized) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
     Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = CircleShape,
+        color = containerColor,
     ) {
         Text(
             text = text,
             style = ChatType.meta,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = contentColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),

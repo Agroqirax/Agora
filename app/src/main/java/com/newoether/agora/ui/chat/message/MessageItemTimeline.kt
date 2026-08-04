@@ -221,6 +221,8 @@ internal fun CompactSegmentBlock(
     useLiveStatus: Boolean,
     expandedStates: SnapshotStateMap<String, Boolean>,
     expansionKey: String,
+    cardAppearanceKey: String = "$expansionKey:card",
+    segmentAppearanceRegistry: SegmentAppearanceRegistry,
     modifier: Modifier = Modifier,
     topPaddingExtra: Dp = 0.dp,
     bottomPaddingExtra: Dp = 6.dp,
@@ -231,6 +233,17 @@ internal fun CompactSegmentBlock(
 ) {
     if (segs.isEmpty()) return
     val haptics = LocalAgoraHaptics.current
+    val animateCardAppearance = rememberSegmentAppearance(
+        registry = segmentAppearanceRegistry,
+        animationKey = cardAppearanceKey,
+        isStreaming = isStreaming,
+    )
+    val cardAppearanceModifier = generationLifecycleAppearanceModifier(
+        animationKey = cardAppearanceKey,
+        animate = animateCardAppearance,
+        durationMillis = SEGMENT_ENTER_DURATION_MS,
+        initialScale = SEGMENT_ENTER_INITIAL_SCALE,
+    )
     val isExpanded by remember(expansionKey) {
         derivedStateOf { expandedStates[expansionKey] ?: false }
     }
@@ -277,6 +290,7 @@ internal fun CompactSegmentBlock(
         modifier = modifier
             .fillMaxWidth()
             .padding(top = 8.dp + topPaddingExtra, bottom = mergedBottomPadding + bottomPaddingExtra)
+            .then(cardAppearanceModifier)
             .noOpBringIntoView()
             .onSizeChanged { onBlockHeightChanged(it.height) }
     ) {
@@ -350,17 +364,23 @@ internal fun CompactSegmentBlock(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 if (seg.content.isNotBlank()) {
-                                    val flat = seg.content.replace('\n', ' ')
-                                    val preview = if (isStreaming && useLiveStatus && idx == segs.lastIndex) {
-                                        if (flat.length > 60) "…${flat.takeLast(60)}" else flat
-                                    } else flat
-                                    Text(
-                                        text = preview,
-                                        style = ChatType.metaNormal,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
+                                    if (seg.type == "thought") {
+                                        StreamingThoughtPreviewText(
+                                            content = seg.content,
+                                            streaming =
+                                                isStreaming &&
+                                                    useLiveStatus &&
+                                                    idx == segs.lastIndex,
+                                        )
+                                    } else {
+                                        Text(
+                                            text = seg.content.replace('\n', ' '),
+                                            style = ChatType.metaNormal,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 } else {
                                     Text(
                                         text = "Image transcription is empty.",
@@ -419,7 +439,7 @@ internal fun TimelineSegmentsContent(
     groupAdjacentBlocks: Boolean,
     expandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
-    animatedBlockKeys: Set<String>,
+    segmentAppearanceRegistry: SegmentAppearanceRegistry,
     onLayoutMutationStarted: (String) -> Unit,
     onLayoutMutationSettled: (String) -> Unit,
     onSegmentClick: (List<Int>) -> Unit
@@ -479,6 +499,8 @@ internal fun TimelineSegmentsContent(
                                 useLiveStatus = isStreaming && blockDetailIndices.lastOrNull() == detailSegments.lastIndex,
                                 expandedStates = expandedStates,
                                 expansionKey = expansionKey,
+                                cardAppearanceKey = "$expansionKey:card",
+                                segmentAppearanceRegistry = segmentAppearanceRegistry,
                                 topPaddingExtra = blockTopPaddingExtra,
                                 bottomPaddingExtra = 0.dp,
                                 onExpansionStarted = onLayoutMutationStarted,
@@ -488,7 +510,8 @@ internal fun TimelineSegmentsContent(
                         }
                         AnimatedTimelineBlockAppearance(
                             animationKey = expansionKey,
-                            animate = expansionKey in animatedBlockKeys
+                            appearanceRegistry = segmentAppearanceRegistry,
+                            isStreaming = isStreaming,
                         ) {
                             blockContent()
                         }
@@ -499,6 +522,7 @@ internal fun TimelineSegmentsContent(
                         val currentDetailIndex = detailIndex
                         detailIndex++
                         val cardTopPaddingExtra = if (previousVisibleWasAnswer) 8.dp else 0.dp
+                        val timelineKey = "${message.id}:timeline:$currentDetailIndex"
                         val cardContent: @Composable () -> Unit = {
                             TimelineInfoSegmentCard(
                                 seg = seg,
@@ -506,13 +530,15 @@ internal fun TimelineSegmentsContent(
                                 detailIndex = currentDetailIndex,
                                 isStreaming = isStreaming && index == segments.lastIndex,
                                 topPaddingExtra = cardTopPaddingExtra,
+                                cardAnimationKey = "$timelineKey:card",
+                                segmentAppearanceRegistry = segmentAppearanceRegistry,
                                 onClick = { onSegmentClick(listOf(currentDetailIndex)) }
                             )
                         }
-                        val timelineKey = "${message.id}:timeline:$currentDetailIndex"
                         AnimatedTimelineBlockAppearance(
                             animationKey = timelineKey,
-                            animate = timelineKey in animatedBlockKeys
+                            appearanceRegistry = segmentAppearanceRegistry,
+                            isStreaming = isStreaming,
                         ) {
                             cardContent()
                         }
@@ -535,15 +561,29 @@ private fun TimelineInfoSegmentCard(
     detailIndex: Int,
     isStreaming: Boolean,
     topPaddingExtra: Dp = 0.dp,
+    cardAnimationKey: String,
+    segmentAppearanceRegistry: SegmentAppearanceRegistry,
     onClick: () -> Unit
 ) {
     val haptics = LocalAgoraHaptics.current
+    val animateCardAppearance = rememberSegmentAppearance(
+        registry = segmentAppearanceRegistry,
+        animationKey = cardAnimationKey,
+        isStreaming = isStreaming,
+    )
+    val cardAppearanceModifier = generationLifecycleAppearanceModifier(
+        animationKey = cardAnimationKey,
+        animate = animateCardAppearance,
+        durationMillis = SEGMENT_ENTER_DURATION_MS,
+        initialScale = SEGMENT_ENTER_INITIAL_SCALE,
+    )
     Surface(
         tonalElevation = 2.dp,
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp + topPaddingExtra, bottom = 6.dp)
+            .then(cardAppearanceModifier)
             .clip(RoundedCornerShape(18.dp))
             .clickable {
                 haptics.tap()
@@ -578,22 +618,27 @@ private fun TimelineInfoSegmentCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                val summary = when (seg.type) {
-                    "tool" -> toolSummary(seg)
-                    "transcription" -> seg.content.takeIf { it.isNotBlank() } ?: "Image transcription is empty."
-                    else -> {
-                        val flat = seg.content.replace('\n', ' ')
-                        if (isStreaming && flat.length > 60) "…${flat.takeLast(60)}" else flat
-                    }
-                }
-                if (summary.isNotBlank()) {
-                    Text(
-                        text = summary,
-                        style = ChatType.metaNormal,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                if (seg.type == "thought" && seg.content.isNotBlank()) {
+                    StreamingThoughtPreviewText(
+                        content = seg.content,
+                        streaming = isStreaming,
                     )
+                } else {
+                    val summary = when (seg.type) {
+                        "tool" -> toolSummary(seg)
+                        "transcription" -> seg.content.takeIf { it.isNotBlank() }
+                            ?: "Image transcription is empty."
+                        else -> ""
+                    }
+                    if (summary.isNotBlank()) {
+                        Text(
+                            text = summary,
+                            style = ChatType.metaNormal,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
             }
             Icon(
@@ -604,4 +649,46 @@ private fun TimelineInfoSegmentCard(
             )
         }
     }
+}
+
+private const val STREAMING_THOUGHT_PREVIEW_CODE_POINTS = 60
+
+private fun thoughtPreviewTail(
+    content: AnnotatedString,
+    maximumCodePoints: Int = STREAMING_THOUGHT_PREVIEW_CODE_POINTS,
+): AnnotatedString {
+    if (content.isEmpty() || maximumCodePoints <= 0) return content
+    val raw = content.text
+    val codePointCount = raw.codePointCount(0, raw.length)
+    if (codePointCount <= maximumCodePoints) return content
+    val start = raw.offsetByCodePoints(0, codePointCount - maximumCodePoints)
+    return AnnotatedString.Builder().apply {
+        append("…")
+        append(content.subSequence(start, content.length))
+    }.toAnnotatedString()
+}
+
+@Composable
+private fun StreamingThoughtPreviewText(
+    content: String,
+    streaming: Boolean,
+) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    val flat = remember(content) { content.replace('\n', ' ') }
+    val annotated = remember(flat) { AnnotatedString(flat) }
+    val faded = rememberStreamingGlyphFade(
+        content = annotated,
+        color = color,
+        enabled = streaming,
+    )
+    val preview = remember(faded, streaming) {
+        if (streaming) thoughtPreviewTail(faded) else faded
+    }
+    Text(
+        text = preview,
+        style = ChatType.metaNormal,
+        color = color,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+    )
 }

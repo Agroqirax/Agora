@@ -3,6 +3,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">新增附件</string>
+    <string name="camera">相機</string>
     <string name="photos">照片</string>
     <string name="videos">影片</string>
     <string name="files">檔案</string>
@@ -72,7 +73,7 @@
     <string name="called_n_tools">呼叫 %1$d 個工具</string>
     <string name="welcome_to_agora">歡迎使用 Agora。</string>
     <string name="failed_to_generate">生成失敗。</string>
-    <string name="generation_stopped">生成已停止。</string>
+    <string name="generation_stopped">生成已停止</string>
     <string name="import_invalid_gguf_title">無效的 GGUF 檔案</string>
     <string name="import_invalid_gguf_desc">所選檔案不是有效的 GGUF 模型檔案。</string>
     <string name="ok">確定</string>
@@ -372,6 +373,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">自動生成標題</string>
     <string name="title_gen_auto_desc">在首次回覆後生成標題</string>
+    <string name="title_gen_notifications">顯示標題生成提示</string>
+    <string name="title_gen_notifications_desc">生成標題時顯示進度與結果訊息</string>
     <string name="title_gen_model">標題模型</string>
     <string name="title_gen_current_model">使用目前模型</string>
     <string name="title_gen_select_model">選擇標題模型</string>

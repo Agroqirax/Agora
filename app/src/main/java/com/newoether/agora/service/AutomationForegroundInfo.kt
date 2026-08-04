@@ -94,7 +94,7 @@ object AutomationForegroundInfo {
                 "Automation",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Ongoing notification while an Agora automation is running"
+                description = context.getString(R.string.automation_notification_channel_desc)
                 setShowBadge(false)
                 setSound(null, null)
             }

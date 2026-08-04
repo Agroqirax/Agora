@@ -1,13 +1,19 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.Collections
@@ -20,7 +26,10 @@ import java.util.Collections
  * (which answers). Extracted from [ChatViewModel] as a single responsibility so the
  * trust policy lives in one place and is independently testable.
  */
-class ShellConfirmationController(private val settings: SettingsRepository) {
+class ShellConfirmationController(
+    private val settings: SettingsRepository,
+    private val appForeground: StateFlow<Boolean> = AppForegroundTracker.foreground,
+) {
     data class PendingShellCommand(
         val server: String,
         val summary: String,
@@ -42,19 +51,37 @@ class ShellConfirmationController(private val settings: SettingsRepository) {
     suspend fun confirm(server: String, summary: String): Boolean {
         if (!settings.shellConfirmEnabled.value) return true
         if (sessionAllowedServers.contains(server)) return true
+        // A Worker has no UI surface while the app is backgrounded. Refuse immediately instead
+        // of occupying the tool loop for the full confirmation timeout.
+        if (!appForeground.value) return false
         return promptMutex.withLock {
             // Re-check after the wait — the user may have trusted this server while an
             // earlier conversation's prompt was up.
             if (sessionAllowedServers.contains(server)) return@withLock true
+            if (!appForeground.value) return@withLock false
             val deferred = CompletableDeferred<Boolean>()
             _pendingShellCommand.value = PendingShellCommand(server, summary, deferred)
             try {
-                // Bound the wait. The dialog renders only while the Activity is composing, so if it is
-                // backgrounded/rebuilt (or this is a headless automation run with no UI) the deferred
-                // would never resolve and the inline-blocking stream coroutine would hang forever
-                // (#49). Fail safe — refuse the command — after the timeout, and let the finally
-                // below clear the stale prompt so a late user tap can't resurrect a dead request.
-                withTimeout(Constants.SHELL_CONFIRM_TIMEOUT_MS) { deferred.await() }
+                // Activity recreation keeps this process-scoped prompt alive. Moving the whole app
+                // to the background is different: there is no visible decision surface, so cancel
+                // the wait immediately. The timeout remains a final safety bound for a foreground
+                // Activity that never answers.
+                withTimeout(Constants.SHELL_CONFIRM_TIMEOUT_MS) {
+                    coroutineScope {
+                        val backgrounded = async {
+                            appForeground.filter { foreground -> !foreground }.first()
+                            false
+                        }
+                        try {
+                            select {
+                                deferred.onAwait { allowed -> allowed }
+                                backgrounded.onAwait { allowed -> allowed }
+                            }
+                        } finally {
+                            backgrounded.cancel()
+                        }
+                    }
+                }
             } catch (e: TimeoutCancellationException) {
                 false
             } finally {

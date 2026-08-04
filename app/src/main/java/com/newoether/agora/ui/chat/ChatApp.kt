@@ -25,6 +25,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyListState
@@ -61,10 +62,13 @@ import com.newoether.agora.R
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
+import com.newoether.agora.ui.chat.bottombar.PendingAttachmentRemoval
 import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
 import com.newoether.agora.ui.components.AnimatedBlobBackground
 import com.newoether.agora.ui.components.clearFocusOnTap
+import com.newoether.agora.ui.components.TypewriterMode
 import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.common.rememberAgoraHaptics
@@ -72,13 +76,17 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.util.DebugLog
+import com.newoether.agora.viewmodel.AnimatedScrollDestination
 import com.newoether.agora.viewmodel.ChatViewModel
+import com.newoether.agora.viewmodel.RegenerationTransitionStage
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -96,6 +104,26 @@ private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 private const val INLINE_SHARE_LIMIT_BYTES = 256 * 1024
 private const val SHARE_ERROR_DETAIL_TOKEN = "__AGORA_SHARE_ERROR_DETAIL__"
 private const val STREAM_SCROLL_RESUME_DELAY_MS = 160L
+private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
+private const val DRAFT_PERSIST_RETRY_COUNT = 2
+private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
+
+private data class ComposerDraftUiSnapshot(
+    val text: String,
+    val attachments: List<SelectedAttachment>,
+    val removals: List<PendingAttachmentRemoval>,
+)
+
+internal fun composerDraftWriteDelayMillis(
+    previousAttachments: List<SelectedAttachment>,
+    nextAttachments: List<SelectedAttachment>,
+    hasPendingRemovals: Boolean,
+): Long =
+    if (previousAttachments != nextAttachments || hasPendingRemovals) {
+        0L
+    } else {
+        DRAFT_TEXT_DEBOUNCE_MS
+    }
 
 /**
  * Text/argument growth within an existing message tree can be coalesced while LazyColumn owns a
@@ -145,10 +173,12 @@ private fun rememberScrollIsolatedMessages(
     conversationId: String?,
     upstream: State<List<ChatMessage>>,
     listState: LazyListState,
+    bypassScrollIsolation: Boolean,
 ): State<List<ChatMessage>> {
     val rendered = remember(conversationId, upstream) {
         mutableStateOf(upstream.value)
     }
+    val latestBypassScrollIsolation by rememberUpdatedState(bypassScrollIsolation)
     LaunchedEffect(conversationId, upstream, listState) {
         coroutineScope {
             var latest = upstream.value
@@ -157,11 +187,17 @@ private fun rememberScrollIsolatedMessages(
             var resumeJob: Job? = null
 
             launch {
-                snapshotFlow { listState.isScrollInProgress }
+                snapshotFlow {
+                    listState.isScrollInProgress to latestBypassScrollIsolation
+                }
                     .distinctUntilChanged()
-                    .collect { scrolling ->
+                    .collect { (scrolling, bypass) ->
                         resumeJob?.cancel()
-                        if (scrolling) {
+                        if (bypass) {
+                            deferred = false
+                            hasOwnedScroll = false
+                            if (rendered.value !== latest) rendered.value = latest
+                        } else if (scrolling) {
                             hasOwnedScroll = true
                             deferred = true
                         } else if (hasOwnedScroll) {
@@ -188,6 +224,7 @@ private fun rememberScrollIsolatedMessages(
                     .collect { next ->
                         latest = next
                         if (
+                            latestBypassScrollIsolation ||
                             !deferred ||
                             !sameStreamingRenderStructure(rendered.value, next)
                         ) {
@@ -267,7 +304,11 @@ private fun AnsweringHapticEffect(
 // isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
 // MessageItemSegments.kt.
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalFoundationApi::class,
+    kotlinx.coroutines.FlowPreview::class,
+)
 @Composable
 fun ChatApp(
     viewModel: ChatViewModel,
@@ -345,6 +386,7 @@ fun ChatApp(
     val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val newChatEntryId by viewModel.newChatEntryId.collectAsState()
     val isSwitching by viewModel.isSwitching.collectAsState()
+    val regenerationTransition by viewModel.regenerationTransition.collectAsState()
     val isTransitioningToNewChat by viewModel.isTransitioningToNewChat.collectAsState()
     val totalTokens by viewModel.totalTokens.collectAsState()
     val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
@@ -430,6 +472,62 @@ fun ChatApp(
     }
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
     val listState = rememberLazyListState()
+    var absoluteBottomScrollPhase by remember(currentConversationId) {
+        mutableStateOf(AbsoluteBottomScrollPhase.IDLE)
+    }
+    var absoluteBottomRequestToken by remember(currentConversationId) {
+        mutableLongStateOf(0L)
+    }
+    val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
+    val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
+    var isNearAbsoluteBottom by remember(currentConversationId) {
+        mutableStateOf(true)
+    }
+    // STOPPING deliberately keeps the generation slot's loading flag true until both coroutine
+    // unwind and durable finalization finish. It cannot produce more content, though, so treating
+    // it as a growing stream lets a transient terminal-layout contraction drive either follow
+    // actor upward (in the worst case all the way to the top).
+    val latestGenerationCanGrow by rememberUpdatedState(isLoading && !isStopping)
+    // Follow state belongs to one conversation. Reusing it across a conversation switch can
+    // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
+    val streamingTailController = rememberStreamingTailController(currentConversationId)
+    fun requestAbsoluteBottomScroll(): Boolean {
+        if (absoluteBottomScrollPhase.isActive) return false
+        absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
+            absoluteBottomScrollPhase,
+            AbsoluteBottomScrollEvent.Requested,
+        )
+        absoluteBottomRequestToken =
+            if (absoluteBottomRequestToken == Long.MAX_VALUE) {
+                1L
+            } else {
+                absoluteBottomRequestToken + 1L
+            }
+        return true
+    }
+    LaunchedEffect(
+        listState,
+        currentConversationId,
+        bottomButtonHideThresholdPx,
+        bottomButtonShowThresholdPx,
+    ) {
+        snapshotFlow {
+            absoluteBottomLayoutSnapshot(
+                layoutInfo = listState.layoutInfo,
+                canScrollForward = listState.canScrollForward,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                isNearAbsoluteBottom = reduceAbsoluteBottomProximity(
+                    wasNearBottom = isNearAbsoluteBottom,
+                    canScrollForward = snapshot.canScrollForward,
+                    remainingDistancePx = snapshot.remainingDistancePx,
+                    hideThresholdPx = bottomButtonHideThresholdPx,
+                    showThresholdPx = bottomButtonShowThresholdPx,
+                )
+            }
+    }
     val messageLifecycleAppearanceRegistry = remember {
         MessageLifecycleAppearanceRegistry()
     }
@@ -437,6 +535,8 @@ fun ChatApp(
         conversationId = currentConversationId,
         upstream = messagesState,
         listState = listState,
+        bypassScrollIsolation =
+            streamingTailController.isAutoFollowing || absoluteBottomScrollPhase.isActive,
     )
     var conversationSearchActive by rememberSaveable { mutableStateOf(false) }
     var conversationSearchQuery by rememberSaveable { mutableStateOf("") }
@@ -608,8 +708,62 @@ fun ChatApp(
         return true
     }
 
-    suspend fun animateAfterTargetCommitted(targetMessageId: String?): Boolean {
-        val targetCommitted = withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
+    fun estimateRemainingAbsoluteBottomDistance(): Float? {
+        val layout = listState.layoutInfo
+        val lastVisible = layout.visibleItemsInfo.maxByOrNull { item -> item.index }
+            ?: return null
+        val currentMessages = messagesState.value
+        val layoutTurns = buildMessageListTurns(currentMessages)
+        val visibleSizes = layout.visibleItemsInfo.associate { item -> item.index to item.size }
+        val fallbackHeight = visibleSizes.values
+            .filter { size -> size > 1 }
+            .takeIf { sizes -> sizes.isNotEmpty() }
+            ?.average()
+            ?.toFloat()
+            ?: with(density) { 72.dp.toPx() }
+        val lastUserMessageId = currentMessages
+            .lastOrNull { message -> message.participant == Participant.USER }
+            ?.id
+        val tailMinimumHeightPx = if (lastUserMessageId == null || viewportHeightPx == 0) {
+            0f
+        } else {
+            calculateTailMinHeightPx(
+                viewportHeightPx = viewportHeightPx,
+                targetTopPx = with(density) { 140.dp.roundToPx() },
+                bottomObstructionPx = with(density) {
+                    (bottomBarHeight + shareSelectionBarSpace + 8.dp).roundToPx()
+                },
+            ).toFloat()
+        }
+        val sentinelHeightPx = with(density) { 1.dp.toPx() }
+
+        fun estimatedItemSize(index: Int): Float {
+            visibleSizes[index]?.let { size -> return size.toFloat() }
+            val turn = layoutTurns.getOrNull(index) ?: return sentinelHeightPx
+            val estimated = estimateMessageListTurnHeightPx(
+                turn = turn,
+                messageHeights = messageHeights,
+                fallbackHeightPx = fallbackHeight,
+            )
+            return if (turn.key == lastUserMessageId) {
+                maxOf(estimated, tailMinimumHeightPx)
+            } else {
+                estimated
+            }
+        }
+
+        return estimateAbsoluteBottomDistancePx(
+            lastVisibleIndex = lastVisible.index,
+            lastVisibleEndOffsetPx = lastVisible.offset + lastVisible.size,
+            viewportEndOffsetPx = layout.viewportEndOffset,
+            afterContentPaddingPx = layout.afterContentPadding,
+            totalItemsCount = layout.totalItemsCount,
+            estimatedItemSizePx = ::estimatedItemSize,
+        )
+    }
+
+    suspend fun awaitScrollTargetCommitted(targetMessageId: String?): Boolean =
+        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
             snapshotFlow {
                 val index = resolveScrollTargetIndex(messagesState.value, targetMessageId)
                 index to listState.layoutInfo.totalItemsCount
@@ -617,8 +771,10 @@ fun ChatApp(
                 index >= 0 && index < itemCount
             }
             true
-        } ?: return false
-        if (!targetCommitted) return false
+        } == true
+
+    suspend fun animateAfterTargetCommitted(targetMessageId: String?): Boolean {
+        if (!awaitScrollTargetCommitted(targetMessageId)) return false
         return animateToUserMessage(targetMessageId)
     }
 
@@ -792,62 +948,261 @@ fun ChatApp(
         }
     }
 
-    // Load draft for the newly-opened conversation. loadingDraft gates the write-back
-    // snapshotFlow; updateDraft itself also compares against lastLoadedDraft for the
-    // debounce-delay window (belt-and-suspenders anti-loop).
+    // One effect owns both loading and persistence for exactly one conversation. This prevents
+    // the former pair of independent effects from cancelling a debounced tail write during a
+    // fast switch. Attachment mutations bypass the text debounce; cancellation performs a final
+    // non-cancellable flush before the next conversation is allowed to bind the shared composer.
     LaunchedEffect(currentConversationId) {
-        val id = currentConversationId
-        if (id == null) {
+        val draftId = currentConversationId
+        if (draftId == null) {
             // New-chat screen: clear the composer so a draft from the previous conversation
             // doesn't carry over.
             viewModel.loadingDraft = true
-            textFieldState.edit { replace(0, length, "") }
-            composer.selectedAttachments = emptyList()
-            viewModel.loadingDraft = false
+            try {
+                composer.bindDraftOwner(null)
+                textFieldState.edit { replace(0, length, "") }
+                composer.selectedAttachments = emptyList()
+            } finally {
+                viewModel.loadingDraft = false
+            }
             return@LaunchedEffect
         }
-        viewModel.loadingDraft = true
-        val (draftText, draftAttachments) = try {
-            viewModel.loadDraft(id)
-        } catch (e: Exception) {
-            "" to emptyList()
-        }
-        textFieldState.edit {
-            replace(0, length, draftText)
-        }
-        composer.selectedAttachments = draftAttachments
-        viewModel.loadingDraft = false
-    }
 
-    // Draft write-back, debounced. Keyed by conversation id and the id is CAPTURED when the
-    // effect starts — a debounced write can therefore never attribute text typed in conversation
-    // A to conversation B after a fast switch (the old bottom-bar effect read the live id at
-    // fire time). Switching restarts the effect, dropping ≤300ms of pending tail — acceptable.
-    // Declared AFTER the draft-load effect above so loadingDraft is already set when this runs.
-    @OptIn(kotlinx.coroutines.FlowPreview::class)
-    LaunchedEffect(currentConversationId) {
-        val draftId = currentConversationId ?: return@LaunchedEffect
-        snapshotFlow { textFieldState.text.toString() to composer.selectedAttachments }
-            .distinctUntilChanged()
-            .debounce(300L)
-            .collect { (text, attachments) ->
-                if (!viewModel.loadingDraft) {
-                    viewModel.updateDraft(draftId, text, attachments)
-                }
+        viewModel.loadingDraft = true
+        val loadedDraft = try {
+            viewModel.loadDraft(draftId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            DebugLog.e("AgoraUI", "Failed to load composer draft for $draftId", error)
+            com.newoether.agora.viewmodel.LoadedComposerDraft(
+                text = "",
+                attachments = emptyList(),
+                revision = 0L,
+            )
+        }
+        try {
+            composer.bindDraftOwner(draftId)
+            textFieldState.edit {
+                replace(0, length, loadedDraft.text)
             }
+            composer.selectedAttachments = loadedDraft.attachments
+        } finally {
+            viewModel.loadingDraft = false
+        }
+
+        var revision = loadedDraft.revision
+        var persistedAttachments = loadedDraft.attachments
+
+        fun captureDraft(): ComposerDraftUiSnapshot = ComposerDraftUiSnapshot(
+            text = textFieldState.text.toString(),
+            attachments = composer.selectedAttachments,
+            removals = composer.attachmentRemovalsFor(draftId),
+        )
+        var latestSnapshot = captureDraft()
+
+        suspend fun persistSnapshot(snapshot: ComposerDraftUiSnapshot) {
+            var failureCount = 0
+            while (true) {
+                val result = viewModel.persistDraft(
+                    conversationId = draftId,
+                    expectedRevision = revision,
+                    text = snapshot.text,
+                    attachments = snapshot.attachments,
+                    explicitlyRemovedAttachments =
+                        snapshot.removals.map(PendingAttachmentRemoval::attachment),
+                )
+                revision = result.revision
+                if (result.succeeded) {
+                    if (result.matchesRequested) {
+                        persistedAttachments = snapshot.attachments
+                        composer.acknowledgeAttachmentRemovals(
+                            snapshot.removals
+                                .mapTo(linkedSetOf(), PendingAttachmentRemoval::id),
+                        )
+                    }
+                    // A revision mismatch means a newer owner (most commonly accepted Send)
+                    // already committed state. Never retry the stale snapshot over that state.
+                    return
+                }
+                if (failureCount >= DRAFT_PERSIST_RETRY_COUNT) return
+                failureCount += 1
+                delay(DRAFT_PERSIST_RETRY_DELAY_MS * failureCount)
+            }
+        }
+
+        try {
+            snapshotFlow { captureDraft() }
+                .distinctUntilChanged()
+                .collectLatest { snapshot ->
+                    // Retain a conversation-owned copy before any debounce suspension. A new
+                    // LaunchedEffect may bind the shared composer while this one is cancelling.
+                    latestSnapshot = snapshot
+                    val delayMillis = composerDraftWriteDelayMillis(
+                        previousAttachments = persistedAttachments,
+                        nextAttachments = snapshot.attachments,
+                        hasPendingRemovals = snapshot.removals.isNotEmpty(),
+                    )
+                    if (delayMillis > 0L) delay(delayMillis)
+                    persistSnapshot(snapshot)
+                }
+        } finally {
+            // LaunchedEffect cancellation normally remains cancellable. The final snapshot must
+            // outlive a navigation/recomposition cancellation so its conversation cannot retain
+            // stale text or attachment references.
+            val finalSnapshot = if (composer.isDraftOwner(draftId)) {
+                captureDraft()
+            } else {
+                latestSnapshot
+            }
+            withContext(NonCancellable) {
+                persistSnapshot(finalSnapshot)
+            }
+        }
     }
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
+    LaunchedEffect(absoluteBottomRequestToken, currentConversationId) {
+        if (absoluteBottomRequestToken == 0L) return@LaunchedEffect
+        try {
+            val reachedBottom = listState.animateToAbsoluteBottom(
+                isGenerationActive = { latestGenerationCanGrow },
+                estimateRemainingDistancePx = ::estimateRemainingAbsoluteBottomDistance,
+                minimumStepPx = with(density) { 2.dp.toPx() },
+                onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
+            )
+            if (
+                reachedBottom &&
+                latestGenerationCanGrow &&
+                !listState.canScrollForward
+            ) {
+                streamingTailController.requestReattach()
+            }
+        } finally {
+            if (absoluteBottomScrollPhase.isActive) {
+                absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
+                    absoluteBottomScrollPhase,
+                    AbsoluteBottomScrollEvent.Cancelled,
+                )
+            }
+        }
+    }
+    LaunchedEffect(listState, currentConversationId) {
+        listState.interactionSource.interactions.collect { interaction ->
+            if (
+                interaction is DragInteraction.Start &&
+                absoluteBottomScrollPhase.isActive
+            ) {
+                absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
+                    absoluteBottomScrollPhase,
+                    AbsoluteBottomScrollEvent.Cancelled,
+                )
+                absoluteBottomRequestToken = 0L
+            }
+        }
+    }
+    LaunchedEffect(
+        conversationSearchActive,
+        shareSelectionActive,
+        isSwitching,
+        regenerationTransition?.id,
+        animatedScrollRequest?.id,
+    ) {
+        val competingTransition =
+            conversationSearchActive ||
+                shareSelectionActive ||
+                isSwitching ||
+                regenerationTransition != null ||
+                animatedScrollRequest != null
+        if (competingTransition && absoluteBottomScrollPhase.isActive) {
+            absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
+                absoluteBottomScrollPhase,
+                AbsoluteBottomScrollEvent.Cancelled,
+            )
+            absoluteBottomRequestToken = 0L
+        }
+    }
+    LaunchedEffect(
+        regenerationTransition?.id,
+        currentConversationId,
+    ) {
+        val request = regenerationTransition ?: return@LaunchedEffect
+        if (request.scrollFinished) return@LaunchedEffect
+        if (request.conversationId != currentConversationId) {
+            viewModel.acknowledgeRegenerationScroll(request.id, success = false)
+            return@LaunchedEffect
+        }
+        try {
+            val success = animateToUserMessage(
+                targetMessageId = request.targetUserMessageId,
+                easing = SCROLL_EASING,
+            )
+            viewModel.acknowledgeRegenerationScroll(request.id, success)
+        } catch (e: CancellationException) {
+            viewModel.acknowledgeRegenerationScroll(request.id, success = false)
+            throw e
+        }
+    }
+    LaunchedEffect(
+        regenerationTransition?.id,
+        regenerationTransition?.stage,
+        regenerationTransition?.scrollFinished,
+        currentConversationId,
+    ) {
+        val request = regenerationTransition
+            ?.takeIf {
+                it.stage == RegenerationTransitionStage.COMMITTED &&
+                    it.scrollFinished
+            }
+            ?: return@LaunchedEffect
+        if (request.conversationId == currentConversationId) {
+            snapshotFlow {
+                messagesState.value.none { message -> message.id == request.oldMessageId }
+            }.first { oldPathRemoved -> oldPathRemoved }
+            withFrameNanos { }
+        }
+        viewModel.completeRegenerationTransition(request.id)
+    }
     LaunchedEffect(animatedScrollRequest?.id, currentConversationId) {
         val request = animatedScrollRequest ?: return@LaunchedEffect
-        if (request.conversationId != currentConversationId) return@LaunchedEffect
-        if (!animateAfterTargetCommitted(request.targetMessageId)) {
-            DebugLog.e(
-                "AgoraUI",
-                "Animated scroll target was not committed: ${request.targetMessageId}",
-            )
+        if (request.conversationId != currentConversationId) {
+            viewModel.completeAnimatedScroll(request.id)
+            return@LaunchedEffect
         }
-        viewModel.completeAnimatedScroll(request.id)
+        when (request.destination) {
+            AnimatedScrollDestination.MESSAGE -> {
+                try {
+                    if (!animateAfterTargetCommitted(request.targetMessageId)) {
+                        DebugLog.e(
+                            "AgoraUI",
+                            "Animated scroll target was not committed: ${request.targetMessageId}",
+                        )
+                    }
+                } finally {
+                    viewModel.completeAnimatedScroll(request.id)
+                }
+            }
+            AnimatedScrollDestination.ABSOLUTE_BOTTOM -> {
+                val targetCommitted = try {
+                    awaitScrollTargetCommitted(request.targetMessageId)
+                } finally {
+                    // Complete the readiness request before arming the bottom actor. The
+                    // competing-transition gate therefore cannot cancel the Send's own scroll.
+                    viewModel.completeAnimatedScroll(request.id)
+                }
+                if (
+                    targetCommitted &&
+                    request.conversationId == currentConversationId
+                ) {
+                    requestAbsoluteBottomScroll()
+                } else if (!targetCommitted) {
+                    DebugLog.e(
+                        "AgoraUI",
+                        "Absolute-bottom scroll target was not committed: ${request.targetMessageId}",
+                    )
+                }
+            }
+        }
     }
 
     BackHandler(enabled = drawerState.currentValue != DrawerValue.Closed || drawerState.targetValue != DrawerValue.Closed) {
@@ -1054,6 +1409,7 @@ fun ChatApp(
                             MessageList(
                                 messages = StableMessageList(renderMessagesState.value),
                                 allMessages = StableMessageList(allMessagesState.value),
+                                conversationId = currentConversationId,
                                 modifier = messageListModifier,
                                 state = listState,
                                 // Per-conversation generation gate: isLoading mirrors the OPEN
@@ -1061,7 +1417,41 @@ fun ChatApp(
                                 // gates on current == id), so message actions freeze while THIS
                                 // conversation generates — background conversations don't affect it.
                                 isLoading = isLoading,
+                                isStopping = isStopping,
                                 isSwitching = isSwitching,
+                                streamingAutoFollowEnabled =
+                                    isLoading &&
+                                        !isStopping &&
+                                        !isSwitching &&
+                                        !conversationSearchActive &&
+                                        !shareSelectionActive &&
+                                        !absoluteBottomScrollPhase.isActive &&
+                                        animatedScrollRequest == null &&
+                                        regenerationTransition == null,
+                                streamingAutoFollowPaused =
+                                    isLoading &&
+                                        !isStopping &&
+                                        !isSwitching &&
+                                        !conversationSearchActive &&
+                                        !shareSelectionActive &&
+                                        !absoluteBottomScrollPhase.isActive &&
+                                        (
+                                            animatedScrollRequest?.conversationId ==
+                                                currentConversationId ||
+                                                regenerationTransition?.conversationId ==
+                                                currentConversationId
+                                        ),
+                                programmaticScrollActive =
+                                    animatedScrollRequest?.conversationId ==
+                                        currentConversationId,
+                                streamingTailController = streamingTailController,
+                                streamingIndicatorVisible =
+                                    isLoading &&
+                                        regenerationTransition?.stage !=
+                                            RegenerationTransitionStage.ANIMATING,
+                                regenerationTransition = regenerationTransition,
+                                onRegenerationFadeOutFinished =
+                                    viewModel::acknowledgeRegenerationFade,
                                 visualizeContextRollout = visualizeContextRollout,
                                 toolCallDisplayMode = toolCallDisplayMode,
                                 maxContextWindow = contextWindow,
@@ -1159,24 +1549,17 @@ fun ChatApp(
                                         (availableWelcomeHeight / 2f).coerceAtLeast(0f).dp
                                     val welcomeModifier =
                                         Modifier.padding(top = welcomeTopPadding)
-                                    if (newChatEntryId == 1L) {
-                                        TypewriterText(
-                                            text = welcomeText,
-                                            animationKey = newChatEntryId,
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onBackground,
-                                            modifier = welcomeModifier,
-                                        )
-                                    } else {
-                                        Text(
-                                            text = welcomeText,
-                                            style = MaterialTheme.typography.headlineMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onBackground,
-                                            modifier = welcomeModifier,
-                                        )
-                                    }
+                                    TypewriterText(
+                                        text = welcomeText,
+                                        animationKey = newChatEntryId,
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onBackground,
+                                        typeSpeedMs = 100,
+                                        animate = newChatEntryId == 1L,
+                                        mode = TypewriterMode.TEXT_GRADIENT,
+                                        modifier = welcomeModifier,
+                                    )
                                 }
                             }
                         } else {
@@ -1184,14 +1567,34 @@ fun ChatApp(
                         }
                     }
 
-                    val showButton by remember {
+                    // The proximity/scroll phase states above are themselves recreated for each
+                    // conversation. Recreate this derived state with the same owner so its closure
+                    // never keeps reading a previous conversation's state objects or the initial
+                    // new-chat flag.
+                    val showButton by remember(
+                        currentConversationId,
+                        loadedMessagesConversationId,
+                        isNewChatMode,
+                        isSwitching,
+                        listState,
+                        streamingTailController,
+                    ) {
                         derivedStateOf {
-                            if (isNewChatMode || shareSelectionActive) false
-                            else {
-                                val info = listState.layoutInfo
-                                val total = info.totalItemsCount
-                                total > 0 && info.visibleItemsInfo.none { it.index == total - 1 }
-                            }
+                            val totalItemsCount = listState.layoutInfo.totalItemsCount
+                            shouldShowAbsoluteBottomButton(
+                                isNewChatMode = isNewChatMode,
+                                isSwitching = isSwitching,
+                                conversationContentReady =
+                                    currentConversationId != null &&
+                                        loadedMessagesConversationId == currentConversationId,
+                                shareSelectionActive = shareSelectionActive,
+                                hasItems = totalItemsCount > 1,
+                                canScrollForward = listState.canScrollForward,
+                                isNearBottom = isNearAbsoluteBottom,
+                                isStreamingAutoFollowing =
+                                    streamingTailController.isAutoFollowing,
+                                scrollPhase = absoluteBottomScrollPhase,
+                            )
                         }
                     }
 
@@ -1208,8 +1611,9 @@ fun ChatApp(
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             FloatingActionButton(onClick = {
-                                haptics.tap()
-                                scope.launch { animateToUserMessage(easing = SCROLL_EASING) }
+                                if (requestAbsoluteBottomScroll()) {
+                                    haptics.tap()
+                                }
                             }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }

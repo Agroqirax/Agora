@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -27,6 +28,8 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val titleGenEnabled by viewModel.settings.titleGenerationEnabled.collectAsState()
     val titleGenModel by viewModel.settings.titleGenerationModel.collectAsState()
     val titleGenPrompt by viewModel.settings.titleGenerationPrompt.collectAsState()
+    val titleGenNotificationsEnabled by
+        viewModel.settings.titleGenerationNotificationsEnabled.collectAsState()
     val modelAliases by viewModel.settings.modelAliases.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
     var showTitleModelDialog by remember { mutableStateOf(false) }
@@ -68,6 +71,35 @@ fun SettingsTitleGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     modifier = Modifier.clickable { showTitleModelDialog = true }
                                 )
                             }
+                        }
+                        add {
+                            SettingsItem(
+                                headlineContent = {
+                                    Text(stringResource(R.string.title_gen_notifications))
+                                },
+                                supportingContent = {
+                                    Text(stringResource(R.string.title_gen_notifications_desc))
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.Default.Notifications,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = titleGenNotificationsEnabled,
+                                        onCheckedChange =
+                                            viewModel.settings::setTitleGenerationNotificationsEnabled,
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    viewModel.settings.setTitleGenerationNotificationsEnabled(
+                                        !titleGenNotificationsEnabled,
+                                    )
+                                },
+                            )
                         }
                     }
                 )

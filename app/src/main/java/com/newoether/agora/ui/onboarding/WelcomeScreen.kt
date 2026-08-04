@@ -61,11 +61,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -78,7 +76,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -98,6 +95,8 @@ import com.newoether.agora.R
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
+import com.newoether.agora.ui.components.TypewriterMode
+import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.model.apiModelName
@@ -489,11 +488,37 @@ fun WelcomeScreen(
                             val isCurrent = pagerState.currentPage == index
                             val show = isCurrent || index in typedPages
                             val anim = isCurrent && index !in typedPages
-                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
                                 val delay = if (index == 0) 2000 else 0
-                                TypeInText(text = title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurface, speedMs = 50, initialDelayMs = if (anim) delay else 0, animate = anim, showText = show)
+                                TypewriterText(
+                                    text = title,
+                                    animationKey = "onboarding-title-$index",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Start,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    typeSpeedMs = 50,
+                                    initialDelayMs = if (anim) delay else 0,
+                                    animate = anim,
+                                    showText = show,
+                                    mode = TypewriterMode.TEXT_GRADIENT,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                                 Spacer(Modifier.height(8.dp))
-                                TypeInText(text = desc, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant, speedMs = 30, initialDelayMs = if (anim) delay + 200 else 0, animate = anim, showText = show, onDone = { if (anim) typedPages.add(index) })
+                                TypewriterText(
+                                    text = desc,
+                                    animationKey = "onboarding-description-$index",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    textAlign = TextAlign.Start,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    typeSpeedMs = 30,
+                                    initialDelayMs = if (anim) delay + 200 else 0,
+                                    animate = anim,
+                                    showText = show,
+                                    mode = TypewriterMode.TEXT_GRADIENT,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onDone = { if (anim) typedPages.add(index) },
+                                )
                             }
                         }
 
@@ -760,44 +785,6 @@ private fun ModelPage(models: List<String>, modelAliases: Map<String, String>, s
                     Spacer(Modifier.height(10.dp))
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TypeInText(text: String, modifier: Modifier = Modifier, style: TextStyle, color: Color, fontWeight: FontWeight? = null, textAlign: TextAlign? = null, speedMs: Int = 50, initialDelayMs: Int = 0, animate: Boolean = true, onDone: () -> Unit = {}, showText: Boolean = true) {
-    var startMs by remember(text) { mutableLongStateOf(0L) }
-    var started by remember(text) { mutableStateOf(false) }
-    var visible by remember(text, animate) { mutableIntStateOf(if (animate) 0 else text.length) }
-    var done by remember(text, animate) { mutableStateOf(!animate) }
-    // Type by CODE POINT, not by char: a surrogate pair (emoji) or a combining sequence cut in
-    // half renders as tofu for one frame. The count is over code points, and the prefix is
-    // resolved back to a char offset only when slicing.
-    val codePointCount = remember(text) { text.codePointCount(0, text.length) }
-    LaunchedEffect(text, animate) {
-        if (!animate) { visible = codePointCount; done = true; return@LaunchedEffect }
-        visible = 0
-        done = false
-        if (!started) { startMs = System.currentTimeMillis() + initialDelayMs; started = true }
-        while (visible < codePointCount) {
-            // withFrameNanos ties each reveal to a real frame instead of a drifting 16ms sleep.
-            withFrameNanos { }
-            val elapsed = System.currentTimeMillis() - startMs
-            val target = if (elapsed < 0) 0 else (elapsed / speedMs).toInt().coerceAtMost(codePointCount)
-            if (target != visible) visible = target
-        }
-        done = true
-        onDone()
-    }
-    val typed = remember(text, visible) {
-        if (visible >= codePointCount) text else text.substring(0, text.offsetByCodePoints(0, visible))
-    }
-    Box(modifier.fillMaxWidth()) {
-        // Invisible full text anchors layout — always present
-        Text(text = text, style = style, fontWeight = fontWeight, color = Color.Transparent, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
-        // Visible typed text — only when showText is true
-        if (showText) {
-            Text(text = typed + if (!done) "|" else "", style = style, fontWeight = fontWeight, color = color, textAlign = textAlign, modifier = Modifier.fillMaxWidth())
         }
     }
 }

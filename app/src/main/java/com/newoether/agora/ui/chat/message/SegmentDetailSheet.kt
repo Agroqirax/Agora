@@ -1,21 +1,32 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,12 +46,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -94,6 +107,12 @@ internal fun SegmentDetailSheet(
             LocalWindowInfo.current.containerSize.height.toFloat().coerceAtLeast(1f)
         val coroutineScope = rememberCoroutineScope()
         val scrollState = rememberScrollState()
+        val lazyDetailListState = rememberLazyListState()
+        val usesVirtualizedSingleMarkdown =
+            selectedSegs.size == 1 &&
+                seg.type != "tool" &&
+                !(seg.type == "transcription" && seg.content.isBlank()) &&
+                !isStreaming
 
         val PARTIAL = 0.45f
         val FULL = 0.94f
@@ -191,7 +210,7 @@ internal fun SegmentDetailSheet(
         // Half: content does NOT scroll — all delta goes to sheet expansion.
         // Full: content scrolls normally. Exit Full ONLY when content at top
         //       and finger still dragging down (source == Drag).
-        val sheetScrollConnection = remember {
+        val sheetScrollConnection = remember(usesVirtualizedSingleMarkdown) {
             object : NestedScrollConnection {
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                     if (!dismissing && phase != PHASE_FULL) {
@@ -212,7 +231,12 @@ internal fun SegmentDetailSheet(
                     // Exit Full → Half: content at top + finger dragging down
                     if (phase == PHASE_FULL
                         && available.y > 0f
-                        && scrollState.value == 0
+                        && if (usesVirtualizedSingleMarkdown) {
+                            lazyDetailListState.firstVisibleItemIndex == 0 &&
+                                lazyDetailListState.firstVisibleItemScrollOffset == 0
+                        } else {
+                            scrollState.value == 0
+                        }
                         && source == NestedScrollSource.UserInput
                     ) {
                         phase = PHASE_HALF
@@ -342,79 +366,184 @@ internal fun SegmentDetailSheet(
                             )
                         }
 
-                        // Scrollable detail content
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .nestedScroll(sheetScrollConnection)
-                                .verticalScroll(scrollState)
-                                .noOpBringIntoView()
-                                .padding(horizontal = 24.dp)
-                                // Markdown content (thinking, transcription) hugs its title with a
-                                // unified 4dp; tool detail leads with an Arguments/Result label, so it
-                                // gets a slightly larger 6dp.
-                                .padding(top = if (seg.type == "tool") 6.dp else 4.dp)
-                                .navigationBarsPadding()
-                                .padding(bottom = 32.dp)
-                        ) {
-                            if (selectedSegs.size > 1) {
-                                selectedSegs.forEachIndexed { index, detailSeg ->
-                                    val detailIndex = selectedSegmentIndices.getOrNull(index)
-                                        ?: liveSegs.indexOf(detailSeg).coerceAtLeast(0)
-                                    Text(
-                                        segmentDetailTitle(detailSeg, liveSegs, detailIndex),
-                                        style = ChatType.detailTitle,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(top = if (index == 0) 0.dp else 18.dp, bottom = 8.dp)
-                                    )
-                                    if (detailSeg.type == "tool") {
-                                        ToolDetailContent(detailSeg)
-                                    } else if (detailSeg.type == "transcription" && detailSeg.content.isBlank()) {
-                                        Text(
-                                            text = "Image transcription is empty.",
-                                            style = ChatType.body,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                        )
-                                    } else {
-                                        val detailIsStreaming =
-                                            isStreaming && index == selectedSegs.lastIndex
-                                        StreamingMarkdownDocument(
-                                            content = detailSeg.content,
-                                            isStreaming = detailIsStreaming,
-                                            renderContext = markdownRenderContext,
-                                            modifier = Modifier.fillMaxWidth(),
-                                            selectionEnabled = !detailIsStreaming,
-                                        )
-                                    }
-                                    if (index < selectedSegs.lastIndex) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(top = 18.dp),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                                        )
-                                    }
-                                }
-                            } else if (seg.type == "tool") {
-                                ToolDetailContent(seg)
-                            } else if (seg.type == "transcription" && seg.content.isBlank()) {
-                                Text(
-                                    text = "Image transcription is empty.",
-                                    style = ChatType.body,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                                )
-                            } else {
-                                StreamingMarkdownDocument(
-                                    content = seg.content,
-                                    isStreaming = isStreaming,
+                        if (usesVirtualizedSingleMarkdown) {
+                            DetailContentReveal(
+                                revealKey = "${message.id}:$selectedSegmentIndex",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .nestedScroll(sheetScrollConnection)
+                                    .noOpBringIntoView()
+                                    .navigationBarsPadding(),
+                            ) { revealModifier, onReady ->
+                                LazyMarkdownTextContent(
+                                    text = seg.content,
                                     renderContext = markdownRenderContext,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    selectionEnabled = !isStreaming,
+                                    listState = lazyDetailListState,
+                                    modifier = revealModifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(
+                                        start = 24.dp,
+                                        top = 4.dp,
+                                        end = 24.dp,
+                                        bottom = 32.dp,
+                                    ),
+                                    onReady = onReady,
                                 )
+                            }
+                        } else {
+                            // Tool and grouped details use one conventional scroll owner. An
+                            // actively streaming Markdown document must retain its incremental
+                            // renderer when it becomes terminal, so it remains in this branch.
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .nestedScroll(sheetScrollConnection)
+                                    .verticalScroll(scrollState)
+                                    .noOpBringIntoView()
+                                    .padding(horizontal = 24.dp)
+                                    .padding(top = if (seg.type == "tool") 6.dp else 4.dp)
+                                    .navigationBarsPadding()
+                                    .padding(bottom = 32.dp)
+                            ) {
+                                if (selectedSegs.size > 1) {
+                                    selectedSegs.forEachIndexed { index, detailSeg ->
+                                        val detailIndex = selectedSegmentIndices.getOrNull(index)
+                                            ?: liveSegs.indexOf(detailSeg).coerceAtLeast(0)
+                                        Text(
+                                            segmentDetailTitle(detailSeg, liveSegs, detailIndex),
+                                            style = ChatType.detailTitle,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(
+                                                top = if (index == 0) 0.dp else 18.dp,
+                                                bottom = 8.dp,
+                                            ),
+                                        )
+                                        if (detailSeg.type == "tool") {
+                                            ToolDetailContent(detailSeg)
+                                        } else if (
+                                            detailSeg.type == "transcription" &&
+                                            detailSeg.content.isBlank()
+                                        ) {
+                                            Text(
+                                                text = "Image transcription is empty.",
+                                                style = ChatType.body,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    .copy(alpha = 0.4f),
+                                            )
+                                        } else {
+                                            val detailIsStreaming =
+                                                isStreaming && index == selectedSegs.lastIndex
+                                            StreamingDetailMarkdownReveal(
+                                                revealKey = "${message.id}:$detailIndex",
+                                                content = detailSeg.content,
+                                                isStreaming = detailIsStreaming,
+                                                renderContext = markdownRenderContext,
+                                            )
+                                        }
+                                        if (index < selectedSegs.lastIndex) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(top = 18.dp),
+                                                color = MaterialTheme.colorScheme.outlineVariant
+                                                    .copy(alpha = 0.3f),
+                                            )
+                                        }
+                                    }
+                                } else if (seg.type == "tool") {
+                                    ToolDetailContent(seg)
+                                } else if (
+                                    seg.type == "transcription" &&
+                                    seg.content.isBlank()
+                                ) {
+                                    Text(
+                                        text = "Image transcription is empty.",
+                                        style = ChatType.body,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            .copy(alpha = 0.4f),
+                                    )
+                                } else {
+                                    StreamingDetailMarkdownReveal(
+                                        revealKey = "${message.id}:$selectedSegmentIndex",
+                                        content = seg.content,
+                                        isStreaming = isStreaming,
+                                        renderContext = markdownRenderContext,
+                                    )
+                                }
                             }
                         }
                     }
                 }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun StreamingDetailMarkdownReveal(
+    revealKey: String,
+    content: String,
+    isStreaming: Boolean,
+    renderContext: ChatMarkdownRenderContext,
+) {
+    DetailContentReveal(
+        revealKey = revealKey,
+        modifier = Modifier.fillMaxWidth(),
+    ) { revealModifier, onReady ->
+        StreamingMarkdownDocument(
+            content = content,
+            isStreaming = isStreaming,
+            renderContext = renderContext,
+            modifier = revealModifier
+                .fillMaxWidth()
+                .onSizeChanged { size ->
+                    if (size.height > 0 || content.isEmpty()) onReady()
+                },
+            selectionEnabled = !isStreaming,
+        )
+    }
+}
+
+@Composable
+private fun DetailContentReveal(
+    revealKey: String,
+    modifier: Modifier = Modifier,
+    content: @Composable (revealModifier: Modifier, onReady: () -> Unit) -> Unit,
+) {
+    var ready by remember(revealKey) { mutableStateOf(false) }
+    var showLoading by remember(revealKey) { mutableStateOf(false) }
+    val revealAlpha by animateFloatAsState(
+        targetValue = if (ready) 1f else 0f,
+        animationSpec = tween(durationMillis = 240, easing = LinearEasing),
+        label = "detailContentReveal:$revealKey",
+    )
+
+    LaunchedEffect(revealKey) {
+        delay(120)
+        if (!ready) showLoading = true
+    }
+    LaunchedEffect(ready) {
+        if (ready) showLoading = false
+    }
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        content(
+            Modifier.graphicsLayer { alpha = revealAlpha },
+        ) {
+            if (!ready) ready = true
+        }
+        AnimatedVisibility(
+            visible = showLoading && !ready,
+            enter = fadeIn(tween(160, easing = LinearEasing)),
+            exit = fadeOut(tween(140, easing = LinearEasing)),
+            modifier = Modifier.padding(top = 24.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(22.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary,
+            )
         }
     }
 }

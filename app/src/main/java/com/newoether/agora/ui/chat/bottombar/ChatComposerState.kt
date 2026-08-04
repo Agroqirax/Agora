@@ -11,6 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.chat.VideoSliceDialog
 import com.newoether.agora.util.DebugLog
@@ -28,6 +29,17 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
+
+data class CameraCaptureTarget(
+    val uri: Uri,
+    val privatePath: String,
+)
+
+data class PendingAttachmentRemoval(
+    val id: Long,
+    val ownerConversationId: String,
+    val attachment: SelectedAttachment,
+)
 
 /**
  * State holder for the chat composer's attachment subsystem (images / videos / PDFs /
@@ -48,6 +60,10 @@ class ChatComposerState(
     var selectedAttachments by mutableStateOf<List<SelectedAttachment>>(emptyList())
     var processingStates by mutableStateOf<Map<String, Float>>(emptyMap())
     var pendingSend by mutableStateOf(false)
+    private var draftOwnerConversationId: String? = null
+    private var attachmentRemovalIds = 0L
+    var pendingAttachmentRemovals by mutableStateOf<List<PendingAttachmentRemoval>>(emptyList())
+        private set
 
     // PDF page selection dialog state
     var showPdfPageDialog by mutableStateOf(false)
@@ -74,8 +90,21 @@ class ChatComposerState(
     private var videoMetadataJob: Job? = null
     private val attachmentInspectionMutex = Mutex()
 
-    // File validation rejection dialog
-    var rejectedMessage by mutableStateOf<String?>(null)
+    // Generic file validation and camera failures share one dialog surface, but not one title.
+    // Keeping the title alongside the message prevents camera launch errors from being
+    // misreported as an unsupported MIME type.
+    private var rejectionMessageState by mutableStateOf<String?>(null)
+    private var rejectionTitleState by mutableIntStateOf(
+        com.newoether.agora.R.string.file_unsupported_title,
+    )
+    var rejectedMessage: String?
+        get() = rejectionMessageState
+        set(value) {
+            rejectionMessageState = value
+            rejectionTitleState = com.newoether.agora.R.string.file_unsupported_title
+        }
+    val rejectedTitleRes: Int
+        get() = rejectionTitleState
 
     private data class InspectedFile(
         val uri: Uri,
@@ -89,6 +118,25 @@ class ChatComposerState(
      *  must NOT be deleted here; message deletion handles that. */
     fun clearAttachments() {
         selectedAttachments = emptyList()
+    }
+
+    fun bindDraftOwner(conversationId: String?) {
+        draftOwnerConversationId = conversationId
+    }
+
+    fun isDraftOwner(conversationId: String): Boolean =
+        draftOwnerConversationId == conversationId
+
+    fun attachmentRemovalsFor(conversationId: String): List<PendingAttachmentRemoval> =
+        pendingAttachmentRemovals.filter { removal ->
+            removal.ownerConversationId == conversationId
+        }
+
+    fun acknowledgeAttachmentRemovals(ids: Set<Long>) {
+        if (ids.isNotEmpty()) {
+            pendingAttachmentRemovals =
+                pendingAttachmentRemovals.filterNot { removal -> removal.id in ids }
+        }
     }
 
     /**
@@ -161,24 +209,122 @@ class ChatComposerState(
         }
     }
 
-    /** Remove the attachment at [index], cancelling any in-flight extraction and deleting its
-     *  pre-extracted frame / rendered-page files. */
+    /**
+     * Creates the camera's output file inside Agora's private files directory and exposes only
+     * this one path through FileProvider. The system camera writes the full-resolution image
+     * directly; Agora never needs CAMERA permission or a public gallery entry.
+     */
+    suspend fun createCameraCaptureTarget(): CameraCaptureTarget? =
+        withContext(Dispatchers.IO) {
+            var target: java.io.File? = null
+            try {
+                val directory = java.io.File(context.filesDir, "images")
+                check(directory.exists() || directory.mkdirs()) {
+                    "Unable to create private image directory"
+                }
+                target = java.io.File(directory, "camera_${UUID.randomUUID()}.jpg")
+                check(target.createNewFile()) { "Unable to create camera target" }
+                val uri = FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    target,
+                )
+                CameraCaptureTarget(uri = uri, privatePath = target.absolutePath)
+            } catch (error: Exception) {
+                target?.let { runCatching { it.delete() } }
+                DebugLog.e("ChatComposer", "Unable to prepare camera capture", error)
+                null
+            }
+        }
+
+    /**
+     * Commits a successful camera file as a normal image attachment. Cancellation and malformed
+     * zero-byte camera results reclaim the private target asynchronously.
+     */
+    fun completeCameraCapture(privatePath: String, captured: Boolean) {
+        scope.launch {
+            val attachment = withContext(Dispatchers.IO) {
+                val file = privateCameraFile(privatePath)
+                if (file == null) {
+                    null
+                } else if (!captured || !file.isFile || file.length() <= 0L) {
+                    runCatching { file.delete() }
+                    null
+                } else {
+                    runCatching {
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            file,
+                        )
+                        SelectedAttachment(
+                            uri = uri.toString(),
+                            type = "image",
+                            fileName = file.name,
+                            mimeType = "image/jpeg",
+                            fileSize = file.length(),
+                            localPath = file.absolutePath,
+                        )
+                    }.getOrElse { error ->
+                        runCatching { file.delete() }
+                        DebugLog.e("ChatComposer", "Unable to attach camera capture", error)
+                        null
+                    }
+                }
+            }
+            if (attachment != null) {
+                haptics.selection()
+                selectedAttachments = selectedAttachments + attachment
+            } else if (captured) {
+                rejectedMessage = context.getString(
+                    com.newoether.agora.R.string.attachment_copy_failed_image,
+                )
+            }
+        }
+    }
+
+    private fun privateCameraFile(path: String): java.io.File? = runCatching {
+        val directory = java.io.File(context.filesDir, "images").canonicalFile
+        java.io.File(path).canonicalFile.takeIf { file ->
+            file.parentFile == directory && file.name.startsWith("camera_")
+        }
+    }.getOrNull()
+
+    fun reportCameraPreparationFailure() {
+        rejectionTitleState = com.newoether.agora.R.string.camera
+        rejectionMessageState = context.getString(
+            com.newoether.agora.R.string.attachment_copy_failed_image,
+        )
+    }
+
+    /** Remove the attachment at [index]. Conversation-owned files are reclaimed only after the
+     *  new draft is durable; new-chat files have no possible draft owner and can be deleted now. */
     fun removeAttachmentAt(index: Int) {
+        val removed = selectedAttachments.getOrNull(index) ?: return
         haptics.selection()
-        val removed = selectedAttachments.getOrNull(index)
         // Cancel in-flight video extraction + delete partial frames
-        if (removed != null && videoExtractionJobs.containsKey(removed.uri)) {
+        if (videoExtractionJobs.containsKey(removed.uri)) {
             videoExtractionJobs[removed.uri]?.cancel()
             videoExtractionJobs.remove(removed.uri)
         }
-        val uriStr = removed?.uri
+        val uriStr = removed.uri
         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(index) }
-        if (uriStr != null) processingStates = processingStates - uriStr
-        // File deletion is never part of the pointer-input/Main transaction.
-        removed?.let { attachment ->
+        processingStates = processingStates - uriStr
+        val ownerConversationId = draftOwnerConversationId
+        if (ownerConversationId == null) {
+            // A new-chat attachment has never entered a persisted draft. It is still unique to
+            // this composer, so reclaim it off Main immediately.
             scope.launch(Dispatchers.IO) {
-                com.newoether.agora.util.AttachmentFiles.deleteBacking(attachment)
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(removed)
             }
+        } else {
+            attachmentRemovalIds =
+                if (attachmentRemovalIds == Long.MAX_VALUE) 1L else attachmentRemovalIds + 1L
+            pendingAttachmentRemovals = pendingAttachmentRemovals + PendingAttachmentRemoval(
+                id = attachmentRemovalIds,
+                ownerConversationId = ownerConversationId,
+                attachment = removed,
+            )
         }
     }
 

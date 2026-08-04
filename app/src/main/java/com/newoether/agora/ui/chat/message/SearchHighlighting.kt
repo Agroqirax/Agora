@@ -1,6 +1,5 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -18,6 +17,10 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.graphics.Color
 import com.newoether.agora.ui.chat.caseInsensitiveMatchRanges
+
+internal val SearchHighlightBackground = Color(0xFFFFD54F)
+internal val ActiveSearchHighlightBackground = Color(0xFFFFA000)
+private val SearchHighlightForeground = Color(0xFF241A00)
 
 internal data class SearchHighlightSpec(
     val query: String,
@@ -49,7 +52,8 @@ internal fun highlightedSearchText(
                     activeHighlightColor
                 } else {
                     highlightColor
-                }
+                },
+                color = SearchHighlightForeground,
             ),
             start = range.first,
             end = range.last + 1,
@@ -66,8 +70,8 @@ internal fun SearchHighlightedPlainText(
     spec: SearchHighlightSpec?,
     modifier: Modifier = Modifier,
 ) {
-    val highlightColor = MaterialTheme.colorScheme.tertiaryContainer
-    val activeHighlightColor = MaterialTheme.colorScheme.primaryContainer
+    val highlightColor = SearchHighlightBackground
+    val activeHighlightColor = ActiveSearchHighlightBackground
     val ranges = remember(text, spec?.query) {
         caseInsensitiveMatchRanges(text, spec?.query.orEmpty())
     }

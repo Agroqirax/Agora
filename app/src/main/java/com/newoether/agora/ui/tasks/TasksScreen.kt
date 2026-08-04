@@ -421,7 +421,7 @@ private fun NewAutomationRow(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    stringResource(R.string.task_new_automation),
+                    stringResource(R.string.task_new_task),
                     color = MaterialTheme.colorScheme.primary,
                     style = MaterialTheme.typography.labelLarge,
                 )

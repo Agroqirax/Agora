@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">첨부 추가</string>
+    <string name="camera">카메라</string>
     <string name="photos">사진</string>
     <string name="videos">동영상</string>
     <string name="files">파일</string>
@@ -137,7 +138,7 @@
     <string name="thought_for_minutes_called_tools">%1$d분 %2$d초 동안 사고하고 도구 %3$d개를 호출함</string>
     <string name="called_n_tools">도구 %1$d개를 호출함</string>
     <string name="failed_to_generate">생성에 실패했습니다.</string>
-    <string name="generation_stopped">생성이 중지되었습니다.</string>
+    <string name="generation_stopped">생성이 중지되었습니다</string>
     <string name="import_invalid_gguf_title">잘못된 GGUF 파일</string>
     <string name="import_invalid_gguf_desc">선택한 파일은 유효한 GGUF 모델이 아닙니다.</string>
     <string name="ok">확인</string>
@@ -458,6 +459,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">제목 자동 생성</string>
     <string name="title_gen_auto_desc">첫 응답 후 제목 생성</string>
+    <string name="title_gen_notifications">제목 생성 알림 표시</string>
+    <string name="title_gen_notifications_desc">제목을 생성하는 동안 진행 상황과 결과 메시지 표시</string>
     <string name="title_gen_model">제목 모델</string>
     <string name="title_gen_current_model">현재 모델 사용</string>
     <string name="title_gen_select_model">제목 모델 선택</string>

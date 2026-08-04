@@ -1,5 +1,13 @@
 package com.newoether.agora.ui.chat
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.*
@@ -74,7 +82,13 @@ internal fun ChatTopBar(
     val haptics = LocalAgoraHaptics.current
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(searchActive) {
-        if (searchActive) searchFocusRequester.requestFocus()
+        if (searchActive) {
+            // Let AnimatedContent commit the search field before asking the IME for focus.
+            // Requesting focus on the state-change frame makes the keyboard and enter
+            // transition compete for the first layout and produces a visible flash.
+            withFrameNanos { }
+            searchFocusRequester.requestFocus()
+        }
     }
     Column(
         modifier = Modifier
@@ -88,15 +102,53 @@ internal fun ChatTopBar(
                 )
             )
     ) {
-        Row(
+        AnimatedContent(
+            targetState = searchActive,
+            transitionSpec = {
+                if (targetState) {
+                    (
+                        fadeIn(tween(400, easing = FastOutSlowInEasing)) +
+                            scaleIn(
+                                initialScale = 0.94f,
+                                animationSpec = tween(400, easing = FastOutSlowInEasing),
+                            )
+                        ).togetherWith(
+                        fadeOut(tween(300, easing = FastOutSlowInEasing)) +
+                            scaleOut(
+                                targetScale = 0.97f,
+                                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            )
+                    )
+                } else {
+                    (
+                        fadeIn(tween(360, easing = FastOutSlowInEasing)) +
+                            scaleIn(
+                                initialScale = 0.97f,
+                                animationSpec = tween(360, easing = FastOutSlowInEasing),
+                            )
+                        ).togetherWith(
+                        fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                            scaleOut(
+                                targetScale = 0.94f,
+                                animationSpec = tween(320, easing = FastOutSlowInEasing),
+                            )
+                    )
+                }
+            },
+            contentAlignment = Alignment.Center,
+            label = "ChatTopBarSearchTransition",
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+                .height(52.dp),
+        ) { targetSearchActive ->
+            Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
-                    .height(52.dp),
+                    .fillMaxSize(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (searchActive) {
+                if (targetSearchActive) {
                     Surface(
                         shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.surface,
@@ -182,8 +234,7 @@ internal fun ChatTopBar(
                             Spacer(Modifier.width(5.dp))
                         }
                     }
-                    return@Row
-                }
+                } else {
                 // Resolve the active conversation's title; null in new-chat mode OR
                 // before the conversation/title has loaded. Both the brand TEXT and the
                 // brand font SIZE are gated on this single value, so the title never
@@ -272,7 +323,7 @@ internal fun ChatTopBar(
                     ) {
                         Spacer(modifier = Modifier.width(5.dp))
                         IconButton(onClick = onNewChat, modifier = Modifier.size(44.dp)) {
-                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_chat), modifier = Modifier.size(26.dp))
+                            Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_chat), modifier = Modifier.size(30.dp))
                         }
                         Box {
                             IconButton(
@@ -341,6 +392,8 @@ internal fun ChatTopBar(
                         Spacer(modifier = Modifier.width(5.dp))
                     }
                 }
+                }
             }
+        }
     }
 }

@@ -38,6 +38,7 @@ class ChatViewModelFactory(
     private val conversationExecutionCoordinator: ConversationExecutionCoordinator,
     private val automationExecutionGate: AutomationExecutionGate,
     private val conversationStateRegistry: ConversationStateRegistry,
+    private val shellConfirmationController: ShellConfirmationController,
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(ChatViewModel::class.java)) {
@@ -46,7 +47,7 @@ class ChatViewModelFactory(
                 application, database, chatDao, settingsManager, memoryManager, context, sandboxFactory,
                 autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
                 taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-                automationExecutionGate, conversationStateRegistry
+                automationExecutionGate, conversationStateRegistry, shellConfirmationController
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")

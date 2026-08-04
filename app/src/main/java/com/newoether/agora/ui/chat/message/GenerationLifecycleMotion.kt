@@ -12,11 +12,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 
 internal const val MESSAGE_ENTER_DURATION_MS = 320
-internal const val SEGMENT_ENTER_DURATION_MS = 360
+internal const val SEGMENT_ENTER_DURATION_MS = 420
+internal const val SEGMENT_ENTER_INITIAL_SCALE = 0.90f
 internal const val STATUS_CROSSFADE_DURATION_MS = 280
 internal const val ACTIONS_ENTER_DURATION_MS = 320
 internal const val ACTIONS_EXIT_DURATION_MS = 220
 internal const val COMPOSER_ICON_CROSSFADE_DURATION_MS = 200
+internal const val REGENERATION_EXIT_DURATION_MS = 180
+internal const val REGENERATION_ABORT_RESTORE_DURATION_MS = 180
 
 /**
  * A one-shot lifecycle appearance that owns only a draw layer.

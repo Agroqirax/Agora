@@ -4,6 +4,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
@@ -148,8 +149,8 @@ internal fun rememberChatMarkdownAssets(
     )
     val customMarkdownPadding = markdownPadding(block = 8.dp)
     val thoughtMarkdownPadding = markdownPadding(block = 5.dp)
-    val searchHighlightColor = MaterialTheme.colorScheme.tertiaryContainer
-    val activeSearchHighlightColor = MaterialTheme.colorScheme.primaryContainer
+    val searchHighlightColor = SearchHighlightBackground
+    val activeSearchHighlightColor = ActiveSearchHighlightBackground
 
     val customMarkdownComponents = remember(
         searchHighlight,
@@ -348,6 +349,40 @@ internal fun rememberChatMarkdownAssets(
             thoughtPadding = thoughtMarkdownPadding,
             components = customMarkdownComponents,
             flavour = markdownFlavour,
+        )
+    }
+}
+
+/**
+ * Standalone code surface using the exact same colors, metrics, padding, corner radius, and
+ * JetBrains Mono-backed [ChatType.code] style as code blocks in assistant Markdown.
+ *
+ * This renders raw code directly rather than synthesizing a Markdown fence, so commands that
+ * contain backticks can never terminate or corrupt the surrounding block.
+ */
+@Composable
+internal fun ChatMarkdownCodeBlock(
+    code: String,
+    modifier: Modifier = Modifier,
+) {
+    val assets = rememberChatMarkdownAssets(MaterialTheme.colorScheme.onSurface)
+    MarkdownCodeBackground(
+        color = assets.renderContext.colors.codeBackground,
+        shape = RoundedCornerShape(LocalMarkdownDimens.current.codeBackgroundCornerSize),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        language = null,
+        code = code,
+    ) {
+        MarkdownBasicText(
+            text = AnnotatedString(code),
+            style = assets.renderContext.typography.code.copy(
+                color = MaterialTheme.colorScheme.onSurface,
+            ),
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(assets.renderContext.padding.codeBlock),
         )
     }
 }

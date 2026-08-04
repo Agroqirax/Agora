@@ -43,10 +43,9 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun stop_releasesAsSoonAsCoroutineUnwinds_withoutWaitingForFinalizer() = runBlocking {
+    fun stop_waitsForCoroutineAndFinalizerBeforeReleasing() = runBlocking {
         val active = activeStateWithStreamingMessage()
         val state = active.state
-        val token = active.token
 
         state.stop()
 
@@ -55,10 +54,12 @@ class ConversationGenerationStateTest {
         assertTrue(state.stopping.value)
         active.unwind.complete(Unit)
         active.job.join()
+        assertTrue(state.generating.value)
+        assertTrue(state.stopping.value)
+        assertTrue(state.finishStopFinalization(success = true))
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
-        assertFalse(state.finishStopFinalization())
     }
 
     @Test
@@ -68,7 +69,7 @@ class ConversationGenerationStateTest {
 
         state.stop()
 
-        assertFalse(state.finishStopFinalization())
+        assertFalse(state.finishStopFinalization(success = true))
         assertTrue(state.generating.value)
         assertTrue(state.stopping.value)
         active.unwind.complete(Unit)
@@ -76,6 +77,21 @@ class ConversationGenerationStateTest {
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
+    }
+
+    @Test
+    fun failedStopFinalization_keepsSlotOccupied() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+
+        state.stop()
+        active.unwind.complete(Unit)
+        active.job.join()
+
+        assertFalse(state.finishStopFinalization(success = false))
+        assertTrue(state.generating.value)
+        assertTrue(state.stopping.value)
+        assertNull(state.acquireForSend())
     }
 
     @Test

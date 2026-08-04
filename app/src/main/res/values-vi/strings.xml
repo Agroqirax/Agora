@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">Thêm tệp đính kèm</string>
+    <string name="camera">Máy ảnh</string>
     <string name="photos">Ảnh</string>
     <string name="videos">Video</string>
     <string name="files">Tệp</string>
@@ -140,7 +141,7 @@
     <string name="thought_for_minutes_called_tools">Đã suy nghĩ trong %1$d phút %2$d giây, gọi %3$d công cụ</string>
     <string name="called_n_tools">Đã gọi %1$d công cụ</string>
     <string name="failed_to_generate">Tạo thất bại.</string>
-    <string name="generation_stopped">Đã dừng tạo.</string>
+    <string name="generation_stopped">Đã dừng tạo</string>
     <string name="import_invalid_gguf_title">Tệp GGUF không hợp lệ</string>
     <string name="import_invalid_gguf_desc">Tệp đã chọn không phải là mô hình GGUF hợp lệ.</string>
     <string name="ok">OK</string>
@@ -457,6 +458,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Tự động tạo tiêu đề</string>
     <string name="title_gen_auto_desc">Tạo tiêu đề sau phản hồi đầu tiên</string>
+    <string name="title_gen_notifications">Hiện thông báo tạo tiêu đề</string>
+    <string name="title_gen_notifications_desc">Hiện tiến trình và kết quả trong khi tạo tiêu đề</string>
     <string name="title_gen_model">Mô hình tiêu đề</string>
     <string name="title_gen_current_model">Sử dụng mô hình hiện tại</string>
     <string name="title_gen_select_model">Chọn mô hình tiêu đề</string>

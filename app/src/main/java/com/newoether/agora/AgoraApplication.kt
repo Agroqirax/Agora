@@ -19,8 +19,7 @@ class AgoraApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashReporter.install(this)
-        container.startRunRecovery()
-        // Arm scheduled task alarms for this process (idempotent; also re-armed after boot).
-        container.automationScheduler.start()
+        // Orphaned Run recovery is the startup barrier for every generator and scheduler.
+        container.startProcessServices()
     }
 }

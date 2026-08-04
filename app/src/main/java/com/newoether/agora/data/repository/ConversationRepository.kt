@@ -2,15 +2,17 @@ package com.newoether.agora.data.repository
 
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
+import com.newoether.agora.data.local.ClaimedRunPassCommit
 import com.newoether.agora.data.local.ConversationDraftAttachmentReference
 import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.MessageStreamCheckpoint
+import com.newoether.agora.data.local.PendingRunInputCommit
 import com.newoether.agora.data.local.RemovedPendingRunInput
 import com.newoether.agora.data.local.RunEntity
-import com.newoether.agora.data.local.ClaimedRunPass
+import com.newoether.agora.data.local.RunGraphCommit
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ChatConversation
@@ -20,7 +22,10 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.util.DebugLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -41,8 +46,24 @@ class ConversationRepository(
         if (runRecoveryComplete) return
         runRecoveryMutex.withLock {
             if (runRecoveryComplete) return
-            chatDao.recoverOrphanedRuns(System.currentTimeMillis())
-            runRecoveryComplete = true
+            val retryDelaysMs = longArrayOf(40L, 120L, 500L, 2_000L, 5_000L)
+            var failureCount = 0
+            while (!runRecoveryComplete) {
+                try {
+                    chatDao.recoverOrphanedRuns(System.currentTimeMillis())
+                    runRecoveryComplete = true
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    failureCount += 1
+                    DebugLog.e(
+                        "ConversationRepository",
+                        "Run recovery attempt $failureCount failed; generation remains gated",
+                        e,
+                    )
+                    delay(retryDelaysMs[(failureCount - 1).coerceAtMost(retryDelaysMs.lastIndex)])
+                }
+            }
         }
     }
     // ── Conversations ─────────────────────────────────────────
@@ -99,8 +120,11 @@ class ConversationRepository(
     fun getMessagesForConversation(conversationId: String): Flow<List<MessageEntity>> =
         chatDao.getMessagesForConversation(conversationId)
 
-    fun getUiMessagesForConversation(conversationId: String): Flow<List<MessageEntity>> =
-        chatDao.getUiMessagesForConversation(conversationId)
+    fun getUiMessagesForConversation(
+        conversationId: String,
+        streamingMessageId: String? = null,
+    ): Flow<List<MessageEntity>> =
+        chatDao.getUiMessagesForConversation(conversationId, streamingMessageId)
 
     suspend fun getMessagesForConversationSnapshot(conversationId: String): List<MessageEntity> =
         chatDao.getMessagesForConversation(conversationId).first()
@@ -114,9 +138,14 @@ class ConversationRepository(
         chatDao.upsertMessage(entity)
     }
 
-    suspend fun createRunWithMessages(run: RunEntity, messages: List<MessageEntity>) {
+    suspend fun createRunWithMessages(
+        run: RunEntity,
+        messages: List<MessageEntity>,
+        messageSelectionUpdates: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ): RunGraphCommit {
         ensureRunRecovery()
-        chatDao.createRunWithMessages(run, messages)
+        return chatDao.createRunWithMessages(run, messages, messageSelectionUpdates, at)
     }
 
     suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) =
@@ -132,6 +161,15 @@ class ConversationRepository(
         ensureRunRecovery()
         require(message.runId.isNotBlank()) { "Message ${message.id} has no Run" }
         return chatDao.appendMessageToRun(message)
+    }
+
+    suspend fun appendPendingInputToRun(
+        message: MessageEntity,
+        at: Long = System.currentTimeMillis(),
+    ): PendingRunInputCommit {
+        ensureRunRecovery()
+        require(message.runId.isNotBlank()) { "Message ${message.id} has no Run" }
+        return chatDao.appendPendingInputToRun(message, at)
     }
 
     suspend fun appendToolRoundToRun(messages: List<MessageEntity>): List<MessageEntity> {
@@ -197,19 +235,23 @@ class ConversationRepository(
             at,
         ) == 1
 
-    suspend fun claimPendingRunInputs(
+    suspend fun claimPendingRunInputsAndAppendPlaceholder(
         runId: String,
+        expectedInputMessageIds: List<String>,
+        placeholder: MessageEntity,
         at: Long = System.currentTimeMillis(),
-    ): ClaimedRunPass? = chatDao.claimPendingRunInputs(runId, at)
+    ): ClaimedRunPassCommit? {
+        ensureRunRecovery()
+        return chatDao.claimPendingRunInputsAndAppendPlaceholder(
+            runId = runId,
+            expectedInputMessageIds = expectedInputMessageIds,
+            placeholder = placeholder,
+            at = at,
+        )
+    }
 
     suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? =
         chatDao.removePendingRunInput(messageId)
-
-    suspend fun recoverOrphanedRuns(at: Long = System.currentTimeMillis()): Int {
-        val recovered = chatDao.recoverOrphanedRuns(at)
-        runRecoveryComplete = true
-        return recovered
-    }
 
     /**
      * Persist the mutable portion of an in-flight model message without creating a missing row.
@@ -238,11 +280,28 @@ class ConversationRepository(
         messages: List<ChatMessage>,
         runId: String?,
         at: Long = System.currentTimeMillis(),
-    ): Boolean = chatDao.finishStoppedGeneration(
-        checkpoints = messages.map { it.copy(status = MessageStatus.STOPPED).toStreamCheckpoint() },
-        runId = runId,
-        at = at,
-    )
+    ): Boolean {
+        val run = runId?.let { chatDao.getRun(it) }
+        val conversationId = run?.conversationId
+            ?: messages.firstNotNullOfOrNull { message ->
+                chatDao.getMessage(message.id)?.conversationId
+            }
+        // Conversation/Run deletion is itself a durable terminal outcome.
+        if (conversationId == null || chatDao.getConversation(conversationId) == null) {
+            return runId == null || run == null
+        }
+        val applied = chatDao.finishStoppedGeneration(
+            checkpoints = messages.map {
+                it.copy(status = MessageStatus.STOPPED).toStreamCheckpoint()
+            },
+            runId = runId,
+            at = at,
+        )
+        if (applied) return true
+        // Idempotent retry: a previous attempt may have committed but its caller was cancelled
+        // before observing the result.
+        return runId == null || chatDao.getRun(runId)?.status?.isTerminal != false
+    }
 
     private fun ChatMessage.toStreamCheckpoint(): MessageStreamCheckpoint {
         val persistedSegments = segments?.takeIf { it.isNotEmpty() } ?: toolCall?.let {
@@ -464,6 +523,21 @@ class ConversationRepository(
     suspend fun deleteMessageFiles(messages: List<MessageEntity>) {
         deleteUnreferencedAttachmentFiles(
             messages.flatMapTo(linkedSetOf()) { it.attachmentFilePaths() }
+        )
+    }
+
+    /** Reclaims private composer files after their draft reference has been durably removed. */
+    suspend fun deleteUnreferencedDraftAttachmentFiles(
+        attachments: List<SelectedAttachment>,
+    ) {
+        deleteUnreferencedAttachmentFiles(
+            attachments.flatMapTo(linkedSetOf()) { attachment ->
+                buildList {
+                    attachment.localPath?.let(::add)
+                    addAll(attachment.processedFrames.orEmpty())
+                    addAll(attachment.preRenderedPaths.orEmpty())
+                }
+            },
         )
     }
 

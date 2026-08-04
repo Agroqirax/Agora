@@ -4,6 +4,7 @@
 
     <!-- Chat Bottom Bar -->
     <string name="add_attachment">添加附件</string>
+    <string name="camera">相机</string>
     <string name="photos">照片</string>
     <string name="videos">视频</string>
     <string name="files">文件</string>
@@ -86,7 +87,7 @@
     <string name="task_never_run">从未运行</string>
     <string name="task_empty">还没有自动化</string>
     <string name="task_empty_desc">创建自动化，以立即或按计划运行提示词。</string>
-    <string name="task_new_automation">新建自动化</string>
+    <string name="task_new_task">新建任务</string>
     <string name="task_execution_log">历史</string>
     <string name="task_no_executions">还没有运行过</string>
     <string name="task_no_executions_desc">运行此自动化后，执行记录会显示在这里。</string>
@@ -122,6 +123,7 @@
     <string name="loop_next_in">下次 %1$s 后</string>
     <string name="loop_cycle">第 %1$d/%2$d 轮</string>
     <string name="loop_stop">停止循环</string>
+    <string name="automation_notification_channel_desc">Agora 自动化运行时显示的常驻通知</string>
 
     <string name="settings_automation">自动化</string>
     <string name="settings_automation_desc">AI 工具、会话循环与调度精度</string>
@@ -160,7 +162,7 @@
     <string name="called_n_tools">调用 %1$d 个工具</string>
     <string name="welcome_to_agora">欢迎使用 Agora。</string>
     <string name="failed_to_generate">生成失败。</string>
-    <string name="generation_stopped">生成已停止。</string>
+    <string name="generation_stopped">生成已停止</string>
     <string name="import_invalid_gguf_title">无效的 GGUF 文件</string>
     <string name="import_invalid_gguf_desc">所选文件不是有效的 GGUF 模型文件。</string>
     <string name="ok">确定</string>
@@ -467,6 +469,8 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">自动生成标题</string>
     <string name="title_gen_auto_desc">在首次回复后生成标题</string>
+    <string name="title_gen_notifications">显示标题生成提示</string>
+    <string name="title_gen_notifications_desc">生成标题时显示进度与结果消息</string>
     <string name="title_gen_model">标题模型</string>
     <string name="title_gen_current_model">使用当前模型</string>
     <string name="title_gen_select_model">选择标题模型</string>

@@ -15,8 +15,77 @@ class ToolPresentationResolverTest {
             "echo first && echo second",
             singleLineShellCommand(command),
         )
-        assertEquals("shell", singleLineShellCommand(" \n\t "))
+        assertEquals(null, singleLineShellCommand(" \n\t "))
         assertEquals("12345", singleLineShellCommand("123456789", maxCharacters = 5))
+    }
+
+    @Test
+    fun unfinishedArgumentsExposeProgressiveSubjectsAcrossToolKinds() {
+        val cases = listOf(
+            Triple("execute_shell_command", """{"command":"cp /tmp/sour""", "cp /tmp/sour"),
+            Triple("read_memory_file", """{"name":"project-no""", "project-no"),
+            Triple("web_search", """{"query":"compose stream""", "compose stream"),
+            Triple("web_fetch", """{"url":"https://exam""", "https://exam"),
+            Triple("search_conversations", """{"query":"old deci""", "old deci"),
+            Triple("read_conversation", """{"conversation_id":"conv-12""", "conv-12"),
+            Triple("get_shell_job", """{"job_id":"job-45""", "job-45"),
+            Triple("file_write", """{"path":"/tmp/progr""", "/tmp/progr"),
+            Triple("file_glob", """{"pattern":"**/*.k""", "**/*.k"),
+            Triple("generate_image", """{"prompt":"blue mount""", "blue mount"),
+            Triple("create_task", """{"name":"nightly ba""", "nightly ba"),
+            Triple("delete_task", """{"id_or_name":"nightly ba""", "nightly ba"),
+        )
+
+        cases.forEach { (toolName, partialArguments, expectedSubject) ->
+            val presentation = ToolPresentationResolver.resolve(
+                MessageSegment(
+                    type = "tool",
+                    toolName = toolName,
+                    toolArgs = partialArguments,
+                    toolState = ToolExecutionStates.CALLING,
+                ),
+            )
+
+            assertEquals(toolName, expectedSubject, presentation.subject)
+            assertEquals(ToolPresentationState.CALLING, presentation.state)
+        }
+    }
+
+    @Test
+    fun unfinishedCommandDecodesEscapesAndKeepsGrowing() {
+        val first = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolArgs = """{"command":"printf \"hel""",
+                toolState = ToolExecutionStates.CALLING,
+            ),
+        )
+        val second = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolArgs = """{"command":"printf \"hello\"""",
+                toolState = ToolExecutionStates.CALLING,
+            ),
+        )
+
+        assertEquals("printf \"hel", first.subject)
+        assertEquals("printf \"hello\"", second.subject)
+    }
+
+    @Test
+    fun missingArgumentsDoNotInventAToolNameAsSubject() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolArgs = """{"command":""",
+                toolState = ToolExecutionStates.CALLING,
+            ),
+        )
+
+        assertEquals(null, presentation.subject)
     }
 
     @Test

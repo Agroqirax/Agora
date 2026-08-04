@@ -230,4 +230,143 @@ class ConversationUiStateTest {
         assertEquals(listOf("u1", "m1", "error", "u2", "m2"), path.map { it.id })
         assertEquals(MessageStatus.ERROR, path[2].status)
     }
+
+    @Test
+    fun pendingInputFromStoppedRun_remainsTraversableWhileNextRunStreams() {
+        val initial = ChatMessage(
+            id = "u1",
+            text = "initial",
+            participant = Participant.USER,
+            runId = "stopped-run",
+            runSequence = 0,
+            consumedAtPass = 0,
+        )
+        val stopped = ChatMessage(
+            id = "m1",
+            parentId = initial.id,
+            text = "partial",
+            participant = Participant.MODEL,
+            status = MessageStatus.STOPPED,
+            runId = "stopped-run",
+            runSequence = 1,
+        )
+        val acceptedBeforeStop = ChatMessage(
+            id = "u2",
+            parentId = stopped.id,
+            text = "accepted before stop",
+            participant = Participant.USER,
+            runId = "stopped-run",
+            runSequence = 2,
+            consumedAtPass = null,
+        )
+        val nextUser = ChatMessage(
+            id = "u3",
+            parentId = acceptedBeforeStop.id,
+            text = "continue",
+            participant = Participant.USER,
+            runId = "next-run",
+            runSequence = 0,
+            consumedAtPass = 0,
+        )
+        val nextPlaceholder = ChatMessage(
+            id = "m2",
+            parentId = nextUser.id,
+            text = "new answer",
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+            runId = "next-run",
+            runSequence = 1,
+        )
+
+        val path = ConversationUiState.resolvePath(
+            allMessages = listOf(initial, stopped, acceptedBeforeStop, nextUser, nextPlaceholder),
+            streamingMsg = nextPlaceholder,
+            selectedChildren = mapOf(
+                initial.id to stopped.id,
+                stopped.id to acceptedBeforeStop.id,
+                acceptedBeforeStop.id to nextUser.id,
+                nextUser.id to nextPlaceholder.id,
+            ),
+        )
+
+        assertEquals(listOf("u1", "m1", "u2", "u3", "m2"), path.map { it.id })
+        assertEquals("new answer", path.last().text)
+    }
+
+    @Test
+    fun deleteTargetUsesTheNearestRealUserAncestor() {
+        val rootUser = msg("u1")
+        val answer = msg("m1", rootUser.id, participant = Participant.MODEL)
+        val toolResult = msg(
+            Constants.RESULT_MSG_PREFIX + "r1",
+            answer.id,
+            participant = Participant.USER,
+        )
+        val nextAnswer = msg("m2", toolResult.id, participant = Participant.MODEL)
+
+        assertEquals(
+            rootUser.id,
+            nearestUserAncestorId(
+                messages = listOf(rootUser, answer, toolResult, nextAnswer),
+                messageId = nextAnswer.id,
+            ),
+        )
+    }
+
+    @Test
+    fun deletingAModelTargetsItsImmediateUserParent() {
+        val rootUser = msg("u1")
+        val answer = msg("m1", rootUser.id, participant = Participant.MODEL)
+
+        assertEquals(
+            rootUser.id,
+            nearestUserAncestorId(
+                messages = listOf(rootUser, answer),
+                messageId = answer.id,
+            ),
+        )
+        assertNull(
+            nearestUserAncestorId(
+                messages = listOf(rootUser, answer),
+                messageId = rootUser.id,
+            ),
+        )
+    }
+
+    @Test
+    fun deletingUserWithSurvivingSiblingStaysAtSiblingBranchLevel() {
+        val rootUser = msg("u1")
+        val answer = msg("m1", rootUser.id, participant = Participant.MODEL)
+        val firstEdit = msg("u2", answer.id)
+        val firstReply = msg("m2", firstEdit.id, participant = Participant.MODEL)
+        val secondEdit = msg("u3", answer.id)
+        val secondReply = msg("m3", secondEdit.id, participant = Participant.MODEL)
+
+        assertEquals(
+            firstEdit.id,
+            deleteSettlementTargetMessageId(
+                messagesBeforeDelete =
+                    listOf(rootUser, answer, firstEdit, firstReply, secondEdit, secondReply),
+                deletedRootMessageId = secondEdit.id,
+                remainingPath = listOf(rootUser, answer, firstEdit, firstReply),
+            ),
+        )
+    }
+
+    @Test
+    fun deletingLastUserSiblingFallsBackToNearestUserAncestor() {
+        val rootUser = msg("u1")
+        val answer = msg("m1", rootUser.id, participant = Participant.MODEL)
+        val onlyEdit = msg("u2", answer.id)
+        val reply = msg("m2", onlyEdit.id, participant = Participant.MODEL)
+
+        assertEquals(
+            rootUser.id,
+            deleteSettlementTargetMessageId(
+                messagesBeforeDelete = listOf(rootUser, answer, onlyEdit, reply),
+                deletedRootMessageId = onlyEdit.id,
+                remainingPath = listOf(rootUser, answer),
+            ),
+        )
+    }
 }
