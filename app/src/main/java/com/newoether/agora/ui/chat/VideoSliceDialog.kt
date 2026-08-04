@@ -25,6 +25,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.newoether.agora.R
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 data class VideoSliceResult(
@@ -69,15 +71,38 @@ fun VideoSliceDialog(
         intervalSec * 1000L
     }
 
-    val thumbnail = remember(videoUri) {
-        try {
-            val retriever = MediaMetadataRetriever()
-            retriever.setDataSource(context, android.net.Uri.parse(videoUri))
-            val bitmap = retriever.frameAtTime
-            retriever.release()
-            bitmap?.let { Bitmap.createScaledBitmap(it, 512, (512f * it.height / it.width).roundToInt(), true) }
-                ?.also { if (it != bitmap) bitmap.recycle() }
-        } catch (_: Exception) { null }
+    var thumbnail by remember(videoUri) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(videoUri) {
+        thumbnail = withContext(Dispatchers.IO) {
+            try {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, android.net.Uri.parse(videoUri))
+                    val bitmap = retriever.frameAtTime
+                    bitmap?.let {
+                        Bitmap.createScaledBitmap(
+                            it,
+                            512,
+                            (512f * it.height / it.width).roundToInt(),
+                            true,
+                        ).also { scaled ->
+                            if (scaled !== bitmap) bitmap.recycle()
+                        }
+                    }
+                } finally {
+                    retriever.release()
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+    }
+    DisposableEffect(videoUri) {
+        onDispose {
+            thumbnail?.let { bitmap ->
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
     }
 
     val durationFormatted = remember(durationMs) {
@@ -108,7 +133,8 @@ fun VideoSliceDialog(
 
                 Spacer(Modifier.height(16.dp))
 
-                if (thumbnail != null) {
+                val previewBitmap = thumbnail
+                if (previewBitmap != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -117,7 +143,7 @@ fun VideoSliceDialog(
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                     ) {
                         Image(
-                            bitmap = thumbnail.asImageBitmap(),
+                            bitmap = previewBitmap.asImageBitmap(),
                             contentDescription = stringResource(R.string.video_preview),
                             modifier = Modifier.fillMaxSize(),
                             contentScale = ContentScale.Crop
@@ -159,6 +185,7 @@ fun VideoSliceDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
+                    val maxIntervalSec = maxOf(1, minOf(30, seconds.toInt()))
                     Text(
                         stringResource(R.string.interval_seconds, effectiveIntervalMs / 1000),
                         style = MaterialTheme.typography.bodyMedium,
@@ -167,9 +194,11 @@ fun VideoSliceDialog(
                     )
                     Slider(
                         value = intervalSec.toFloat(),
-                        onValueChange = { intervalSec = it.roundToInt().coerceIn(1, minOf(30, seconds.toInt())) },
-                        valueRange = 1f..minOf(30f, seconds.toFloat()).coerceAtLeast(2f),
-                        steps = minOf(29, seconds.toInt() - 1)
+                        onValueChange = {
+                            intervalSec = it.roundToInt().coerceIn(1, maxIntervalSec)
+                        },
+                        valueRange = 1f..maxOf(2f, maxIntervalSec.toFloat()),
+                        steps = (maxIntervalSec - 1).coerceIn(0, 29),
                     )
                     Text(
                         stringResource(R.string.frames_count, effectiveFrameCount),

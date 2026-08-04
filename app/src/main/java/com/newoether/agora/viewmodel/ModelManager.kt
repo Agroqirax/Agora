@@ -27,7 +27,7 @@ class ModelManager(
     }
 
     fun addLocalChatModel(config: LocalChatModelConfig) {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             if (isLocalModelIdTaken(config.modelId)) return@launch
             val models = settings.localChatModels.value.toMutableList()
             models.add(config)
@@ -60,7 +60,7 @@ class ModelManager(
         uuid: String, newModelId: String, newAlias: String, nCtx: Int, temperature: Float, topP: Float, maxTokens: Int,
         mmprojPath: String = ""
     ) {
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             if (isLocalModelIdTaken(newModelId, excludeId = uuid)) return@launch
             val oldModel = settings.localChatModels.value.find { it.id == uuid } ?: return@launch
             if (oldModel.mmprojPath.isNotBlank() && oldModel.mmprojPath != mmprojPath) {

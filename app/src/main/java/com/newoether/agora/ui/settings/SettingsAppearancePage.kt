@@ -59,7 +59,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     // Clear custom font when switching away from custom
     LaunchedEffect(fontPreference) {
         if (fontPreference != "custom" && customFontPath.isNotBlank()) {
-            File(customFontPath).delete()
+            withContext(Dispatchers.IO) { File(customFontPath).delete() }
             viewModel.settings.setCustomFontPath("")
             viewModel.settings.setCustomFontName("")
         }
@@ -448,7 +448,17 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         }
                         if (fontPreference == "custom") {
                             add {
-                                val hasFont = customFontName.isNotBlank() && customFontPath.isNotBlank() && File(customFontPath).exists()
+                                val hasFont by produceState(
+                                    initialValue = false,
+                                    customFontName,
+                                    customFontPath,
+                                ) {
+                                    value = customFontName.isNotBlank() &&
+                                        customFontPath.isNotBlank() &&
+                                        withContext(Dispatchers.IO) {
+                                            File(customFontPath).isFile
+                                        }
+                                }
                                 SettingsItem(
                                     headlineContent = {
                                         Text(

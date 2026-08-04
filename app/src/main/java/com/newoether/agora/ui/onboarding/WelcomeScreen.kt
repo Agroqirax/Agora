@@ -133,6 +133,7 @@ fun WelcomeScreen(
     viewModel: ChatViewModel
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     // ── Onboarding state ──
     val builtInProviders = listOf(
@@ -191,32 +192,70 @@ fun WelcomeScreen(
     val ggufPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             isImportingGGUF = true
-            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+            scope.launch {
                 try {
-                    val dest = File(context.filesDir, "chat_model_${UUID.randomUUID()}.gguf")
-                    val aliasName = com.newoether.agora.util.FileValidator.resolveFileName(context, uri)
-                        ?.let { if (it.substringAfterLast('.', "").equals("gguf", ignoreCase = true)) it.substringBeforeLast('.') else it }
-                        ?.trim()?.ifBlank { null }
-                        ?: dest.nameWithoutExtension
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { output -> input.copyTo(output) }
-                    }
-                    val magic = ByteArray(4); dest.inputStream().use { it.read(magic) }
-                    if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
-                        || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()
-                    ) { dest.delete(); withContext(Dispatchers.Main) { showGgufError = true } }
-                    else {
-                        withContext(Dispatchers.Main) {
-                            localChatModels.forEach { viewModel.deleteLocalChatModel(it.id) }
-                            viewModel.addLocalChatModel(LocalChatModelConfig(
-                                modelId = dest.nameWithoutExtension,
-                                alias = aliasName,
-                                localFilePath = dest.absolutePath
-                            ))
+                    val imported = withContext(Dispatchers.IO) {
+                        val dest = File(context.filesDir, "chat_model_${UUID.randomUUID()}.gguf")
+                        try {
+                            val aliasName =
+                                com.newoether.agora.util.FileValidator.resolveFileName(context, uri)
+                                    ?.let {
+                                        if (
+                                            it.substringAfterLast('.', "")
+                                                .equals("gguf", ignoreCase = true)
+                                        ) {
+                                            it.substringBeforeLast('.')
+                                        } else {
+                                            it
+                                        }
+                                    }
+                                    ?.trim()
+                                    ?.ifBlank { null }
+                                    ?: dest.nameWithoutExtension
+                            val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                                dest.outputStream().use { output -> input.copyTo(output) }
+                                true
+                            } == true
+                            if (!copied) {
+                                dest.delete()
+                                return@withContext null
+                            }
+                            val magic = ByteArray(4)
+                            val bytesRead = dest.inputStream().use { it.read(magic) }
+                            val valid = bytesRead == magic.size &&
+                                magic[0] == 'G'.code.toByte() &&
+                                magic[1] == 'G'.code.toByte() &&
+                                magic[2] == 'U'.code.toByte() &&
+                                magic[3] == 'F'.code.toByte()
+                            if (valid) {
+                                Triple(dest.nameWithoutExtension, aliasName, dest.absolutePath)
+                            } else {
+                                dest.delete()
+                                null
+                            }
+                        } catch (error: Exception) {
+                            dest.delete()
+                            throw error
                         }
                     }
-                } catch (_: Exception) { withContext(Dispatchers.Main) { showGgufError = true } }
-                finally { withContext(Dispatchers.Main) { isImportingGGUF = false } }
+                    if (imported == null) {
+                        showGgufError = true
+                    } else {
+                        val (modelId, aliasName, path) = imported
+                        localChatModels.forEach { viewModel.deleteLocalChatModel(it.id) }
+                        viewModel.addLocalChatModel(
+                            LocalChatModelConfig(
+                                modelId = modelId,
+                                alias = aliasName,
+                                localFilePath = path,
+                            )
+                        )
+                    }
+                } catch (_: Exception) {
+                    showGgufError = true
+                } finally {
+                    isImportingGGUF = false
+                }
             }
         }
     }
@@ -256,7 +295,6 @@ fun WelcomeScreen(
     val visitedPages = remember { mutableSetOf<Int>() }
     val typedPages = remember { mutableSetOf<Int>() }
     val pagerState = rememberPagerState(pageCount = { pages.size })
-    val scope = rememberCoroutineScope()
     var exiting by remember { mutableStateOf(false) }
     var showContent by remember { mutableStateOf(false) }
     val contentAlpha by animateFloatAsState(if (showContent) 1f else 0f, tween(600))

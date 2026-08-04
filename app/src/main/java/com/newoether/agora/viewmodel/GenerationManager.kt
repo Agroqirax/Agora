@@ -480,7 +480,7 @@ class GenerationManager(
         config: GenerationConfig,
         ctx: GenerationContext,
         loadedMessages: List<MessageEntity>? = null,
-    ): Pair<List<ChatMessage>, ProviderConfig> {
+    ): Pair<List<ChatMessage>, ProviderConfig> = withContext(Dispatchers.Default) {
         val dbMessages = loadedMessages
             ?: conversations.getMessagesForConversationSnapshot(conversationId)
         val messagesById = dbMessages.associateBy { it.id }
@@ -592,7 +592,7 @@ class GenerationManager(
             frequencyPenalty = config.frequencyPenalty,
             presencePenalty = config.presencePenalty
         )
-        return Pair(currentPath, providerConfig)
+        Pair(currentPath, providerConfig)
     }
 
     suspend fun generate(

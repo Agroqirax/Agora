@@ -24,7 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -107,7 +106,10 @@ internal fun UserMessageBubble(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = { onCancelEdit() }) { Text(stringResource(R.string.cancel)) }
+                        TextButton(
+                            onClick = { onCancelEdit() },
+                            enabled = !isLoading,
+                        ) { Text(stringResource(R.string.cancel)) }
                         TextButton(
                             onClick = { onEdit(message.id, editState.text.toString()) },
                             enabled = !isLoading && editState.text.isNotBlank(),
@@ -121,7 +123,6 @@ internal fun UserMessageBubble(
                 ) {
                     val hasMetaItems = message.attachmentMeta?.items?.isNotEmpty() == true
                 if (message.images.isNotEmpty() || hasMetaItems) {
-                        val ctx = LocalContext.current
                         val meta = remember(message.attachmentMeta) {
                             message.attachmentMeta
                         }
@@ -157,7 +158,7 @@ internal fun UserMessageBubble(
                         // Collect all image/video URLs for the pager
                         val allMediaUrls = remember(displayItems) {
                             displayItems.mapNotNull { (_, imagePath, metaItem) ->
-                                val t = resolveAttachmentType(imagePath, metaItem, ctx)
+                                val t = resolveAttachmentType(imagePath, metaItem)
                                 when (t) {
                                     "image" -> if (imagePath.isNotEmpty()) imagePath else null
                                     "video" -> metaItem?.originalUri
@@ -172,7 +173,7 @@ internal fun UserMessageBubble(
                         ) {
                             itemsIndexed(displayItems) { itemIdx, (index, imagePath, metaItem) ->
                                 val type = remember(imagePath, metaItem?.type) {
-                                    resolveAttachmentType(imagePath, metaItem, ctx)
+                                    resolveAttachmentType(imagePath, metaItem)
                                 }
                                 val isVideo = type == "video"
                                 val isPdf = type == "pdf"

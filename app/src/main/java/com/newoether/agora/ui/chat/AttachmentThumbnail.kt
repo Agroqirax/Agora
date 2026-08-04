@@ -1,7 +1,6 @@
 package com.newoether.agora.ui.chat
 
 import android.content.Context
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -20,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,23 +34,26 @@ import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.util.AttachmentSourceReader
 import com.newoether.agora.util.Constants
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 fun resolveAttachmentType(
     path: String,
     metaItem: AttachmentItem?,
-    context: Context? = null
 ): String {
     if (metaItem != null) return metaItem.type
-    if (context == null) return "image"
-    val mimeType = try {
-        context.contentResolver.getType(Uri.parse(path))
-    } catch (_: Exception) { null }
+    val normalized = path.substringBefore('?').substringBefore('#').lowercase()
     return when {
-        mimeType == "application/pdf" -> "pdf"
-        mimeType?.startsWith("video/") == true -> "video"
-        mimeType != null && !mimeType.startsWith("image/") -> "file"
-        mimeType?.startsWith("image/") == true -> "image"
-        else -> "file"
+        normalized.endsWith(".pdf") -> "pdf"
+        normalized.endsWith(".mp4") ||
+            normalized.endsWith(".webm") ||
+            normalized.endsWith(".mov") ||
+            normalized.endsWith(".avi") ||
+            normalized.contains("vid_original_") -> "video"
+        // This fallback is used only for legacy image-list entries. Generic files are always
+        // represented by AttachmentMeta, so MIME-provider IPC is unnecessary during composition.
+        else -> "image"
     }
 }
 
@@ -63,12 +66,12 @@ fun findMetaForIndex(meta: AttachmentMeta?, index: Int): AttachmentItem? {
     }
 }
 
-fun readFileContent(
+suspend fun readFileContent(
     context: Context,
     uriString: String,
     maxChars: Int = Constants.MAX_FILE_CONTENT_READ_LENGTH,
-): String {
-    return AttachmentSourceReader.readText(context, uriString, maxChars) ?: ""
+): String = withContext(Dispatchers.IO) {
+    AttachmentSourceReader.readText(context, uriString, maxChars) ?: ""
 }
 
 @Composable
@@ -122,6 +125,7 @@ fun AttachmentThumbnailItem(
 ) {
     val haptics = LocalAgoraHaptics.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val thumbModifier = modifier
         .size(120.dp, 90.dp)
         .clip(RoundedCornerShape(8.dp))
@@ -134,15 +138,17 @@ fun AttachmentThumbnailItem(
                 Modifier
                     .clip(RoundedCornerShape(8.dp))
                     .clickable {
-                        val content = textContent ?: originalUri?.let {
-                            AttachmentSourceReader.readText(
-                                context = context,
-                                source = it,
-                                maxChars = Constants.MAX_FILE_CONTENT_READ_LENGTH,
-                            )
-                        }
-                        if (content != null) {
-                            handlers.onFileClick?.invoke(fileName ?: "", content)
+                        scope.launch {
+                            val content = textContent ?: originalUri?.let {
+                                readFileContent(
+                                    context = context,
+                                    uriString = it,
+                                    maxChars = Constants.MAX_FILE_CONTENT_READ_LENGTH,
+                                )
+                            }
+                            if (content != null) {
+                                handlers.onFileClick?.invoke(fileName ?: "", content)
+                            }
                         }
                     }
             } else {

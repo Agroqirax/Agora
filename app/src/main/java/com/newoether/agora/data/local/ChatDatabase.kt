@@ -264,6 +264,63 @@ interface ChatDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: String): Flow<List<MessageEntity>>
 
+    /**
+     * UI projection of the message graph. Synthetic protocol rows are required for parent-path
+     * traversal, but their text/segments can be very large and are never rendered. Keeping those
+     * payloads out of the invalidation query avoids reloading them for each streaming checkpoint.
+     */
+    @Query(
+        """
+        SELECT
+            id,
+            conversationId,
+            parentId,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN ''
+                ELSE text
+            END AS text,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN '[]'
+                ELSE images
+            END AS images,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE thoughts
+            END AS thoughts,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE thoughtTitle
+            END AS thoughtTitle,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN 0
+                ELSE tokenCount
+            END AS tokenCount,
+            status,
+            participant,
+            timestamp,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE thoughtTimeMs
+            END AS thoughtTimeMs,
+            modelName,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE toolCallJson
+            END AS toolCallJson,
+            CASE
+                WHEN substr(id, 1, 5) = 'tool_' OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE attachmentMeta
+            END AS attachmentMeta,
+            runId,
+            runSequence,
+            consumedAtPass
+        FROM messages
+        WHERE conversationId = :conversationId
+        ORDER BY timestamp ASC
+        """
+    )
+    fun getUiMessagesForConversation(conversationId: String): Flow<List<MessageEntity>>
+
     @Upsert
     suspend fun upsertConversation(conversation: ChatEntity)
 

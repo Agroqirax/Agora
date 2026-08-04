@@ -8,7 +8,9 @@ import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.AttachmentMeta
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -389,7 +391,7 @@ class DataExporter(
         categories: Set<ExportCategory>,
         includeApiKeys: Boolean,
         onProgress: (Float) -> Unit = {}
-    ): ExportResult {
+    ): ExportResult = withContext(Dispatchers.IO) {
         val appInfo = context.packageManager.getPackageInfo(context.packageName, 0)
         val appVersion = appInfo.versionName ?: "unknown"
         val exportedAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
@@ -595,6 +597,6 @@ class DataExporter(
         }
 
         onProgress(1f)
-        return ExportResult(imagesExported = imagesExportedTotal)
+        ExportResult(imagesExported = imagesExportedTotal)
     }
 }

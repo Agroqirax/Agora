@@ -27,15 +27,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.ui.components.clearFocusOnTap
+import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val accessSavedMemories by viewModel.settings.accessSavedMemories.collectAsState()
     val accessActiveMemory by viewModel.settings.accessActiveMemory.collectAsState()
+    val scope = rememberCoroutineScope()
+    val unknownError = stringResource(R.string.unknown_error)
     var activeMemoryContent by remember { mutableStateOf("") }
     var memoryFiles by remember { mutableStateOf<List<com.newoether.agora.data.MemoryManager.MemoryFileInfo>>(emptyList()) }
+    var memoryLoaded by remember { mutableStateOf(false) }
+    var memoryOperationInFlight by remember { mutableStateOf(false) }
     var showFileEditor by remember { mutableStateOf<String?>(null) }
     var fileEditorContent by remember { mutableStateOf("") }
     var fileEditorDesc by remember { mutableStateOf("") }
@@ -45,9 +53,24 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var newFileDesc by remember { mutableStateOf("") }
     var showDeleteFileConfirm by remember { mutableStateOf<String?>(null) }
 
+    fun reportMemoryFailure(action: String, error: Throwable) {
+        DebugLog.e("SettingsMemory", action, error)
+        viewModel.emitSnackbar(error.localizedMessage ?: unknownError)
+    }
+
     LaunchedEffect(Unit) {
-        activeMemoryContent = viewModel.memoryManager.getActiveMemory()
-        memoryFiles = viewModel.memoryManager.listFiles()
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching {
+                viewModel.memoryManager.getActiveMemory() to viewModel.memoryManager.listFiles()
+            }
+        }
+        loaded.onSuccess { (active, files) ->
+            activeMemoryContent = active
+            memoryFiles = files
+        }.onFailure { error ->
+            reportMemoryFailure("Unable to load memories", error)
+        }
+        memoryLoaded = true
     }
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
@@ -92,13 +115,22 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             SettingsItem(
                                 headlineContent = { Text(stringResource(R.string.memory_active_context)) },
                                 supportingContent = {
-                                    Text(
-                                        if (activeMemoryContent.isBlank()) stringResource(R.string.memory_active_empty)
-                                        else activeMemoryContent.take(100) + if (activeMemoryContent.length > 100) "..." else ""
-                                    )
+                                    if (memoryLoaded) {
+                                        Text(
+                                            if (activeMemoryContent.isBlank()) stringResource(R.string.memory_active_empty)
+                                            else activeMemoryContent.take(100) + if (activeMemoryContent.length > 100) "..." else ""
+                                        )
+                                    } else {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    }
                                 },
                                 leadingContent = { Icon(Icons.Default.Memory, null, tint = MaterialTheme.colorScheme.primary) },
-                                modifier = Modifier.clickable {
+                                modifier = Modifier.clickable(
+                                    enabled = memoryLoaded && !memoryOperationInFlight,
+                                ) {
                                     showFileEditor = "ACTIVE_MEMORY"
                                     fileEditorContent = activeMemoryContent
                                 }
@@ -110,7 +142,19 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsGroup(
                     title = stringResource(R.string.memory_saved_title),
                 items = buildList {
-                    if (memoryFiles.isEmpty()) {
+                    if (!memoryLoaded) {
+                        add {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                        }
+                    } else if (memoryFiles.isEmpty()) {
                         add {
                             SettingsItem(
                                 headlineContent = { Text(stringResource(R.string.memory_no_files), color = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -145,12 +189,30 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     leadingIcon = { Icon(Icons.Default.Edit, null) },
                                                     onClick = {
                                                         showFileMenu = false
-                                                        try {
-                                                            showFileEditor = file.name
-                                                            fileEditorContent = viewModel.memoryManager.readFile(file.name)
-                                                            fileEditorDesc = viewModel.memoryManager.getDescription(file.name)
-                                                        } catch (_: Exception) {}
-                                                    }
+                                                        if (!memoryOperationInFlight) {
+                                                            memoryOperationInFlight = true
+                                                            scope.launch {
+                                                                val loaded = withContext(Dispatchers.IO) {
+                                                                    runCatching {
+                                                                        viewModel.memoryManager.readFile(file.name) to
+                                                                            viewModel.memoryManager.getDescription(file.name)
+                                                                    }
+                                                                }
+                                                                loaded.onSuccess { (content, description) ->
+                                                                    fileEditorContent = content
+                                                                    fileEditorDesc = description
+                                                                    showFileEditor = file.name
+                                                                }.onFailure { error ->
+                                                                    reportMemoryFailure(
+                                                                        "Unable to open memory file",
+                                                                        error,
+                                                                    )
+                                                                }
+                                                                memoryOperationInFlight = false
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !memoryOperationInFlight,
                                                 )
                                                 DropdownMenuItem(
                                                     text = { Text(stringResource(R.string.provider_delete), color = MaterialTheme.colorScheme.error) },
@@ -172,7 +234,9 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .heightIn(min = 56.dp)
-                                .clickable { showNewFileDialog = true }
+                                .clickable(
+                                    enabled = memoryLoaded && !memoryOperationInFlight,
+                                ) { showNewFileDialog = true }
                                 .padding(horizontal = 16.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -199,10 +263,26 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        viewModel.memoryManager.deleteFile(fileName)
-                        memoryFiles = viewModel.memoryManager.listFiles()
-                        showDeleteFileConfirm = null
+                        if (!memoryOperationInFlight) {
+                            memoryOperationInFlight = true
+                            scope.launch {
+                                val deleted = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        viewModel.memoryManager.deleteFile(fileName)
+                                        viewModel.memoryManager.listFiles()
+                                    }
+                                }
+                                deleted.onSuccess { files ->
+                                    memoryFiles = files
+                                    showDeleteFileConfirm = null
+                                }.onFailure { error ->
+                                    reportMemoryFailure("Unable to delete memory file", error)
+                                }
+                                memoryOperationInFlight = false
+                            }
+                        }
                     },
+                    enabled = !memoryOperationInFlight,
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
                 ) { Text(stringResource(R.string.provider_delete)) }
             },
@@ -272,23 +352,49 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (isActiveMemory) {
-                        viewModel.memoryManager.updateActiveMemory(editContent)
-                        activeMemoryContent = viewModel.memoryManager.getActiveMemory()
-                    } else {
-                        if (editFileName.isNotBlank() && editFileName != fileName.removeSuffix(".md")) {
-                            viewModel.memoryManager.deleteFile(fileName)
-                            viewModel.memoryManager.createFile(editFileName, editContent, editDesc)
-                        } else {
-                            viewModel.memoryManager.editFile(fileName, editContent, description = editDesc)
+                TextButton(
+                    onClick = {
+                        if (!memoryOperationInFlight) {
+                            val contentSnapshot = editContent
+                            val descriptionSnapshot = editDesc
+                            val editedName = editFileName.trim()
+                            val newName = editedName.takeIf {
+                                !isActiveMemory && it != fileName.removeSuffix(".md")
+                            }
+                            memoryOperationInFlight = true
+                            scope.launch {
+                                val saved = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        if (isActiveMemory) {
+                                            viewModel.memoryManager.updateActiveMemory(contentSnapshot)
+                                            viewModel.memoryManager.getActiveMemory() to null
+                                        } else {
+                                            viewModel.memoryManager.editFile(
+                                                name = fileName,
+                                                content = contentSnapshot,
+                                                newName = newName,
+                                                description = descriptionSnapshot,
+                                            )
+                                            null to viewModel.memoryManager.listFiles()
+                                        }
+                                    }
+                                }
+                                saved.onSuccess { (active, files) ->
+                                    if (active != null) activeMemoryContent = active
+                                    if (files != null) memoryFiles = files
+                                    showFileEditor = null
+                                    fileEditorContent = ""
+                                    fileEditorDesc = ""
+                                }.onFailure { error ->
+                                    reportMemoryFailure("Unable to save memory", error)
+                                }
+                                memoryOperationInFlight = false
+                            }
                         }
-                        memoryFiles = viewModel.memoryManager.listFiles()
-                    }
-                    showFileEditor = null
-                    fileEditorContent = ""
-                    fileEditorDesc = ""
-                }) { Text(stringResource(R.string.provider_save)) }
+                    },
+                    enabled = !memoryOperationInFlight &&
+                        (isActiveMemory || editFileName.isNotBlank()),
+                ) { Text(stringResource(R.string.provider_save)) }
             },
             dismissButton = {
                 TextButton(onClick = {
@@ -340,18 +446,39 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    if (newFileName.isNotBlank()) {
-                        try {
-                            viewModel.memoryManager.createFile(newFileName, newFileContent, newFileDesc)
-                            memoryFiles = viewModel.memoryManager.listFiles()
-                        } catch (_: Exception) {}
-                    }
-                    showNewFileDialog = false
-                    newFileName = ""
-                    newFileContent = ""
-                    newFileDesc = ""
-                }) { Text(stringResource(R.string.memory_create)) }
+                TextButton(
+                    onClick = {
+                        if (newFileName.isNotBlank() && !memoryOperationInFlight) {
+                            val nameSnapshot = newFileName
+                            val contentSnapshot = newFileContent
+                            val descriptionSnapshot = newFileDesc
+                            memoryOperationInFlight = true
+                            scope.launch {
+                                val created = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        viewModel.memoryManager.createFile(
+                                            nameSnapshot,
+                                            contentSnapshot,
+                                            descriptionSnapshot,
+                                        )
+                                        viewModel.memoryManager.listFiles()
+                                    }
+                                }
+                                created.onSuccess { files ->
+                                    memoryFiles = files
+                                    showNewFileDialog = false
+                                    newFileName = ""
+                                    newFileContent = ""
+                                    newFileDesc = ""
+                                }.onFailure { error ->
+                                    reportMemoryFailure("Unable to create memory file", error)
+                                }
+                                memoryOperationInFlight = false
+                            }
+                        }
+                    },
+                    enabled = newFileName.isNotBlank() && !memoryOperationInFlight,
+                ) { Text(stringResource(R.string.memory_create)) }
             },
             dismissButton = {
                 TextButton(onClick = {

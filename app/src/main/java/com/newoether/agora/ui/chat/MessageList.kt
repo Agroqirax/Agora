@@ -241,7 +241,7 @@ internal fun MessageList(
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
     viewportHeight: Int = 0,
     messageHeights: SnapshotStateMap<String, Int> = remember { mutableStateMapOf() },
-    onEditMessage: (String, String) -> Unit = { _, _ -> },
+    onEditMessage: suspend (String, String) -> Boolean = { _, _ -> false },
     onSwitchBranch: (String?, String, Int) -> Unit = { _, _, _ -> },
     onRegenerate: (String) -> Unit = {},
     onFork: (String) -> Unit = {},
@@ -259,6 +259,7 @@ internal fun MessageList(
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
+    var pendingEditMessageId by remember { mutableStateOf<String?>(null) }
     val mutationAnchorLock = remember(state) { MessageListMutationAnchorLock() }
     val mutationScope = rememberCoroutineScope()
     val pendingMutationSettles = remember(state) { mutableMapOf<String, Job>() }
@@ -270,7 +271,6 @@ internal fun MessageList(
         mutationAnchorLock.cancel()
     }
 
-    LaunchedEffect(isLoading) { if (isLoading) editingMessageId = null }
     LaunchedEffect(isSwitching) {
         if (isSwitching) cancelMutationAnchoring()
     }
@@ -359,8 +359,24 @@ internal fun MessageList(
         MessageItem(
             message = message,
             onEdit = { id, text ->
-                onEditMessage(id, text)
-                editingMessageId = null
+                if (pendingEditMessageId == null) {
+                    pendingEditMessageId = id
+                    mutationScope.launch {
+                        val accepted = try {
+                            onEditMessage(id, text)
+                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (accepted && editingMessageId == id) {
+                            editingMessageId = null
+                        }
+                        if (pendingEditMessageId == id) {
+                            pendingEditMessageId = null
+                        }
+                    }
+                }
             },
             // Every active MODEL owns its streaming renderer until its own terminal status.
             // Appending a queued USER must not dispose the previous turn's incremental renderer.
@@ -371,7 +387,7 @@ internal fun MessageList(
                     MessageStatus.TOOL_CALLING,
                     MessageStatus.TRANSCRIBING,
                 ),
-            isLoading = isLoading,
+            isLoading = isLoading || pendingEditMessageId == message.id,
             isEditingAllowed = !selectionMode &&
                 (editingMessageId == null || editingMessageId == message.id) &&
                 !isLoading,

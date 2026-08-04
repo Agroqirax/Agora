@@ -23,7 +23,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.newoether.agora.R
 import com.newoether.agora.ui.settings.CollapsingSettingsScaffold
 import com.newoether.agora.ui.settings.DocumentationFab
@@ -114,11 +116,12 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     ) { uri ->
         if (uri != null) {
             claudeFileUri = uri
-            val name = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIdx = cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst()) cursor.getString(nameIdx) else null
+            scope.launch {
+                val name = withContext(Dispatchers.IO) {
+                    com.newoether.agora.util.FileValidator.resolveFileName(context, uri)
+                }
+                if (claudeFileUri == uri) claudeFileName = name
             }
-            claudeFileName = name
             viewModel.previewClaudeChat(uri)
         }
     }
@@ -129,11 +132,12 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     ) { uri ->
         if (uri != null) {
             gptFileUri = uri
-            val name = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIdx = cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst()) cursor.getString(nameIdx) else null
+            scope.launch {
+                val name = withContext(Dispatchers.IO) {
+                    com.newoether.agora.util.FileValidator.resolveFileName(context, uri)
+                }
+                if (gptFileUri == uri) gptFileName = name
             }
-            gptFileName = name
             viewModel.previewGptChat(uri)
         }
     }

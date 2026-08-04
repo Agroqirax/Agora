@@ -28,7 +28,9 @@ import com.newoether.agora.api.ProviderDefaults
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 private data class SearchMethodOption(val key: String, @androidx.annotation.StringRes val labelRes: Int)
@@ -499,24 +501,45 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 if (uri != null) {
                     isImporting = true
                     scope.launch {
-                        try {
-                            val destFile = File(context.filesDir, "embedding_${java.util.UUID.randomUUID()}.gguf")
-                            context.contentResolver.openInputStream(uri)?.use { input ->
-                                destFile.outputStream().use { output ->
-                                    input.copyTo(output)
+                        val importedPath = withContext(Dispatchers.IO) {
+                            try {
+                                val destFile = File(
+                                    context.filesDir,
+                                    "embedding_${java.util.UUID.randomUUID()}.gguf",
+                                )
+                                val copied = context.contentResolver
+                                    .openInputStream(uri)
+                                    ?.use { input ->
+                                        destFile.outputStream().use { output ->
+                                            input.copyTo(output)
+                                        }
+                                        true
+                                    } == true
+                                if (!copied) {
+                                    destFile.delete()
+                                    return@withContext null
                                 }
+                                val magic = ByteArray(4)
+                                destFile.inputStream().use { it.read(magic) }
+                                val valid = magic[0] == 'G'.code.toByte() &&
+                                    magic[1] == 'G'.code.toByte() &&
+                                    magic[2] == 'U'.code.toByte() &&
+                                    magic[3] == 'F'.code.toByte()
+                                if (valid) {
+                                    destFile.absolutePath
+                                } else {
+                                    destFile.delete()
+                                    null
+                                }
+                            } catch (_: Exception) {
+                                null
                             }
-                            // Validate GGUF magic bytes
-                            val magic = ByteArray(4)
-                            destFile.inputStream().use { it.read(magic) }
-                            if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte()
-                                || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
-                                destFile.delete()
-                                showGgufError = true
-                            } else {
-                                localFilePath = destFile.absolutePath
-                            }
-                        } catch (_: Exception) { }
+                        }
+                        if (importedPath == null) {
+                            showGgufError = true
+                        } else {
+                            localFilePath = importedPath
+                        }
                         isImporting = false
                     }
                 }
@@ -525,7 +548,10 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 modifier = Modifier.clearFocusOnTap(),
                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                 onDismissRequest = {
-                    if (localFilePath.isNotBlank()) File(localFilePath).delete()
+                    val pathToDelete = localFilePath
+                    if (pathToDelete.isNotBlank()) {
+                        scope.launch(Dispatchers.IO) { File(pathToDelete).delete() }
+                    }
                     showLocalDialog = false
                 },
                 title = { Text(stringResource(R.string.add_local_model), fontWeight = FontWeight.Bold) },
@@ -586,7 +612,10 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 },
                 dismissButton = {
                     TextButton(onClick = {
-                        if (localFilePath.isNotBlank()) File(localFilePath).delete()
+                        val pathToDelete = localFilePath
+                        if (pathToDelete.isNotBlank()) {
+                            scope.launch(Dispatchers.IO) { File(pathToDelete).delete() }
+                        }
                         showLocalDialog = false
                     }) { Text(stringResource(R.string.cancel)) }
                 }

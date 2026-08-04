@@ -53,7 +53,19 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
 
     override fun handles(name: String): Boolean = name == "generate_image"
 
-    override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
+    override suspend fun execute(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+    ): String = withContext(Dispatchers.IO) {
+        executeOffMain(name, arguments, ctx)
+    }
+
+    private suspend fun executeOffMain(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+    ): String {
         val conversationId = ctx.conversationId?.takeIf { it.isNotBlank() }
             ?: return err("missing_conversation", "Image generation requires a conversation.")
         val argsStr = arguments.ifBlank { "{}" }

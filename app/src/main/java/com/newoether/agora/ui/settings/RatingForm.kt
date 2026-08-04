@@ -195,19 +195,37 @@ fun RatingForm(
                         submitting = true
                         submitError = false
                         try {
-                            val json = buildString {
-                                append("{\"rating\":$rating,\"app\":\"${context.packageName}\"")
-                                if (name.isNotBlank()) append(",\"name\":${jsonEscape(name)}")
-                                if (email.isNotBlank()) append(",\"email\":${jsonEscape(email)}")
-                                if (comment.isNotBlank()) append(",\"comment\":${jsonEscape(comment)}")
-                                append("}")
+                            val submittedRating = rating
+                            val submittedName = name
+                            val submittedEmail = email
+                            val submittedComment = comment
+                            val accepted = withContext(Dispatchers.IO) {
+                                val json = buildString {
+                                    append(
+                                        "{\"rating\":$submittedRating,\"app\":" +
+                                            jsonEscape(context.packageName)
+                                    )
+                                    if (submittedName.isNotBlank()) {
+                                        append(",\"name\":${jsonEscape(submittedName)}")
+                                    }
+                                    if (submittedEmail.isNotBlank()) {
+                                        append(",\"email\":${jsonEscape(submittedEmail)}")
+                                    }
+                                    if (submittedComment.isNotBlank()) {
+                                        append(",\"comment\":${jsonEscape(submittedComment)}")
+                                    }
+                                    append("}")
+                                }
+                                val body = json.toRequestBody("application/json".toMediaType())
+                                val request = Request.Builder()
+                                    .url("https://newoether.space/api/rating")
+                                    .post(body)
+                                    .build()
+                                HttpClient.client.newCall(request).execute().use {
+                                    it.isSuccessful
+                                }
                             }
-                            val body = json.toRequestBody("application/json".toMediaType())
-                            val request = Request.Builder()
-                                .url("https://newoether.space/api/rating")
-                                .post(body)
-                                .build()
-                            withContext(Dispatchers.IO) { HttpClient.client.newCall(request).execute() }
+                            if (!accepted) error("Rating endpoint rejected the request")
                             submitted = true
                             onSubmitted()
                         } catch (_: Exception) {

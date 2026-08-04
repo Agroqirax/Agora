@@ -11,6 +11,9 @@ import com.newoether.agora.util.Constants
  * persistence operations can never detach a selected Run from one of its parents.
  */
 internal data class ConversationBranchPath(
+    /** The exact root-to-leaf traversal chosen from the persisted message graph. */
+    val selectedPathMessages: List<MessageEntity>,
+    /** [selectedPathMessages] plus protocol side-chain rows needed for provider-valid history. */
     val structuralMessages: List<MessageEntity>,
     val visibleMessages: List<MessageEntity>,
     val runIds: List<String>,
@@ -23,7 +26,7 @@ internal fun resolveConversationBranchPath(
     throughMessageId: String? = null,
 ): ConversationBranchPath? {
     if (messages.isEmpty()) {
-        return ConversationBranchPath(emptyList(), emptyList(), emptyList())
+        return ConversationBranchPath(emptyList(), emptyList(), emptyList(), emptyList())
     }
 
     val structuralPath = resolveStructuralMessagePath(messages, selectedChildren) ?: return null
@@ -81,6 +84,7 @@ internal fun resolveConversationBranchPath(
     val selectedStructuralIds = selectedStructuralPath.mapTo(mutableSetOf()) { it.id }
 
     return ConversationBranchPath(
+        selectedPathMessages = selectedStructuralPath,
         // Keep the selected path first. Callers use that order to reproduce explicit branch
         // selections; protocol siblings are appended deterministically for persistence.
         structuralMessages = selectedStructuralPath +

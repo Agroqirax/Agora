@@ -7,6 +7,8 @@ import com.newoether.agora.api.ToolProperty
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
@@ -139,14 +141,18 @@ class MemoryToolProvider(
         return tools
     }
 
-    override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
+    override suspend fun execute(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+    ): String = withContext(Dispatchers.IO) {
         val argsStr = arguments.ifBlank { "{}" }
         val args =
             Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(argsStr)
         fun arg(key: String): String =
             (args[key] as? JsonPrimitive)?.content ?: ""
 
-        return when (name) {
+        when (name) {
             "list_memory_files" -> {
                 val files = memoryManager.listFiles()
                 if (files.isEmpty()) {

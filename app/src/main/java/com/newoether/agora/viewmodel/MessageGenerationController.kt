@@ -22,11 +22,13 @@ import com.newoether.agora.model.RunStatus
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -572,16 +574,21 @@ class MessageGenerationController(
     // editMessage
     // ════════════════════════════════════════════════════════════════════
 
-    fun editMessage(messageId: String, newText: String) {
-        if (newText.isBlank()) return
-        val genId = currentConversationId.value ?: return
+    suspend fun editMessage(messageId: String, newText: String): Boolean =
+        withContext(Dispatchers.Default) {
+            editMessageOffMain(messageId, newText)
+        }
+
+    private suspend fun editMessageOffMain(messageId: String, newText: String): Boolean {
+        if (newText.isBlank()) return false
+        val genId = currentConversationId.value ?: return false
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
+        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return false
         val visiblePath = messages.value
-        val messageToEdit = visiblePath.find { it.id == messageId } ?: return
-        if (messageToEdit.participant != Participant.USER) return
-        val sourceRunId = messageToEdit.runId ?: return
+        val messageToEdit = visiblePath.find { it.id == messageId } ?: return false
+        if (messageToEdit.participant != Participant.USER) return false
+        val sourceRunId = messageToEdit.runId ?: return false
         val inputBoundary = visiblePath
             .filter {
                 it.runId == sourceRunId &&
@@ -594,13 +601,14 @@ class MessageGenerationController(
                     .thenBy { it.timestamp }
                     .thenBy { it.id }
             )
-        if (inputBoundary?.id != messageId) return
+        if (inputBoundary?.id != messageId) return false
 
         // Edit is idle-only by product rule; enforce it atomically below the UI gate.
-        val myUiToken = state.tryAcquireForReplacement() ?: return
+        val myUiToken = state.tryAcquireForReplacement() ?: return false
         val runId = UUID.randomUUID().toString()
         state.bindRun(myUiToken, runId)
-        state.launchGenerationJob(myUiToken) {
+        val committed = CompletableDeferred<Boolean>()
+        val job = state.launchGenerationJob(myUiToken) {
             val myPersistId = state.nextPersistId()
             var setupModelMessageId: String? = null
             try {
@@ -667,6 +675,17 @@ class MessageGenerationController(
                 selectedChildren.value = selectedAfterModelEdit
                 onScrollToMessage(newUser.id)
             }
+            if (currentConversationId.value == genId) {
+                // The three projection inputs are independent StateFlows. Await the combined
+                // visible path so the UI cannot leave edit mode against an intermediate snapshot
+                // that still resolves to the source branch.
+                combine(messages, currentConversationId) { path, openConversationId ->
+                    openConversationId != genId || path.any { it.id == newUser.id }
+                }.first { projectedOrClosed -> projectedOrClosed }
+            }
+            // The durable branch and its UI projection are now committed. Only now may the
+            // editor leave edit mode; completing earlier exposes the old branch for a frame.
+            committed.complete(true)
             launchGeneration(
                 genId, modelMessageId, startTime,
                 isRegenerate = false, replaceMessageId = null,
@@ -687,8 +706,11 @@ class MessageGenerationController(
                 )
             } finally {
                 releaseAndDrain(state, myUiToken, genId)
+                if (!committed.isCompleted) committed.complete(false)
             }
         }
+        if (job == null) return false
+        return committed.await()
     }
 
     // ════════════════════════════════════════════════════════════════════
@@ -699,6 +721,14 @@ class MessageGenerationController(
         text: String,
         images: List<String> = emptyList(),
         attachments: List<SelectedAttachment> = emptyList(),
+    ): SendAcceptance? = withContext(Dispatchers.Default) {
+        sendMessageOffMain(text, images, attachments)
+    }
+
+    private suspend fun sendMessageOffMain(
+        text: String,
+        images: List<String>,
+        attachments: List<SelectedAttachment>,
     ): SendAcceptance? {
         val selectedModelId = currentActiveModel.value
         // Pre-flight: a blank model fails fast BEFORE creating a new-chat row or enqueueing, so the

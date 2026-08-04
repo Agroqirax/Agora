@@ -10,10 +10,25 @@ import kotlinx.serialization.json.jsonObject
 
 object SearchResultFormatter {
 
-    fun isRawSearchResult(text: String): Boolean = try {
-        val type = Json.parseToJsonElement(text).jsonObject["type"]?.let { (it as? JsonPrimitive)?.content }
-        type == "web_search" || type == "search_conversations" || type == "execute_shell_command" || type == "list_shells" || type == "list_memory_files" || type == "list_conversations" || type == "read_conversation"
-    } catch (_: Exception) { false }
+    fun isRawSearchResult(text: String): Boolean {
+        // Nearly every persisted user/assistant row is Markdown. Reject it before constructing a
+        // JSON parser (and, previously, an exception) on every Room emission.
+        val firstContent = text.indexOfFirst { character -> !character.isWhitespace() }
+        if (firstContent < 0 || text[firstContent] != '{') return false
+        return try {
+            val type = Json.parseToJsonElement(text).jsonObject["type"]
+                ?.let { (it as? JsonPrimitive)?.content }
+            type == "web_search" ||
+                type == "search_conversations" ||
+                type == "execute_shell_command" ||
+                type == "list_shells" ||
+                type == "list_memory_files" ||
+                type == "list_conversations" ||
+                type == "read_conversation"
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     fun format(text: String, context: Context): String {
         if (!isRawSearchResult(text)) return text

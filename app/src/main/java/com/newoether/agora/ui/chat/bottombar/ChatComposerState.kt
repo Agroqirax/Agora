@@ -24,6 +24,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -69,15 +71,76 @@ class ChatComposerState(
     var pendingVideoUri by mutableStateOf<String?>(null)
     var pendingVideoDurationMs by mutableLongStateOf(0L)
     var pendingVideoQueue by mutableStateOf<List<String>>(emptyList())
+    private var videoMetadataJob: Job? = null
+    private val attachmentInspectionMutex = Mutex()
 
     // File validation rejection dialog
     var rejectedMessage by mutableStateOf<String?>(null)
+
+    private data class InspectedFile(
+        val uri: Uri,
+        val validation: FileValidator.Result,
+        val fileName: String?,
+        val pageCount: Int,
+    )
 
     /** Clear the attachment list after a successful send. The extracted-frame / rendered-page
      *  files are now owned by the stored message (via images field in MessageEntity) — they
      *  must NOT be deleted here; message deletion handles that. */
     fun clearAttachments() {
         selectedAttachments = emptyList()
+    }
+
+    /**
+     * Commits the current PDF selection without doing filesystem work in the click transaction.
+     * Selected page files become message-owned attachments; unselected files are reclaimed on IO.
+     */
+    fun confirmPendingPdfSelection(selectedPages: Set<Int>) {
+        val uri = pendingPdfUri ?: return
+        val renderedPaths = pendingPdfRenderedPaths
+        val keptPaths = renderedPaths.filterIndexed { index, _ -> index in selectedPages }
+        val discardedPaths = renderedPaths.filterIndexed { index, _ -> index !in selectedPages }
+        selectedAttachments = selectedAttachments + SelectedAttachment(
+            uri = uri,
+            type = "pdf",
+            mimeType = pendingPdfMimeType,
+            fileName = pendingPdfFileName,
+            selectedPages = keptPaths.indices.toSet(),
+            preRenderedPaths = keptPaths,
+        )
+        resetPendingPdfState()
+        deleteFilesAsync(discardedPaths)
+    }
+
+    /**
+     * Cancels and clears the pending PDF state synchronously, then reclaims completed page files
+     * off Main. A cancelled renderer owns cleanup of any files it had not published yet.
+     */
+    fun dismissPendingPdf() {
+        pdfRenderJob?.cancel()
+        pdfRenderJob = null
+        val discardedPaths = pendingPdfRenderedPaths
+        resetPendingPdfState()
+        deleteFilesAsync(discardedPaths)
+    }
+
+    private fun resetPendingPdfState() {
+        showPdfPageDialog = false
+        pendingPdfUri = null
+        pendingPdfPages = 0
+        pendingPdfFileName = null
+        pendingPdfMimeType = null
+        pendingPdfRenderedPaths = emptyList()
+        pendingPdfIsRendering = false
+        pendingPdfRenderProgress = 0 to 0
+        pdfDialogHiddenForPreview = false
+    }
+
+    private fun deleteFilesAsync(paths: List<String>) {
+        if (paths.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            paths.forEach { path -> runCatching { java.io.File(path).delete() } }
+        }
     }
 
     /** Copy a content URI to app-private storage, returning the absolute path (or null). */
@@ -108,28 +171,50 @@ class ChatComposerState(
             videoExtractionJobs[removed.uri]?.cancel()
             videoExtractionJobs.remove(removed.uri)
         }
-        // Delete all app-private files backing this attachment (frames / PDF pages / copied file).
-        removed?.let { com.newoether.agora.util.AttachmentFiles.deleteBacking(it) }
         val uriStr = removed?.uri
         selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(index) }
         if (uriStr != null) processingStates = processingStates - uriStr
+        // File deletion is never part of the pointer-input/Main transaction.
+        removed?.let { attachment ->
+            scope.launch(Dispatchers.IO) {
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(attachment)
+            }
+        }
     }
 
     // Helper: process next video in queue, showing slice dialog
     fun processNextVideo() {
-        if (pendingVideoQueue.isNotEmpty()) {
-            val uri = pendingVideoQueue.first()
-            pendingVideoQueue = pendingVideoQueue.drop(1).toMutableList()
-            val durationMs = try {
-                val retriever = android.media.MediaMetadataRetriever()
-                try {
-                retriever.setDataSource(context, android.net.Uri.parse(uri))
-                retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                } finally { retriever.release() }
-            } catch (_: Exception) { 0L }
-            pendingVideoUri = uri
-            pendingVideoDurationMs = durationMs
-            showVideoSliceDialog = true
+        if (
+            pendingVideoQueue.isEmpty() ||
+            showVideoSliceDialog ||
+            videoMetadataJob?.isActive == true
+        ) return
+
+        val uri = pendingVideoQueue.first()
+        pendingVideoQueue = pendingVideoQueue.drop(1)
+        videoMetadataJob = scope.launch {
+            try {
+                val durationMs = withContext(Dispatchers.IO) {
+                    try {
+                        val retriever = android.media.MediaMetadataRetriever()
+                        try {
+                            retriever.setDataSource(context, Uri.parse(uri))
+                            retriever.extractMetadata(
+                                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                            )?.toLongOrNull() ?: 0L
+                        } finally {
+                            retriever.release()
+                        }
+                    } catch (_: Exception) {
+                        0L
+                    }
+                }
+                pendingVideoUri = uri
+                pendingVideoDurationMs = durationMs
+                showVideoSliceDialog = true
+            } finally {
+                videoMetadataJob = null
+            }
         }
     }
 
@@ -182,11 +267,11 @@ class ChatComposerState(
         val newAttachments = uris.map {
             SelectedAttachment(
                 uri = it.toString(), type = "image",
-                mimeType = try { context.contentResolver.getType(it) } catch (_: Exception) { null }
+                mimeType = null,
             )
         }
         selectedAttachments = selectedAttachments + newAttachments
-        for ((uriObj, att) in uris.zip(newAttachments)) {
+        for (uriObj in uris) {
             val uriStr = uriObj.toString()
             processingStates = processingStates + (uriStr to 0f)
             // Launch on the scope's Main dispatcher: copyToPrivate hops to IO internally, so every
@@ -194,10 +279,21 @@ class ChatComposerState(
             // block on IO made N parallel completions race each other's list assignment (lost
             // update → a localPath silently reverted to null → attachment dropped at send).
             scope.launch {
+                val mimeType = withContext(Dispatchers.IO) {
+                    try {
+                        context.contentResolver.getType(uriObj)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
                 val localPath = copyToPrivate(uriObj, "img")
                 if (localPath != null) {
                     selectedAttachments = selectedAttachments.map { a ->
-                        if (a.uri == uriStr) a.copy(localPath = localPath) else a
+                        if (a.uri == uriStr) {
+                            a.copy(localPath = localPath, mimeType = mimeType)
+                        } else {
+                            a
+                        }
                     }
                 } else {
                     // Copy failed -- remove the attachment and show rejection
@@ -223,118 +319,137 @@ class ChatComposerState(
     /** Handle generic files picked from the document picker (validates, queues first PDF for
      *  page rendering, adds the rest as attachments). */
     fun onPickFiles(uris: List<Uri>, onInitPdfSelection: ((Set<Int>) -> Unit)?) {
-        val validAttachments = mutableListOf<SelectedAttachment>()
-        val fileCopySources = mutableListOf<Pair<Uri, SelectedAttachment>>()
-        val rejectedMessages = mutableListOf<String>()
-        for (uri in uris) {
-            val validation = FileValidator.validate(context, uri)
-            if (!validation.valid) {
-                rejectedMessages.add(FileValidator.errorMessage(context, validation.error!!, validation.mimeType))
-                continue
-            }
-            val mimeType = validation.mimeType
-            val type = when {
-                mimeType == "application/pdf" -> "pdf"
-                mimeType != null -> "file"
-                else -> "file"
-            }
-            val fileName = try {
-                val cursor = context.contentResolver.query(
-                    uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
-                )
-                cursor?.use {
-                    if (it.moveToFirst()) {
-                        val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                        if (idx >= 0) it.getString(idx) else null
-                    } else null
+        if (uris.isEmpty()) return
+        scope.launch {
+            // SAF providers can block on MIME, metadata and page-count queries. Serialize commits
+            // on Main, but perform the complete inspection batch on IO.
+            attachmentInspectionMutex.withLock {
+                val inspected = withContext(Dispatchers.IO) {
+                    uris.map { uri ->
+                        val validation = FileValidator.validate(context, uri)
+                        val fileName = if (validation.valid) {
+                            FileValidator.resolveFileName(context, uri)
+                        } else {
+                            null
+                        }
+                        val pageCount = if (
+                            validation.valid &&
+                            validation.mimeType == "application/pdf"
+                        ) {
+                            PdfPageRenderer.getPageCount(context, uri)
+                        } else {
+                            0
+                        }
+                        InspectedFile(uri, validation, fileName, pageCount)
+                    }
                 }
-            } catch (_: Exception) { null }
-            if (type == "pdf" && !showPdfPageDialog) {
-                // Queue first PDF — render all pages in background
-                val pageCount = PdfPageRenderer.getPageCount(context, uri)
-                if (pageCount > 0) {
-                    pendingPdfUri = uri.toString()
-                    pendingPdfPages = pageCount
-                    pendingPdfFileName = fileName
-                    pendingPdfMimeType = mimeType
-                    pendingPdfRenderedPaths = emptyList()
-                    pendingPdfIsRendering = true
-                    pendingPdfRenderProgress = 0 to pageCount
-                    showPdfPageDialog = true
-                    // Initialize selection to first 5 pages
-                    onInitPdfSelection?.invoke((0 until minOf(pageCount, 5)).toSet())
-                    pdfRenderJob = scope.launch {
-                        val paths = withContext(Dispatchers.IO) {
-                            PdfPageRenderer.renderAllPages(
-                                context, uri, maxPages = pageCount,
-                                // Progress callback fires on IO — post the state write to main.
-                                onProgress = { cur, total -> scope.launch { pendingPdfRenderProgress = cur to total } }
+
+                val validAttachments = mutableListOf<SelectedAttachment>()
+                val fileCopySources = mutableListOf<Pair<Uri, SelectedAttachment>>()
+                val rejectedMessages = mutableListOf<String>()
+                for (item in inspected) {
+                    val validation = item.validation
+                    if (!validation.valid) {
+                        rejectedMessages.add(
+                            FileValidator.errorMessage(
+                                context,
+                                checkNotNull(validation.error),
+                                validation.mimeType,
+                            )
+                        )
+                        continue
+                    }
+                    val mimeType = validation.mimeType
+                    val type = if (mimeType == "application/pdf") "pdf" else "file"
+                    if (type == "pdf" && !showPdfPageDialog && item.pageCount > 0) {
+                        pendingPdfUri = item.uri.toString()
+                        pendingPdfPages = item.pageCount
+                        pendingPdfFileName = item.fileName
+                        pendingPdfMimeType = mimeType
+                        pendingPdfRenderedPaths = emptyList()
+                        pendingPdfIsRendering = true
+                        pendingPdfRenderProgress = 0 to item.pageCount
+                        showPdfPageDialog = true
+                        onInitPdfSelection?.invoke(
+                            (0 until minOf(item.pageCount, 5)).toSet()
+                        )
+                        pdfRenderJob = scope.launch {
+                            val paths = withContext(Dispatchers.IO) {
+                                PdfPageRenderer.renderAllPages(
+                                    context,
+                                    item.uri,
+                                    maxPages = item.pageCount,
+                                    onProgress = { cur, total ->
+                                        scope.launch {
+                                            pendingPdfRenderProgress = cur to total
+                                        }
+                                    },
+                                )
+                            }
+                            pendingPdfRenderedPaths = paths
+                            pendingPdfIsRendering = false
+                        }
+                        continue
+                    }
+                    val attachment = SelectedAttachment(
+                        uri = item.uri.toString(),
+                        type = type,
+                        mimeType = mimeType,
+                        fileName = item.fileName,
+                    )
+                    validAttachments.add(attachment)
+                    if (type == "file") {
+                        fileCopySources.add(item.uri to attachment)
+                    }
+                }
+                if (rejectedMessages.isNotEmpty()) {
+                    haptics.reject()
+                    rejectedMessage = rejectedMessages.joinToString("\n")
+                }
+                if (validAttachments.isNotEmpty()) haptics.selection()
+                selectedAttachments = selectedAttachments + validAttachments
+
+                // Copy generic files to app-private storage immediately. Main-confined mutations
+                // prevent parallel completions from losing another attachment's localPath.
+                for ((uri, attachment) in fileCopySources) {
+                    val uriStr = uri.toString()
+                    val ext = attachment.fileName?.substringAfterLast('.', "bin") ?: "bin"
+                    processingStates = processingStates + (uriStr to 0f)
+                    scope.launch {
+                        val localPath = copyToPrivate(uri, ext)
+                        if (localPath != null) {
+                            selectedAttachments = selectedAttachments.map { current ->
+                                if (current.uri == uriStr) {
+                                    current.copy(localPath = localPath)
+                                } else {
+                                    current
+                                }
+                            }
+                        } else {
+                            val idx = selectedAttachments.indexOfFirst { it.uri == uriStr }
+                            if (idx >= 0) {
+                                selectedAttachments = selectedAttachments
+                                    .toMutableList()
+                                    .also { it.removeAt(idx) }
+                            }
+                            rejectedMessage = context.getString(
+                                com.newoether.agora.R.string.attachment_copy_failed_file
                             )
                         }
-                        pendingPdfRenderedPaths = paths
-                        pendingPdfIsRendering = false
+                        processingStates = processingStates - uriStr
                     }
-                    continue
                 }
-            }
-            val attachment = SelectedAttachment(
-                uri = uri.toString(), type = type,
-                mimeType = mimeType, fileName = fileName
-            )
-            validAttachments.add(attachment)
-            if (type == "file") {
-                fileCopySources.add(uri to attachment)
-            }
-        }
-        if (rejectedMessages.isNotEmpty()) {
-            haptics.reject()
-            rejectedMessage = rejectedMessages.joinToString("\n")
-        }
-        if (validAttachments.isNotEmpty()) haptics.selection()
-        selectedAttachments = selectedAttachments + validAttachments
-
-        // Copy generic files to app-private storage immediately. Main-confined mutations —
-        // copyToPrivate does its own IO hop (see onPickImages for the race rationale).
-        for ((uri, att) in fileCopySources) {
-            val uriStr = uri.toString()
-            val ext = att.fileName?.substringAfterLast('.', "bin") ?: "bin"
-            processingStates = processingStates + (uriStr to 0f)
-            scope.launch {
-                val localPath = copyToPrivate(uri, ext)
-                if (localPath != null) {
-                    selectedAttachments = selectedAttachments.map { a ->
-                        if (a.uri == uriStr) a.copy(localPath = localPath) else a
-                    }
-                } else {
-                    val idx = selectedAttachments.indexOfFirst { it.uri == uriStr }
-                    if (idx >= 0) {
-                        selectedAttachments = selectedAttachments.toMutableList().also { it.removeAt(idx) }
-                    }
-                    rejectedMessage = context.getString(com.newoether.agora.R.string.attachment_copy_failed_file)
-                }
-                processingStates = processingStates - uriStr
             }
         }
     }
 
     /** Add a sliced video as an attachment and start background frame extraction. */
     fun addSlicedVideo(vidUri: String, frameCount: Int, intervalMs: Long) {
-        val fileName = try {
-            val cursor = context.contentResolver.query(
-                Uri.parse(vidUri), arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null
-            )
-            cursor?.use {
-                if (it.moveToFirst()) {
-                    val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) it.getString(idx) else null
-                } else null
-            }
-        } catch (_: Exception) { null }
         val attachment = SelectedAttachment(
             uri = vidUri, type = "video",
             frameCount = frameCount,
             sliceIntervalMs = intervalMs,
-            fileName = fileName,
+            fileName = null,
             mimeType = "video/*"
         )
         selectedAttachments = selectedAttachments + attachment
@@ -344,9 +459,16 @@ class ChatComposerState(
         // extracting can cancel it (extractVideoFrames cleans up partial files on cancel).
         // Main-launched: extraction hops to IO internally; list/map mutations stay main-confined.
         val job = scope.launch {
+            val fileName = withContext(Dispatchers.IO) {
+                FileValidator.resolveFileName(context, Uri.parse(vidUri))
+            }
             val framePaths = extractVideoFrames(vidUri, frameCount, intervalMs)
             selectedAttachments = selectedAttachments.map { a ->
-                if (a.uri == vidUri) a.copy(processedFrames = framePaths) else a
+                if (a.uri == vidUri) {
+                    a.copy(processedFrames = framePaths, fileName = fileName)
+                } else {
+                    a
+                }
             }
             videoExtractionJobs.remove(vidUri)
         }

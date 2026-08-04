@@ -37,6 +37,7 @@ class ConversationBranchPathTest {
         )
 
         assertEquals(listOf("user", "model"), branch.visibleMessages.map { it.id })
+        assertEquals(listOf("user", "model"), branch.selectedPathMessages.map { it.id })
         assertTrue(branch.structuralMessages.any { it.id == "result_a" })
         assertTrue(branch.structuralMessages.any { it.id == "result_b" })
     }
@@ -62,6 +63,57 @@ class ConversationBranchPathTest {
         assertEquals(listOf("user", "model"), branch.visibleMessages.map { it.id })
         assertFalse(branch.structuralMessages.any { it.id == "later_user" })
         assertFalse(branch.structuralMessages.any { it.id == "later_model" })
+    }
+
+    @Test
+    fun clonedProtocolRowsRetainTheirKindAndDoNotEnterTheVisiblePath() {
+        val sourceMessages = listOf(
+            message("user", null, Participant.USER, 0),
+            message("model", "user", Participant.MODEL, 1),
+            message("tool_round", "model", Participant.MODEL, 2),
+            message("result_a", "tool_round", Participant.USER, 3),
+            message("result_b", "tool_round", Participant.USER, 4),
+        )
+        val sourceSelections = mapOf<String?, String>(
+            null to "user",
+            "user" to "model",
+            "model" to "tool_round",
+            "tool_round" to "result_b",
+        )
+        val sourceBranch = checkNotNull(
+            resolveConversationBranchPath(
+                messages = sourceMessages,
+                runs = listOf(run()),
+                selectedChildren = sourceSelections,
+            )
+        )
+        val messageIds = sourceMessages.associate { message ->
+            message.id to remapForkMessageId(message.id, "clone_${message.id}")
+        }
+        val clonedMessages = sourceMessages.map { message ->
+            message.copy(
+                id = messageIds.getValue(message.id),
+                conversationId = "fork",
+                parentId = message.parentId?.let(messageIds::getValue),
+            )
+        }
+        val clonedSelections = sourceSelections.entries.associate { (parentId, childId) ->
+            parentId?.let(messageIds::getValue) to messageIds.getValue(childId)
+        }
+        val clonedBranch = checkNotNull(
+            resolveConversationBranchPath(
+                messages = clonedMessages,
+                runs = listOf(run().copy(conversationId = "fork")),
+                selectedChildren = clonedSelections,
+            )
+        )
+
+        assertTrue(messageIds.getValue("tool_round").startsWith("tool_"))
+        assertTrue(messageIds.getValue("result_a").startsWith("result_"))
+        assertEquals(
+            sourceBranch.visibleMessages.map { messageIds.getValue(it.id) },
+            clonedBranch.visibleMessages.map { it.id },
+        )
     }
 
     private fun message(

@@ -75,6 +75,7 @@ import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -83,6 +84,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
@@ -198,37 +200,41 @@ private fun rememberScrollIsolatedMessages(
     return rendered
 }
 
-private fun launchConversationShare(
+private suspend fun launchConversationShare(
     context: Context,
     text: String,
     chooserTitle: String,
 ) {
-    val utf8 = text.toByteArray(Charsets.UTF_8)
-    val sendIntent = if (utf8.size <= INLINE_SHARE_LIMIT_BYTES) {
-        Intent(Intent.ACTION_SEND).apply {
-            type = "text/plain"
-            putExtra(Intent.EXTRA_TEXT, text)
-        }
-    } else {
-        val shareDirectory = File(context.cacheDir, "shared").apply { mkdirs() }
-        val file = File.createTempFile("agora_conversation_", ".md", shareDirectory).apply {
-            writeBytes(utf8)
-        }
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file,
-        )
-        Intent(Intent.ACTION_SEND).apply {
-            type = "text/markdown"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newRawUri("Agora conversation", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    val sendIntent = withContext(Dispatchers.IO) {
+        val utf8 = text.toByteArray(Charsets.UTF_8)
+        if (utf8.size <= INLINE_SHARE_LIMIT_BYTES) {
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+        } else {
+            val shareDirectory = File(context.cacheDir, "shared").apply { mkdirs() }
+            val file = File.createTempFile("agora_conversation_", ".md", shareDirectory).apply {
+                writeBytes(utf8)
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file,
+            )
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/markdown"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = ClipData.newRawUri("Agora conversation", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
         }
     }
-    val chooser = Intent.createChooser(sendIntent, chooserTitle)
-    if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    context.startActivity(chooser)
+    withContext(Dispatchers.Main.immediate) {
+        val chooser = Intent.createChooser(sendIntent, chooserTitle)
+        if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(chooser)
+    }
 }
 
 @Composable

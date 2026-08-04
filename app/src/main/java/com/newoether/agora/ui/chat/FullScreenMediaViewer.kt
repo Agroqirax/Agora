@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -56,9 +57,37 @@ import com.newoether.agora.R
 import com.newoether.agora.ui.common.AgoraHaptics
 import com.newoether.agora.ui.common.NoOpAgoraHaptics
 import com.newoether.agora.ui.common.rememberAgoraHaptics
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
+
+private fun hasVideoExtension(url: String): Boolean {
+    val normalized = url.substringBefore('?').substringBefore('#').lowercase()
+    return normalized.endsWith(".mp4") ||
+        normalized.endsWith(".webm") ||
+        normalized.endsWith(".mov") ||
+        normalized.endsWith(".avi") ||
+        normalized.contains("vid_original_")
+}
+
+@Composable
+private fun rememberIsVideoMedia(url: String): Boolean? {
+    if (hasVideoExtension(url)) return true
+    if (!url.startsWith("content://", ignoreCase = true)) return false
+    val context = LocalContext.current
+    val resolved by produceState<Boolean?>(initialValue = null, url) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.getType(Uri.parse(url))?.startsWith("video/") == true
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+    return resolved
+}
 
 @Composable
 fun FullScreenMediaViewer(
@@ -75,16 +104,20 @@ fun FullScreenMediaViewer(
     val url = urls.getOrNull(initialIndex) ?: return
     val haptics = rememberAgoraHaptics(hapticsEnabled)
     val isPdf = pdfPages.isNotEmpty()
-    val context = LocalContext.current
-    val mimeType = remember(url) {
-        try { context.contentResolver.getType(Uri.parse(url)) } catch (_: Exception) { null }
-    }
-    val isSingleVideo = mimeType?.startsWith("video/") == true ||
-        url.endsWith(".mp4", true) || url.endsWith(".webm", true) ||
-        url.endsWith(".mov", true) || url.endsWith(".avi", true) ||
-        url.contains("vid_original_")
+    val isSingleVideo = if (isPdf) false else rememberIsVideoMedia(url)
 
-    if (isSingleVideo && urls.size == 1) {
+    if (isSingleVideo == null) {
+        BackHandler(onBack = onClose)
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color.Black),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Color.White)
+        }
+        return
+    }
+
+    if (isSingleVideo == true && urls.size == 1) {
         var showOverlay by remember { mutableStateOf(true) }
         var closing by remember { mutableStateOf(false) }
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -237,7 +270,6 @@ private fun MediaPager(
     onMessage: (String) -> Unit = {},
     haptics: AgoraHaptics = NoOpAgoraHaptics
 ) {
-    val context = LocalContext.current
     var currentScale by remember { mutableFloatStateOf(1f) }
     var showOverlay by remember { mutableStateOf(true) }
     var closing by remember { mutableStateOf(false) }
@@ -256,24 +288,32 @@ private fun MediaPager(
             userScrollEnabled = currentScale <= 1.05f
         ) { page ->
             val mediaUrl = urls[page]
-            val isVideo = remember(mediaUrl) {
-                val mt = try { context.contentResolver.getType(Uri.parse(mediaUrl)) } catch (_: Exception) { null }
-                mt?.startsWith("video/") == true || mediaUrl.endsWith(".mp4", true) ||
-                    mediaUrl.endsWith(".webm", true) || mediaUrl.endsWith(".mov", true) ||
-                    mediaUrl.endsWith(".avi", true) || mediaUrl.contains("vid_original_")
-            }
-            if (isVideo) {
-                if (page == pagerState.currentPage) {
-                    VideoPlayer(uri = mediaUrl, onClose = onClose, closing = closing)
+            when (rememberIsVideoMedia(mediaUrl)) {
+                null -> Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = Color.White)
                 }
-            } else {
-                ZoomableImageItem(
-                    url = mediaUrl,
-                    onTap = { showOverlay = !showOverlay },
-                    onScaleChanged = { if (page == pagerState.currentPage) currentScale = it },
-                    onLongPress = { haptics.longPress(); actionsForUrl = mediaUrl },
-                    consumeConditionally = true
-                )
+                true -> {
+                    if (page == pagerState.currentPage) {
+                        VideoPlayer(uri = mediaUrl, onClose = onClose, closing = closing)
+                    }
+                }
+                false -> {
+                    ZoomableImageItem(
+                        url = mediaUrl,
+                        onTap = { showOverlay = !showOverlay },
+                        onScaleChanged = {
+                            if (page == pagerState.currentPage) currentScale = it
+                        },
+                        onLongPress = {
+                            haptics.longPress()
+                            actionsForUrl = mediaUrl
+                        },
+                        consumeConditionally = true,
+                    )
+                }
             }
         }
         actionsForUrl?.let { ImageActionsSheet(url = it, onMessage = onMessage, onDismiss = { actionsForUrl = null }) }

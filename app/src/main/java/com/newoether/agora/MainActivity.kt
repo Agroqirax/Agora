@@ -60,8 +60,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.ui.settings.RatingForm
+import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
@@ -115,7 +115,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
+        var startupReady = false
+        splashScreen.setKeepOnScreenCondition { !startupReady }
         super.onCreate(savedInstanceState)
         handleNavigationIntent(intent)
 
@@ -128,21 +130,32 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val storedVersion = ChatDatabase.getStoredVersion(this)
-        val needsErrorDialog = storedVersion > ChatDatabase.CURRENT_VERSION
-
-        val memoryManager = MemoryManager(applicationContext)
         val settingsManager = SettingsManager(applicationContext)
-        runBlocking(Dispatchers.IO) {
-            settingsManager.initializeFirstInstallDefaults(locale = java.util.Locale.getDefault())
-        }
+        lifecycleScope.launch {
+            val storedVersion = withContext(Dispatchers.IO) {
+                ChatDatabase.getStoredVersion(this@MainActivity)
+            }
+            val needsErrorDialog = storedVersion > ChatDatabase.CURRENT_VERSION
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    settingsManager.initializeFirstInstallDefaults(
+                        locale = java.util.Locale.getDefault()
+                    )
+                }.onFailure { error ->
+                    com.newoether.agora.util.DebugLog.e(
+                        "MainActivity",
+                        "First-install settings initialization failed",
+                        error,
+                    )
+                }
+            }
 
-        enableEdgeToEdge()
-        // Remove navigation bar scrim so it blends with app content
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            window.isNavigationBarContrastEnforced = false
-        }
-        setContent {
+            enableEdgeToEdge()
+            // Remove navigation bar scrim so it blends with app content
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
+            }
+            setContent {
             val themeMode by settingsManager.themeMode.collectAsState(initial = "FOLLOW_DEVICE")
             val colorSchemeName by settingsManager.colorScheme.collectAsState(initial = "DEFAULT")
             val schemeStyleName by settingsManager.schemeStyle.collectAsState(initial = "TONAL_SPOT")
@@ -179,6 +192,8 @@ class MainActivity : ComponentActivity() {
                 val activity = LocalActivity.current
 
                 if (needsErrorDialog) {
+                    val databaseScope = rememberCoroutineScope()
+                    var clearingDatabase by remember { mutableStateOf(false) }
                     AlertDialog(
                         onDismissRequest = { activity?.finish() },
                         title = { Text(stringResource(R.string.database_incompatible), fontWeight = FontWeight.Bold) },
@@ -187,10 +202,20 @@ class MainActivity : ComponentActivity() {
                             TextButton(onClick = { activity?.finish() }) { Text(stringResource(R.string.quit)) }
                         },
                         confirmButton = {
-                            TextButton(onClick = {
-                                applicationContext.deleteDatabase(ChatDatabase.DB_NAME)
-                                activity?.recreate()
-                            }) { Text(stringResource(R.string.clear_database)) }
+                            TextButton(
+                                onClick = {
+                                    if (!clearingDatabase) {
+                                        clearingDatabase = true
+                                        databaseScope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                applicationContext.deleteDatabase(ChatDatabase.DB_NAME)
+                                            }
+                                            activity?.recreate()
+                                        }
+                                    }
+                                },
+                                enabled = !clearingDatabase,
+                            ) { Text(stringResource(R.string.clear_database)) }
                         }
                     )
                 } else {
@@ -234,6 +259,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+            }
+            startupReady = true
         }
     }
 
@@ -584,19 +611,29 @@ fun MainNavigation(
 
     // Crash report — opt-in, shown once on the first launch after an unexpected exit
     val crashContext = LocalContext.current
-    var pendingCrash by remember { mutableStateOf<String?>(null) }
+    var pendingCrash by remember { mutableStateOf<Pair<String, String>?>(null) }
     val crashSubmittedMsg = stringResource(R.string.crash_submitted)
     LaunchedEffect(Unit) {
-        pendingCrash = withContext(Dispatchers.IO) { CrashReporter.pendingReport(crashContext) }
+        pendingCrash = withContext(Dispatchers.IO) {
+            CrashReporter.pendingReport(crashContext)?.let { report ->
+                val trace = runCatching {
+                    org.json.JSONObject(report).optString("trace", "")
+                }.getOrDefault("")
+                report to trace
+            }
+        }
     }
-    pendingCrash?.let { report ->
+    fun dismissPendingCrash() {
+        pendingCrash = null
+        ratingScope.launch(Dispatchers.IO) { CrashReporter.clear(crashContext) }
+    }
+    pendingCrash?.let { (report, trace) ->
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { CrashReporter.clear(crashContext); pendingCrash = null },
+            onDismissRequest = ::dismissPendingCrash,
             icon = { Icon(Icons.Default.BugReport, null, modifier = Modifier.size(40.dp), tint = MaterialTheme.colorScheme.error) },
             title = { Text(stringResource(R.string.crash_title), fontWeight = FontWeight.Bold) },
             text = {
-                val trace = runCatching { org.json.JSONObject(report).optString("trace", "") }.getOrDefault("")
                 val clipboard = LocalClipboardManager.current
                 Column {
                     Text(
@@ -679,9 +716,12 @@ fun MainNavigation(
             confirmButton = {
                 TextButton(onClick = {
                     pendingCrash = null
-                    CrashReporter.clear(crashContext)
                     ratingScope.launch {
-                        val ok = withContext(Dispatchers.IO) { CrashReporter.submit(report) }
+                        val ok = withContext(Dispatchers.IO) {
+                            CrashReporter.submit(report).also { submitted ->
+                                if (submitted) CrashReporter.clear(crashContext)
+                            }
+                        }
                         if (ok) {
                             try {
                                 snackbarHostState.showSnackbar(crashSubmittedMsg)
@@ -693,7 +733,7 @@ fun MainNavigation(
                 }) { Text(stringResource(R.string.crash_submit)) }
             },
             dismissButton = {
-                TextButton(onClick = { CrashReporter.clear(crashContext); pendingCrash = null }) {
+                TextButton(onClick = ::dismissPendingCrash) {
                     Text(stringResource(R.string.crash_dismiss))
                 }
             }

@@ -9,6 +9,8 @@ import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -48,8 +50,12 @@ class WebSearchToolProvider : ToolProvider {
         )
     }
 
-    override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
-        return when (name) {
+    override suspend fun execute(
+        name: String,
+        arguments: String,
+        ctx: GenerationContext,
+    ): String = withContext(Dispatchers.IO) {
+        when (name) {
             "web_search" -> executeWebSearch(arguments, ctx)
             "web_fetch" -> executeWebFetch(arguments, ctx)
             else -> "Unknown tool: $name"

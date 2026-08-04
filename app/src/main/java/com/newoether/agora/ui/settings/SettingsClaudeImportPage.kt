@@ -20,7 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.newoether.agora.R
 import com.newoether.agora.viewmodel.ChatViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,11 +49,12 @@ fun SettingsClaudeImportPage(
     ) { uri ->
         if (uri != null) {
             fileUri = uri
-            val name = context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                val nameIdx = cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)
-                if (cursor.moveToFirst()) cursor.getString(nameIdx) else null
+            scope.launch {
+                val name = withContext(Dispatchers.IO) {
+                    com.newoether.agora.util.FileValidator.resolveFileName(context, uri)
+                }
+                if (fileUri == uri) fileName = name
             }
-            fileName = name
             // Preview the file
             viewModel.previewClaudeChat(uri)
         }

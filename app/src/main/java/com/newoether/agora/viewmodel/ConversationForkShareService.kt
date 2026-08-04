@@ -9,6 +9,7 @@ import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
+import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,13 @@ class ConversationForkShareService(
     }
 
     suspend fun fork(
+        conversationId: String,
+        throughMessageId: String?,
+    ): ForkResult = withContext(Dispatchers.Default) {
+        forkOffMain(conversationId, throughMessageId)
+    }
+
+    private suspend fun forkOffMain(
         conversationId: String,
         throughMessageId: String?,
     ): ForkResult {
@@ -85,7 +93,9 @@ class ConversationForkShareService(
 
         val newConversationId = UUID.randomUUID().toString()
         val runIds = selection.runIds.associateWith { UUID.randomUUID().toString() }
-        val messageIds = selectedMessages.associate { it.id to UUID.randomUUID().toString() }
+        val messageIds = selectedMessages.associate { message ->
+            message.id to remapForkMessageId(message.id)
+        }
         val clonedRuns = selectedRuns.map { run ->
             run.copy(
                 id = checkNotNull(runIds[run.id]),
@@ -132,17 +142,16 @@ class ConversationForkShareService(
                     put(parentId?.let { checkNotNull(messageIds[it]) }, checkNotNull(messageIds[childId]))
                 }
             }
-            selection.structuralMessages.zipWithNext { parent, child ->
-                if (
-                    parent.id in selectedMessageIds &&
-                    child.id in selectedMessageIds &&
-                    child.parentId == parent.id
-                ) {
+            // Reproduce the exact persisted traversal, not structuralMessages: that list also
+            // contains parallel protocol side-chain rows appended for history completeness.
+            // Treating closure rows as traversal edges can select a dead-end result sibling and
+            // make an otherwise-complete fork appear truncated.
+            selection.selectedPathMessages.zipWithNext { parent, child ->
+                if (child.parentId == parent.id) {
                     put(checkNotNull(messageIds[parent.id]), checkNotNull(messageIds[child.id]))
                 }
             }
-            selection.structuralMessages.firstOrNull()
-                ?.takeIf { it.id in selectedMessageIds }
+            selection.selectedPathMessages.firstOrNull()
                 ?.let { first -> put(null, checkNotNull(messageIds[first.id])) }
         }
         val explicitRunSelections = buildMap<String?, String> {
@@ -200,13 +209,25 @@ class ConversationForkShareService(
         }
     }
 
-    suspend fun shareAll(conversationId: String): ShareResult {
+    suspend fun shareAll(conversationId: String): ShareResult =
+        withContext(Dispatchers.Default) {
+            shareAllOffMain(conversationId)
+        }
+
+    private suspend fun shareAllOffMain(conversationId: String): ShareResult {
         val snapshot = shareSnapshot(conversationId)
             ?: return ShareResult.Failure("Conversation not found")
         return renderShare(snapshot, snapshot.branch.visibleMessages.mapTo(linkedSetOf()) { it.id })
     }
 
     suspend fun shareRun(
+        conversationId: String,
+        assistantMessageId: String,
+    ): ShareResult = withContext(Dispatchers.Default) {
+        shareRunOffMain(conversationId, assistantMessageId)
+    }
+
+    private suspend fun shareRunOffMain(
         conversationId: String,
         assistantMessageId: String,
     ): ShareResult {
@@ -219,6 +240,13 @@ class ConversationForkShareService(
     }
 
     suspend fun shareMessages(
+        conversationId: String,
+        messageIds: Set<String>,
+    ): ShareResult = withContext(Dispatchers.Default) {
+        shareMessagesOffMain(conversationId, messageIds)
+    }
+
+    private suspend fun shareMessagesOffMain(
         conversationId: String,
         messageIds: Set<String>,
     ): ShareResult {
@@ -382,4 +410,20 @@ private fun attachmentSummary(message: MessageEntity): String? {
             append("Images: $imageCount")
         }
     }
+}
+
+/**
+ * Protocol row kind is encoded in the persisted message ID and consumed throughout provider,
+ * projection, deletion and fork code. A fork must generate a fresh identity without erasing that
+ * discriminator; otherwise tool/result rows become ordinary visible messages in the cloned graph.
+ */
+internal fun remapForkMessageId(
+    sourceMessageId: String,
+    generatedId: String = UUID.randomUUID().toString(),
+): String = when {
+    sourceMessageId.startsWith(Constants.TOOL_MSG_PREFIX) ->
+        "${Constants.TOOL_MSG_PREFIX}$generatedId"
+    sourceMessageId.startsWith(Constants.RESULT_MSG_PREFIX) ->
+        "${Constants.RESULT_MSG_PREFIX}$generatedId"
+    else -> generatedId
 }

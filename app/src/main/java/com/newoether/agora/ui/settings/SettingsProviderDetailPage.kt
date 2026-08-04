@@ -44,6 +44,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +65,14 @@ fun SettingsProviderDetailPage(
 
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    fun deleteFilesAsync(vararg paths: String?) {
+        val targets = paths.filterNotNull().filter(String::isNotBlank)
+        if (targets.isNotEmpty()) {
+            scope.launch(Dispatchers.IO) {
+                targets.forEach { java.io.File(it).delete() }
+            }
+        }
+    }
 
     // Dialogs
     var showKeyDialog by remember { mutableStateOf<ApiKeyEntry?>(null) }
@@ -82,31 +91,65 @@ fun SettingsProviderDetailPage(
     val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             importingModel = true
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val dest = java.io.File(context.filesDir, "chat_model_${java.util.UUID.randomUUID()}.gguf")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { output -> input.copyTo(output) }
+            scope.launch {
+                val importedPath = withContext(Dispatchers.IO) {
+                    try {
+                        val dest = java.io.File(
+                            context.filesDir,
+                            "chat_model_${java.util.UUID.randomUUID()}.gguf",
+                        )
+                        val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                            dest.outputStream().use { output -> input.copyTo(output) }
+                            true
+                        } == true
+                        if (!copied) return@withContext null
+                        val magic = ByteArray(4)
+                        dest.inputStream().use { it.read(magic) }
+                        val valid = magic[0] == 'G'.code.toByte() &&
+                            magic[1] == 'G'.code.toByte() &&
+                            magic[2] == 'U'.code.toByte() &&
+                            magic[3] == 'F'.code.toByte()
+                        if (valid) {
+                            dest.absolutePath
+                        } else {
+                            dest.delete()
+                            null
+                        }
+                    } catch (e: Exception) {
+                        DebugLog.e("ProviderDetail", "GGUF import", e)
+                        null
                     }
-                    val magic = ByteArray(4); dest.inputStream().use { it.read(magic) }
-                    if (magic[0] != 'G'.code.toByte() || magic[1] != 'G'.code.toByte() || magic[2] != 'U'.code.toByte() || magic[3] != 'F'.code.toByte()) {
-                        dest.delete(); showGgufError = true
-                    } else { copiedFilePath = dest.absolutePath; showAddModelDialog = true }
-                } catch (e: Exception) { DebugLog.e("ProviderDetail", "GGUF import", e) }
-                finally { importingModel = false }
+                }
+                if (importedPath == null) {
+                    showGgufError = true
+                } else {
+                    copiedFilePath = importedPath
+                    showAddModelDialog = true
+                }
+                importingModel = false
             }
         }
     }
     val mmprojLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            scope.launch(Dispatchers.IO) {
-                try {
-                    val dest = java.io.File(context.filesDir, "mmproj_${java.util.UUID.randomUUID()}.gguf")
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        dest.outputStream().use { output -> input.copyTo(output) }
+            scope.launch {
+                val importedPath = withContext(Dispatchers.IO) {
+                    try {
+                        val dest = java.io.File(
+                            context.filesDir,
+                            "mmproj_${java.util.UUID.randomUUID()}.gguf",
+                        )
+                        val copied = context.contentResolver.openInputStream(uri)?.use { input ->
+                            dest.outputStream().use { output -> input.copyTo(output) }
+                            true
+                        } == true
+                        if (copied) dest.absolutePath else null
+                    } catch (e: Exception) {
+                        DebugLog.e("ProviderDetail", "mmproj import", e)
+                        null
                     }
-                    mmprojPickedUri = dest.absolutePath
-                } catch (e: Exception) { DebugLog.e("ProviderDetail", "mmproj import", e) }
+                }
+                if (importedPath != null) mmprojPickedUri = importedPath
             }
         }
     }
@@ -392,15 +435,18 @@ fun SettingsProviderDetailPage(
         var nCtx by remember { mutableStateOf("2048") }; var temperature by remember { mutableStateOf("0.7") }; var topP by remember { mutableStateOf("0.9") }; var maxTokens by remember { mutableStateOf("4096") }
         var idError by remember { mutableStateOf<String?>(null) }; var formError by remember { mutableStateOf<String?>(null) }
         val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
-        LaunchedEffect(mmprojPickedUri) { if (mmprojPickedUri != null) { addMmprojPath = mmprojPickedUri!!; mmprojPickedUri = null } }
+        LaunchedEffect(mmprojPickedUri) {
+            mmprojPickedUri?.let { newPath ->
+                deleteFilesAsync(addMmprojPath)
+                addMmprojPath = newPath
+                mmprojPickedUri = null
+            }
+        }
         AlertDialog(
             modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
-                scope.launch(Dispatchers.IO) {
-                    copiedFilePath?.let { java.io.File(it).delete() }
-                    if (addMmprojPath.isNotBlank()) java.io.File(addMmprojPath).delete()
-                }
+                deleteFilesAsync(copiedFilePath, addMmprojPath)
                 showAddModelDialog = false; copiedFilePath = null
             },
             title = { Text(stringResource(R.string.add_local_chat_model), fontWeight = FontWeight.Bold) },
@@ -418,7 +464,11 @@ fun SettingsProviderDetailPage(
                     }
                     if (hasMmproj) {
                         Spacer(modifier = Modifier.width(8.dp))
-                        TextButton(onClick = { java.io.File(addMmprojPath).delete(); addMmprojPath = "" }) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
+                        TextButton(onClick = {
+                            val removedPath = addMmprojPath
+                            addMmprojPath = ""
+                            deleteFilesAsync(removedPath)
+                        }) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -442,10 +492,7 @@ fun SettingsProviderDetailPage(
                 showAddModelDialog = false; copiedFilePath = null
             }) { Text(stringResource(R.string.add)) } },
             dismissButton = { TextButton(onClick = {
-                scope.launch(Dispatchers.IO) {
-                    copiedFilePath?.let { java.io.File(it).delete() }
-                    if (addMmprojPath.isNotBlank()) java.io.File(addMmprojPath).delete()
-                }
+                deleteFilesAsync(copiedFilePath, addMmprojPath)
                 showAddModelDialog = false; copiedFilePath = null
             }) { Text(stringResource(R.string.cancel)) } }
         )
@@ -457,10 +504,20 @@ fun SettingsProviderDetailPage(
         var editNCtx by remember { mutableStateOf(model.nCtx.toString()) }; var editTemp by remember { mutableStateOf(model.temperature.toString()) }; var editTopP by remember { mutableStateOf(model.topP.toString()) }; var editMaxTokens by remember { mutableStateOf(model.maxTokens.toString()) }
         var editIdError by remember { mutableStateOf<String?>(null) }; var editFormError by remember { mutableStateOf<String?>(null) }
         val idRegex = remember { Regex("^[a-z0-9._-]+\$") }
-        LaunchedEffect(mmprojPickedUri) { if (mmprojPickedUri != null) { editMmprojPath = mmprojPickedUri!!; mmprojPickedUri = null } }
+        LaunchedEffect(mmprojPickedUri) {
+            mmprojPickedUri?.let { newPath ->
+                if (editMmprojPath != model.mmprojPath) deleteFilesAsync(editMmprojPath)
+                editMmprojPath = newPath
+                mmprojPickedUri = null
+            }
+        }
         AlertDialog(
             modifier = Modifier.clearFocusOnTap(),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showEditModelDialog = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = {
+                if (editMmprojPath != model.mmprojPath) deleteFilesAsync(editMmprojPath)
+                showEditModelDialog = null
+            },
             title = { Text(stringResource(R.string.edit), fontWeight = FontWeight.Bold) },
             text = { Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                 OutlinedTextField(value = editModelId, onValueChange = { editModelId = it; editIdError = null }, label = { Text(stringResource(R.string.model_id_label)) }, supportingText = if (editIdError != null) {{ Text(editIdError!!, color = MaterialTheme.colorScheme.error) }} else null, isError = editIdError != null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
@@ -477,8 +534,9 @@ fun SettingsProviderDetailPage(
                     if (hasMmproj) {
                         Spacer(modifier = Modifier.width(8.dp))
                         TextButton(onClick = {
-                            if (editMmprojPath != model.mmprojPath) java.io.File(editMmprojPath).delete()
+                            val removedPath = editMmprojPath
                             editMmprojPath = ""
+                            if (removedPath != model.mmprojPath) deleteFilesAsync(removedPath)
                         }) { Text(stringResource(R.string.remove), color = MaterialTheme.colorScheme.error) }
                     }
                 }
@@ -503,7 +561,7 @@ fun SettingsProviderDetailPage(
                 showEditModelDialog = null
             }) { Text(stringResource(R.string.save)) } },
             dismissButton = { TextButton(onClick = {
-                if (editMmprojPath.isNotBlank() && editMmprojPath != model.mmprojPath) java.io.File(editMmprojPath).delete()
+                if (editMmprojPath != model.mmprojPath) deleteFilesAsync(editMmprojPath)
                 showEditModelDialog = null
             }) { Text(stringResource(R.string.cancel)) } }
         )

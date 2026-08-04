@@ -647,35 +647,10 @@ fun ChatBottomBar(
                 onPdfPreviewSelect?.invoke(composer.pendingPdfRenderedPaths, index)
             },
             onConfirm = { selection ->
-                composer.showPdfPageDialog = false
-                val rendered = composer.pendingPdfRenderedPaths
-                val sel = selection.selectedPages
-                // Keep only the selected pages; delete the rest so unselected pages don't
-                // pile up in filesDir. The kept paths are re-indexed 0..n so the attachment
-                // and the send path (which filters preRenderedPaths by selectedPages) stay in sync.
-                val keptPaths = rendered.filterIndexed { i, _ -> i in sel }
-                rendered.filterIndexedTo(mutableListOf()) { i, _ -> i !in sel }
-                    .forEach { runCatching { java.io.File(it).delete() } }
-                composer.selectedAttachments = composer.selectedAttachments + com.newoether.agora.model.SelectedAttachment(
-                    uri = composer.pendingPdfUri!!, type = "pdf",
-                    mimeType = composer.pendingPdfMimeType,
-                    fileName = composer.pendingPdfFileName,
-                    selectedPages = keptPaths.indices.toSet(),
-                    preRenderedPaths = keptPaths
-                )
-                composer.pendingPdfUri = null
-                composer.pendingPdfRenderedPaths = emptyList()
+                composer.confirmPendingPdfSelection(selection.selectedPages)
             },
             onDismiss = {
-                composer.showPdfPageDialog = false
-                // Cancel an in-flight render (renderAllPages deletes its own partial files on
-                // cancellation) and delete any fully-rendered pages — nothing was attached.
-                composer.pdfRenderJob?.cancel()
-                composer.pdfRenderJob = null
-                composer.pendingPdfRenderedPaths.forEach { runCatching { java.io.File(it).delete() } }
-                composer.pendingPdfUri = null
-                composer.pendingPdfRenderedPaths = emptyList()
-                composer.pendingPdfIsRendering = false
+                composer.dismissPendingPdf()
             }
         )
     }

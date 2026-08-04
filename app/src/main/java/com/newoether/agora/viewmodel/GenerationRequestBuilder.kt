@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.withContext
 
 /**
  * Stateless builder for the LLM generation request. Extracted from ChatViewModel.
@@ -101,7 +102,7 @@ class GenerationRequestBuilder(
         )
     }
 
-    internal fun buildGenerationPair(
+    internal suspend fun buildGenerationPair(
         providerName: String,
         modelId: String,
         activeKey: String,
@@ -110,7 +111,7 @@ class GenerationRequestBuilder(
         resolvedUserPostpend: String?,
         effectiveSettings: ConversationSettings,
         currentId: String
-    ): Pair<GenerationConfig, GenerationContext> {
+    ): Pair<GenerationConfig, GenerationContext> = withContext(Dispatchers.Default) {
         val config = GenerationConfig(
             providerName = providerName,
             modelId = ModelId.parse(modelId).modelName,
@@ -168,7 +169,7 @@ class GenerationRequestBuilder(
             transcriptionApiKey = resolveTranscriptionApiKey(),
             transcriptionBaseUrl = resolveTranscriptionBaseUrl()
         )
-        return Pair(config, genCtx)
+        Pair(config, genCtx)
     }
 
     data class ResolvedPrompt(
@@ -181,46 +182,48 @@ class GenerationRequestBuilder(
     internal suspend fun buildEffectiveSystemPrompt(
         currentId: String,
         activeModel: String,
-    ): ResolvedPrompt = coroutineScope {
-        val includeActiveMemory = settings.accessActiveMemory.value
-        // Room and the optional memory-file read are independent. Running both immediately avoids
-        // adding their latencies serially to the visible Sending phase.
-        val conversationDeferred = async {
-            convRepo.getConversation(currentId)
-        }
-        val activeMemoryDeferred = async(Dispatchers.IO) {
-            if (includeActiveMemory) memoryManager.getActiveMemory() else ""
-        }
-        val conversation = conversationDeferred.await()
-        val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
-        val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
-        val activeMemory = activeMemoryDeferred.await()
-        val modelId = ModelId.parse(activeModel).modelName
+    ): ResolvedPrompt = withContext(Dispatchers.Default) {
+        coroutineScope {
+            val includeActiveMemory = settings.accessActiveMemory.value
+            // Room and the optional memory-file read are independent. Running both immediately avoids
+            // adding their latencies serially to the visible Sending phase.
+            val conversationDeferred = async {
+                convRepo.getConversation(currentId)
+            }
+            val activeMemoryDeferred = async(Dispatchers.IO) {
+                if (includeActiveMemory) memoryManager.getActiveMemory() else ""
+            }
+            val conversation = conversationDeferred.await()
+            val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
+            val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
+            val activeMemory = activeMemoryDeferred.await()
+            val modelId = ModelId.parse(activeModel).modelName
 
-        val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
-        val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-        val now = java.util.Date()
+            val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
+            val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            val now = java.util.Date()
 
-        val runtimeValues = mapOf(
-            PredefinedVariables.TIME to sdf.format(now),
-            PredefinedVariables.DATE to dateSdf.format(now),
-            PredefinedVariables.SENT_TIME to sdf.format(now),
-            PredefinedVariables.SENT_DATE to dateSdf.format(now),
-            PredefinedVariables.MODEL_ID to modelId,
-            PredefinedVariables.ACTIVE_MEMORY to if (includeActiveMemory && activeMemory.isNotBlank()) activeMemory else ""
-        )
-
-        if (entry != null) {
-            val systemItems = entry.resolvedSystemItems
-            // Prepend/postpend: {sent_time}/{sent_date} stay as placeholders resolved per-message in applyUserTemplate
-            val perMsgValues = runtimeValues.filterKeys { it !in PredefinedVariables.PER_MESSAGE_VARS }
-            return@coroutineScope ResolvedPrompt(
-                systemPrompt = PredefinedVariables.compile(systemItems, runtimeValues).ifBlank { null },
-                userPrepend = PredefinedVariables.compile(entry.userPrependItems, perMsgValues, emptyMap()).ifBlank { null },
-                userPostpend = PredefinedVariables.compile(entry.userPostpendItems, perMsgValues, emptyMap()).ifBlank { null }
+            val runtimeValues = mapOf(
+                PredefinedVariables.TIME to sdf.format(now),
+                PredefinedVariables.DATE to dateSdf.format(now),
+                PredefinedVariables.SENT_TIME to sdf.format(now),
+                PredefinedVariables.SENT_DATE to dateSdf.format(now),
+                PredefinedVariables.MODEL_ID to modelId,
+                PredefinedVariables.ACTIVE_MEMORY to if (includeActiveMemory && activeMemory.isNotBlank()) activeMemory else ""
             )
-        }
 
-        ResolvedPrompt(null, null, null)
+            if (entry != null) {
+                val systemItems = entry.resolvedSystemItems
+                // Prepend/postpend: {sent_time}/{sent_date} stay as placeholders resolved per-message in applyUserTemplate
+                val perMsgValues = runtimeValues.filterKeys { it !in PredefinedVariables.PER_MESSAGE_VARS }
+                return@coroutineScope ResolvedPrompt(
+                    systemPrompt = PredefinedVariables.compile(systemItems, runtimeValues).ifBlank { null },
+                    userPrepend = PredefinedVariables.compile(entry.userPrependItems, perMsgValues, emptyMap()).ifBlank { null },
+                    userPostpend = PredefinedVariables.compile(entry.userPostpendItems, perMsgValues, emptyMap()).ifBlank { null }
+                )
+            }
+
+            ResolvedPrompt(null, null, null)
+        }
     }
 }

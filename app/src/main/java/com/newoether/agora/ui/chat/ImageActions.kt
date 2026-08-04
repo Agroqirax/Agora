@@ -31,18 +31,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.InputStream
+import java.io.IOException
 import java.util.Locale
 
-/** Reads the bytes of an image referenced by a file path or content/file Uri string. */
-private fun readImageBytes(context: Context, url: String): ByteArray? = try {
-    val asFile = File(url)
-    if (asFile.exists()) asFile.readBytes()
-    else context.contentResolver.openInputStream(Uri.parse(url))?.use { it.readBytes() }
-} catch (_: Exception) { null }
+private fun directImageFile(url: String): File? {
+    val path = if (url.startsWith("file://", ignoreCase = true)) {
+        Uri.parse(url).path
+    } else {
+        url
+    }
+    return path?.let(::File)?.takeIf(File::isFile)
+}
+
+private fun openImageInput(context: Context, url: String): InputStream? =
+    directImageFile(url)?.inputStream()
+        ?: context.contentResolver.openInputStream(Uri.parse(url))
 
 /** Save the image into the device gallery (Pictures/Agora). Returns true on success. */
 suspend fun saveImageToGallery(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
-    val bytes = readImageBytes(context, url) ?: return@withContext false
+    val resolver = context.contentResolver
+    var destination: Uri? = null
     try {
         val name = "agora_${System.currentTimeMillis()}.jpg"
         val values = ContentValues().apply {
@@ -53,44 +62,68 @@ suspend fun saveImageToGallery(context: Context, url: String): Boolean = withCon
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
         }
-        val resolver = context.contentResolver
         val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             ?: return@withContext false
-        resolver.openOutputStream(uri)?.use { it.write(bytes) } ?: return@withContext false
+        destination = uri
+        val input = openImageInput(context, url)
+            ?: throw IOException("Unable to open source image")
+        input.use { source ->
+            val output = resolver.openOutputStream(uri)
+                ?: throw IOException("Unable to open gallery destination")
+            output.use { sink -> source.copyTo(sink) }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             values.clear()
             values.put(MediaStore.Images.Media.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
         }
         true
-    } catch (_: Exception) { false }
+    } catch (_: Exception) {
+        destination?.let { runCatching { resolver.delete(it, null, null) } }
+        false
+    }
 }
 
 /** Share the image via a content Uri (copied into the exposed cache dir for FileProvider). */
-fun shareImage(context: Context, url: String) {
+suspend fun shareImage(context: Context, url: String): Boolean = withContext(Dispatchers.IO) {
     try {
-        val bytes = readImageBytes(context, url) ?: return
         val dir = File(context.cacheDir, "shared").apply { mkdirs() }
         val file = File(dir, "agora_${System.currentTimeMillis()}.jpg")
-        file.writeBytes(bytes)
+        val input = openImageInput(context, url) ?: return@withContext false
+        input.use { source ->
+            file.outputStream().use { sink -> source.copyTo(sink) }
+        }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "image/jpeg"
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, context.getString(R.string.img_action_share)))
-    } catch (_: Exception) { }
+        withContext(Dispatchers.Main) {
+            context.startActivity(
+                Intent.createChooser(intent, context.getString(R.string.img_action_share))
+            )
+        }
+        true
+    } catch (_: Exception) {
+        false
+    }
 }
 
 private data class ImageInfo(val width: Int, val height: Int, val sizeBytes: Long)
 
 private fun readImageInfo(context: Context, url: String): ImageInfo? {
-    val bytes = readImageBytes(context, url) ?: return null
     return try {
         val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-        ImageInfo(opts.outWidth, opts.outHeight, bytes.size.toLong())
+        openImageInput(context, url)?.use { input ->
+            android.graphics.BitmapFactory.decodeStream(input, null, opts)
+        } ?: return null
+        val size = directImageFile(url)?.length()
+            ?: context.contentResolver
+                .openAssetFileDescriptor(Uri.parse(url), "r")
+                ?.use { descriptor -> descriptor.length.takeIf { it >= 0L } }
+            ?: 0L
+        ImageInfo(opts.outWidth, opts.outHeight, size)
     } catch (_: Exception) { null }
 }
 
@@ -106,6 +139,8 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showInfo by remember { mutableStateOf(false) }
+    var imageInfo by remember(url) { mutableStateOf<ImageInfo?>(null) }
+    var imageInfoLoading by remember(url) { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState()
 
     // Animate the sheet down before running the action, so every option exits with a
@@ -130,6 +165,19 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
             onDismiss()
         }
     }
+    fun doShare() {
+        scope.launch {
+            shareImage(context, url)
+            onDismiss()
+        }
+    }
+    LaunchedEffect(showInfo, url) {
+        if (showInfo && imageInfo == null) {
+            imageInfoLoading = true
+            imageInfo = withContext(Dispatchers.IO) { readImageInfo(context, url) }
+            imageInfoLoading = false
+        }
+    }
     // Pre-Q gallery writes need WRITE_EXTERNAL_STORAGE; request it then save.
     val permLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
@@ -143,7 +191,7 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
                 else permLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
             ActionRow(Icons.Default.Share, stringResource(R.string.img_action_share)) {
-                collapseThen { shareImage(context, url); onDismiss() }
+                collapseThen { doShare() }
             }
             ActionRow(Icons.Default.Info, stringResource(R.string.info)) {
                 collapseThen { showInfo = true }
@@ -152,15 +200,29 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
     }
 
     if (showInfo) {
-        val info = remember(url) { readImageInfo(context, url) }
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { showInfo = false; onDismiss() },
             title = { Text(stringResource(R.string.info), fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    InfoLine(stringResource(R.string.img_info_dimensions), info?.let { "${it.width} × ${it.height}" } ?: "—")
-                    InfoLine(stringResource(R.string.img_info_size), info?.let { formatBytes(it.sizeBytes) } ?: "—")
+                if (imageInfoLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        InfoLine(
+                            stringResource(R.string.img_info_dimensions),
+                            imageInfo?.let { "${it.width} × ${it.height}" } ?: "—",
+                        )
+                        InfoLine(
+                            stringResource(R.string.img_info_size),
+                            imageInfo?.let { formatBytes(it.sizeBytes) } ?: "—",
+                        )
+                    }
                 }
             },
             confirmButton = { TextButton(onClick = { showInfo = false; onDismiss() }) { Text(stringResource(R.string.provider_close)) } }

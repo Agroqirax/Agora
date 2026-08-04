@@ -77,6 +77,68 @@ data class AnimatedScrollRequest(
     val targetMessageId: String?,
 )
 
+private fun MessageEntity.toUiChatMessage(context: Context): ChatMessage {
+    val isSynthetic =
+        id.startsWith(Constants.TOOL_MSG_PREFIX) ||
+            id.startsWith(Constants.RESULT_MSG_PREFIX)
+    // Protocol rows only participate in the branch walk. Provider history is built from
+    // MessageEntity snapshots, so copying their potentially huge results into UI state only
+    // increases allocation and GC pressure.
+    val decodedSegments = if (isSynthetic) {
+        null
+    } else {
+        toolCallJson?.let { raw ->
+            runCatching {
+                Json.decodeFromString<List<MessageSegment>>(raw)
+            }.getOrNull()
+        }
+    }
+    return ChatMessage(
+        id = id,
+        parentId = parentId,
+        text = if (isSynthetic) "" else SearchResultFormatter.format(text, context),
+        images = if (isSynthetic) emptyList() else images,
+        thoughts = if (isSynthetic) null else thoughts,
+        thoughtTitle = if (isSynthetic) null else thoughtTitle,
+        tokenCount = if (isSynthetic) 0 else tokenCount,
+        status = status,
+        participant = participant,
+        timestamp = timestamp,
+        thoughtTimeMs = if (isSynthetic) null else thoughtTimeMs,
+        modelName = modelName,
+        segments = decodedSegments
+            ?: thoughts
+                ?.takeIf { thought -> !isSynthetic && thought.isNotBlank() }
+                ?.let { thought ->
+                    listOf(
+                        MessageSegment(
+                            type = "thought",
+                            content = thought,
+                        )
+                    )
+                },
+        toolCall = decodedSegments
+            ?.lastOrNull { segment -> segment.type == "tool" }
+            ?.let { segment ->
+                ToolCallData(
+                    segment.toolName.orEmpty(),
+                    segment.toolArgs ?: "{}",
+                    SearchResultFormatter.format(segment.toolResult.orEmpty(), context),
+                )
+            },
+        attachmentMeta = if (isSynthetic) {
+            null
+        } else {
+            attachmentMeta?.let { raw ->
+                runCatching { Json.decodeFromString<AttachmentMeta>(raw) }.getOrNull()
+            }
+        },
+        runId = runId,
+        runSequence = runSequence,
+        consumedAtPass = consumedAtPass,
+    )
+}
+
 class ChatViewModel(
     application: Application,
     // [chatDao] and [settingsManager] are retained ONLY to pass to ImportExportManager,
@@ -786,83 +848,29 @@ class ChatViewModel(
 
                         // Restore selected branches
                         val conversation = convRepo.getConversation(id)
-                        if (conversation?.selectedBranchesJson != null) {
-                            try {
-                                val map = Json.decodeFromString<Map<String, String>>(conversation.selectedBranchesJson)
-                                val decodedMap = map.mapKeys { if (it.key == "null") null else it.key }
-                                _selectedChildren.value = decodedMap
-                            } catch (e: Exception) {
-                                _selectedChildren.value = emptyMap()
-                            }
-                        } else {
-                            _selectedChildren.value = emptyMap()
+                        val restoredChildren = withContext(Dispatchers.Default) {
+                            conversation?.selectedBranchesJson?.let { raw ->
+                                runCatching {
+                                    Json.decodeFromString<Map<String, String>>(raw)
+                                        .mapKeys { (key, _) -> if (key == "null") null else key }
+                                }.getOrNull()
+                            }.orEmpty()
                         }
+                        _selectedChildren.value = restoredChildren
 
                         var generationMirrorStarted = false
-                        convRepo.getMessagesForConversation(id).collect { entities ->
-                            val mapped = entities.map {
-                                // Synthetic tool/result rows are protocol edges, never visible
-                                // message content. Their id/parent/run metadata is sufficient for
-                                // the UI path walker. Decoding their often-large segment payloads
-                                // on every Room emission duplicated work and amplified long tool
-                                // runs into repeated multi-megabyte allocations on the main feed.
-                                val isSynthetic =
-                                    it.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
-                                        it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-                                val decodedSegments = if (isSynthetic) {
-                                    null
-                                } else {
-                                    it.toolCallJson?.let { raw ->
-                                        runCatching {
-                                            Json.decodeFromString<List<MessageSegment>>(raw)
-                                        }.getOrNull()
+                        convRepo.getUiMessagesForConversation(id)
+                            .mapLatest { entities ->
+                                // Room republishes the complete list for every persisted stream
+                                // checkpoint. JSON/format projection is CPU work, and stale
+                                // projections should be cancelled when a newer snapshot arrives.
+                                withContext(Dispatchers.Default) {
+                                    entities.map { entity ->
+                                        entity.toUiChatMessage(appContext)
                                     }
                                 }
-                                ChatMessage(
-                                    id = it.id,
-                                    parentId = it.parentId,
-                                    text = SearchResultFormatter.format(it.text, appContext),
-                                    images = it.images,
-                                    thoughts = it.thoughts,
-                                    thoughtTitle = it.thoughtTitle,
-                                    tokenCount = it.tokenCount,
-                                    status = it.status,
-                                    participant = it.participant,
-                                    timestamp = it.timestamp,
-                                    thoughtTimeMs = it.thoughtTimeMs,
-                                    modelName = it.modelName,
-                                    segments = decodedSegments
-                                        ?: it.thoughts
-                                            ?.takeIf { thought -> thought.isNotBlank() }
-                                            ?.let { thought ->
-                                                listOf(
-                                                    MessageSegment(
-                                                        type = "thought",
-                                                        content = thought,
-                                                    )
-                                                )
-                                            },
-                                    toolCall = decodedSegments
-                                        ?.lastOrNull { segment -> segment.type == "tool" }
-                                        ?.let { segment ->
-                                            val rawResult = segment.toolResult.orEmpty()
-                                            ToolCallData(
-                                                segment.toolName.orEmpty(),
-                                                segment.toolArgs ?: "{}",
-                                                SearchResultFormatter.format(
-                                                    rawResult,
-                                                    appContext,
-                                                ),
-                                            )
-                                        },
-                                    attachmentMeta = it.attachmentMeta?.let { json ->
-                                        try { Json.decodeFromString<AttachmentMeta>(json) } catch (_: Exception) { null }
-                                    },
-                                    runId = it.runId,
-                                    runSequence = it.runSequence,
-                                    consumedAtPass = it.consumedAtPass,
-                                )
                             }
+                            .collect { mapped ->
                             _allMessages.value = mapped
                             _loadedMessagesConversationId.value = id
                             if (!generationMirrorStarted) {
@@ -876,7 +884,7 @@ class ChatViewModel(
                                     generationMirror.collect(id, state)
                                 }
                             }
-                        }
+                            }
                     }
                 } else {
                     _allMessages.value = emptyList()
@@ -923,8 +931,9 @@ class ChatViewModel(
         return try { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }
     }
     suspend fun checkForUpdates(): UpdateInfo? {
-        val current = getCurrentVersion()
-        return UpdateChecker.check(current)
+        return withContext(Dispatchers.IO) {
+            UpdateChecker.check(getCurrentVersion())
+        }
     }
     fun addEmbeddingModel(config: EmbeddingModelConfig) = ragManager.addEmbeddingModel(config)
     fun deleteEmbeddingModel(id: String) = ragManager.deleteEmbeddingModel(id)
@@ -1385,7 +1394,8 @@ class ChatViewModel(
         }
     }
 
-    fun editMessage(messageId: String, newText: String) = generationController.editMessage(messageId, newText)
+    suspend fun editMessage(messageId: String, newText: String): Boolean =
+        generationController.editMessage(messageId, newText)
 
     suspend fun sendMessage(
         text: String,
@@ -1537,10 +1547,12 @@ class ChatViewModel(
     /** Load a stored draft for [conversationId]. Returns [draftText] and deserialized
      *  [SelectedAttachment] list (empty if none stored). The caller must set [loadingDraft] before
      *  mutating UI fields with the result, to suppress the write-back snapshotFlow. */
-    suspend fun loadDraft(conversationId: String): Pair<String, List<SelectedAttachment>> {
+    suspend fun loadDraft(
+        conversationId: String,
+    ): Pair<String, List<SelectedAttachment>> = withContext(Dispatchers.Default) {
         val entity = convRepo.getConversation(conversationId) ?: run {
             lastLoadedDraft = Triple(conversationId, "", emptyList())
-            return "" to emptyList()
+            return@withContext "" to emptyList()
         }
         val attachments: List<SelectedAttachment> = try {
             entity.draftAttachments?.let { Json.decodeFromString<List<SelectedAttachment>>(it) } ?: emptyList()
@@ -1549,6 +1561,6 @@ class ChatViewModel(
             emptyList()
         }
         lastLoadedDraft = Triple(conversationId, entity.draftText, attachments)
-        return entity.draftText to attachments
+        entity.draftText to attachments
     }
 }

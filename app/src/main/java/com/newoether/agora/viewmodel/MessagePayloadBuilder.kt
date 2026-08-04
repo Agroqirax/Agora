@@ -10,6 +10,8 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.PdfPageRenderer
 import com.newoether.agora.util.AttachmentSourceReader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Resolves outgoing message attachments (images / video / file / pdf) into concrete
@@ -30,7 +32,7 @@ class MessagePayloadBuilder(
         app: Application,
         images: List<String>,
         attachments: List<SelectedAttachment>
-    ): MessagePayload {
+    ): MessagePayload = withContext(Dispatchers.IO) {
         // mediaUris: URIs that need processImages (images, video content:// URIs)
         // directPaths: paths that skip processImages (pre-extracted frames, PDF copies, rendered pages)
         val mediaUris = mutableListOf<String>()
@@ -185,6 +187,6 @@ class MessagePayloadBuilder(
         val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
             AttachmentMeta(items = adjustedMetaItems)
         } else null
-        return MessagePayload(allImages, attachmentMeta)
+        MessagePayload(allImages, attachmentMeta)
     }
 }
