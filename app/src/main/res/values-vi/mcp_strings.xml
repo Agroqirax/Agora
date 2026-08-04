@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mcp_title">MCP</string>
+    <string name="mcp_desc">Kết nối máy chủ công cụ bên ngoài</string>
+    <string name="mcp_servers">Máy chủ MCP</string>
+    <string name="mcp_no_servers">Không có máy chủ MCP</string>
+    <string name="mcp_no_servers_desc">Thêm điểm cuối Streamable HTTP để dùng các công cụ của máy chủ trong cuộc trò chuyện.</string>
+    <string name="mcp_add_server">Thêm máy chủ</string>
+    <string name="mcp_edit_server">Chỉnh sửa máy chủ MCP</string>
+    <string name="mcp_delete_title">Xóa máy chủ MCP?</string>
+    <string name="mcp_delete_message">Xóa %1$s và các công cụ của máy chủ?</string>
+    <string name="mcp_connection">Kết nối</string>
+    <string name="mcp_name">Tên</string>
+    <string name="mcp_url">URL Streamable HTTP</string>
+    <string name="mcp_url_error">Nhập URL http:// hoặc https:// hợp lệ</string>
+    <string name="mcp_headers">Tiêu đề tùy chỉnh</string>
+    <string name="mcp_headers_desc">Mỗi dòng một tiêu đề Tên: Giá trị. Được lưu mã hóa.</string>
+    <string name="mcp_headers_error">Mỗi dòng phải có dạng Tên: Giá trị</string>
+    <string name="mcp_timeout">Thời gian chờ (giây)</string>
+    <string name="mcp_timeout_desc">5–300 giây</string>
+    <string name="mcp_status">Trạng thái</string>
+    <string name="mcp_status_idle">Đang chờ</string>
+    <string name="mcp_status_connecting">Đang kết nối…</string>
+    <string name="mcp_status_connected">Đã kết nối · đã bật %1$d công cụ</string>
+    <string name="mcp_status_error">Lỗi kết nối</string>
+    <string name="mcp_refresh">Kết nối lại và đồng bộ công cụ</string>
+    <string name="mcp_tools_count">Công cụ (%1$d)</string>
+    <string name="mcp_tool_no_description">Không có mô tả</string>
+</resources>

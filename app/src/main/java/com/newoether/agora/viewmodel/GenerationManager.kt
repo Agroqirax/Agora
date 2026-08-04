@@ -21,6 +21,7 @@ import com.newoether.agora.R
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
+import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
 import com.newoether.agora.api.util.projectGenerationStatusesForApi
 import com.newoether.agora.util.Constants
 import com.newoether.agora.tool.ImageGenToolProvider
@@ -29,6 +30,8 @@ import com.newoether.agora.tool.RagToolProvider
 import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.ToolExecutionEvent
+import com.newoether.agora.tool.ToolExecutionResult
+import com.newoether.agora.tool.ToolImageStore
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -187,6 +190,7 @@ data class GenerationContext(
     val shellEnabled: Boolean = false,
     val shellDevices: List<com.newoether.agora.data.ShellDeviceConfig> = emptyList(),
     val sandboxEnabled: Boolean = false,
+    val sandboxSharedStorageEnabled: Boolean = false,
     val imageTranscriptionEnabled: Boolean = false,
     val imageTranscriptionModel: String? = null,
     val imageTranscriptionBatchSize: Int = 3,
@@ -263,7 +267,10 @@ class GenerationManager(
     private val webSearchToolProvider = WebSearchToolProvider()
     private val ragToolProvider = RagToolProvider(conversations)
     private val imageGenToolProvider = ImageGenToolProvider(app)
-    private val shellToolProvider = ShellToolProvider(sandboxFactory).also { stp ->
+    private val shellToolProvider = ShellToolProvider(
+        sandboxFactory = sandboxFactory,
+        imageStore = ToolImageStore(app),
+    ).also { stp ->
         // Forward to the ViewModel-provided gate at call time (read the var lazily).
         stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
     }
@@ -278,7 +285,14 @@ class GenerationManager(
     private val transcriptionManager = TranscriptionManager(providers, conversations, context)
 
     companion object {
-        private val FILE_TOOL_NAMES = setOf("file_read", "file_write", "file_edit", "file_glob", "file_grep")
+        private val FILE_TOOL_NAMES = setOf(
+            "file_read",
+            "file_write",
+            "file_edit",
+            "file_glob",
+            "file_grep",
+            "view_image",
+        )
     }
 
     private fun getProviderInstance(name: String): LlmProvider =
@@ -323,13 +337,16 @@ class GenerationManager(
         arguments: String,
         ctx: GenerationContext,
         onEvent: suspend (ToolExecutionEvent) -> Unit,
-    ): String {
+    ): ToolExecutionResult {
         val completeArguments = arguments.ifBlank { "{}" }
         val argumentsAreCompleteObject = runCatching {
             Json.parseToJsonElement(completeArguments).jsonObject
         }.isSuccess
         if (!argumentsAreCompleteObject) {
-            return "Error executing tool '$name': arguments are not a complete JSON object"
+            return ToolExecutionResult(
+                text = "Error executing tool '$name': arguments are not a complete JSON object",
+                isError = true,
+            )
         }
         return try {
             for (provider in toolProviders) {
@@ -344,7 +361,7 @@ class GenerationManager(
                     // the tool loop continues with an error instead of hanging (#49).
                     val attemptJob = Job()
                     val attempt = CoroutineScope(currentCoroutineContext() + attemptJob).async {
-                        var completedResult: String? = null
+                        var completedResult: ToolExecutionResult? = null
                         provider.executeEvents(name, completeArguments, ctx).collect { event ->
                             if (event is ToolExecutionEvent.Completed) {
                                 completedResult = event.result
@@ -352,7 +369,10 @@ class GenerationManager(
                             onEvent(event)
                         }
                         completedResult
-                            ?: "Error executing tool '$name': provider ended without a result"
+                            ?: ToolExecutionResult(
+                                text = "Error executing tool '$name': provider ended without a result",
+                                isError = true,
+                            )
                     }
                     try {
                         return withTimeout(ctx.toolTimeoutMs) { attempt.await() }
@@ -361,15 +381,21 @@ class GenerationManager(
                     }
                 }
             }
-            "Unknown tool: $name"
+            ToolExecutionResult(text = "Unknown tool: $name", isError = true)
         } catch (e: TimeoutCancellationException) {
             // A timeout is a recoverable tool failure, NOT a generation cancellation — return an
             // error string so the model can react, instead of unwinding the whole generation.
-            "Error executing tool '$name': timed out after ${ctx.toolTimeoutMs}ms"
+            ToolExecutionResult(
+                text = "Error executing tool '$name': timed out after ${ctx.toolTimeoutMs}ms",
+                isError = true,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            "Error executing tool '$name': ${e.localizedMessage ?: "Unknown error"}"
+            ToolExecutionResult(
+                text = "Error executing tool '$name': ${e.localizedMessage ?: "Unknown error"}",
+                isError = true,
+            )
         }
     }
 
@@ -887,7 +913,7 @@ class GenerationManager(
                 name: String,
                 arguments: String,
                 toolCallId: String,
-            ): String {
+            ): ToolExecutionResult {
                 var lastToolUiEmitMs = 0L
                 return executeTool(name, arguments, ctx) { toolEvent ->
                     val changed = when (toolEvent) {
@@ -958,10 +984,15 @@ class GenerationManager(
                         call.id,
                     )
                     generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
-                    val clipped = result.take(Constants.MAX_TOOL_RESULT_LENGTH)
+                    val clipped = result.text.take(Constants.MAX_TOOL_RESULT_LENGTH)
                     segments[index] = segments[index].copy(
                         toolResult = clipped,
-                        toolState = finalToolState(result),
+                        toolState = if (result.isError) {
+                            com.newoether.agora.model.ToolExecutionStates.FAILED
+                        } else {
+                            finalToolState(result.text)
+                        },
+                        toolImages = result.images,
                     )
                     roundToolSegments.add(segments[index])
                     results += ToolCallData(
@@ -970,6 +1001,7 @@ class GenerationManager(
                         result = clipped,
                         signature = call.signature,
                         toolCallId = call.id,
+                        resultImages = result.images,
                     )
                     publishStreamUpdate()
                     lastEmitMs = System.currentTimeMillis()
@@ -1109,7 +1141,10 @@ class GenerationManager(
                 }
             }
 
-            val projectedPath = projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages)
+            val projectedPath = projectToolResultImagesToUserMessage(
+                projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages),
+                providerConfig.includeImages,
+            )
             val apiPath = applyUserTemplate(projectedPath, config.userPrepend, config.userPostpend)
             var firstProviderEventPending = true
             requestTrace?.mark("provider_dispatch")
@@ -1171,6 +1206,7 @@ class GenerationManager(
                     rid to ChatMessage(
                         id = rid, parentId = toolMsgId,
                         text = tcData.result,
+                        images = tcData.resultImages.map { it.path },
                         participant = Participant.USER, status = MessageStatus.SUCCESS,
                         toolCall = tcData,
                         runId = runId,
@@ -1199,6 +1235,7 @@ class GenerationManager(
                         add(MessageEntity(
                             id = rid, conversationId = conversationId, parentId = toolMsgId,
                             text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
+                            images = tcds[index].resultImages.map { it.path },
                             participant = Participant.USER, timestamp = toolRoundTimestamp + index + 1,
                             modelName = modelName, runId = runId,
                             toolCallJson = Json.encodeToString(listOf(
@@ -1210,6 +1247,7 @@ class GenerationManager(
                                     signature = tcds[index].signature,
                                     signatureProvider = provider.name.takeIf { tcds[index].signature != null },
                                     toolCallId = tcds[index].toolCallId,
+                                    toolImages = tcds[index].resultImages,
                                 )
                             ))
                         ))
@@ -1232,7 +1270,10 @@ class GenerationManager(
 
                 lastEmitMs = 0L
 
-                val projectedToolPath = projectAssistantImagesToLatestUserMessage(toolPath, providerConfig.includeImages)
+                val projectedToolPath = projectToolResultImagesToUserMessage(
+                    projectAssistantImagesToLatestUserMessage(toolPath, providerConfig.includeImages),
+                    providerConfig.includeImages,
+                )
                 val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
                 provider.generateResponse(apiToolPath, providerConfig).collect { event ->
                     handleStreamEvent(event)

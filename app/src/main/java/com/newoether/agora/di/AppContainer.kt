@@ -18,6 +18,8 @@ import com.newoether.agora.automation.LoopManager
 import com.newoether.agora.automation.TaskExecutionEngine
 import com.newoether.agora.automation.TaskManager
 import com.newoether.agora.tool.AutomationToolProvider
+import com.newoether.agora.tool.McpToolProvider
+import com.newoether.agora.mcp.McpRegistry
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.TaskWorker
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -110,6 +112,14 @@ class AppContainer(private val appContext: Context) {
         ConversationStateRegistry()
     }
 
+    val mcpRegistry: McpRegistry by lazy {
+        McpRegistry(appContext, settingsRepository, appScope)
+    }
+
+    val mcpToolProvider: McpToolProvider by lazy {
+        McpToolProvider(mcpRegistry)
+    }
+
     /** Lets native import quiesce Task/Loop generation without serializing ordinary executions. */
     val automationExecutionGate: AutomationExecutionGate by lazy { AutomationExecutionGate() }
 
@@ -119,8 +129,11 @@ class AppContainer(private val appContext: Context) {
         try {
             // fdroid flavor provides FdroidSandboxManagerFactory
             Class.forName("com.newoether.agora.sandbox.FdroidSandboxManagerFactory")
-                .getDeclaredConstructor(android.content.Context::class.java)
-                .newInstance(appContext) as SandboxManagerFactory
+                .getDeclaredConstructor(
+                    android.content.Context::class.java,
+                    com.newoether.agora.data.repository.SettingsRepository::class.java,
+                )
+                .newInstance(appContext, settingsRepository) as SandboxManagerFactory
         } catch (_: ClassNotFoundException) {
             // play flavor provides PlaySandboxManagerFactory
             try {
@@ -159,6 +172,7 @@ class AppContainer(private val appContext: Context) {
             executionCoordinator = conversationExecutionCoordinator,
             shellConfirmation = shellConfirmationController,
             automationExecutionGate = automationExecutionGate,
+            mcpToolProvider = mcpToolProvider,
         )
     }
 
@@ -218,6 +232,7 @@ class AppContainer(private val appContext: Context) {
             application, database, chatDao, settingsManager, memoryManager, appContext, sandboxManagerFactory,
             autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
             taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
-            automationExecutionGate, conversationStateRegistry, shellConfirmationController
+            automationExecutionGate, conversationStateRegistry, shellConfirmationController,
+            mcpRegistry, mcpToolProvider,
         )
 }

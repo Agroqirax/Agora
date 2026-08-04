@@ -9,12 +9,15 @@ import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.ShellClient
 import com.newoether.agora.util.SshClient
+import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.GenerationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
@@ -25,23 +28,33 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 
 class ShellToolProvider(
-    private val sandboxFactory: SandboxManagerFactory? = null
+    private val sandboxFactory: SandboxManagerFactory? = null,
+    private val imageStore: ToolImageStore? = null,
 ) : ToolProvider {
 
     private val sandbox = sandboxFactory?.create()
 
     /**
-     * Optional user-confirmation gate for state-changing operations on REMOTE
-     * servers (SSH/Conch). Returns true to proceed, false to deny. The local
-     * sandbox is proot-isolated and is never gated. Set by the owning ViewModel;
-     * null = no gate (proceed).
+     * Optional user-confirmation gate for state-changing operations. The isolated local sandbox
+     * normally proceeds directly; once shared storage is mounted, local commands/writes are gated
+     * too because they can mutate files outside the app sandbox.
      */
     var confirm: (suspend (server: String, summary: String) -> Boolean)? = null
 
-    /** Run [confirm] for remote devices only; sandbox (device == null) always proceeds. */
-    private suspend fun confirmRemote(device: ShellDeviceConfig?, summary: String): Boolean {
-        if (device == null) return true
-        return confirm?.invoke(device.name.ifBlank { "${device.type} server" }, summary) ?: true
+    private suspend fun confirmTarget(
+        device: ShellDeviceConfig?,
+        summary: String,
+        localSharedStorageExposed: Boolean = false,
+    ): Boolean {
+        if (device == null && !localSharedStorageExposed) return true
+        val target = device?.name?.ifBlank { "${device.type} server" }
+            ?: "Local Sandbox · /mnt/shared"
+        return confirm?.invoke(target, summary) ?: true
+    }
+
+    private fun targetsSharedStorage(path: String): Boolean {
+        val normalized = path.trim().replace('\\', '/').replace(Regex("/+"), "/")
+        return normalized == "/mnt/shared" || normalized.startsWith("/mnt/shared/")
     }
 
     // ── Helpers ────────────────────────────────────────────
@@ -258,6 +271,9 @@ class ShellToolProvider(
         suspend fun getJob(jobId: String): String = client.getJob(jobId)
 
         suspend fun stopJob(jobId: String): String = client.stopJob(jobId)
+
+        suspend fun viewImage(path: String): ShellClient.FileImageResult =
+            client.fileImage(path)
     }
 
     private inner class SshBackend(override val device: ShellDeviceConfig) : Backend {
@@ -265,13 +281,12 @@ class ShellToolProvider(
         private val port = device.sshPort
         private val user = device.sshUser
         private val password = device.sshPassword
-        private val timeout = device.timeout
         private val deviceName = device.name
         private val hostKey = device.sshHostKey
 
         private val client: SshClient by lazy {
             SshClient(
-                host, port, user, password, timeout * 1000,
+                host, port, user, password,
                 pinnedHostKey = hostKey,
                 // Un-pinned devices stay usable (capture-only); once a key is pinned it is enforced.
                 allowUnknownHostKey = hostKey.isBlank()
@@ -416,7 +431,7 @@ class ShellToolProvider(
                     properties = mapOf(
                         "command" to ToolProperty("string", "The shell command to execute."),
                         "server" to ToolProperty("string", serverPropDesc),
-                        "timeout_ms" to ToolProperty("integer", "Timeout in milliseconds (optional; foreground max 120s, background is bounded by Conch policy)."),
+                        "timeout_ms" to ToolProperty("integer", "Timeout in milliseconds (optional; defaults to 300s, foreground max 300s, background is bounded by Conch policy)."),
                         "workdir" to ToolProperty("string", "Working directory (optional)."),
                         "background" to ToolProperty("boolean", "Start a durable background job on Conch and return its job_id immediately (optional, default false)."),
                     ),
@@ -544,7 +559,41 @@ class ShellToolProvider(
             ))
         )
 
-        return shellTools + fileTools
+        val imageTools = if (conchDeviceNames.isEmpty()) {
+            emptyList()
+        } else {
+            val imageServerDescription = if (conchDeviceNames.size == 1) {
+                "Conch server name (optional; defaults to ${conchDeviceNames.single()})."
+            } else {
+                "Conch server name. Available: ${conchDeviceNames.joinToString(", ")}."
+            }
+            val imageRequired = if (conchDeviceNames.size == 1) {
+                listOf("path")
+            } else {
+                listOf("path", "server")
+            }
+            listOf(
+                ToolDefinition(
+                    function = ToolFunction(
+                        name = "view_image",
+                        description =
+                            "Load an image from a Conch device and return it as visual context.",
+                        parameters = ToolParameters(
+                            properties = mapOf(
+                                "path" to ToolProperty(
+                                    "string",
+                                    "Absolute path to the image file.",
+                                ),
+                                "server" to ToolProperty("string", imageServerDescription),
+                            ),
+                            required = imageRequired,
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        return shellTools + fileTools + imageTools
     }
 
     override suspend fun execute(name: String, arguments: String, ctx: GenerationContext): String {
@@ -559,6 +608,7 @@ class ShellToolProvider(
             "file_edit" -> executeFileEdit(arguments, ctx)
             "file_glob" -> executeFileGlob(arguments, ctx)
             "file_grep" -> executeFileGrep(arguments, ctx)
+            "view_image" -> executeViewImage(arguments, ctx).text
             else -> "Unknown tool: $name"
         }
     }
@@ -568,16 +618,19 @@ class ShellToolProvider(
         arguments: String,
         ctx: GenerationContext,
     ): Flow<ToolExecutionEvent> {
-        if (name != "execute_shell_command") {
-            return super<ToolProvider>.executeEvents(name, arguments, ctx)
+        return when (name) {
+            "execute_shell_command" -> executeShellCommandEvents(arguments, ctx)
+            "view_image" -> flow {
+                emit(ToolExecutionEvent.Completed(executeViewImage(arguments, ctx)))
+            }
+            else -> super<ToolProvider>.executeEvents(name, arguments, ctx)
         }
-        return executeShellCommandEvents(arguments, ctx)
     }
 
     override fun handles(name: String): Boolean = name in setOf(
         "list_shells", "execute_shell_command",
         "list_shell_jobs", "get_shell_job", "stop_shell_job",
-        "file_read", "file_write", "file_edit", "file_glob", "file_grep"
+        "file_read", "file_write", "file_edit", "file_glob", "file_grep", "view_image"
     )
 
     // ── list_shells ────────────────────────────────────────
@@ -618,10 +671,11 @@ class ShellToolProvider(
         if (command.isBlank()) return jsonError("execute_shell_command", "no_command")
         val serverName = arg(args, "server")
         val background = boolArg(args, "background")
-        val timeoutMax = if (background) 86_400_000 else 120_000
+        val defaultTimeoutMs = Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
+        val timeoutMax = if (background) 86_400_000 else defaultTimeoutMs
         val timeoutMs = (
             arg(args, "timeout_ms").toIntOrNull()
-                ?: if (background) timeoutMax else 30_000
+                ?: defaultTimeoutMs
             ).coerceIn(1000, timeoutMax)
         val workdir = arg(args, "workdir")
 
@@ -633,7 +687,7 @@ class ShellToolProvider(
                     server = serverName,
                     command = command,
                 )
-            if (!confirmRemote(backend.device, "start background job: $ $command")) {
+            if (!confirmTarget(backend.device, "start background job: $ $command")) {
                 return jsonError(
                     "execute_shell_command",
                     "denied_by_user: the user declined to run this background command",
@@ -658,7 +712,13 @@ class ShellToolProvider(
         try {
             // Gate on the backend's ACTUAL target: with a blank server name the sandbox wins
             // resolution, while resolveShellDevice() would name an unrelated remote device.
-            if (!confirmRemote(backend.device, "$ $command")) {
+            if (!confirmTarget(
+                    backend.device,
+                    "$ $command",
+                    localSharedStorageExposed =
+                        backend.device == null && ctx.sandboxSharedStorageEnabled,
+                )
+            ) {
                 return jsonError("execute_shell_command", "denied_by_user: the user declined to run this command", server = serverName, command = command)
             }
             return backend.executeCommand(command, workdir, timeoutMs)
@@ -698,8 +758,10 @@ class ShellToolProvider(
             emit(ToolExecutionEvent.Completed(executeShellCommand(arguments, ctx)))
             return@flow
         }
-        val timeoutMs = (arg(args, "timeout_ms").toIntOrNull() ?: 30000)
-            .coerceIn(1000, 120000)
+        val timeoutMs = (
+            arg(args, "timeout_ms").toIntOrNull()
+                ?: Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
+            ).coerceIn(1000, Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt())
         val workdir = arg(args, "workdir")
         val backend = getBackend(serverName, ctx)
         if (backend == null) {
@@ -716,7 +778,13 @@ class ShellToolProvider(
             ),
         )
         try {
-            if (!confirmRemote(backend.device, "$ $command")) {
+            if (!confirmTarget(
+                    backend.device,
+                    "$ $command",
+                    localSharedStorageExposed =
+                        backend.device == null && ctx.sandboxSharedStorageEnabled,
+                )
+            ) {
                 emit(
                     ToolExecutionEvent.Completed(
                         jsonError(
@@ -816,7 +884,7 @@ class ShellToolProvider(
                 conchServerNotFoundMessage(serverName, ctx),
                 server = serverName,
             )
-        if (!confirmRemote(backend.device, "stop background shell job: $jobId")) {
+        if (!confirmTarget(backend.device, "stop background shell job: $jobId")) {
             return jsonError(
                 "stop_shell_job",
                 "denied_by_user: the user declined to stop this job",
@@ -835,6 +903,83 @@ class ShellToolProvider(
     }
 
     // ── File tools ─────────────────────────────────────────
+
+    private suspend fun executeViewImage(
+        arguments: String,
+        ctx: GenerationContext,
+    ): ToolExecutionResult {
+        val args = parseToolArgs(arguments)
+        val path = arg(args, "path")
+        if (path.isBlank()) {
+            return ToolExecutionResult(
+                text = jsonError("view_image", "path is required"),
+                isError = true,
+            )
+        }
+        val serverName = arg(args, "server")
+        val backend = getConchBackend(serverName, ctx)
+            ?: return ToolExecutionResult(
+                text = jsonError(
+                    "view_image",
+                    conchServerNotFoundMessage(serverName, ctx),
+                    server = serverName,
+                ),
+                isError = true,
+            )
+        val store = imageStore
+            ?: return ToolExecutionResult(
+                text = jsonError(
+                    "view_image",
+                    "Tool image storage is unavailable",
+                    server = backend.device.name,
+                ),
+                isError = true,
+            )
+        return try {
+            val remote = backend.viewImage(path)
+            if (remote.error != null) {
+                return ToolExecutionResult(
+                    text = jsonError(
+                        "view_image",
+                        remote.error,
+                        server = backend.device.name,
+                    ),
+                    isError = true,
+                )
+            }
+            val attachment = withContext(Dispatchers.IO) {
+                store.persistBase64(
+                    data = remote.data,
+                    mimeType = remote.mimeType,
+                    filePrefix = "conch",
+                )
+            }
+            ToolExecutionResult(
+                text = buildJsonObject {
+                    put("type", "view_image")
+                    put("server", backend.device.name)
+                    put("path", path)
+                    put("mime_type", attachment.mimeType)
+                    put("size", attachment.sizeBytes)
+                    attachment.width?.let { put("width", it) }
+                    attachment.height?.let { put("height", it) }
+                    put("ok", true)
+                }.toString(),
+                images = listOf(attachment),
+            )
+        } catch (error: Exception) {
+            ToolExecutionResult(
+                text = jsonError(
+                    "view_image",
+                    error.message ?: "Failed to load image",
+                    server = backend.device.name,
+                ),
+                isError = true,
+            )
+        } finally {
+            backend.close()
+        }
+    }
 
     private suspend fun executeFileRead(arguments: String, ctx: GenerationContext): String {
         val args = parseToolArgs(arguments)
@@ -864,7 +1009,13 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_write", serverNotFoundMessage(serverName, ctx))
         try {
-            if (!confirmRemote(backend.device, "write file: $path")) {
+            if (!confirmTarget(
+                    backend.device,
+                    "write file: $path",
+                    localSharedStorageExposed =
+                        backend.device == null && targetsSharedStorage(path),
+                )
+            ) {
                 return jsonError("file_write", "denied_by_user: the user declined to write this file", server = serverName)
             }
             val error = backend.fileWrite(path, content)
@@ -890,7 +1041,13 @@ class ShellToolProvider(
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("file_edit", serverNotFoundMessage(serverName, ctx))
         try {
-            if (!confirmRemote(backend.device, "edit file: $path")) {
+            if (!confirmTarget(
+                    backend.device,
+                    "edit file: $path",
+                    localSharedStorageExposed =
+                        backend.device == null && targetsSharedStorage(path),
+                )
+            ) {
                 return jsonError("file_edit", "denied_by_user: the user declined to edit this file", server = serverName)
             }
             // Read the file

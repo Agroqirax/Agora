@@ -1,6 +1,9 @@
 package com.newoether.agora.ui.settings
 
 import android.util.Log
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -45,15 +48,45 @@ import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
 import com.newoether.agora.sandbox.openSandboxRoot
 import com.newoether.agora.sandbox.SandboxManager
+import com.newoether.agora.sandbox.SandboxSharedStorageAccess
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, showDocFab: Boolean = false) {
+fun SettingsSandboxPage(
+    sandboxManager: SandboxManager,
+    onBack: () -> Unit,
+    showDocFab: Boolean = false,
+    sharedStorageEnabled: Boolean = false,
+    onSharedStorageEnabledChange: (Boolean) -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val installFailedMessage = stringResource(R.string.sandbox_install_failed)
+    var sharedStorageAccessGranted by remember {
+        mutableStateOf(SandboxSharedStorageAccess.isGranted(ctx))
+    }
+    val sharedStorageSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        sharedStorageAccessGranted = SandboxSharedStorageAccess.isGranted(ctx)
+    }
+    val legacyStoragePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        sharedStorageAccessGranted = SandboxSharedStorageAccess.isGranted(ctx)
+    }
+    fun requestSharedStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            SandboxSharedStorageAccess.settingsIntent(ctx)
+                ?.let(sharedStorageSettingsLauncher::launch)
+        } else {
+            legacyStoragePermissionLauncher.launch(
+                SandboxSharedStorageAccess.legacyPermissions,
+            )
+        }
+    }
 
     // Core state — use fast sync check for instant first paint, confirm async
     var available by remember { mutableStateOf(sandboxManager.isAvailableSync()) }
@@ -243,40 +276,128 @@ fun SettingsSandboxPage(sandboxManager: SandboxManager, onBack: () -> Unit, show
                 }
 
                 if (available) {
-                    // ═══ Browse Files ═══
+                    // ═══ Files and shared storage ═══
                     item {
                         SettingsGroup(
                             title = stringResource(R.string.sandbox_browse_files),
-                            items = listOf({
-                                SettingsItem(
-                                    headlineContent = {
-                                        Text(
-                                            stringResource(R.string.sandbox_browse_files),
-                                            fontWeight = FontWeight.Medium
+                            items = buildList {
+                                add {
+                                    SettingsItem(
+                                        headlineContent = {
+                                            Text(
+                                                stringResource(R.string.sandbox_browse_files),
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        },
+                                        supportingContent = {
+                                            Text(
+                                                stringResource(R.string.sandbox_browse_files_desc),
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        },
+                                        leadingContent = {
+                                            Icon(
+                                                Icons.Default.Folder,
+                                                null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        modifier = Modifier.clickable {
+                                            try {
+                                                ctx.openSandboxRoot()
+                                            } catch (e: Exception) {
+                                                Log.w(
+                                                    "SettingsSandboxPage",
+                                                    "Failed to open sandbox root",
+                                                    e,
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                                add {
+                                    SettingsItem(
+                                        headlineContent = {
+                                            Text(stringResource(R.string.sandbox_shared_storage))
+                                        },
+                                        supportingContent = {
+                                            Text(
+                                                when {
+                                                    sharedStorageEnabled &&
+                                                        sharedStorageAccessGranted ->
+                                                        stringResource(
+                                                            R.string.sandbox_shared_storage_mounted,
+                                                        )
+                                                    sharedStorageEnabled ->
+                                                        stringResource(
+                                                            R.string.sandbox_shared_storage_permission_required,
+                                                        )
+                                                    else -> stringResource(
+                                                        R.string.sandbox_shared_storage_desc,
+                                                    )
+                                                },
+                                            )
+                                        },
+                                        leadingContent = {
+                                            Icon(
+                                                Icons.Default.SdStorage,
+                                                null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        },
+                                        trailingContent = {
+                                            Switch(
+                                                checked = sharedStorageEnabled,
+                                                onCheckedChange = { enabled ->
+                                                    onSharedStorageEnabledChange(enabled)
+                                                    if (
+                                                        enabled &&
+                                                        !sharedStorageAccessGranted
+                                                    ) {
+                                                        requestSharedStorageAccess()
+                                                    }
+                                                },
+                                            )
+                                        },
+                                        modifier = Modifier.clickable {
+                                            val enabled = !sharedStorageEnabled
+                                            onSharedStorageEnabledChange(enabled)
+                                            if (enabled && !sharedStorageAccessGranted) {
+                                                requestSharedStorageAccess()
+                                            }
+                                        },
+                                    )
+                                }
+                                if (
+                                    sharedStorageEnabled &&
+                                    !sharedStorageAccessGranted
+                                ) {
+                                    add {
+                                        SettingsItem(
+                                            headlineContent = {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.sandbox_shared_storage_grant,
+                                                    ),
+                                                )
+                                            },
+                                            supportingContent = {
+                                                Text(
+                                                    stringResource(
+                                                        R.string.sandbox_shared_storage_warning,
+                                                    ),
+                                                )
+                                            },
+                                            leadingContent = {
+                                                Icon(Icons.Default.AdminPanelSettings, null)
+                                            },
+                                            modifier = Modifier.clickable {
+                                                requestSharedStorageAccess()
+                                            },
                                         )
-                                    },
-                                    supportingContent = {
-                                        Text(
-                                            stringResource(R.string.sandbox_browse_files_desc),
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    },
-                                    leadingContent = {
-                                        Icon(
-                                            Icons.Default.Folder,
-                                            null,
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    },
-                                    modifier = Modifier.clickable {
-                                        try {
-                                            ctx.openSandboxRoot()
-                                        } catch (e: Exception) {
-                                            Log.w("SettingsSandboxPage", "Failed to open sandbox root", e)
-                                        }
                                     }
-                                )
-                            })
+                                }
+                            },
                         )
                     }
 

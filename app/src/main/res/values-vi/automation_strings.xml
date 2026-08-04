@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">Chọn lịch</string>
     <string name="task_last_run_at">Lần chạy gần nhất: %1$s</string>
     <string name="task_never_run">Chưa từng chạy</string>
-    <string name="task_empty">Chưa có tự động hóa</string>
-    <string name="task_empty_desc">Tạo tự động hóa để chạy prompt ngay hoặc theo lịch.</string>
+    <string name="task_empty">Chưa có tác vụ</string>
+    <string name="task_empty_desc">Tạo tác vụ để chạy prompt ngay hoặc theo lịch.</string>
     <string name="task_new_task">Tác vụ mới</string>
     <string name="task_execution_log">Lịch sử</string>
     <string name="task_no_executions">Chưa có lần chạy nào</string>
-    <string name="task_no_executions_desc">Chạy tự động hóa này để tạo lịch sử thực thi.</string>
+    <string name="task_no_executions_desc">Chạy tác vụ này để tạo lịch sử thực thi.</string>
     <string name="task_running">Đang chạy…</string>
     <string name="task_last_run">Lần chạy gần nhất: %1$s</string>
     <string name="task_from_banner">Từ tác vụ: %1$s</string>

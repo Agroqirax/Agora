@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">Elegir programación</string>
     <string name="task_last_run_at">Última ejecución: %1$s</string>
     <string name="task_never_run">Nunca ejecutada</string>
-    <string name="task_empty">Aún no hay automatizaciones</string>
-    <string name="task_empty_desc">Crea una automatización para ejecutar un prompt ahora o según una programación.</string>
+    <string name="task_empty">Aún no hay tareas</string>
+    <string name="task_empty_desc">Crea una tarea para ejecutar un prompt ahora o según una programación.</string>
     <string name="task_new_task">Nueva tarea</string>
     <string name="task_execution_log">Historial</string>
     <string name="task_no_executions">Aún no hay ejecuciones</string>
-    <string name="task_no_executions_desc">Ejecuta esta automatización para crear un historial de ejecuciones.</string>
+    <string name="task_no_executions_desc">Ejecuta esta tarea para crear un historial de ejecuciones.</string>
     <string name="task_running">Ejecutando…</string>
     <string name="task_last_run">Última ejecución: %1$s</string>
     <string name="task_from_banner">De la tarea: %1$s</string>

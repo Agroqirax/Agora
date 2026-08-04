@@ -30,6 +30,7 @@ class ToolPresentationResolverTest {
             Triple("read_conversation", """{"conversation_id":"conv-12""", "conv-12"),
             Triple("get_shell_job", """{"job_id":"job-45""", "job-45"),
             Triple("file_write", """{"path":"/tmp/progr""", "/tmp/progr"),
+            Triple("view_image", """{"path":"/tmp/previ""", "/tmp/previ"),
             Triple("file_glob", """{"pattern":"**/*.k""", "**/*.k"),
             Triple("generate_image", """{"prompt":"blue mount""", "blue mount"),
             Triple("create_task", """{"name":"nightly ba""", "nightly ba"),

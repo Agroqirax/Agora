@@ -1,8 +1,11 @@
 package com.newoether.agora.sandbox
 
 import android.content.Context
+import android.os.Build
+import android.os.Environment
 import android.util.Log
 import com.newoether.agora.R
+import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.util.PortableGlobMatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +25,10 @@ import kotlinx.coroutines.sync.withLock
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-class ProotSandboxManager(private val context: Context) : SandboxManager {
+class ProotSandboxManager(
+    private val context: Context,
+    private val settings: SettingsRepository,
+) : SandboxManager {
 
     // Serializes every state-mutating operation against the shared Alpine rootfs. The sandbox
     // filesystem is process-global (one rootfs/home shared across all conversations and across
@@ -62,6 +68,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     private val rootfsDir: File = File(context.filesDir, "alpine-rootfs")
     private val homeMountDir: File = File(context.filesDir, "sandbox-home")
     private val homeMountPath = "/home/agora"
+    private val sharedStorageMountPath = "/mnt/shared"
     private val metadataDir: File = File(rootfsDir, "etc/agora")
     private val baseWorldFile: File = File(metadataDir, "base-world")
     private val explicitPackagesFile: File = File(metadataDir, "explicit-packages")
@@ -340,15 +347,21 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
         ensureSandboxMountTargets()
         val tmpDir = File(rootfsDir, "tmp").apply { mkdirs() }.absolutePath
         val resolvedWorkdir = workdir.ifBlank { homeMountPath }
-        val args = listOf(prootPath,
+        val args = mutableListOf(prootPath,
             "--rootfs=" + rootfsDir.absolutePath,
             "--bind=/dev", "--bind=/proc", "--bind=/sys",
             "--bind=/dev/urandom:/dev/random",
             "--bind=${homeMountDir.absolutePath}:$homeMountPath",
+        ).apply {
+            sharedStorageHostDir()?.let { host ->
+                add("--bind=${host.absolutePath}:$sharedStorageMountPath")
+            }
+            addAll(listOf(
             "-w", resolvedWorkdir,
             "-0", "--link2symlink", "--kill-on-exit", "-L",
             "/bin/sh", "-c", command
-        )
+            ))
+        }
         return try {
             val libDir = context.applicationInfo.nativeLibraryDir
             val tallocLibDir = ensureTalloc()
@@ -1032,6 +1045,7 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     private fun ensureSandboxMountTargets() {
         homeMountDir.mkdirs()
         File(rootfsDir, homeMountPath.trimStart('/')).mkdirs()
+        File(rootfsDir, sharedStorageMountPath.trimStart('/')).mkdirs()
     }
 
     private fun normalizeVirtualPath(path: String): String {
@@ -1053,6 +1067,24 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
             }
             return ResolvedSandboxPath(resolved, root, homeMountPath)
         }
+        if (
+            normalized == sharedStorageMountPath ||
+            normalized.startsWith("$sharedStorageMountPath/")
+        ) {
+            val root = sharedStorageHostDir()
+                ?: throw SecurityException(
+                    "Shared storage is not mounted. Enable it and grant all-files access first.",
+                )
+            val suffix = normalized.removePrefix(sharedStorageMountPath).trimStart('/')
+            val resolved = File(root, suffix).canonicalFile
+            require(
+                resolved.absolutePath == root.absolutePath ||
+                    resolved.absolutePath.startsWith(root.absolutePath + File.separator),
+            ) {
+                "Path traversal: $path"
+            }
+            return ResolvedSandboxPath(resolved, root, sharedStorageMountPath)
+        }
 
         val root = rootfsDir.canonicalFile
         val resolved = File(root, normalized.trimStart('/')).canonicalFile
@@ -1063,6 +1095,22 @@ class ProotSandboxManager(private val context: Context) : SandboxManager {
     }
 
     private fun resolvePath(path: String): File = resolveSandboxPath(path).file
+
+    private fun sharedStorageHostDir(): File? {
+        if (!settings.sandboxSharedStorageEnabled.value) return null
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            context.checkSelfPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                context.checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+        if (!granted) return null
+        return Environment.getExternalStorageDirectory()
+            ?.canonicalFile
+            ?.takeIf { it.isDirectory && it.canRead() }
+    }
 
     // remaining: levels still allowed including the current dir's files. -1 = unlimited;
     // 1 = only this dir's files (no descent); >1 = descend with one fewer level.

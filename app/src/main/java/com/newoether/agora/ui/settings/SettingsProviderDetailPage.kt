@@ -176,12 +176,15 @@ fun SettingsProviderDetailPage(
                 // before navigation pops it — render with an empty placeholder, don't crash.
                 val providerInstance = viewModel.getProviderInstanceOrNull(providerName)
                 val savedUrl = providerBaseUrls[providerName]
+                val defaultUrl = providerInstance?.defaultBaseUrl.orEmpty()
+                val displayedUrl = savedUrl?.takeIf(String::isNotBlank) ?: defaultUrl
                 // Don't key remember on savedUrl — that causes TextFieldState to be recreated
                 // every time the debounced save writes back to DataStore, overwriting user input.
-                val baseUrlState = remember { TextFieldState(savedUrl ?: "") }
-                // Sync external changes (e.g. import) back into the text field.
-                LaunchedEffect(savedUrl) {
-                    val ext = savedUrl ?: ""
+                val baseUrlState = remember(providerName) { TextFieldState(displayedUrl) }
+                // Sync external changes (e.g. import) and a late provider registration back into
+                // the field. A missing/blank override visibly resolves to the provider default.
+                LaunchedEffect(savedUrl, defaultUrl) {
+                    val ext = savedUrl?.takeIf(String::isNotBlank) ?: defaultUrl
                     val cur = baseUrlState.text.toString()
                     if (ext.isNotEmpty() && ext != cur) {
                         baseUrlState.edit { replace(0, length, ext) }
@@ -197,7 +200,9 @@ fun SettingsProviderDetailPage(
                     delay(500)
                     val text = baseUrlState.text.toString()
                     val stored = providerBaseUrls[providerName] ?: ""
-                    if (text != stored) {
+                    val isUneditedImplicitDefault =
+                        stored.isBlank() && text == defaultUrl
+                    if (!isUneditedImplicitDefault && text != stored) {
                         viewModel.settings.setProviderBaseUrl(providerName, text)
                     }
                 }
@@ -217,7 +222,7 @@ fun SettingsProviderDetailPage(
                                         Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
                                             OutlinedTextField(
                                                 state = baseUrlState,
-                                                placeholder = { Text(providerInstance?.defaultBaseUrl ?: "", style = MaterialTheme.typography.bodyMedium) },
+                                                placeholder = { Text(defaultUrl, style = MaterialTheme.typography.bodyMedium) },
                                                 shape = RoundedCornerShape(16.dp),
                                                 modifier = Modifier.fillMaxWidth(),
                                                 textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)

@@ -85,12 +85,12 @@
     <string name="task_schedule_pick">选择计划</string>
     <string name="task_last_run_at">上次运行 %1$s</string>
     <string name="task_never_run">从未运行</string>
-    <string name="task_empty">还没有自动化</string>
-    <string name="task_empty_desc">创建自动化，以立即或按计划运行提示词。</string>
+    <string name="task_empty">还没有任务</string>
+    <string name="task_empty_desc">创建任务，以立即或按计划运行提示词。</string>
     <string name="task_new_task">新建任务</string>
     <string name="task_execution_log">历史</string>
     <string name="task_no_executions">还没有运行过</string>
-    <string name="task_no_executions_desc">运行此自动化后，执行记录会显示在这里。</string>
+    <string name="task_no_executions_desc">运行此任务后，执行记录会显示在这里。</string>
     <string name="task_running">运行中…</string>
     <string name="task_last_run">上次运行 %1$s</string>
     <string name="task_from_banner">来自任务：%1$s</string>

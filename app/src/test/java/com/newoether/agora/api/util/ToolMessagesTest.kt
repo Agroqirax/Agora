@@ -11,6 +11,53 @@ import org.junit.Test
 
 class ToolMessagesTest {
     @Test
+    fun toolImagesAreProjectedAfterTheCompleteResultBatch() {
+        val first = result("result_a", "call-a").copy(
+            images = listOf("/private/first.png"),
+            runId = "run-1",
+            runSequence = 7L,
+        )
+        val second = result("result_b", "call-b").copy(
+            images = listOf("/private/second.png", "/private/first.png"),
+            runId = "run-1",
+            runSequence = 7L,
+        )
+
+        val projected = projectToolResultImagesToUserMessage(
+            messages = listOf(tool("tool_round", "call-a", "call-b"), first, second),
+            includeImages = true,
+        )
+
+        assertEquals(4, projected.size)
+        assertEquals(listOf(first.id, second.id), projected.drop(1).take(2).map { it.id })
+        val visualTurn = projected.last()
+        assertEquals(Participant.USER, visualTurn.participant)
+        assertEquals(second.id, visualTurn.parentId)
+        assertEquals(
+            listOf("/private/first.png", "/private/second.png"),
+            visualTurn.images,
+        )
+        assertEquals("run-1", visualTurn.runId)
+        assertEquals(7L, visualTurn.runSequence)
+    }
+
+    @Test
+    fun unsupportedModelGetsExplicitToolImageNoticeWithoutBinaryInput() {
+        val projected = projectToolResultImagesToUserMessage(
+            messages = listOf(
+                result("result_image", "call-image").copy(
+                    images = listOf("/private/image.png"),
+                ),
+            ),
+            includeImages = false,
+        )
+
+        assertEquals(2, projected.size)
+        assertTrue(projected.last().images.isEmpty())
+        assertTrue(projected.last().text.contains("does not support image input"))
+    }
+
+    @Test
     fun parallelToolRoundWithMissingResult_becomesPlainContext() {
         val validated = validateToolMessages(
             listOf(

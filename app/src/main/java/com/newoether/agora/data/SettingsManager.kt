@@ -40,7 +40,6 @@ data class ShellDeviceConfig(
     // Conch fields (type=conch)
     val serverUrl: String = "",
     val apiKey: String = "",
-    val timeout: Int = 30,
     val conchPublicKey: String = "",
     // SSH fields (type=ssh)
     val sshHost: String = "",
@@ -50,6 +49,17 @@ data class ShellDeviceConfig(
     // Pinned SSH host key (base64 of the server public-key blob). Blank = not yet
     // pinned (trust-on-first-use); once set, connections must match or are rejected.
     val sshHostKey: String = ""
+)
+
+@Serializable
+data class McpServerConfig(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
+    val enabled: Boolean = true,
+    val url: String = "",
+    val headers: Map<String, String> = emptyMap(),
+    /** Raw MCP tool names disabled for this server. New tools stay enabled by default. */
+    val disabledTools: Set<String> = emptySet(),
 )
 
 @Serializable
@@ -165,7 +175,10 @@ class SettingsManager(private val context: Context) {
         const val DEFAULT_PROXY_BYPASS = "localhost\n127.0.0.1\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n::1"
         val SHELL_CONFIRM_ENABLED = booleanPreferencesKey("shell_confirm_enabled")
         val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
+        val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
         val SANDBOX_ENABLED = booleanPreferencesKey("sandbox_enabled")
+        val SANDBOX_SHARED_STORAGE_ENABLED =
+            booleanPreferencesKey("sandbox_shared_storage_enabled")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val COLOR_SCHEME = stringPreferencesKey("color_scheme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
@@ -344,7 +357,18 @@ class SettingsManager(private val context: Context) {
         val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[SHELL_DEVICES_JSON] ?: "[]")
         try { json.decodeFromString<List<ShellDeviceConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
     }
+    val mcpServers: Flow<List<McpServerConfig>> = context.dataStore.data.map { pref ->
+        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[MCP_SERVERS_JSON] ?: "[]")
+        try {
+            json.decodeFromString<List<McpServerConfig>>(jsonStr)
+        } catch (e: Exception) {
+            DebugLog.e("SettingsManager", "Failed to decode MCP servers", e)
+            emptyList()
+        }
+    }
     val sandboxEnabled: Flow<Boolean> = context.dataStore.data.map { it[SANDBOX_ENABLED] ?: false }
+    val sandboxSharedStorageEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[SANDBOX_SHARED_STORAGE_ENABLED] ?: false }
 
     val themeMode: Flow<String> = context.dataStore.data.map { it[THEME_MODE] ?: "FOLLOW_DEVICE" }
     val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
@@ -768,8 +792,19 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[SHELL_DEVICES_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(devices)) }
     }
 
+    suspend fun saveMcpServers(servers: List<McpServerConfig>) {
+        context.dataStore.edit {
+            it[MCP_SERVERS_JSON] =
+                com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(servers))
+        }
+    }
+
     suspend fun saveSandboxEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SANDBOX_ENABLED] = enabled }
+    }
+
+    suspend fun saveSandboxSharedStorageEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[SANDBOX_SHARED_STORAGE_ENABLED] = enabled }
     }
 
     suspend fun saveThemeMode(mode: String) {

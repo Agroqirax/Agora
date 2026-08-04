@@ -9,13 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.interaction.DragInteraction
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.MutatePriority
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
@@ -32,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -56,6 +55,7 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.RegenerationTransitionRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
@@ -358,6 +358,7 @@ internal fun MessageList(
     isSwitching: Boolean = false,
     streamingAutoFollowEnabled: Boolean = isLoading && !isSwitching,
     streamingAutoFollowPaused: Boolean = false,
+    streamingTailWithinAttachThreshold: Boolean = false,
     programmaticScrollActive: Boolean = false,
     streamingTailController: StreamingTailController = rememberStreamingTailController(),
     streamingIndicatorVisible: Boolean = isLoading,
@@ -630,25 +631,38 @@ internal fun MessageList(
     LaunchedEffect(
         state,
         conversationId,
-        streamingTailController.reattachRequestToken,
+        isLoading,
+        streamingAutoFollowEnabled,
+        streamingAutoFollowPaused,
+        streamingTailWithinAttachThreshold,
     ) {
-        if (
-            streamingTailController.reattachRequestToken == 0L ||
-            !latestIsLoading ||
-            !latestAutoFollowEnabled
-        ) {
-            return@LaunchedEffect
+        snapshotFlow {
+            state.isScrollInProgress to streamingTailFollowMode
         }
-        val nextMode = reduceStreamingTailFollow(
-            streamingTailFollowMode,
-            StreamingTailFollowEvent.ExplicitBottomReached(
-                atAbsoluteBottom = !state.canScrollForward,
-            ),
-        )
-        if (nextMode == StreamingTailFollowMode.ATTACHED) {
-            cancelMutationAnchoring()
-        }
-        setStreamingTailFollowMode(nextMode)
+            .distinctUntilChanged()
+            .collect { (scrollInProgress, _) ->
+                if (
+                    !isLoading ||
+                    !streamingAutoFollowEnabled ||
+                    streamingAutoFollowPaused
+                ) {
+                    return@collect
+                }
+                val nextMode = reduceStreamingTailFollow(
+                    streamingTailFollowMode,
+                    StreamingTailFollowEvent.ViewportProximityChanged(
+                        withinAttachThreshold = streamingTailWithinAttachThreshold,
+                        scrollInProgress = scrollInProgress,
+                    ),
+                )
+                if (
+                    nextMode == StreamingTailFollowMode.ATTACHED &&
+                    streamingTailFollowMode != StreamingTailFollowMode.ATTACHED
+                ) {
+                    cancelMutationAnchoring()
+                }
+                setStreamingTailFollowMode(nextMode)
+            }
     }
 
     // One frame-driven actor owns attached scrolling. It reads the newest cumulative geometry on
@@ -679,68 +693,74 @@ internal fun MessageList(
         val settlingStartNanos = previousFrameNanos
         var stableFrames = 0
         try {
-            // Hold one low-priority mutation for the whole attachment. A real touch scroll owns
-            // UserInput priority and cancels this block synchronously, so there is no one-frame
-            // corrective pull after the user's finger starts moving.
-            state.scroll(MutatePriority.Default) {
-                while (
-                    currentCoroutineContext().isActive &&
+            // Attachment is a layout correction, not a user-visible scroll gesture. Raw one-frame
+            // deltas deliberately avoid LazyList's MutatorMutex and isScrollInProgress, so an
+            // attached list never cancels taps or competes with the horizontal drawer recognizer.
+            // A real vertical drag still emits DragInteraction.Start above and detaches first.
+            while (
+                currentCoroutineContext().isActive &&
+                (
                     (
+                        streamingTailFollowMode == StreamingTailFollowMode.ATTACHED &&
+                            latestIsLoading &&
+                            latestAutoFollowEnabled
+                    ) ||
                         (
-                            streamingTailFollowMode == StreamingTailFollowMode.ATTACHED &&
-                                latestIsLoading &&
-                                latestAutoFollowEnabled
-                        ) ||
-                            (
-                                streamingTailFollowMode == StreamingTailFollowMode.SETTLING &&
-                                    !latestIsLoading
-                            )
-                    ) &&
-                    !streamingTailUserDragInProgress
-                ) {
-                    val frameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
-                    val elapsedSeconds =
-                        ((frameNanos - previousFrameNanos).coerceAtLeast(1L) / 1_000_000_000f)
-                            .coerceAtMost(0.05f)
-                    previousFrameNanos = frameNanos
-                    val absoluteBottom = absoluteBottomLayoutSnapshot(
-                        layoutInfo = state.layoutInfo,
-                        canScrollForward = state.canScrollForward,
-                    )
-                    // Attachment has exactly one authority: the page's physical end sentinel.
-                    // The visual tail dot is deliberately absent from this calculation.
-                    val error = absoluteBottom.remainingDistancePx
-                        ?: if (state.canScrollForward) {
-                            absoluteBottom.viewportSizePx * 0.5f
-                        } else {
-                            0f
-                        }
-                    if (error > 0.5f) {
-                        val step = coalescedScrollStep(
-                            errorPx = error,
-                            elapsedSeconds = elapsedSeconds,
-                            timeConstantSeconds = 0.055f,
-                            maximumVelocityPxPerSecond = 2_800f,
-                            minimumStepPx = minimumStepPx,
+                            streamingTailFollowMode == StreamingTailFollowMode.SETTLING &&
+                                !latestIsLoading
                         )
-                        if (abs(step) > 0.05f) scrollBy(step)
+                ) &&
+                !streamingTailUserDragInProgress
+            ) {
+                val frameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
+                val elapsedSeconds =
+                    ((frameNanos - previousFrameNanos).coerceAtLeast(1L) / 1_000_000_000f)
+                        .coerceAtMost(0.05f)
+                previousFrameNanos = frameNanos
+                val absoluteBottom = absoluteBottomLayoutSnapshot(
+                    layoutInfo = state.layoutInfo,
+                    canScrollForward = state.canScrollForward,
+                )
+                // Attachment has exactly one authority: the page's physical end sentinel.
+                // The visual tail dot is deliberately absent from this calculation.
+                val error = absoluteBottom.remainingDistancePx
+                    ?: if (state.canScrollForward) {
+                        absoluteBottom.viewportSizePx * 0.5f
+                    } else {
+                        0f
                     }
-
-                    if (streamingTailFollowMode == StreamingTailFollowMode.SETTLING) {
-                        stableFrames = if (error <= tailTolerancePx) stableFrames + 1 else 0
-                        val settlingElapsedMs =
-                            (frameNanos - settlingStartNanos).coerceAtLeast(0L) / 1_000_000L
-                        val settledAfterFinalAnimations =
-                            settlingElapsedMs >= 700L && stableFrames >= 8
-                        val settlingTimedOut = settlingElapsedMs >= 1_600L
-                        if (settledAfterFinalAnimations || settlingTimedOut) {
-                            setStreamingTailFollowMode(
-                                reduceStreamingTailFollow(
-                                    streamingTailFollowMode,
-                                    StreamingTailFollowEvent.SettlingFinished,
-                                ),
-                            )
+                if (error > 0.5f) {
+                    val step = coalescedScrollStep(
+                        errorPx = error,
+                        elapsedSeconds = elapsedSeconds,
+                        timeConstantSeconds = 0.055f,
+                        maximumVelocityPxPerSecond = 2_800f,
+                        minimumStepPx = minimumStepPx,
+                    )
+                    if (abs(step) > 0.05f) {
+                        val modeStillOwnsAttachment =
+                            streamingTailFollowMode == StreamingTailFollowMode.ATTACHED ||
+                                streamingTailFollowMode == StreamingTailFollowMode.SETTLING
+                        if (!streamingTailUserDragInProgress && modeStillOwnsAttachment) {
+                            state.dispatchRawDelta(step)
                         }
+                    }
+                }
+
+                if (streamingTailFollowMode == StreamingTailFollowMode.SETTLING) {
+                    stableFrames = if (error <= tailTolerancePx) stableFrames + 1 else 0
+                    val settlingElapsedMs =
+                        (frameNanos - settlingStartNanos).coerceAtLeast(0L) / 1_000_000L
+                    val settledAfterFinalAnimations =
+                        settlingElapsedMs >= 700L && stableFrames >= 8
+                    val settlingTimedOut = settlingElapsedMs >= 1_600L
+                    if (settledAfterFinalAnimations || settlingTimedOut) {
+                        setStreamingTailFollowMode(
+                            reduceStreamingTailFollow(
+                                streamingTailFollowMode,
+                                StreamingTailFollowEvent.SettlingFinished,
+                            ),
+                        )
                     }
                 }
             }

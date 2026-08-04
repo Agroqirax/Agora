@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">スケジュールを選択</string>
     <string name="task_last_run_at">前回の実行：%1$s</string>
     <string name="task_never_run">未実行</string>
-    <string name="task_empty">自動化はまだありません</string>
-    <string name="task_empty_desc">プロンプトを今すぐ、またはスケジュールで実行する自動化を作成します。</string>
+    <string name="task_empty">タスクはまだありません</string>
+    <string name="task_empty_desc">プロンプトを今すぐ、またはスケジュールで実行するタスクを作成します。</string>
     <string name="task_new_task">新しいタスク</string>
     <string name="task_execution_log">履歴</string>
     <string name="task_no_executions">実行履歴はまだありません</string>
-    <string name="task_no_executions_desc">この自動化を実行すると、実行履歴が作成されます。</string>
+    <string name="task_no_executions_desc">このタスクを実行すると、実行履歴が作成されます。</string>
     <string name="task_running">実行中…</string>
     <string name="task_last_run">前回の実行：%1$s</string>
     <string name="task_from_banner">タスクから：%1$s</string>

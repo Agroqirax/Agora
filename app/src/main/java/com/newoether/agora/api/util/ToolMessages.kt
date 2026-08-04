@@ -192,6 +192,71 @@ fun projectAssistantImagesToLatestUserMessage(
     return if (changed) projected else messages
 }
 
+/**
+ * Adds an API-only normal user turn after each complete tool-result batch that returned images.
+ *
+ * Tool-result blocks themselves remain text-only because provider wire formats disagree about
+ * multimodal tool results. A following ordinary user turn is accepted by all supported
+ * multimodal providers and preserves the required tool-call/result adjacency. The synthetic row
+ * is never persisted or rendered.
+ */
+fun projectToolResultImagesToUserMessage(
+    messages: List<ChatMessage>,
+    includeImages: Boolean,
+): List<ChatMessage> {
+    if (messages.none { it.id.startsWith(Constants.RESULT_MSG_PREFIX) && it.images.isNotEmpty() }) {
+        return messages
+    }
+
+    val projected = ArrayList<ChatMessage>(messages.size + 2)
+    var index = 0
+    while (index < messages.size) {
+        val message = messages[index]
+        projected += message
+        if (!message.id.startsWith(Constants.RESULT_MSG_PREFIX)) {
+            index++
+            continue
+        }
+
+        val batch = mutableListOf(message)
+        var next = index + 1
+        while (
+            next < messages.size &&
+            messages[next].id.startsWith(Constants.RESULT_MSG_PREFIX)
+        ) {
+            projected += messages[next]
+            batch += messages[next]
+            next++
+        }
+        val images = batch.flatMap(ChatMessage::images).filter(String::isNotBlank).distinct()
+        if (images.isNotEmpty()) {
+            val first = batch.first()
+            val seed = batch.joinToString(":") { it.id }
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(seed.toByteArray())
+                .take(8)
+                .joinToString("") { "%02x".format(it) }
+            projected += ChatMessage(
+                id = "tool_image_context_$digest",
+                parentId = batch.last().id,
+                text = if (includeImages) {
+                    "[Tool visual result: inspect the attached image${if (images.size == 1) "" else "s"} before continuing.]"
+                } else {
+                    "[Tool visual result unavailable: the current model does not support image input.]"
+                },
+                images = if (includeImages) images else emptyList(),
+                participant = Participant.USER,
+                status = MessageStatus.SUCCESS,
+                timestamp = batch.last().timestamp,
+                runId = first.runId,
+                runSequence = first.runSequence,
+            )
+        }
+        index = next
+    }
+    return projected
+}
+
 private fun ChatMessage.isNormalUserMessage(): Boolean =
     participant == Participant.USER && !isToolProtocolMessage()
 

@@ -29,6 +29,80 @@ internal sealed interface AbsoluteBottomScrollEvent {
     data object Cancelled : AbsoluteBottomScrollEvent
 }
 
+/**
+ * Short-lived ownership used while the IME reduces the chat viewport.
+ *
+ * The eligibility snapshot is captured before the inset changes, so even a one-frame IME jump
+ * cannot make a previously bottom-aligned list look detached. A real drag suppresses reacquisition
+ * for the rest of that IME opening cycle.
+ */
+internal data class ImeBottomAnchorState(
+    val observedInsetPx: Int,
+    val bottomEligibleBeforeInsetChange: Boolean,
+    val active: Boolean = false,
+    val suppressedUntilInsetFalls: Boolean = false,
+)
+
+internal sealed interface ImeBottomAnchorEvent {
+    data class InsetsObserved(
+        val insetPx: Int,
+        val bottomEligibleNow: Boolean,
+    ) : ImeBottomAnchorEvent
+
+    data object CorrectionSettled : ImeBottomAnchorEvent
+    data object UserDragStarted : ImeBottomAnchorEvent
+    data object ExplicitBottomReached : ImeBottomAnchorEvent
+    data object Cancelled : ImeBottomAnchorEvent
+}
+
+internal fun reduceImeBottomAnchor(
+    current: ImeBottomAnchorState,
+    event: ImeBottomAnchorEvent,
+): ImeBottomAnchorState = when (event) {
+    is ImeBottomAnchorEvent.InsetsObserved -> when {
+        event.insetPx > current.observedInsetPx -> current.copy(
+            observedInsetPx = event.insetPx,
+            active =
+                !current.suppressedUntilInsetFalls &&
+                    (current.active || current.bottomEligibleBeforeInsetChange),
+        )
+
+        event.insetPx < current.observedInsetPx -> current.copy(
+            observedInsetPx = event.insetPx,
+            bottomEligibleBeforeInsetChange = event.bottomEligibleNow,
+            active = false,
+            suppressedUntilInsetFalls = false,
+        )
+
+        current.active || current.suppressedUntilInsetFalls -> current
+        else -> current.copy(
+            bottomEligibleBeforeInsetChange = event.bottomEligibleNow,
+        )
+    }
+
+    ImeBottomAnchorEvent.CorrectionSettled -> current.copy(
+        bottomEligibleBeforeInsetChange = true,
+        active = false,
+    )
+
+    ImeBottomAnchorEvent.UserDragStarted -> current.copy(
+        bottomEligibleBeforeInsetChange = false,
+        active = false,
+        suppressedUntilInsetFalls = true,
+    )
+
+    ImeBottomAnchorEvent.ExplicitBottomReached -> current.copy(
+        bottomEligibleBeforeInsetChange = true,
+        active = false,
+        suppressedUntilInsetFalls = false,
+    )
+
+    ImeBottomAnchorEvent.Cancelled -> current.copy(
+        bottomEligibleBeforeInsetChange = false,
+        active = false,
+    )
+}
+
 internal fun reduceAbsoluteBottomScroll(
     current: AbsoluteBottomScrollPhase,
     event: AbsoluteBottomScrollEvent,
@@ -57,6 +131,8 @@ internal data class AbsoluteBottomLayoutSnapshot(
     val afterContentPaddingPx: Int,
     val sentinelOffsetPx: Int?,
     val sentinelSizePx: Int?,
+    val lastVisibleIndex: Int? = null,
+    val lastVisibleEndOffsetPx: Int? = null,
 ) {
     val sentinelVisible: Boolean
         get() = sentinelOffsetPx != null && sentinelSizePx != null
@@ -71,6 +147,21 @@ internal data class AbsoluteBottomLayoutSnapshot(
 
     val viewportSizePx: Int
         get() = (viewportEndOffsetPx - viewportStartOffsetPx).coerceAtLeast(0)
+
+    /**
+     * Returns the physical distance to the final sentinel even while the sentinel itself is just
+     * outside the viewport. LazyColumn exposes the end of the immediately preceding item, so this
+     * remains exact for the final one-item gap and avoids turning a nominal 64dp threshold into an
+     * effective 1dp threshold.
+     */
+    fun estimatedRemainingDistancePx(estimatedSentinelSizePx: Float): Float? {
+        remainingDistancePx?.let { return it }
+        val lastIndex = lastVisibleIndex ?: return null
+        val lastEnd = lastVisibleEndOffsetPx ?: return null
+        if (lastIndex != totalItemsCount - 2) return null
+        val contentEnd = viewportEndOffsetPx - afterContentPaddingPx
+        return (lastEnd + estimatedSentinelSizePx - contentEnd).coerceAtLeast(0f)
+    }
 }
 
 internal fun absoluteBottomLayoutSnapshot(
@@ -83,6 +174,7 @@ internal fun absoluteBottomLayoutSnapshot(
     } else {
         null
     }
+    val lastVisible = layoutInfo.visibleItemsInfo.maxByOrNull { item -> item.index }
     return AbsoluteBottomLayoutSnapshot(
         totalItemsCount = layoutInfo.totalItemsCount,
         canScrollForward = canScrollForward,
@@ -91,7 +183,21 @@ internal fun absoluteBottomLayoutSnapshot(
         afterContentPaddingPx = layoutInfo.afterContentPadding,
         sentinelOffsetPx = sentinel?.offset,
         sentinelSizePx = sentinel?.size,
+        lastVisibleIndex = lastVisible?.index,
+        lastVisibleEndOffsetPx = lastVisible?.let { item -> item.offset + item.size },
     )
+}
+
+internal fun isWithinAbsoluteBottomAttachThreshold(
+    snapshot: AbsoluteBottomLayoutSnapshot,
+    remainingDistancePx: Float?,
+    thresholdPx: Float,
+): Boolean {
+    require(thresholdPx >= 0f)
+    val layoutReady = snapshot.totalItemsCount > 0 && snapshot.viewportSizePx > 0
+    if (!layoutReady) return false
+    if (!snapshot.canScrollForward) return true
+    return remainingDistancePx != null && remainingDistancePx <= thresholdPx
 }
 
 internal fun estimateAbsoluteBottomDistancePx(
@@ -121,6 +227,7 @@ internal fun shouldShowAbsoluteBottomButton(
     isNearBottom: Boolean,
     isStreamingAutoFollowing: Boolean,
     scrollPhase: AbsoluteBottomScrollPhase,
+    competingProgrammaticScrollActive: Boolean = false,
 ): Boolean =
     !isNewChatMode &&
         !isSwitching &&
@@ -130,7 +237,8 @@ internal fun shouldShowAbsoluteBottomButton(
         canScrollForward &&
         !isNearBottom &&
         !isStreamingAutoFollowing &&
-        !scrollPhase.isActive
+        !scrollPhase.isActive &&
+        !competingProgrammaticScrollActive
 
 /**
  * Hysteretic proximity latch for the absolute-bottom button.

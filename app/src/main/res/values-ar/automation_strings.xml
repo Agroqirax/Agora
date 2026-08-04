@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">اختيار جدول</string>
     <string name="task_last_run_at">آخر تشغيل: %1$s</string>
     <string name="task_never_run">لم تُشغَّل قط</string>
-    <string name="task_empty">لا توجد عمليات أتمتة بعد</string>
-    <string name="task_empty_desc">أنشئ عملية أتمتة لتشغيل موجّه الآن أو وفق جدول.</string>
+    <string name="task_empty">لا توجد مهام بعد</string>
+    <string name="task_empty_desc">أنشئ مهمة لتشغيل موجّه الآن أو وفق جدول.</string>
     <string name="task_new_task">مهمة جديدة</string>
     <string name="task_execution_log">السجل</string>
     <string name="task_no_executions">لا توجد عمليات تشغيل بعد</string>
-    <string name="task_no_executions_desc">شغّل هذه الأتمتة لإنشاء سجل تنفيذ.</string>
+    <string name="task_no_executions_desc">شغّل هذه المهمة لإنشاء سجل تنفيذ.</string>
     <string name="task_running">قيد التشغيل…</string>
     <string name="task_last_run">آخر تشغيل: %1$s</string>
     <string name="task_from_banner">من المهمة: %1$s</string>

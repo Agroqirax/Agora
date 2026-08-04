@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">일정 선택</string>
     <string name="task_last_run_at">마지막 실행: %1$s</string>
     <string name="task_never_run">실행된 적 없음</string>
-    <string name="task_empty">아직 자동화가 없습니다</string>
-    <string name="task_empty_desc">프롬프트를 지금 또는 일정에 따라 실행할 자동화를 만드세요.</string>
+    <string name="task_empty">아직 작업이 없습니다</string>
+    <string name="task_empty_desc">프롬프트를 지금 또는 일정에 따라 실행할 작업을 만드세요.</string>
     <string name="task_new_task">새 작업</string>
     <string name="task_execution_log">기록</string>
     <string name="task_no_executions">아직 실행 기록이 없습니다</string>
-    <string name="task_no_executions_desc">이 자동화를 실행하면 실행 기록이 생성됩니다.</string>
+    <string name="task_no_executions_desc">이 작업을 실행하면 실행 기록이 생성됩니다.</string>
     <string name="task_running">실행 중…</string>
     <string name="task_last_run">마지막 실행: %1$s</string>
     <string name="task_from_banner">작업에서 실행: %1$s</string>

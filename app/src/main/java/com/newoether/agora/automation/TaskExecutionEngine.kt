@@ -23,6 +23,7 @@ import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
 import com.newoether.agora.viewmodel.ShellConfirmationController
 import com.newoether.agora.viewmodel.fallbackConversationTitle
+import com.newoether.agora.tool.McpToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.NonCancellable
@@ -56,6 +57,7 @@ class TaskExecutionEngine(
     private val appScope: CoroutineScope,
     private val executionCoordinator: ConversationExecutionCoordinator,
     shellConfirmation: ShellConfirmationController,
+    mcpToolProvider: McpToolProvider,
     private val automationExecutionGate: AutomationExecutionGate = AutomationExecutionGate(),
 ) {
     sealed interface Result {
@@ -110,6 +112,7 @@ class TaskExecutionEngine(
         providers = providerRegistry.all,
         context = appContext,
         sandboxFactory = sandboxFactory,
+        additionalToolProviders = listOf(mcpToolProvider),
     ).also {
         // Foreground Task/Loop executions share the exact same prompt and session trust state as
         // Chat. ShellConfirmationController itself fails fast when no Activity is visible.

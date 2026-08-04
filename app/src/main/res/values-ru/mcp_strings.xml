@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mcp_title">MCP</string>
+    <string name="mcp_desc">Подключение внешних серверов инструментов</string>
+    <string name="mcp_servers">Серверы MCP</string>
+    <string name="mcp_no_servers">Нет серверов MCP</string>
+    <string name="mcp_no_servers_desc">Добавьте конечную точку Streamable HTTP, чтобы использовать её инструменты в диалогах.</string>
+    <string name="mcp_add_server">Добавить сервер</string>
+    <string name="mcp_edit_server">Изменить сервер MCP</string>
+    <string name="mcp_delete_title">Удалить сервер MCP?</string>
+    <string name="mcp_delete_message">Удалить %1$s и его инструменты?</string>
+    <string name="mcp_connection">Подключение</string>
+    <string name="mcp_name">Название</string>
+    <string name="mcp_url">URL Streamable HTTP</string>
+    <string name="mcp_url_error">Введите корректный URL http:// или https://</string>
+    <string name="mcp_headers">Пользовательские заголовки</string>
+    <string name="mcp_headers_desc">Один заголовок Имя: Значение в строке. Хранится в зашифрованном виде.</string>
+    <string name="mcp_headers_error">Каждая строка должна иметь формат Имя: Значение</string>
+    <string name="mcp_timeout">Тайм-аут (секунды)</string>
+    <string name="mcp_timeout_desc">5–300 секунд</string>
+    <string name="mcp_status">Состояние</string>
+    <string name="mcp_status_idle">Ожидание</string>
+    <string name="mcp_status_connecting">Подключение…</string>
+    <string name="mcp_status_connected">Подключено · включено инструментов: %1$d</string>
+    <string name="mcp_status_error">Ошибка подключения</string>
+    <string name="mcp_refresh">Переподключиться и синхронизировать инструменты</string>
+    <string name="mcp_tools_count">Инструменты (%1$d)</string>
+    <string name="mcp_tool_no_description">Нет описания</string>
+</resources>

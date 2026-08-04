@@ -45,7 +45,8 @@ internal object StreamingToolArgumentHintResolver {
             ToolKind.SHELL_JOB_STOP -> root.scalar("job_id")
             ToolKind.FILE_READ,
             ToolKind.FILE_WRITE,
-            ToolKind.FILE_EDIT -> root.scalar("path")
+            ToolKind.FILE_EDIT,
+            ToolKind.IMAGE_VIEW -> root.scalar("path")
             ToolKind.FILE_GLOB,
             ToolKind.FILE_GREP -> root.scalar("pattern")
             ToolKind.IMAGE_GENERATE -> root.scalar("prompt")

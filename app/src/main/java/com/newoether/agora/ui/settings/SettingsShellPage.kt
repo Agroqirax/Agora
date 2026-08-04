@@ -31,7 +31,6 @@ import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,6 +40,8 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val shellConfirmEnabled by viewModel.settings.shellConfirmEnabled.collectAsState()
     val shellDevices by viewModel.settings.shellDevices.collectAsState()
     val sandboxEnabled by viewModel.settings.sandboxEnabled.collectAsState()
+    val sandboxSharedStorageEnabled by
+        viewModel.settings.sandboxSharedStorageEnabled.collectAsState()
     val density = androidx.compose.ui.platform.LocalDensity.current
     var newlyAddedDeviceId by remember { mutableStateOf<String?>(null) }
     var deleteConfirmDeviceId by remember { mutableStateOf<String?>(null) }
@@ -60,7 +61,10 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsSandboxPage(
                     sandboxManager = viewModel.sandboxManager!!,
                     onBack = { showSandboxMgmt = false },
-                    showDocFab = showDocFab
+                    showDocFab = showDocFab,
+                    sharedStorageEnabled = sandboxSharedStorageEnabled,
+                    onSharedStorageEnabledChange =
+                        viewModel.settings::setSandboxSharedStorageEnabled,
                 )
             }
         } else {
@@ -230,7 +234,6 @@ private fun DeviceEditor(
     var sshPortInput by remember(device.id) { mutableStateOf(device.sshPort.toString()) }
     var sshUserInput by remember(device.id) { mutableStateOf(device.sshUser) }
     var sshPwInput by remember(device.id) { mutableStateOf(device.sshPassword) }
-    var timeoutInput by remember(device.id) { mutableIntStateOf(device.timeout) }
     var sshHostKeyInput by remember(device.id) { mutableStateOf(device.sshHostKey) }
     val nameFocusRequester = remember { FocusRequester() }
     val urlFocusRequester = remember { FocusRequester() }
@@ -244,7 +247,7 @@ private fun DeviceEditor(
         nameInput = device.name; descInput = device.description; typeInput = device.type
         urlInput = device.serverUrl; keyInput = device.apiKey
         sshHostInput = device.sshHost; sshPortInput = device.sshPort.toString()
-        sshUserInput = device.sshUser; sshPwInput = device.sshPassword; timeoutInput = device.timeout
+        sshUserInput = device.sshUser; sshPwInput = device.sshPassword
         sshHostKeyInput = device.sshHostKey
     }
 
@@ -374,7 +377,7 @@ private fun DeviceEditor(
                             scope.launch {
                                 val result = viewModel.verifySshHostKey(
                                     sshHostInput.trim(), sshPortInput.toIntOrNull() ?: 22,
-                                    sshUserInput.trim().ifBlank { "root" }, sshPwInput, timeoutInput
+                                    sshUserInput.trim().ifBlank { "root" }, sshPwInput
                                 )
                                 verifying = false
                                 result.fold(
@@ -405,16 +408,6 @@ private fun DeviceEditor(
                     placeholder = { Text(stringResource(R.string.shell_device_desc_hint)) }, leadingIcon = { Icon(Icons.Default.Description, null) },
                     singleLine = true, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth())
 
-                // Timeout
-                Spacer(Modifier.height(10.dp))
-                Text(stringResource(R.string.shell_device_timeout), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.shell_timeout_value, timeoutInput), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(48.dp))
-                    Slider(value = timeoutInput.toFloat(), onValueChange = { timeoutInput = (it / 5f).roundToInt() * 5 }, valueRange = 5f..120f, steps = 22, modifier = Modifier.weight(1f))
-                }
-
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { onDeleteConfirm(device.id) }, modifier = Modifier.weight(1f),
@@ -430,8 +423,7 @@ private fun DeviceEditor(
                             sshPort = sshPortInput.toIntOrNull() ?: 22,
                             sshUser = if (typeInput == "ssh") sshUserInput.trim().ifBlank { "root" } else "root",
                             sshPassword = if (typeInput == "ssh") sshPwInput else "",
-                            sshHostKey = if (typeInput == "ssh") sshHostKeyInput else "",
-                            timeout = timeoutInput
+                            sshHostKey = if (typeInput == "ssh") sshHostKeyInput else ""
                         )); expanded = false
                     }, modifier = Modifier.weight(1f)) { Text(stringResource(R.string.save)) }
                 }

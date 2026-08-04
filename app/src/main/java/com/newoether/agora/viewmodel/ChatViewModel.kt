@@ -191,6 +191,8 @@ class ChatViewModel(
     private val automationExecutionGate: com.newoether.agora.automation.AutomationExecutionGate,
     private val generationRegistry: ConversationStateRegistry,
     private val shellConfirmation: ShellConfirmationController,
+    private val mcpRegistry: com.newoether.agora.mcp.McpRegistry,
+    private val mcpToolProvider: com.newoether.agora.tool.McpToolProvider,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -455,7 +457,7 @@ class ChatViewModel(
             providers = providerRegistry.all,
             context = appContext,
             sandboxFactory = sandboxFactory,
-            additionalToolProviders = listOf(automationToolProvider),
+            additionalToolProviders = listOf(automationToolProvider, mcpToolProvider),
         ).also { gm ->
             // Gate lives in RagManager.indexMessageForRag (autoCacheEnabled + active model).
             gm.onMessagePersisted = { messageId, text -> ragManager.indexMessageForRag(messageId, text) }
@@ -467,6 +469,10 @@ class ChatViewModel(
         sandboxFactory?.create()
     }
     val isSandboxFlavor: Boolean = sandboxFactory?.isAvailable() == true
+    val mcpServerSnapshots: StateFlow<Map<String, com.newoether.agora.mcp.McpServerSnapshot>>
+        get() = mcpRegistry.snapshots
+
+    fun refreshMcpServer(serverId: String) = mcpRegistry.refresh(serverId)
 
     override fun onCleared() {
         super.onCleared()
@@ -1105,11 +1111,11 @@ class ChatViewModel(
      * if the password is wrong — letting the user pin the key first.
      */
     suspend fun verifySshHostKey(
-        host: String, port: Int, user: String, password: String, timeoutSec: Int
+        host: String, port: Int, user: String, password: String
     ): Result<Pair<String, String>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
         if (host.isBlank()) return@withContext Result.failure(Exception("Host is empty"))
         val client = SshClient(
-            host, port, user.ifBlank { "root" }, password, timeoutSec * 1000,
+            host, port, user.ifBlank { "root" }, password,
             pinnedHostKey = "", allowUnknownHostKey = true
         )
         try {

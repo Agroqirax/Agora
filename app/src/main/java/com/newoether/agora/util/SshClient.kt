@@ -32,7 +32,7 @@ class SshClient(
     private val port: Int,
     private val user: String,
     private val password: String,
-    private val timeoutMs: Int = 30000,
+    private val timeoutMs: Int = Constants.NETWORK_CONNECT_TIMEOUT_MS.toInt(),
     private val pinnedHostKey: String = "",
     private val allowUnknownHostKey: Boolean = false
 ) {

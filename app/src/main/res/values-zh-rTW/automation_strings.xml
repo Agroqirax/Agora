@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">選擇排程</string>
     <string name="task_last_run_at">上次執行：%1$s</string>
     <string name="task_never_run">從未執行</string>
-    <string name="task_empty">尚無自動化</string>
-    <string name="task_empty_desc">建立自動化，以立即或按排程執行提示詞。</string>
+    <string name="task_empty">尚無任務</string>
+    <string name="task_empty_desc">建立任務，以立即或按排程執行提示詞。</string>
     <string name="task_new_task">新增任務</string>
     <string name="task_execution_log">歷史記錄</string>
     <string name="task_no_executions">尚無執行記錄</string>
-    <string name="task_no_executions_desc">執行此自動化後，執行記錄會顯示在這裡。</string>
+    <string name="task_no_executions_desc">執行此任務後，執行記錄會顯示在這裡。</string>
     <string name="task_running">執行中…</string>
     <string name="task_last_run">上次執行：%1$s</string>
     <string name="task_from_banner">來自任務：%1$s</string>

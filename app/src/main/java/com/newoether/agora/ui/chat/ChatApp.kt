@@ -108,11 +108,6 @@ private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
 private const val DRAFT_PERSIST_RETRY_COUNT = 2
 private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
 
-private data class AbsoluteBottomRequest(
-    val token: Long = 0L,
-    val attachStreamingTailOnArrival: Boolean = false,
-)
-
 private data class ComposerDraftUiSnapshot(
     val text: String,
     val attachments: List<SelectedAttachment>,
@@ -480,13 +475,39 @@ fun ChatApp(
     var absoluteBottomScrollPhase by remember(currentConversationId) {
         mutableStateOf(AbsoluteBottomScrollPhase.IDLE)
     }
-    var absoluteBottomRequest by remember(currentConversationId) {
-        mutableStateOf(AbsoluteBottomRequest())
+    var absoluteBottomRequestToken by remember(currentConversationId) {
+        mutableLongStateOf(0L)
     }
     val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
     val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
     var isNearAbsoluteBottom by remember(currentConversationId) {
         mutableStateOf(true)
+    }
+    var isWithinAbsoluteBottomAttachThreshold by remember(currentConversationId) {
+        mutableStateOf(false)
+    }
+    val imeBottomPx = with(density) { imeBottom.roundToPx() }
+    var imeBottomAnchorState by remember(currentConversationId) {
+        mutableStateOf(
+            ImeBottomAnchorState(
+                observedInsetPx = imeBottomPx,
+                bottomEligibleBeforeInsetChange = false,
+            ),
+        )
+    }
+    val imeBottomEligibleNow =
+        currentConversationId != null &&
+            loadedMessagesConversationId == currentConversationId &&
+            isWithinAbsoluteBottomAttachThreshold
+    SideEffect {
+        val next = reduceImeBottomAnchor(
+            current = imeBottomAnchorState,
+            event = ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = imeBottomPx,
+                bottomEligibleNow = imeBottomEligibleNow,
+            ),
+        )
+        if (next != imeBottomAnchorState) imeBottomAnchorState = next
     }
     // STOPPING deliberately keeps the generation slot's loading flag true until both coroutine
     // unwind and durable finalization finish. It cannot produce more content, though, so treating
@@ -496,21 +517,19 @@ fun ChatApp(
     // Follow state belongs to one conversation. Reusing it across a conversation switch can
     // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
     val streamingTailController = rememberStreamingTailController(currentConversationId)
-    fun requestAbsoluteBottomScroll(
-        attachStreamingTailOnArrival: Boolean = false,
-    ): Boolean {
+    fun requestAbsoluteBottomScroll(): Boolean {
         if (absoluteBottomScrollPhase.isActive) return false
+        imeBottomAnchorState = reduceImeBottomAnchor(
+            imeBottomAnchorState,
+            ImeBottomAnchorEvent.Cancelled,
+        )
         absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
             absoluteBottomScrollPhase,
             AbsoluteBottomScrollEvent.Requested,
         )
-        val nextToken =
-            if (absoluteBottomRequest.token == Long.MAX_VALUE) 1L
-            else absoluteBottomRequest.token + 1L
-        absoluteBottomRequest = AbsoluteBottomRequest(
-            token = nextToken,
-            attachStreamingTailOnArrival = attachStreamingTailOnArrival,
-        )
+        absoluteBottomRequestToken =
+            if (absoluteBottomRequestToken == Long.MAX_VALUE) 1L
+            else absoluteBottomRequestToken + 1L
         return true
     }
     LaunchedEffect(
@@ -519,18 +538,26 @@ fun ChatApp(
         bottomButtonHideThresholdPx,
         bottomButtonShowThresholdPx,
     ) {
+        val estimatedSentinelSizePx = with(density) { 1.dp.toPx() }
         snapshotFlow {
-            absoluteBottomLayoutSnapshot(
+            val snapshot = absoluteBottomLayoutSnapshot(
                 layoutInfo = listState.layoutInfo,
                 canScrollForward = listState.canScrollForward,
             )
+            snapshot to snapshot.estimatedRemainingDistancePx(estimatedSentinelSizePx)
         }
             .distinctUntilChanged()
-            .collect { snapshot ->
+            .collect { (snapshot, remainingDistancePx) ->
+                isWithinAbsoluteBottomAttachThreshold =
+                    isWithinAbsoluteBottomAttachThreshold(
+                        snapshot = snapshot,
+                        remainingDistancePx = remainingDistancePx,
+                        thresholdPx = bottomButtonHideThresholdPx,
+                    )
                 isNearAbsoluteBottom = reduceAbsoluteBottomProximity(
                     wasNearBottom = isNearAbsoluteBottom,
                     canScrollForward = snapshot.canScrollForward,
-                    remainingDistancePx = snapshot.remainingDistancePx,
+                    remainingDistancePx = remainingDistancePx,
                     hideThresholdPx = bottomButtonHideThresholdPx,
                     showThresholdPx = bottomButtonShowThresholdPx,
                 )
@@ -768,6 +795,84 @@ fun ChatApp(
             totalItemsCount = layout.totalItemsCount,
             estimatedItemSizePx = ::estimatedItemSize,
         )
+    }
+
+    val latestImeBottomAnchorState by rememberUpdatedState(imeBottomAnchorState)
+    val latestImeBottomPx by rememberUpdatedState(imeBottomPx)
+    LaunchedEffect(
+        currentConversationId,
+        imeBottomAnchorState.active,
+    ) {
+        if (!imeBottomAnchorState.active) return@LaunchedEffect
+
+        val minimumStepPx = with(density) { 1.dp.toPx() }
+        var previousFrameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
+        val actorStartNanos = previousFrameNanos
+        var lastObservedInsetPx = latestImeBottomPx
+        var lastInsetChangeNanos = previousFrameNanos
+        var stableFrames = 0
+        while (true) {
+            val frameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
+            if (!latestImeBottomAnchorState.active) return@LaunchedEffect
+            if (latestImeBottomPx != lastObservedInsetPx) {
+                lastObservedInsetPx = latestImeBottomPx
+                lastInsetChangeNanos = frameNanos
+            }
+            val elapsedSeconds =
+                ((frameNanos - previousFrameNanos).coerceAtLeast(1L) / 1_000_000_000f)
+                    .coerceAtMost(0.05f)
+            previousFrameNanos = frameNanos
+
+            val layout = absoluteBottomLayoutSnapshot(
+                layoutInfo = listState.layoutInfo,
+                canScrollForward = listState.canScrollForward,
+            )
+            val remainingDistancePx =
+                layout.remainingDistancePx
+                    ?: estimateRemainingAbsoluteBottomDistance()
+                    ?: if (listState.canScrollForward) {
+                        layout.viewportSizePx * 0.5f
+                    } else {
+                        0f
+                    }
+
+            if (remainingDistancePx > 0.5f) {
+                // Keep the correction outside LazyList's MutatorMutex, but distribute a one-frame
+                // IME jump over display frames. This preserves immediate drag cancellation and
+                // drawer/tap input without exposing uneven platform inset delivery as a hard snap.
+                val step = coalescedScrollStep(
+                    errorPx = remainingDistancePx,
+                    elapsedSeconds = elapsedSeconds,
+                    timeConstantSeconds = 0.055f,
+                    maximumVelocityPxPerSecond = 6_000f,
+                    minimumStepPx = minimumStepPx,
+                )
+                listState.dispatchRawDelta(step)
+                stableFrames = 0
+            } else {
+                val insetStableForNanos = frameNanos - lastInsetChangeNanos
+                stableFrames =
+                    if (insetStableForNanos >= 80_000_000L) stableFrames + 1 else 0
+                if (stableFrames >= 3) {
+                    imeBottomAnchorState = reduceImeBottomAnchor(
+                        latestImeBottomAnchorState,
+                        ImeBottomAnchorEvent.CorrectionSettled,
+                    )
+                    return@LaunchedEffect
+                }
+            }
+
+            if (frameNanos - actorStartNanos >= 1_600_000_000L) {
+                // Bound the actor even if a malformed layout never exposes a stable sentinel. The
+                // normal proximity state will then expose the bottom button instead of burning
+                // frames indefinitely.
+                imeBottomAnchorState = reduceImeBottomAnchor(
+                    latestImeBottomAnchorState,
+                    ImeBottomAnchorEvent.CorrectionSettled,
+                )
+                return@LaunchedEffect
+            }
+        }
     }
 
     suspend fun awaitScrollTargetCommitted(targetMessageId: String?): Boolean =
@@ -1070,10 +1175,8 @@ fun ChatApp(
     }
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
-    LaunchedEffect(absoluteBottomRequest.token, currentConversationId) {
-        val request = absoluteBottomRequest
-        if (request.token == 0L) return@LaunchedEffect
-        var reattachAfterHandoff = false
+    LaunchedEffect(absoluteBottomRequestToken, currentConversationId) {
+        if (absoluteBottomRequestToken == 0L) return@LaunchedEffect
         try {
             val reachedBottom = listState.animateToAbsoluteBottom(
                 isGenerationActive = { latestGenerationCanGrow },
@@ -1081,11 +1184,12 @@ fun ChatApp(
                 minimumStepPx = with(density) { 2.dp.toPx() },
                 onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
             )
-            reattachAfterHandoff =
-                request.attachStreamingTailOnArrival &&
-                    reachedBottom &&
-                    latestGenerationCanGrow &&
-                    !listState.canScrollForward
+            if (reachedBottom) {
+                imeBottomAnchorState = reduceImeBottomAnchor(
+                    imeBottomAnchorState,
+                    ImeBottomAnchorEvent.ExplicitBottomReached,
+                )
+            }
         } finally {
             if (absoluteBottomScrollPhase.isActive) {
                 absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
@@ -1094,24 +1198,21 @@ fun ChatApp(
                 )
             }
         }
-        // The MessageList follow owner is paused while the absolute-bottom actor runs. Publish the
-        // explicit reattach only after that handoff has ended, otherwise the request observes
-        // autoFollowEnabled=false and is permanently consumed.
-        if (reattachAfterHandoff) {
-            streamingTailController.requestReattach()
-        }
     }
     LaunchedEffect(listState, currentConversationId) {
         listState.interactionSource.interactions.collect { interaction ->
-            if (
-                interaction is DragInteraction.Start &&
-                absoluteBottomScrollPhase.isActive
-            ) {
-                absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
-                    absoluteBottomScrollPhase,
-                    AbsoluteBottomScrollEvent.Cancelled,
+            if (interaction is DragInteraction.Start) {
+                imeBottomAnchorState = reduceImeBottomAnchor(
+                    imeBottomAnchorState,
+                    ImeBottomAnchorEvent.UserDragStarted,
                 )
-                absoluteBottomRequest = AbsoluteBottomRequest()
+                if (absoluteBottomScrollPhase.isActive) {
+                    absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
+                        absoluteBottomScrollPhase,
+                        AbsoluteBottomScrollEvent.Cancelled,
+                    )
+                    absoluteBottomRequestToken = 0L
+                }
             }
         }
     }
@@ -1121,6 +1222,7 @@ fun ChatApp(
         isSwitching,
         regenerationTransition?.id,
         animatedScrollRequest?.id,
+        imeBottomAnchorState.active,
     ) {
         val competingTransition =
             conversationSearchActive ||
@@ -1133,7 +1235,13 @@ fun ChatApp(
                 absoluteBottomScrollPhase,
                 AbsoluteBottomScrollEvent.Cancelled,
             )
-            absoluteBottomRequest = AbsoluteBottomRequest()
+            absoluteBottomRequestToken = 0L
+        }
+        if (competingTransition && imeBottomAnchorState.active) {
+            imeBottomAnchorState = reduceImeBottomAnchor(
+                imeBottomAnchorState,
+                ImeBottomAnchorEvent.Cancelled,
+            )
         }
     }
     LaunchedEffect(
@@ -1427,7 +1535,8 @@ fun ChatApp(
                                         conversationSearchActive ||
                                         shareSelectionActive,
                                 programmaticHandoff =
-                                    absoluteBottomScrollPhase.isActive ||
+                                    imeBottomAnchorState.active ||
+                                        absoluteBottomScrollPhase.isActive ||
                                         animatedScrollRequest?.conversationId ==
                                             currentConversationId ||
                                         regenerationTransition?.conversationId ==
@@ -1451,6 +1560,8 @@ fun ChatApp(
                                     streamingFollowAvailability.enabled,
                                 streamingAutoFollowPaused =
                                     streamingFollowAvailability.paused,
+                                streamingTailWithinAttachThreshold =
+                                    isWithinAbsoluteBottomAttachThreshold,
                                 programmaticScrollActive =
                                     animatedScrollRequest?.conversationId ==
                                         currentConversationId,
@@ -1581,6 +1692,9 @@ fun ChatApp(
                     // conversation. Recreate this derived state with the same owner so its closure
                     // never keeps reading a previous conversation's state objects or the initial
                     // new-chat flag.
+                    val regenerationScrollActive =
+                        regenerationTransition?.conversationId == currentConversationId &&
+                            regenerationTransition?.scrollFinished == false
                     val showButton by remember(
                         currentConversationId,
                         loadedMessagesConversationId,
@@ -1588,6 +1702,8 @@ fun ChatApp(
                         isSwitching,
                         listState,
                         streamingTailController,
+                        regenerationScrollActive,
+                        imeBottomAnchorState.active,
                     ) {
                         derivedStateOf {
                             val totalItemsCount = listState.layoutInfo.totalItemsCount
@@ -1604,6 +1720,9 @@ fun ChatApp(
                                 isStreamingAutoFollowing =
                                     streamingTailController.isAutoFollowing,
                                 scrollPhase = absoluteBottomScrollPhase,
+                                competingProgrammaticScrollActive =
+                                    regenerationScrollActive ||
+                                        imeBottomAnchorState.active,
                             )
                         }
                     }
@@ -1621,11 +1740,7 @@ fun ChatApp(
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             FloatingActionButton(onClick = {
-                                if (
-                                    requestAbsoluteBottomScroll(
-                                        attachStreamingTailOnArrival = true,
-                                    )
-                                ) {
+                                if (requestAbsoluteBottomScroll()) {
                                     haptics.tap()
                                 }
                             }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {

@@ -257,7 +257,88 @@ class MessageListLayoutTest {
                         AbsoluteBottomScrollEvent.Cancelled,
                     ),
                 )
-            }
+        }
+    }
+
+    @Test
+    fun imeRiseAnchorsOnlyAPreviouslyBottomAlignedViewport() {
+        var state = ImeBottomAnchorState(
+            observedInsetPx = 0,
+            bottomEligibleBeforeInsetChange = false,
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 0,
+                bottomEligibleNow = true,
+            ),
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 120,
+                bottomEligibleNow = false,
+            ),
+        )
+        assertTrue(state.active)
+
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.CorrectionSettled,
+        )
+        assertFalse(state.active)
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 240,
+                bottomEligibleNow = false,
+            ),
+        )
+        assertTrue(state.active)
+
+        val detached = reduceImeBottomAnchor(
+            ImeBottomAnchorState(
+                observedInsetPx = 0,
+                bottomEligibleBeforeInsetChange = false,
+            ),
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 240,
+                bottomEligibleNow = false,
+            ),
+        )
+        assertFalse(detached.active)
+    }
+
+    @Test
+    fun userDragSuppressesImeReattachmentUntilTheInsetFalls() {
+        var state = ImeBottomAnchorState(
+            observedInsetPx = 80,
+            bottomEligibleBeforeInsetChange = true,
+            active = true,
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.UserDragStarted,
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 160,
+                bottomEligibleNow = true,
+            ),
+        )
+        assertFalse(state.active)
+        assertTrue(state.suppressedUntilInsetFalls)
+
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 0,
+                bottomEligibleNow = false,
+            ),
+        )
+        assertFalse(state.active)
+        assertFalse(state.suppressedUntilInsetFalls)
     }
 
     @Test
@@ -273,6 +354,31 @@ class MessageListLayoutTest {
         )
 
         assertEquals(65f, snapshot.remainingDistancePx ?: -1f, 0f)
+    }
+
+    @Test
+    fun absoluteBottomThresholdUsesTheFinalPreSentinelGap() {
+        val snapshot = AbsoluteBottomLayoutSnapshot(
+            totalItemsCount = 4,
+            canScrollForward = true,
+            viewportStartOffsetPx = 0,
+            viewportEndOffsetPx = 1_000,
+            afterContentPaddingPx = 24,
+            sentinelOffsetPx = null,
+            sentinelSizePx = null,
+            lastVisibleIndex = 2,
+            lastVisibleEndOffsetPx = 1_030,
+        )
+        val remaining = snapshot.estimatedRemainingDistancePx(3f)
+
+        assertEquals(57f, remaining ?: -1f, 0f)
+        assertTrue(
+            isWithinAbsoluteBottomAttachThreshold(
+                snapshot = snapshot,
+                remainingDistancePx = remaining,
+                thresholdPx = 64f,
+            ),
+        )
     }
 
     @Test
@@ -377,6 +483,20 @@ class MessageListLayoutTest {
                 scrollPhase = AbsoluteBottomScrollPhase.IDLE,
             ),
         )
+        assertFalse(
+            shouldShowAbsoluteBottomButton(
+                isNewChatMode = false,
+                isSwitching = false,
+                conversationContentReady = true,
+                shareSelectionActive = false,
+                hasItems = true,
+                canScrollForward = true,
+                isNearBottom = false,
+                isStreamingAutoFollowing = false,
+                scrollPhase = AbsoluteBottomScrollPhase.IDLE,
+                competingProgrammaticScrollActive = true,
+            ),
+        )
     }
 
     @Test
@@ -419,8 +539,9 @@ class MessageListLayoutTest {
         )
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ExplicitBottomReached(
-                atAbsoluteBottom = true,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.ATTACHED, mode)
@@ -442,8 +563,9 @@ class MessageListLayoutTest {
         )
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ExplicitBottomReached(
-                atAbsoluteBottom = true,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = false,
             ),
         )
         mode = reduceStreamingTailFollow(
@@ -460,8 +582,18 @@ class MessageListLayoutTest {
 
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ExplicitBottomReached(
-                atAbsoluteBottom = true,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.DETACHED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.ATTACHED, mode)
@@ -508,7 +640,7 @@ class MessageListLayoutTest {
     }
 
     @Test
-    fun streamingTailOnlyAttachesAfterExplicitBottomRequestCompletes() {
+    fun streamingTailAttachesOnlyAfterNearBottomMotionSettles() {
         var mode = reduceStreamingTailFollow(
             StreamingTailFollowMode.INACTIVE,
             StreamingTailFollowEvent.GenerationChanged(
@@ -519,8 +651,18 @@ class MessageListLayoutTest {
 
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ExplicitBottomReached(
-                atAbsoluteBottom = true,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = true,
+            ),
+        )
+        assertEquals(StreamingTailFollowMode.ARMED, mode)
+
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ViewportProximityChanged(
+                withinAttachThreshold = true,
+                scrollInProgress = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.ATTACHED, mode)

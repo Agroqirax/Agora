@@ -7,6 +7,7 @@ import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
 import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
+import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.CancellationException
@@ -93,7 +94,8 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
                 val response = HttpClient.post(
                     "$baseUrl/images/generations",
                     body,
-                    mapOf("Authorization" to "Bearer $apiKey")
+                    mapOf("Authorization" to "Bearer $apiKey"),
+                    callTimeoutMillis = Constants.TOOL_EXECUTION_TIMEOUT_MS,
                 ) ?: return@withContext err("no_response", null)
 
                 val json = Json.decodeFromString<Map<String, kotlinx.serialization.json.JsonElement>>(response)
@@ -107,7 +109,10 @@ class ImageGenToolProvider(private val app: Application) : ToolProvider {
                     } else {
                         val url = (first["url"] as? JsonPrimitive)?.content
                             ?: return@withContext err("no_image", "No b64_json or url in the response.")
-                        HttpClient.getBytes(url) ?: return@withContext err("download_failed", null)
+                        HttpClient.getBytes(
+                            url,
+                            callTimeoutMillis = Constants.TOOL_EXECUTION_TIMEOUT_MS,
+                        ) ?: return@withContext err("download_failed", null)
                     }
                 }
 

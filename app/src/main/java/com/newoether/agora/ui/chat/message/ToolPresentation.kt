@@ -33,6 +33,7 @@ internal enum class ToolKind {
     FILE_EDIT,
     FILE_GLOB,
     FILE_GREP,
+    IMAGE_VIEW,
     IMAGE_GENERATE,
     TASK_CREATE,
     TASK_LIST,
@@ -175,6 +176,7 @@ internal object ToolPresentationResolver {
         "file_edit" -> ToolKind.FILE_EDIT
         "file_glob" -> ToolKind.FILE_GLOB
         "file_grep" -> ToolKind.FILE_GREP
+        "view_image" -> ToolKind.IMAGE_VIEW
         "generate_image" -> ToolKind.IMAGE_GENERATE
         "create_task" -> ToolKind.TASK_CREATE
         "list_tasks" -> ToolKind.TASK_LIST
@@ -255,7 +257,8 @@ internal object ToolPresentationResolver {
             ?: result.string("job_id")
         ToolKind.FILE_READ,
         ToolKind.FILE_WRITE,
-        ToolKind.FILE_EDIT -> arguments.string("path")
+        ToolKind.FILE_EDIT,
+        ToolKind.IMAGE_VIEW -> arguments.string("path")
             ?: result.string("path")
         ToolKind.FILE_GLOB,
         ToolKind.FILE_GREP -> arguments.string("pattern")

@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">Выбрать расписание</string>
     <string name="task_last_run_at">Последний запуск: %1$s</string>
     <string name="task_never_run">Ещё не запускалась</string>
-    <string name="task_empty">Автоматизаций пока нет</string>
-    <string name="task_empty_desc">Создайте автоматизацию, чтобы запускать промпт сейчас или по расписанию.</string>
+    <string name="task_empty">Задач пока нет</string>
+    <string name="task_empty_desc">Создайте задачу, чтобы запускать промпт сейчас или по расписанию.</string>
     <string name="task_new_task">Новая задача</string>
     <string name="task_execution_log">История</string>
     <string name="task_no_executions">Запусков пока нет</string>
-    <string name="task_no_executions_desc">Запустите эту автоматизацию, чтобы создать историю выполнений.</string>
+    <string name="task_no_executions_desc">Запустите эту задачу, чтобы создать историю выполнений.</string>
     <string name="task_running">Выполняется…</string>
     <string name="task_last_run">Последний запуск: %1$s</string>
     <string name="task_from_banner">Из задачи: %1$s</string>

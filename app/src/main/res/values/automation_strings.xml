@@ -20,12 +20,12 @@
     <string name="task_schedule_pick">Choose schedule</string>
     <string name="task_last_run_at">Last run %1$s</string>
     <string name="task_never_run">Never run</string>
-    <string name="task_empty">No automations yet</string>
-    <string name="task_empty_desc">Create an automation to run a prompt now or on a schedule.</string>
+    <string name="task_empty">No tasks yet</string>
+    <string name="task_empty_desc">Create a task to run a prompt now or on a schedule.</string>
     <string name="task_new_task">New task</string>
     <string name="task_execution_log">History</string>
     <string name="task_no_executions">No runs yet</string>
-    <string name="task_no_executions_desc">Run this automation to create execution history.</string>
+    <string name="task_no_executions_desc">Run this task to create execution history.</string>
     <string name="task_running">Running…</string>
     <string name="task_last_run">Last run %1$s</string>
     <string name="task_from_banner">From task: %1$s</string>

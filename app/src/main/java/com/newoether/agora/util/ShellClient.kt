@@ -181,6 +181,13 @@ class ShellClient(
         val error: String? = null
     )
 
+    data class FileImageResult(
+        val data: String,
+        val mimeType: String,
+        val size: Long,
+        val error: String? = null,
+    )
+
     data class GrepMatch(
         val path: String,
         val line: Int,
@@ -283,6 +290,21 @@ class ShellClient(
             content = json["content"]?.jsonPrimitive?.content ?: "",
             lines = json["lines"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0,
             totalLines = json["totalLines"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+        )
+    }
+
+    suspend fun fileImage(path: String): FileImageResult {
+        val payload = buildJsonBodyFile(mapOf("path" to path))
+        val jsonStr = filePost("/file/image", payload)
+        val json = Json.parseToJsonElement(jsonStr).jsonObject
+        val error = json["error"]?.jsonPrimitive?.content
+        if (error != null) {
+            return FileImageResult("", "", 0L, error = error)
+        }
+        return FileImageResult(
+            data = json["data"]?.jsonPrimitive?.content.orEmpty(),
+            mimeType = json["mimeType"]?.jsonPrimitive?.content.orEmpty(),
+            size = json["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L,
         )
     }
 

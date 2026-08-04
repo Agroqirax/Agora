@@ -21,12 +21,12 @@
     <string name="task_schedule_pick">Choisir un planning</string>
     <string name="task_last_run_at">Dernière exécution : %1$s</string>
     <string name="task_never_run">Jamais exécutée</string>
-    <string name="task_empty">Aucune automatisation pour le moment</string>
-    <string name="task_empty_desc">Créez une automatisation pour exécuter un prompt maintenant ou selon un planning.</string>
+    <string name="task_empty">Aucune tâche pour le moment</string>
+    <string name="task_empty_desc">Créez une tâche pour exécuter un prompt maintenant ou selon un planning.</string>
     <string name="task_new_task">Nouvelle tâche</string>
     <string name="task_execution_log">Historique</string>
     <string name="task_no_executions">Aucune exécution pour le moment</string>
-    <string name="task_no_executions_desc">Exécutez cette automatisation pour créer un historique d’exécution.</string>
+    <string name="task_no_executions_desc">Exécutez cette tâche pour créer un historique d’exécution.</string>
     <string name="task_running">Exécution en cours…</string>
     <string name="task_last_run">Dernière exécution : %1$s</string>
     <string name="task_from_banner">Depuis la tâche : %1$s</string>

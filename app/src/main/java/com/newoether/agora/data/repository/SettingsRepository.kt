@@ -11,6 +11,7 @@ import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.ShellDeviceConfig
+import com.newoether.agora.data.McpServerConfig
 import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
@@ -136,7 +137,10 @@ class SettingsRepository(
     val proxyBypass: StateFlow<String> = hot(settingsManager.proxyBypass, com.newoether.agora.data.SettingsManager.DEFAULT_PROXY_BYPASS)
     val shellConfirmEnabled: StateFlow<Boolean> = hot(settingsManager.shellConfirmEnabled, true)
     val shellDevices: StateFlow<List<ShellDeviceConfig>> = hot(settingsManager.shellDevices, emptyList())
+    val mcpServers: StateFlow<List<McpServerConfig>> = hot(settingsManager.mcpServers, emptyList())
     val sandboxEnabled: StateFlow<Boolean> = hot(settingsManager.sandboxEnabled, false)
+    val sandboxSharedStorageEnabled: StateFlow<Boolean> =
+        hot(settingsManager.sandboxSharedStorageEnabled, false)
     val defaultTemperature: StateFlow<Float?> = hot(settingsManager.defaultTemperature, null)
     val defaultMaxTokens: StateFlow<Int?> = hot(settingsManager.defaultMaxTokens, null)
     val defaultTopP: StateFlow<Float?> = hot(settingsManager.defaultTopP, null)
@@ -341,6 +345,8 @@ class SettingsRepository(
 
     // Shell devices
     fun removeShellDevice(deviceId: String) = scope.launch { settingsManager.saveShellDevices(shellDevices.value.filter { it.id != deviceId }) }
+    fun removeMcpServer(serverId: String) =
+        scope.launch { settingsManager.saveMcpServers(mcpServers.value.filter { it.id != serverId }) }
 
     fun setConversationSettings(convId: String, settings: ConversationSettings?) = scope.launch { settingsManager.saveConversationSettings(convId, settings) }
 
@@ -389,6 +395,8 @@ class SettingsRepository(
     fun setProxyPassword(pass: String) = scope.launch { settingsManager.saveProxyPassword(pass) }
     fun setProxyBypass(bypass: String) = scope.launch { settingsManager.saveProxyBypass(bypass) }
     fun setSandboxEnabled(enabled: Boolean) = scope.launch { settingsManager.saveSandboxEnabled(enabled) }
+    fun setSandboxSharedStorageEnabled(enabled: Boolean) =
+        scope.launch { settingsManager.saveSandboxSharedStorageEnabled(enabled) }
     fun setThinkingEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingEnabled(enabled) }
     fun setThinkingLevel(level: String) = scope.launch { settingsManager.saveThinkingLevel(level) }
     fun setThinkingBudgetEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingBudgetEnabled(enabled) }
@@ -416,6 +424,13 @@ class SettingsRepository(
     fun addShellDevice(device: ShellDeviceConfig) = scope.launch { settingsManager.saveShellDevices(shellDevices.value + device) }
     fun updateShellDevice(device: ShellDeviceConfig) = scope.launch {
         settingsManager.saveShellDevices(shellDevices.value.map { if (it.id == device.id) device else it })
+    }
+    fun addMcpServer(server: McpServerConfig) =
+        scope.launch { settingsManager.saveMcpServers(mcpServers.value + server) }
+    fun updateMcpServer(server: McpServerConfig) = scope.launch {
+        settingsManager.saveMcpServers(
+            mcpServers.value.map { if (it.id == server.id) server else it },
+        )
     }
 
     // ── Derived lookups ─────────────────────────────────────────

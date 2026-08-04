@@ -22,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,14 +49,6 @@ internal class StreamingTailController {
 
     var isAttached by mutableStateOf(false)
         internal set
-
-    var reattachRequestToken by mutableLongStateOf(0L)
-        private set
-
-    fun requestReattach() {
-        reattachRequestToken =
-            if (reattachRequestToken == Long.MAX_VALUE) 1L else reattachRequestToken + 1L
-    }
 }
 
 @Composable
@@ -96,8 +87,8 @@ internal fun streamingTailAvailability(
  * Explicit auto-follow state.
  *
  * ARMED is generation-active but not following. ATTACHED keeps the physical page bottom
- * stationary as the page extent grows. Geometry never grants attachment: only completion of a
- * user-initiated scroll-to-bottom request can enter ATTACHED. A real user drag latches DETACHED.
+ * stationary as the page extent grows. A real user drag immediately latches DETACHED; once all
+ * user/programmatic motion settles, proximity to the physical bottom is the sole attach authority.
  */
 internal enum class StreamingTailFollowMode {
     INACTIVE,
@@ -114,8 +105,9 @@ internal sealed interface StreamingTailFollowEvent {
 
     data object UserDragStarted : StreamingTailFollowEvent
 
-    data class ExplicitBottomReached(
-        val atAbsoluteBottom: Boolean,
+    data class ViewportProximityChanged(
+        val withinAttachThreshold: Boolean,
+        val scrollInProgress: Boolean,
     ) : StreamingTailFollowEvent
 
     data object SettlingFinished : StreamingTailFollowEvent
@@ -145,18 +137,14 @@ internal fun reduceStreamingTailFollow(
             StreamingTailFollowMode.DETACHED
         }
 
-    is StreamingTailFollowEvent.ExplicitBottomReached ->
-        if (
-            current in setOf(
-                StreamingTailFollowMode.ARMED,
-                StreamingTailFollowMode.DETACHED,
-            ) &&
-            event.atAbsoluteBottom
-        ) {
-            StreamingTailFollowMode.ATTACHED
-        } else {
-            current
-        }
+    is StreamingTailFollowEvent.ViewportProximityChanged -> when {
+        current == StreamingTailFollowMode.INACTIVE -> current
+        event.scrollInProgress -> current
+        current == StreamingTailFollowMode.ATTACHED ||
+            current == StreamingTailFollowMode.SETTLING -> current
+        event.withinAttachThreshold -> StreamingTailFollowMode.ATTACHED
+        else -> current
+    }
 
     StreamingTailFollowEvent.SettlingFinished ->
         if (current == StreamingTailFollowMode.SETTLING) {

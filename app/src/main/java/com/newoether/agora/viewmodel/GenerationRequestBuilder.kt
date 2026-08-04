@@ -158,6 +158,7 @@ class GenerationRequestBuilder(
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
             shellDevices = settings.shellDevices.value,
             sandboxEnabled = settings.sandboxEnabled.value,
+            sandboxSharedStorageEnabled = settings.sandboxSharedStorageEnabled.value,
             // Keyed on THIS generation's model, not the UI's currently-selected one — a queued
             // or parallel-conversation generation must not inherit another conversation's model.
             imageTranscriptionEnabled = settings.imageTranscriptionEnabledModels.value.contains(modelId),

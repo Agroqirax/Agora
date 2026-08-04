@@ -19,8 +19,13 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.encodeToString
+import java.util.concurrent.TimeUnit
 
 class WebSearchToolProvider : ToolProvider {
+    private val webClient = HttpClient.client.newBuilder()
+        .callTimeout(Constants.NETWORK_TOOL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .readTimeout(Constants.NETWORK_TOOL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        .build()
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.webSearchEnabled) return emptyList()
@@ -74,7 +79,7 @@ class WebSearchToolProvider : ToolProvider {
         return try {
             // DuckDuckGo is a scraper, not an API — handle it separately.
             if (ctx.webSearchProvider == "duckduckgo") {
-                val scraper = DuckDuckGoScraper()
+                val scraper = DuckDuckGoScraper(webClient)
                 return when (val r = scraper.search(query, numResults)) {
                     is DuckDuckGoScraper.SearchResponse.Success -> {
                         val rawResults = buildJsonArray {
@@ -111,7 +116,8 @@ class WebSearchToolProvider : ToolProvider {
                 "serper" -> HttpClient.post(
                     "https://google.serper.dev/search",
                     Json.encodeToString(buildJsonObject { put("q", query); put("num", numResults) }),
-                    mapOf("X-API-KEY" to apiKey)
+                    mapOf("X-API-KEY" to apiKey),
+                    callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                 )
                 "tavily" -> HttpClient.post(
                     "https://api.tavily.com/search",
@@ -122,7 +128,8 @@ class WebSearchToolProvider : ToolProvider {
                         put("search_depth", "advanced")
                         put("include_answer", true)
                     }),
-                    emptyMap()
+                    emptyMap(),
+                    callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                 )
                 "searxng" -> {
                     val baseUrl = ctx.webSearchBaseUrl.ifBlank { "https://searx.be" }
@@ -133,12 +140,14 @@ class WebSearchToolProvider : ToolProvider {
                     // bot-filtering instances don't 403 us (same reason web_fetch sets one).
                     HttpClient.fetchModels(
                         "$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json",
-                        mapOf("User-Agent" to Constants.WEB_FETCH_USER_AGENT)
+                        mapOf("User-Agent" to Constants.WEB_FETCH_USER_AGENT),
+                        callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                     )
                 }
                 else -> HttpClient.fetchModels(
                     "https://api.search.brave.com/res/v1/web/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&count=$numResults",
-                    mapOf("Accept" to "application/json", "X-Subscription-Token" to apiKey)
+                    mapOf("Accept" to "application/json", "X-Subscription-Token" to apiKey),
+                    callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                 )
             } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
 
@@ -221,7 +230,7 @@ class WebSearchToolProvider : ToolProvider {
             val html = HttpClient.fetchModels(url, mapOf(
                 "User-Agent" to Constants.WEB_FETCH_USER_AGENT,
                 "Accept" to "text/html,application/xhtml+xml,*/*"
-            ))
+            ), callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS)
                 ?: return buildJsonObject { put("type", "web_fetch"); put("url", url); put("error", "no_response") }.toString()
             val fullText = htmlToReadableText(html)
             val text = fullText.take(maxChars)

@@ -1,6 +1,7 @@
 package com.newoether.agora.tool
 
 import com.newoether.agora.api.ToolDefinition
+import com.newoether.agora.model.ToolImageAttachment
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -16,8 +17,22 @@ sealed interface ToolExecutionEvent {
     data class Progress(val message: String) : ToolExecutionEvent
 
     /** Exactly one authoritative model-facing result. */
-    data class Completed(val result: String) : ToolExecutionEvent
+    data class Completed(val result: ToolExecutionResult) : ToolExecutionEvent {
+        constructor(text: String) : this(ToolExecutionResult(text = text))
+    }
 }
+
+/**
+ * Provider-neutral tool output. Text remains the protocol-facing result while images are
+ * persisted as private files and projected into a normal user multimodal turn for the next model
+ * round. Structured JSON stays distinct so arbitrary text is never classified by its spelling.
+ */
+data class ToolExecutionResult(
+    val text: String,
+    val images: List<ToolImageAttachment> = emptyList(),
+    val structuredContent: String? = null,
+    val isError: Boolean = false,
+)
 
 /**
  * Interface for tool providers that supply tool definitions and execution
@@ -42,7 +57,7 @@ interface ToolProvider {
         arguments: String,
         ctx: GenerationContext,
     ): Flow<ToolExecutionEvent> = flow {
-        emit(ToolExecutionEvent.Completed(execute(name, arguments, ctx)))
+        emit(ToolExecutionEvent.Completed(ToolExecutionResult(execute(name, arguments, ctx))))
     }
 
     /** Whether this provider can execute the given tool name. */

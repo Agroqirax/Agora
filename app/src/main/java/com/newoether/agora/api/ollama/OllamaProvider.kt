@@ -64,7 +64,7 @@ internal data class OllamaModelInfo(
 
 class OllamaProvider : LlmProvider {
     override val name: String = Constants.PROVIDER_OLLAMA
-    override val defaultBaseUrl: String = ""
+    override val defaultBaseUrl: String = "http://localhost:11434"
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
 
     override fun generateResponse(

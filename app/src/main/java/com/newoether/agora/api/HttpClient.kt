@@ -74,7 +74,7 @@ object HttpClient {
 
     /** Fail-closed guard: never transmit API credentials over cleartext HTTP to a
      *  non-local host. LAN / loopback / Tailscale endpoints (Ollama, self-hosted) stay allowed. */
-    private fun guardCleartextCredentials(url: String, headers: Map<String, String>) {
+    internal fun guardCleartextCredentials(url: String, headers: Map<String, String>) {
         if (!url.startsWith("http://", ignoreCase = true)) return
         val host = try { java.net.URI(url).host ?: "" } catch (_: Exception) { "" }
         if (isLocalHost(host)) return
@@ -339,12 +339,25 @@ object HttpClient {
         liveHandles.clear()
     }
 
-    fun post(url: String, jsonBody: String, headers: Map<String, String> = emptyMap()): String? {
+    private fun newCall(request: Request, callTimeoutMillis: Long?): okhttp3.Call =
+        client.newCall(request).also { call ->
+            callTimeoutMillis?.let {
+                require(it > 0L)
+                call.timeout().timeout(it, TimeUnit.MILLISECONDS)
+            }
+        }
+
+    fun post(
+        url: String,
+        jsonBody: String,
+        headers: Map<String, String> = emptyMap(),
+        callTimeoutMillis: Long? = null,
+    ): String? {
         guardCleartextCredentials(url, headers)
         val body = jsonBody.toRequestBody(JSON)
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val response = client.newCall(requestBuilder.build()).execute()
+        val response = newCall(requestBuilder.build(), callTimeoutMillis).execute()
         return response.use {
             if (it.isSuccessful) it.body?.string()
             else {
@@ -372,11 +385,15 @@ object HttpClient {
         }
     }
 
-    fun fetchModels(url: String, headers: Map<String, String> = emptyMap()): String? {
+    fun fetchModels(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        callTimeoutMillis: Long? = null,
+    ): String? {
         guardCleartextCredentials(url, headers)
         val requestBuilder = Request.Builder().url(url).get()
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val response = client.newCall(requestBuilder.build()).execute()
+        val response = newCall(requestBuilder.build(), callTimeoutMillis).execute()
         return response.use {
             if (it.isSuccessful) it.body?.string() else null
         }
@@ -399,11 +416,15 @@ object HttpClient {
     }
 
     /** GET raw bytes (e.g. an image referenced by URL). Returns null on failure. */
-    fun getBytes(url: String, headers: Map<String, String> = emptyMap()): ByteArray? {
+    fun getBytes(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        callTimeoutMillis: Long? = null,
+    ): ByteArray? {
         guardCleartextCredentials(url, headers)
         val requestBuilder = Request.Builder().url(url).get()
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val response = client.newCall(requestBuilder.build()).execute()
+        val response = newCall(requestBuilder.build(), callTimeoutMillis).execute()
         return response.use {
             if (it.isSuccessful) it.body?.bytes() else null
         }

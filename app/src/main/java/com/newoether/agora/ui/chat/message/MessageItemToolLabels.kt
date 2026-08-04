@@ -45,6 +45,7 @@ private fun toolBaseDisplayName(
     ToolKind.FILE_EDIT -> stringResource(R.string.tool_file_edit)
     ToolKind.FILE_GLOB -> stringResource(R.string.tool_file_glob)
     ToolKind.FILE_GREP -> stringResource(R.string.tool_file_grep)
+    ToolKind.IMAGE_VIEW -> stringResource(R.string.tool_view_image)
     ToolKind.IMAGE_GENERATE -> stringResource(R.string.tool_generate_image)
     ToolKind.TASK_CREATE -> stringResource(R.string.tool_create_task)
     ToolKind.TASK_LIST -> stringResource(R.string.tool_list_tasks)
@@ -183,6 +184,11 @@ private fun runningSummary(
         subject,
         R.string.tool_searching_file,
         R.string.tool_progress_searching,
+    )
+    ToolKind.IMAGE_VIEW -> optionalSubjectSummary(
+        subject,
+        R.string.tool_viewing_image,
+        R.string.tool_progress_viewing,
     )
     ToolKind.IMAGE_GENERATE -> optionalSubjectSummary(
         subject,
@@ -356,6 +362,11 @@ private fun completedSummary(
     )
     ToolKind.FILE_GLOB -> stringResource(R.string.tool_found_files, presentation.count ?: 0)
     ToolKind.FILE_GREP -> stringResource(R.string.tool_searched_file, presentation.count ?: 0)
+    ToolKind.IMAGE_VIEW -> optionalSubjectSummary(
+        subject,
+        R.string.tool_viewed_image,
+        R.string.tool_viewed_image_default,
+    )
     ToolKind.IMAGE_GENERATE -> stringResource(R.string.tool_generated_image)
     ToolKind.TASK_CREATE -> stringResource(R.string.tool_created_task)
     ToolKind.TASK_LIST -> stringResource(R.string.tool_listed_tasks)

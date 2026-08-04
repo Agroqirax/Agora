@@ -10,7 +10,18 @@ data class ToolCallData(
     val arguments: String,
     val result: String,
     val signature: String? = null,
-    val toolCallId: String? = null
+    val toolCallId: String? = null,
+    val resultImages: List<ToolImageAttachment> = emptyList(),
+)
+
+@Serializable
+data class ToolImageAttachment(
+    val path: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val width: Int? = null,
+    val height: Int? = null,
+    val sha256: String,
 )
 
 @Serializable
@@ -35,6 +46,8 @@ data class MessageSegment(
     val toolProgress: String? = null,
     /** Resolved execution target for tool UI. Kept separate from lifecycle and output text. */
     val toolTarget: String? = null,
+    /** Private-file metadata for image content returned by a tool. */
+    val toolImages: List<ToolImageAttachment> = emptyList(),
 )
 
 object ToolExecutionStates {

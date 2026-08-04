@@ -35,11 +35,17 @@ object Constants {
     const val MAX_PERSISTED_TEXT_CHARS = 500_000
     /** Timeout for fetching available models from a single provider (ms) */
     const val MODEL_FETCH_TIMEOUT_MS = 10_000L
+    /** Connection establishment and request writes should fail fast; long-running response work is
+     *  governed separately by TOOL_EXECUTION_TIMEOUT_MS. */
+    const val NETWORK_CONNECT_TIMEOUT_MS = 30_000L
+    /** Total budget for short remote operations such as web requests and MCP control messages. */
+    const val NETWORK_TOOL_TIMEOUT_MS = 60_000L
     /** Wall-clock budget for a single tool execution. Tools run inline on the stream-consuming
      *  coroutine (flow.emit suspends the producer until the collector returns), so a tool that
      *  blocks forever hangs the whole generation. This bound downgrades that to a recoverable
      *  tool error instead of a permanent hang (#49). Overridable via GenerationContext. */
-    const val TOOL_EXECUTION_TIMEOUT_MS = 180_000L
+    const val TOOL_EXECUTION_TIMEOUT_SECONDS = 300
+    const val TOOL_EXECUTION_TIMEOUT_MS = TOOL_EXECUTION_TIMEOUT_SECONDS * 1_000L
     /** Wall-clock budget for a shell-command confirmation prompt. The await hangs forever if the
      *  Activity is backgrounded/rebuilt (dialog never renders) or in a headless automation run,
      *  so failing safe (refusing) after this timeout unblocks the stream (#49). */

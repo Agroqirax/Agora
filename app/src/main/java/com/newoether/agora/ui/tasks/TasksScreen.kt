@@ -515,7 +515,7 @@ private fun TaskDetailPage(
         modifier = Modifier.clearFocusOnTap(),
         listState = listState,
         actions = {
-            IconButton(enabled = isComplete && !saved, onClick = { save() }) {
+            IconButton(enabled = isComplete && !saved, onClick = { leave() }) {
                 Icon(Icons.Default.Save, contentDescription = stringResource(R.string.task_save))
             }
         },
