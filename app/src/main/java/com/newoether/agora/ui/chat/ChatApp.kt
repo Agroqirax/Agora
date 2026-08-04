@@ -430,6 +430,9 @@ fun ChatApp(
     }
     LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
     val listState = rememberLazyListState()
+    val messageLifecycleAppearanceRegistry = remember {
+        MessageLifecycleAppearanceRegistry()
+    }
     val renderMessagesState = rememberScrollIsolatedMessages(
         conversationId = currentConversationId,
         upstream = messagesState,
@@ -1066,6 +1069,10 @@ fun ChatApp(
                                 bottomBarHeight = bottomBarHeight + shareSelectionBarSpace,
                                 viewportHeight = viewportHeightPx,
                                 messageHeights = messageHeights,
+                                lifecycleAppearanceRegistry = messageLifecycleAppearanceRegistry,
+                                lifecycleEntranceTargetMessageId = animatedScrollRequest
+                                    ?.takeIf { it.conversationId == currentConversationId }
+                                    ?.targetMessageId,
                                 onEditMessage = { id, text ->
                                     // Same feel as the composer's Send: an edit re-sends, so it
                                     // gets the identical single confirmation tap.

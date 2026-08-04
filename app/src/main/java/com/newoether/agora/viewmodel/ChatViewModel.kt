@@ -1324,7 +1324,7 @@ class ChatViewModel(
         }
     }
 
-    fun regenerate(messageId: String) = generationController.regenerate(messageId)
+    fun regenerate(messageId: String): Boolean = generationController.regenerate(messageId)
 
     fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
         if (isSwitching.value) return

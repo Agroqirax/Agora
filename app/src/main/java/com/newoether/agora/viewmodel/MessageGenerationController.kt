@@ -338,18 +338,19 @@ class MessageGenerationController(
     // regenerate
     // ════════════════════════════════════════════════════════════════════
 
-    fun regenerate(messageId: String) {
-        val genId = currentConversationId.value ?: return
+    fun regenerate(messageId: String): Boolean {
+        val genId = currentConversationId.value ?: return false
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return
+        val (providerName, activeKey) =
+            requestBuilder.resolveProviderKey(modelId) ?: return false
 
         // Validate and snapshot the open conversation BEFORE claiming the slot. The generation
         // coroutine may wait behind automation while the user switches to another conversation.
         val visiblePath = messages.value
-        val messageToRegenerate = visiblePath.find { it.id == messageId } ?: return
-        if (messageToRegenerate.participant != Participant.MODEL) return
-        val sourceRunId = messageToRegenerate.runId ?: return
+        val messageToRegenerate = visiblePath.find { it.id == messageId } ?: return false
+        if (messageToRegenerate.participant != Participant.MODEL) return false
+        val sourceRunId = messageToRegenerate.runId ?: return false
         val outputBoundary = visiblePath
             .filter {
                 it.runId == sourceRunId &&
@@ -362,15 +363,15 @@ class MessageGenerationController(
                     .thenBy { it.timestamp }
                     .thenBy { it.id }
             )
-        if (outputBoundary?.id != messageId) return
+        if (outputBoundary?.id != messageId) return false
 
         // Regenerate is idle-only by product rule. Enforce it atomically in the state machine in
         // addition to the UI's enabled flag, which can lag during a conversation switch.
-        val myUiToken = state.tryAcquireForReplacement() ?: return
+        val myUiToken = state.tryAcquireForReplacement() ?: return false
         val runId = UUID.randomUUID().toString()
         state.bindRun(myUiToken, runId)
 
-        state.launchGenerationJob(myUiToken) {
+        val generationJob = state.launchGenerationJob(myUiToken) {
             val myPersistId = state.nextPersistId()
             var setupModelMessageId: String? = null
             try {
@@ -456,6 +457,7 @@ class MessageGenerationController(
                 releaseAndDrain(state, myUiToken, genId)
             }
         }
+        return generationJob != null
     }
 
     // ════════════════════════════════════════════════════════════════════

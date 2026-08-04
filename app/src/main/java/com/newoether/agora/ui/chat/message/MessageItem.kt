@@ -3,7 +3,6 @@ package com.newoether.agora.ui.chat.message
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.input.*
 
@@ -33,6 +32,7 @@ import com.mikepenz.markdown.compose.components.markdownComponents
 internal fun MessageItem(
     message: ChatMessage, 
     onEdit: (String, String) -> Unit, 
+    animateEntrance: Boolean = false,
     isStreaming: Boolean = false,
     isLoading: Boolean = false,
     isEditingAllowed: Boolean = true,
@@ -50,7 +50,7 @@ internal fun MessageItem(
     branchIndex: Int = 0,
     totalBranches: Int = 1,
     onSwitchBranch: (Int) -> Unit = {},
-    onRegenerate: (String) -> Unit = {},
+    onRegenerate: (String) -> Boolean = { false },
     onFork: (String) -> Unit = {},
     onShare: (String) -> Unit = {},
     deleteTargetMessageId: String = message.id,
@@ -69,9 +69,6 @@ internal fun MessageItem(
     onLayoutMutationSettled: (String) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
-    var isFirstComposition by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) { isFirstComposition = false }
-
     var showSegmentDetail by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var selectedSegmentIndices by remember { mutableStateOf<List<Int>>(emptyList()) }
@@ -139,7 +136,11 @@ internal fun MessageItem(
     val markdownRenderContext = markdownAssets.renderContext
     val thoughtMarkdownRenderContext = markdownAssets.thoughtRenderContext
 
-    val shouldAnimate = !isFirstComposition && !isSwitching
+    val entranceModifier = generationLifecycleAppearanceModifier(
+        animationKey = "message:${message.id}",
+        animate = animateEntrance && !isSwitching,
+        durationMillis = MESSAGE_ENTER_DURATION_MS,
+    )
 
     Row(
         modifier = Modifier
@@ -147,7 +148,8 @@ internal fun MessageItem(
             .onSizeChanged {
                 onHeightChanged(it.height)
             }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 8.dp)
+            .then(entranceModifier),
         verticalAlignment = Alignment.Top,
     ) {
         AnimatedVisibility(visible = selectionMode) {
@@ -174,7 +176,6 @@ internal fun MessageItem(
                         backgroundColor = backgroundColor,
                         textColor = textColor,
                         contextAlpha = contextAlpha,
-                        shouldAnimate = shouldAnimate,
                         isEditing = isEditing,
                         isLoading = isLoading,
                         isEditingAllowed = isEditingAllowed,

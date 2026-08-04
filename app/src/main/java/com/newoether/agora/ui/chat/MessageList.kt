@@ -16,6 +16,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -35,6 +36,7 @@ import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.chat.message.MessageItem
+import com.newoether.agora.util.Constants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -93,6 +95,49 @@ internal class MessageListTurnCache {
         }
         previousByKey = next.associateBy { it.key }
         return next
+    }
+}
+
+/**
+ * Session-scoped one-shot registry. LazyColumn disposal/recreation and conversation switches must
+ * not replay an entrance for a message the user has already seen.
+ */
+internal class MessageLifecycleAppearanceRegistry {
+    private val knownMessageIds = HashSet<String>()
+
+    fun isKnown(messageId: String): Boolean = messageId in knownMessageIds
+
+    fun markKnown(messages: Iterable<ChatMessage>) {
+        messages.forEach { knownMessageIds += it.id }
+    }
+}
+
+internal fun shouldAnimateMessageLifecycleEntrance(
+    message: ChatMessage,
+    isKnown: Boolean,
+    isLoading: Boolean,
+    isStreaming: Boolean,
+    lastUserMessageId: String?,
+    requestedTargetMessageId: String?,
+): Boolean {
+    if (isKnown) return false
+    if (
+        message.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
+        message.id.startsWith(Constants.RESULT_MSG_PREFIX)
+    ) {
+        return false
+    }
+    return when (message.participant) {
+        Participant.USER ->
+            message.id == requestedTargetMessageId ||
+                (isLoading && message.id == lastUserMessageId)
+        Participant.MODEL ->
+            isStreaming ||
+                (
+                    requestedTargetMessageId != null &&
+                        message.parentId == requestedTargetMessageId
+                )
+        Participant.ERROR -> false
     }
 }
 
@@ -243,7 +288,7 @@ internal fun MessageList(
     messageHeights: SnapshotStateMap<String, Int> = remember { mutableStateMapOf() },
     onEditMessage: suspend (String, String) -> Boolean = { _, _ -> false },
     onSwitchBranch: (String?, String, Int) -> Unit = { _, _, _ -> },
-    onRegenerate: (String) -> Unit = {},
+    onRegenerate: (String) -> Boolean = { false },
     onFork: (String) -> Unit = {},
     onShare: (String) -> Unit = {},
     onDelete: (String) -> Unit = {},
@@ -256,7 +301,10 @@ internal fun MessageList(
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
     onPdfPagesClick: ((pages: List<String>, startIndex: Int) -> Unit)? = null,
-    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
+    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
+    lifecycleAppearanceRegistry: MessageLifecycleAppearanceRegistry =
+        remember { MessageLifecycleAppearanceRegistry() },
+    lifecycleEntranceTargetMessageId: String? = null,
 ) {
     var editingMessageId by remember { mutableStateOf<String?>(null) }
     var pendingEditMessageId by remember { mutableStateOf<String?>(null) }
@@ -300,6 +348,9 @@ internal fun MessageList(
     val turnCache = remember { MessageListTurnCache() }
     val turns = remember(messages) { turnCache.update(messages.list) }
     val lastUserMessage = messages.list.lastOrNull { it.participant == Participant.USER }
+    SideEffect {
+        lifecycleAppearanceRegistry.markKnown(messages.list)
+    }
 
     // Text/status/tool deltas do not change branch/run structure. Cache this O(n) projection by its
     // structural fields; copy text is read from the live MessageItem below.
@@ -355,9 +406,25 @@ internal fun MessageList(
     val renderMessage: @Composable (ChatMessage) -> Unit = { message ->
         val isInContext = inContextIds.contains(message.id)
         val presentation = runPresentation[message.id]
+        val messageIsStreaming = message.participant == Participant.MODEL &&
+            message.status in setOf(
+                MessageStatus.SENDING,
+                MessageStatus.THINKING,
+                MessageStatus.TOOL_CALLING,
+                MessageStatus.TRANSCRIBING,
+            )
+        val animateLifecycleEntrance = shouldAnimateMessageLifecycleEntrance(
+            message = message,
+            isKnown = lifecycleAppearanceRegistry.isKnown(message.id),
+            isLoading = isLoading,
+            isStreaming = messageIsStreaming,
+            lastUserMessageId = lastUserMessage?.id,
+            requestedTargetMessageId = lifecycleEntranceTargetMessageId,
+        )
 
         MessageItem(
             message = message,
+            animateEntrance = animateLifecycleEntrance,
             onEdit = { id, text ->
                 if (pendingEditMessageId == null) {
                     pendingEditMessageId = id
@@ -380,13 +447,7 @@ internal fun MessageList(
             },
             // Every active MODEL owns its streaming renderer until its own terminal status.
             // Appending a queued USER must not dispose the previous turn's incremental renderer.
-            isStreaming = message.participant == Participant.MODEL &&
-                message.status in setOf(
-                    MessageStatus.SENDING,
-                    MessageStatus.THINKING,
-                    MessageStatus.TOOL_CALLING,
-                    MessageStatus.TRANSCRIBING,
-                ),
+            isStreaming = messageIsStreaming,
             isLoading = isLoading || pendingEditMessageId == message.id,
             isEditingAllowed = !selectionMode &&
                 (editingMessageId == null || editingMessageId == message.id) &&

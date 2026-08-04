@@ -1,23 +1,21 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CallSplit
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -29,14 +27,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
@@ -48,8 +44,68 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
-import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
-import kotlinx.coroutines.launch
+
+private enum class AssistantStatusKind {
+    ACTIVE,
+    THINKING,
+    SUCCESS,
+    STOPPED,
+    INFO,
+}
+
+private data class AssistantStatusPresentation(
+    val text: String,
+    val kind: AssistantStatusKind,
+)
+
+@Composable
+private fun AssistantStatusRow(status: AssistantStatusPresentation) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(bottom = 6.dp),
+    ) {
+        Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
+            when (status.kind) {
+                AssistantStatusKind.ACTIVE,
+                AssistantStatusKind.THINKING,
+                -> CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    color = if (status.kind == AssistantStatusKind.THINKING) {
+                        MaterialTheme.colorScheme.tertiary
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    strokeWidth = 2.dp,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+                AssistantStatusKind.SUCCESS -> Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.tertiary,
+                )
+                AssistantStatusKind.STOPPED -> Icon(
+                    Icons.Default.Stop,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+                AssistantStatusKind.INFO -> Icon(
+                    Icons.Default.Info,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            status.text,
+            style = ChatType.meta,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 /**
  * The left-aligned assistant (and error) message content: the streaming status header,
@@ -77,7 +133,7 @@ internal fun AssistantMessageContent(
     branchIndex: Int,
     totalBranches: Int,
     onSwitchBranch: (Int) -> Unit,
-    onRegenerate: (String) -> Unit,
+    onRegenerate: (String) -> Boolean,
     onFork: () -> Unit,
     onShare: () -> Unit,
     onMediaClick: (List<String>, Int) -> Unit,
@@ -92,6 +148,24 @@ internal fun AssistantMessageContent(
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
     var showMenu by remember { mutableStateOf(false) }
+    var regenerateRequested by remember(message.id) { mutableStateOf(false) }
+    LaunchedEffect(regenerateRequested, isLoading, isStreaming) {
+        if (regenerateRequested && !isLoading && !isStreaming) {
+            regenerateRequested = false
+        }
+    }
+    val statusChromeAlpha by animateFloatAsState(
+        targetValue = if (regenerateRequested) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (regenerateRequested) {
+                ACTIONS_EXIT_DURATION_MS
+            } else {
+                ACTIONS_ENTER_DURATION_MS
+            },
+            easing = LinearEasing,
+        ),
+        label = "assistantStatusChrome:${message.id}",
+    )
 
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
@@ -142,27 +216,24 @@ internal fun AssistantMessageContent(
                 }
 
                 if (displayText != null) {
-                    val text = displayText
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
-                        Box(modifier = Modifier.size(16.dp), contentAlignment = Alignment.Center) {
-                            if (isStreaming || hasInFlightStatus) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(14.dp),
-                                    color = if (text == thinkingStatus) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                                    strokeWidth = 2.dp,
-                                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                                )
-                            } else {
-                                val icon = when (message.status) {
-                                    MessageStatus.SUCCESS -> Icons.Default.CheckCircle
-                                    MessageStatus.STOPPED -> Icons.Default.Stop
-                                    else -> Icons.Default.Info
-                                }
-                                Icon(icon, null, modifier = Modifier.size(14.dp), tint = if (message.status == MessageStatus.SUCCESS) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error)
-                            }
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(text, style = ChatType.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val statusKind = when {
+                        message.status == MessageStatus.SUCCESS -> AssistantStatusKind.SUCCESS
+                        message.status == MessageStatus.STOPPED -> AssistantStatusKind.STOPPED
+                        (isStreaming || hasInFlightStatus) && thinkingNow ->
+                            AssistantStatusKind.THINKING
+                        isStreaming || hasInFlightStatus -> AssistantStatusKind.ACTIVE
+                        else -> AssistantStatusKind.INFO
+                    }
+                    Crossfade(
+                        targetState = AssistantStatusPresentation(displayText, statusKind),
+                        modifier = Modifier.graphicsLayer { alpha = statusChromeAlpha },
+                        animationSpec = tween(
+                            durationMillis = STATUS_CROSSFADE_DURATION_MS,
+                            easing = LinearEasing,
+                        ),
+                        label = "assistantStatus:${message.id}",
+                    ) { status ->
+                        AssistantStatusRow(status)
                     }
                 }
             }
@@ -338,94 +409,194 @@ internal fun AssistantMessageContent(
                         }
                     }
                 }
-                if (message.participant == Participant.MODEL) {
-                    if (!isStreaming && showActions) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(2.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                if (message.participant == Participant.MODEL && showActions) {
+                    val actionsVisible = assistantActionsVisible(
+                        isStreaming = isStreaming,
+                        regenerateRequested = regenerateRequested,
+                    )
+                    val actionsEnabled = actionsVisible && !isLoading
+                    val actionsAlpha by animateFloatAsState(
+                        targetValue = if (actionsVisible) 1f else 0f,
+                        animationSpec = tween(
+                            durationMillis = if (actionsVisible) {
+                                ACTIONS_ENTER_DURATION_MS
+                            } else {
+                                ACTIONS_EXIT_DURATION_MS
+                            },
+                            easing = LinearEasing,
+                        ),
+                        label = "assistantActions:${message.id}",
+                    )
+                    LaunchedEffect(actionsEnabled) {
+                        if (!actionsEnabled) showMenu = false
+                    }
+                    val actionTint =
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                            alpha = if (actionsEnabled) 0.6f else 0.3f
+                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // Reserve the terminal action row from the first Sending frame. Only
+                            // its draw alpha changes, so completion cannot grow the message item.
+                            .height(44.dp)
+                            .padding(top = 12.dp)
+                            .graphicsLayer { alpha = actionsAlpha },
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!actionCopyText.isNullOrBlank()) {
+                            IconButton(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(actionCopyText))
+                                    haptics.confirm()
+                                },
+                                enabled = actionsEnabled,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = actionTint,
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = {
+                                if (onRegenerate(message.id)) {
+                                    regenerateRequested = true
+                                }
+                            },
+                            enabled = actionsEnabled,
+                            modifier = Modifier.size(32.dp),
                         ) {
-                            if (!actionCopyText.isNullOrBlank()) {
-                                IconButton(onClick = { clipboardManager.setText(AnnotatedString(actionCopyText)); haptics.confirm() }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                                }
-                            }
-                            IconButton(onClick = { onRegenerate(message.id) }, enabled = !isLoading, modifier = Modifier.size(32.dp)) {
-                                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(19.dp), tint = if (isLoading) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                            }
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(19.dp),
+                                tint = actionTint,
+                            )
+                        }
+                        IconButton(
+                            onClick = onFork,
+                            enabled = actionsEnabled,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.CallSplit,
+                                contentDescription = stringResource(R.string.conversation_fork_from_here),
+                                modifier = Modifier.size(18.dp),
+                                tint = actionTint,
+                            )
+                        }
+                        IconButton(
+                            onClick = onShare,
+                            enabled = actionsEnabled,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Share,
+                                contentDescription = stringResource(R.string.conversation_share),
+                                modifier = Modifier.size(18.dp),
+                                tint = actionTint,
+                            )
+                        }
+                        Box {
                             IconButton(
-                                onClick = onFork,
-                                enabled = !isLoading,
+                                onClick = {
+                                    haptics.tap()
+                                    showMenu = true
+                                },
+                                enabled = actionsEnabled,
                                 modifier = Modifier.size(32.dp),
                             ) {
                                 Icon(
-                                    Icons.Default.CallSplit,
-                                    contentDescription = stringResource(R.string.conversation_fork_from_here),
+                                    Icons.Default.MoreVert,
+                                    contentDescription = null,
                                     modifier = Modifier.size(18.dp),
-                                    tint = if (isLoading) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                                    },
+                                    tint = actionTint,
                                 )
                             }
-                            IconButton(
-                                onClick = onShare,
-                                enabled = !isLoading,
-                                modifier = Modifier.size(32.dp),
+                            DropdownMenu(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 16.dp,
+                                shape = RoundedCornerShape(12.dp),
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
                             ) {
-                                Icon(
-                                    Icons.Default.Share,
-                                    contentDescription = stringResource(R.string.conversation_share),
-                                    modifier = Modifier.size(18.dp),
-                                    tint = if (isLoading) {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.info)) },
+                                    onClick = {
+                                        haptics.tap()
+                                        showMenu = false
+                                        onShowInfo()
+                                    },
+                                    enabled = actionsEnabled,
+                                    leadingIcon = { Icon(Icons.Default.Info, null) },
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            stringResource(R.string.delete),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    onClick = {
+                                        haptics.tap()
+                                        showMenu = false
+                                        onShowDelete()
+                                    },
+                                    enabled = actionsEnabled,
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
                                     },
                                 )
                             }
-                            Box {
-                                IconButton(onClick = { haptics.tap(); showMenu = true }, modifier = Modifier.size(32.dp)) {
-                                    Icon(Icons.Default.MoreVert, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
-                                }
-                                DropdownMenu(
-                                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                                    tonalElevation = 16.dp,
-                                    shape = RoundedCornerShape(12.dp),
-                                    expanded = showMenu,
-                                    onDismissRequest = { showMenu = false }
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.info)) },
-                                        onClick = { haptics.tap(); showMenu = false; onShowInfo() },
-                                        leadingIcon = { Icon(Icons.Default.Info, null) }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                                        onClick = { haptics.tap(); showMenu = false; onShowDelete() },
-                                        enabled = !isLoading,
-                                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
-                                    )
-                                }
-                            }
+                        }
 
-                            if (showBranchSelector && totalBranches > 1) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .padding(start = 8.dp)
-                                        .clip(RoundedCornerShape(100))
-                                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                                        .padding(horizontal = 4.dp)
+                        if (showBranchSelector && totalBranches > 1) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .padding(start = 8.dp)
+                                    .clip(RoundedCornerShape(100))
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    )
+                                    .padding(horizontal = 4.dp),
+                            ) {
+                                IconButton(
+                                    onClick = { onSwitchBranch(-1) },
+                                    enabled = actionsEnabled && branchIndex > 0 && isEditingAllowed,
+                                    modifier = Modifier.size(24.dp),
                                 ) {
-                                    IconButton(onClick = { onSwitchBranch(-1) }, enabled = branchIndex > 0 && isEditingAllowed, modifier = Modifier.size(24.dp)) {
-                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, modifier = Modifier.size(16.dp))
-                                    }
-                                    Text("${branchIndex + 1} / $totalBranches", style = MaterialTheme.typography.labelSmall)
-                                    IconButton(onClick = { onSwitchBranch(1) }, enabled = branchIndex < totalBranches - 1 && isEditingAllowed, modifier = Modifier.size(24.dp)) {
-                                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, modifier = Modifier.size(16.dp))
-                                    }
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                                Text(
+                                    "${branchIndex + 1} / $totalBranches",
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                                IconButton(
+                                    onClick = { onSwitchBranch(1) },
+                                    enabled = actionsEnabled &&
+                                        branchIndex < totalBranches - 1 &&
+                                        isEditingAllowed,
+                                    modifier = Modifier.size(24.dp),
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
                                 }
                             }
                         }

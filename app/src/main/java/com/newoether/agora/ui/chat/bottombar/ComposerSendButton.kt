@@ -1,5 +1,8 @@
 package com.newoether.agora.ui.chat.bottombar
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.input.TextFieldState
@@ -24,8 +27,16 @@ import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.chat.message.COMPOSER_ICON_CROSSFADE_DURATION_MS
 import com.newoether.agora.viewmodel.SendAcceptance
 import kotlinx.coroutines.launch
+
+private enum class ComposerActionIcon {
+    STOPPING,
+    PENDING,
+    STOP,
+    SEND,
+}
 
 /**
  * The composer's send / stop / pending-send FAB. Owns the "wait for attachment
@@ -127,24 +138,41 @@ internal fun ComposerSendButton(
         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
     ) {
         val fabIcon = when {
-            isStopping || isSubmitting -> "stopping"
-            composer.pendingSend -> "pending"
-            showStop -> "stop"
-            else -> "send"
+            isStopping || isSubmitting -> ComposerActionIcon.STOPPING
+            composer.pendingSend -> ComposerActionIcon.PENDING
+            showStop -> ComposerActionIcon.STOP
+            else -> ComposerActionIcon.SEND
         }
-        when (fabIcon) {
-            "stopping" -> CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            "pending" -> CircularProgressIndicator(
-                modifier = Modifier.size(24.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onPrimary
-            )
-            "stop" -> Icon(Icons.Default.Stop, stringResource(R.string.action), modifier = Modifier.size(24.dp))
-            else -> Icon(Icons.Default.ArrowUpward, stringResource(R.string.action), modifier = Modifier.size(24.dp))
+        Crossfade(
+            targetState = fabIcon,
+            animationSpec = tween(
+                durationMillis = COMPOSER_ICON_CROSSFADE_DURATION_MS,
+                easing = LinearEasing,
+            ),
+            label = "composerActionIcon",
+        ) { icon ->
+            when (icon) {
+                ComposerActionIcon.STOPPING -> CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ComposerActionIcon.PENDING -> CircularProgressIndicator(
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+                ComposerActionIcon.STOP -> Icon(
+                    Icons.Default.Stop,
+                    stringResource(R.string.action),
+                    modifier = Modifier.size(24.dp),
+                )
+                ComposerActionIcon.SEND -> Icon(
+                    Icons.Default.ArrowUpward,
+                    stringResource(R.string.action),
+                    modifier = Modifier.size(24.dp),
+                )
+            }
         }
     }
 }

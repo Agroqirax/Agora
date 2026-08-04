@@ -1,7 +1,5 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -53,7 +51,6 @@ internal fun UserMessageBubble(
     backgroundColor: Color,
     textColor: Color,
     contextAlpha: Modifier,
-    shouldAnimate: Boolean,
     isEditing: Boolean,
     isLoading: Boolean,
     isEditingAllowed: Boolean,
@@ -85,7 +82,6 @@ internal fun UserMessageBubble(
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .then(contextAlpha)
-                .then(if (shouldAnimate) Modifier.animateContentSize(animationSpec = tween(500)) else Modifier)
         ) {
             if (isEditing) {
                 val editState = rememberTextFieldState(message.text)
