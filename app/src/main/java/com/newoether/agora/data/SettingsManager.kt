@@ -632,13 +632,7 @@ class SettingsManager(private val context: Context) {
             } catch (_: Exception) {
                 emptyList()
             }
-            val migratedPrompts = ensureBuiltInPrompt(
-                migrateLegacyDefaultPromptTitle(
-                    migrateLegacyDefaultPromptTemplate(currentPrompts, locale),
-                    locale
-                ),
-                locale
-            )
+            val migratedPrompts = ensureBuiltInPrompt(currentPrompts, locale)
             if (migratedPrompts != currentPrompts) {
                 prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(migratedPrompts)
             }
@@ -681,49 +675,6 @@ class SettingsManager(private val context: Context) {
                 userPostpendItems = defaultPrompt.userPostpendItems,
                 isBuiltIn = true
             )
-        }
-    }
-
-    /** An unedited default prompt from before the tool-use section was collapsed spells out
-     *  every tool category (Location, Mcp servers, ...) individually and unconditionally,
-     *  which is both redundant with each tool's own name/description and can make the model
-     *  reference tools the user has since disabled. Swap its system items for the current
-     *  template in place, leaving title/id/pre/postpend untouched. Edited prompts (including
-     *  ones the user renamed) never match and are left alone. */
-    private fun migrateLegacyDefaultPromptTemplate(
-        prompts: List<SystemPromptEntry>,
-        locale: Locale
-    ): List<SystemPromptEntry> {
-        if (prompts.isEmpty()) return prompts
-        val legacyItems = DefaultSystemPrompt.legacyStaticSystemItems()
-        val newDefault = DefaultSystemPrompt.create(locale)
-        return prompts.map { entry ->
-            if (entry.resolvedSystemItems.sameTemplateItems(legacyItems)) {
-                entry.copy(systemItems = newDefault.systemItems)
-            } else {
-                entry
-            }
-        }
-    }
-
-    private fun migrateLegacyDefaultPromptTitle(
-        prompts: List<SystemPromptEntry>,
-        locale: Locale
-    ): List<SystemPromptEntry> {
-        if (prompts.isEmpty()) return prompts
-        val localizedTitle = DefaultSystemPrompt.titleForLocale(locale)
-        val defaultPrompt = DefaultSystemPrompt.create(locale)
-        return prompts.map { entry ->
-            val legacyLowercaseEnglish = entry.title == "default"
-            val legacySimplifiedTitleInTraditionalLocale =
-                entry.title == "\u9ed8\u8ba4" && localizedTitle == "\u9810\u8a2d"
-            if ((legacyLowercaseEnglish || legacySimplifiedTitleInTraditionalLocale) &&
-                entry.sameTemplateAs(defaultPrompt)
-            ) {
-                entry.copy(title = localizedTitle)
-            } else {
-                entry
-            }
         }
     }
 
