@@ -1,7 +1,12 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,18 +16,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.ToolImageAttachment
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.util.NoAutoScrollSelectionContainer
@@ -34,7 +49,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 
 @Composable
-internal fun ToolDetailContent(segment: MessageSegment) {
+internal fun ToolDetailContent(
+    segment: MessageSegment,
+    onMediaClick: (List<String>, Int) -> Unit,
+) {
     val presentation = ToolPresentationResolver.resolve(segment)
     val args = presentation.rawArguments
     if (!args.isNullOrBlank() && args != "{}") {
@@ -46,6 +64,13 @@ internal fun ToolDetailContent(segment: MessageSegment) {
 
     ToolSectionLabel(stringResource(R.string.result_label))
     Spacer(Modifier.height(6.dp))
+    if (segment.toolImages.isNotEmpty()) {
+        ToolImageResults(
+            images = segment.toolImages,
+            onMediaClick = onMediaClick,
+        )
+        Spacer(Modifier.height(12.dp))
+    }
     if (presentation.kind == ToolKind.SHELL_EXECUTE ||
         presentation.kind == ToolKind.SHELL_JOB_GET
     ) {
@@ -76,6 +101,106 @@ internal fun ToolDetailContent(segment: MessageSegment) {
         )
         ToolPresentationState.EMPTY,
         ToolPresentationState.SUCCEEDED -> ToolCompletedContent(presentation)
+    }
+}
+
+private enum class ToolImagePreviewState {
+    LOADING,
+    LOADED,
+    FAILED,
+}
+
+@Composable
+private fun ToolImageResults(
+    images: List<ToolImageAttachment>,
+    onMediaClick: (List<String>, Int) -> Unit,
+) {
+    val displayImages = remember(images) {
+        images.filter { it.path.isNotBlank() }
+    }
+    val paths = remember(displayImages) {
+        displayImages.map(ToolImageAttachment::path)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        displayImages.forEachIndexed { index, image ->
+            key(image.path, image.sha256) {
+                ToolImagePreview(
+                    image = image,
+                    onClick = { onMediaClick(paths, index) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ToolImagePreview(
+    image: ToolImageAttachment,
+    onClick: () -> Unit,
+) {
+    val aspectRatio = remember(image.width, image.height) {
+        val width = image.width?.takeIf { it > 0 }
+        val height = image.height?.takeIf { it > 0 }
+        if (width == null || height == null) {
+            1f
+        } else {
+            (width.toFloat() / height.toFloat()).coerceIn(0.55f, 2.2f)
+        }
+    }
+    var state by remember(image.path) {
+        mutableStateOf(ToolImagePreviewState.LOADING)
+    }
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (state == ToolImagePreviewState.LOADED) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "toolImagePreview:${image.sha256}",
+    )
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        val previewHeight = (maxWidth / aspectRatio).coerceIn(140.dp, 420.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(previewHeight)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.45f),
+                )
+                .clickable(
+                    enabled = state == ToolImagePreviewState.LOADED,
+                    onClick = onClick,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (state) {
+                ToolImagePreviewState.LOADING -> {
+                    CircularProgressIndicator(
+                        modifier = Modifier.width(24.dp).height(24.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+                ToolImagePreviewState.FAILED -> {
+                    Text(
+                        text = stringResource(R.string.attachment_copy_failed_image),
+                        style = ChatType.metaNormal,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                ToolImagePreviewState.LOADED -> Unit
+            }
+            coil.compose.AsyncImage(
+                model = image.path,
+                contentDescription = stringResource(R.string.tool_view_image),
+                contentScale = ContentScale.Fit,
+                onLoading = { state = ToolImagePreviewState.LOADING },
+                onSuccess = { state = ToolImagePreviewState.LOADED },
+                onError = { state = ToolImagePreviewState.FAILED },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(previewHeight)
+                    .graphicsLayer { alpha = imageAlpha },
+            )
+        }
     }
 }
 

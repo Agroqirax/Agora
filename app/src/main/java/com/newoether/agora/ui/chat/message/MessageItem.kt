@@ -257,6 +257,7 @@ internal fun MessageItem(
             selectedSegmentIndices = selectedSegmentIndices,
             isStreaming = isStreaming,
             markdownRenderContext = thoughtMarkdownRenderContext,
+            onMediaClick = onMediaClick,
             onDismiss = { showSegmentDetail = false }
         )
     }

@@ -89,6 +89,7 @@ internal fun SegmentDetailSheet(
     selectedSegmentIndices: List<Int>,
     isStreaming: Boolean,
     markdownRenderContext: ChatMarkdownRenderContext,
+    onMediaClick: (List<String>, Int) -> Unit,
     onDismiss: () -> Unit
 ) {
     val liveSegs = remember(message.segments) {
@@ -418,7 +419,13 @@ internal fun SegmentDetailSheet(
                                             ),
                                         )
                                         if (detailSeg.type == "tool") {
-                                            ToolDetailContent(detailSeg)
+                                            ToolDetailContent(
+                                                segment = detailSeg,
+                                                onMediaClick = { paths, mediaIndex ->
+                                                    onDismiss()
+                                                    onMediaClick(paths, mediaIndex)
+                                                },
+                                            )
                                         } else if (
                                             detailSeg.type == "transcription" &&
                                             detailSeg.content.isBlank()
@@ -448,7 +455,13 @@ internal fun SegmentDetailSheet(
                                         }
                                     }
                                 } else if (seg.type == "tool") {
-                                    ToolDetailContent(seg)
+                                    ToolDetailContent(
+                                        segment = seg,
+                                        onMediaClick = { paths, mediaIndex ->
+                                            onDismiss()
+                                            onMediaClick(paths, mediaIndex)
+                                        },
+                                    )
                                 } else if (
                                     seg.type == "transcription" &&
                                     seg.content.isBlank()
