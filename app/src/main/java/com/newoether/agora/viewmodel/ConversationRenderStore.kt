@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -53,7 +54,46 @@ internal class ConversationRenderStore {
     }
 
     fun setAllMessages(messages: List<ChatMessage>) {
-        _snapshot.update { it.copy(allMessages = messages) }
+        synchronized(streamingHandoffLock) {
+            val retiredId = retiredStreamingMessageId
+            if (retiredId == null) {
+                _snapshot.update { it.copy(allMessages = messages) }
+                return
+            }
+
+            val incoming = messages.firstOrNull { it.id == retiredId }
+            val currentTerminal = _snapshot.value.allMessages.firstOrNull {
+                it.id == retiredId && !it.status.isStreamingStatus()
+            }
+            when {
+                // A deletion is authoritative; never retain a terminal row as a ghost.
+                incoming == null -> {
+                    retiredStreamingMessageId = null
+                    _snapshot.update { it.copy(allMessages = messages) }
+                }
+                // Room has caught up to a terminal checkpoint. Keep the monotonic fence until a
+                // new stream starts (or the row is deleted), because an older projection may
+                // already have completed its off-main mapping and still be queued for delivery.
+                !incoming.status.isStreamingStatus() -> {
+                    _snapshot.update { it.copy(allMessages = messages) }
+                }
+                // A projection that started before the terminal transaction must not regress the
+                // visible row from SUCCESS/ERROR/STOPPED back to Answering.
+                currentTerminal != null -> {
+                    _snapshot.update { snapshot ->
+                        snapshot.copy(
+                            allMessages = messages.map { message ->
+                                if (message.id == retiredId) currentTerminal else message
+                            },
+                        )
+                    }
+                }
+                else -> {
+                    retiredStreamingMessageId = null
+                    _snapshot.update { it.copy(allMessages = messages) }
+                }
+            }
+        }
     }
 
     fun updateAllMessages(transform: (List<ChatMessage>) -> List<ChatMessage>) {
@@ -131,3 +171,9 @@ internal class ConversationRenderStore {
         }
     }
 }
+
+private fun MessageStatus.isStreamingStatus(): Boolean =
+    this == MessageStatus.TRANSCRIBING ||
+        this == MessageStatus.SENDING ||
+        this == MessageStatus.THINKING ||
+        this == MessageStatus.TOOL_CALLING

@@ -32,7 +32,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
@@ -43,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunMessagePresentation
 import com.newoether.agora.model.RunUiProjection
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
@@ -56,7 +56,6 @@ import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.RegenerationTransitionRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
@@ -407,6 +406,9 @@ internal fun MessageList(
     var retainedRegenerationExitMessages by remember(conversationId) {
         mutableStateOf<List<ChatMessage>>(emptyList())
     }
+    var retainedRegenerationPresentations by remember(conversationId) {
+        mutableStateOf<Map<String, RunMessagePresentation>>(emptyMap())
+    }
     val regenerationExitAlpha = remember(conversationId) { Animatable(1f) }
     val latestRegenerationFadeFinished by rememberUpdatedState(onRegenerationFadeOutFinished)
     val mutationAnchorLock = remember(state) { MessageListMutationAnchorLock() }
@@ -558,6 +560,7 @@ internal fun MessageList(
                 regenerationExitAlpha.snapTo(1f)
             }
             retainedRegenerationExitMessages = emptyList()
+            retainedRegenerationPresentations = emptyMap()
             regenerationExitIds = emptySet()
             return@LaunchedEffect
         }
@@ -568,6 +571,9 @@ internal fun MessageList(
         )
         regenerationExitIds =
             retainedRegenerationExitMessages.mapTo(linkedSetOf()) { message -> message.id }
+        retainedRegenerationPresentations =
+            RunUiProjection.project(messages.list, allMessages.list)
+                .filterKeys(regenerationExitIds::contains)
         if (transition.stage != com.newoether.agora.viewmodel.RegenerationTransitionStage.ANIMATING) {
             regenerationExitAlpha.snapTo(0f)
             return@LaunchedEffect
@@ -605,7 +611,6 @@ internal fun MessageList(
                     active = isLoading,
                     autoFollowEnabled = streamingAutoFollowEnabled,
                     autoFollowPaused = streamingAutoFollowPaused,
-                    atAbsoluteBottom = !state.canScrollForward,
                 ),
             )
             return@LaunchedEffect
@@ -615,7 +620,6 @@ internal fun MessageList(
             active = isLoading,
             autoFollowEnabled = streamingAutoFollowEnabled,
             autoFollowPaused = streamingAutoFollowPaused,
-            atAbsoluteBottom = !state.canScrollForward,
         )
         if (nextMode == StreamingTailFollowMode.ATTACHED) {
             cancelMutationAnchoring()
@@ -645,48 +649,6 @@ internal fun MessageList(
             cancelMutationAnchoring()
         }
         setStreamingTailFollowMode(nextMode)
-    }
-
-    LaunchedEffect(
-        state,
-        conversationId,
-        isLoading,
-        streamingAutoFollowEnabled,
-        streamingAutoFollowPaused,
-        lastUserMessage?.id,
-    ) {
-        snapshotFlow {
-            Triple(
-                !state.canScrollForward,
-                streamingTailFollowMode,
-                streamingTailUserDragInProgress,
-            )
-        }
-            .distinctUntilChanged()
-            .collect { (atAbsoluteBottom, _, userDragInProgress) ->
-                if (
-                    !isLoading ||
-                    !streamingAutoFollowEnabled ||
-                    streamingAutoFollowPaused ||
-                    userDragInProgress
-                ) {
-                    return@collect
-                }
-                val nextMode = reduceStreamingTailFollow(
-                    streamingTailFollowMode,
-                    StreamingTailFollowEvent.ViewportSettled(
-                        atAbsoluteBottom = atAbsoluteBottom,
-                        userDragInProgress = false,
-                    ),
-                )
-                if (
-                    nextMode == StreamingTailFollowMode.ATTACHED &&
-                    streamingTailFollowMode != StreamingTailFollowMode.ATTACHED
-                ) {
-                    cancelMutationAnchoring()
-                }
-                setStreamingTailFollowMode(nextMode)
-            }
     }
 
     // One frame-driven actor owns attached scrolling. It reads the newest cumulative geometry on
@@ -879,7 +841,12 @@ internal fun MessageList(
         val isRetainedRegenerationExit =
             message.id in regenerationExitIds && message.id !in activeMessageIds
         val isInContext = !isRetainedRegenerationExit && inContextIds.contains(message.id)
-        val presentation = runPresentation[message.id]
+        // Once the new branch commits, the active Run projection no longer contains the
+        // transparent old answer. Retain its exact presentation until the regeneration handoff
+        // releases that composition, otherwise the action row is conditionally removed instead
+        // of participating in the fade.
+        val presentation =
+            runPresentation[message.id] ?: retainedRegenerationPresentations[message.id]
         val messageIsStreaming = message.participant == Participant.MODEL &&
             message.status in setOf(
                 MessageStatus.SENDING,
@@ -948,6 +915,7 @@ internal fun MessageList(
             // Appending a queued USER must not dispose the previous turn's incremental renderer.
             isStreaming = messageIsStreaming,
             isLoading = isLoading || pendingEditMessageId == message.id,
+            isRegenerationExiting = message.id in regenerationExitIds,
             isEditingAllowed = !isRetainedRegenerationExit &&
                 !selectionMode &&
                 (editingMessageId == null || editingMessageId == message.id) &&

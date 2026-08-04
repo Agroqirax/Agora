@@ -2,10 +2,8 @@ package com.newoether.agora.ui.chat
 
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
@@ -160,9 +158,11 @@ internal fun reduceAbsoluteBottomProximity(
 }
 
 /**
- * Smoothly reaches the list's physical maximum extent and, while generation remains active,
- * follows that moving extent. The stable final sentinel makes the target independent from the
- * streaming-tail indicator; [LazyListState.canScrollForward] remains the completion authority.
+ * Smoothly reaches the list's physical maximum extent. While seeking, every layout change
+ * retargets the same actor; once it reaches the bottom of an active generation, ownership is
+ * handed to MessageList's attached-tail actor. The stable final sentinel makes the target
+ * independent from the streaming-tail indicator; [LazyListState.canScrollForward] remains the
+ * completion authority.
  *
  * No scroll mutation is held while already at the bottom. That keeps touch input responsive.
  * A real drag cancels the owning effect in [ChatApp]; new content wakes the suspended snapshot
@@ -223,15 +223,11 @@ internal suspend fun LazyListState.animateToAbsoluteBottom(
             dispatch(AbsoluteBottomScrollEvent.BottomReached)
             layout = absoluteBottomLayoutSnapshot(layoutInfo, canScrollForward)
             if (isGenerationActive()) {
-                // At rest, suspend completely instead of polling every display frame. Any extent
-                // growth or terminal generation transition invalidates this exact snapshot.
-                val baseline = layout to true
-                snapshotFlow {
-                    absoluteBottomLayoutSnapshot(layoutInfo, canScrollForward) to
-                        isGenerationActive()
-                }.first { observation -> observation != baseline }
-                dispatch(AbsoluteBottomScrollEvent.ExtentChanged)
-                continue
+                // Do not keep a second long-lived follow owner for the rest of generation.
+                // ChatApp exits the handoff phase and explicitly attaches MessageList's one
+                // frame-driven tail actor, which a real upward drag can cancel immediately.
+                dispatch(AbsoluteBottomScrollEvent.Finished)
+                return true
             }
 
             val minimumSettlingMs = if (followedActiveGeneration) 700L else 192L

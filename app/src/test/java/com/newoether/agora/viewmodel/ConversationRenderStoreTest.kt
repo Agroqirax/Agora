@@ -98,6 +98,48 @@ class ConversationRenderStoreTest {
         assertSame(next, store.snapshot.value.streamingMessage)
     }
 
+    @Test
+    fun successfulTerminalHandoff_cannotRegressBackToAnswering() {
+        val user = message("user", null, Participant.USER)
+        val sending = message(
+            id = "model",
+            parentId = user.id,
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+            text = "partial",
+        )
+        val success = sending.copy(
+            status = MessageStatus.SUCCESS,
+            text = "complete answer",
+        )
+        val store = ConversationRenderStore()
+        store.replaceConversation(
+            allMessages = listOf(user, sending),
+            selectedChildren = mapOf(null to user.id, user.id to sending.id),
+            streamingMessage = success,
+        )
+
+        store.commitTerminalStreamingMessage(success)
+        store.setAllMessages(listOf(user, sending))
+
+        val fenced = store.snapshot.value
+        assertNull(fenced.streamingMessage)
+        assertSame(success, fenced.allMessages.single { it.id == success.id })
+        assertEquals(MessageStatus.SUCCESS, fenced.allMessages.last().status)
+
+        // The terminal Room invalidation is accepted normally.
+        store.setAllMessages(listOf(user, success))
+        assertSame(success, store.snapshot.value.allMessages.last())
+
+        // Even a mapped checkpoint queued before that invalidation remains monotonic.
+        store.setAllMessages(listOf(user, sending))
+        assertSame(success, store.snapshot.value.allMessages.last())
+
+        // A later real deletion remains authoritative and cannot leave a ghost terminal row.
+        store.setAllMessages(listOf(user))
+        assertEquals(listOf(user.id), store.snapshot.value.allMessages.map { it.id })
+    }
+
     private fun message(
         id: String,
         parentId: String?,

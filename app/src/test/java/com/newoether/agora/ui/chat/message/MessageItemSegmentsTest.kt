@@ -1,6 +1,9 @@
 package com.newoether.agora.ui.chat.message
 
+import com.newoether.agora.model.MessageSegment
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -38,5 +41,66 @@ class MessageItemSegmentsTest {
 
         assertFalse(registry.shouldAnimate(segmentKey, isStreaming = true))
         assertTrue(registry.shouldAnimate(cardKey, isStreaming = true))
+    }
+
+    @Test
+    fun everyStreamingSegmentTypeGetsOneFirstAppearance() {
+        val registry = SegmentAppearanceRegistry()
+
+        listOf("answer", "thought", "tool", "transcription").forEachIndexed { index, type ->
+            val key = segmentAppearanceKey(
+                messageId = "message",
+                mergedIndex = index,
+                segment = MessageSegment(type = type),
+            )
+            assertTrue("$type must animate when first inserted", registry.shouldAnimate(key, true))
+            registry.markSeen(key)
+            assertFalse("$type must not replay while updating", registry.shouldAnimate(key, true))
+        }
+    }
+
+    @Test
+    fun segmentAppearanceIdentityIgnoresStreamingPayloadGrowth() {
+        val partial = MessageSegment(
+            type = "tool",
+            toolName = "shell",
+            toolArgs = """{"command":"cp"}""",
+        )
+        val complete = partial.copy(
+            toolArgs = """{"command":"cp source destination"}""",
+            toolResult = "done",
+        )
+
+        assertEquals(
+            segmentAppearanceKey("message", 2, partial),
+            segmentAppearanceKey("message", 2, complete),
+        )
+        assertNotEquals(
+            segmentAppearanceKey("message", 2, partial),
+            segmentAppearanceKey("message", 3, partial),
+        )
+    }
+
+    @Test
+    fun detailAndContainerIdentitiesIgnoreStreamingPayloadGrowth() {
+        val partial = MessageSegment(
+            type = "tool",
+            toolName = "shell",
+            toolArgs = """{"command":"cp"}""",
+        )
+        val complete = partial.copy(
+            toolArgs = """{"command":"cp source destination"}""",
+            toolResult = "done",
+        )
+
+        assertEquals(
+            detailSegmentAppearanceKey("message", 1, partial),
+            detailSegmentAppearanceKey("message", 1, complete),
+        )
+        assertEquals("message:compact", compactSegmentBlockAppearanceKey("message"))
+        assertEquals(
+            "message:group:1",
+            groupedSegmentBlockAppearanceKey("message", 1),
+        )
     }
 }

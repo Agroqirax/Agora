@@ -699,9 +699,10 @@ class ChatViewModel(
             }
             state.onStreamCommit = { conversationId, message ->
                 if (_currentConversationId.value == conversationId) {
-                    renderStore.updateAllMessages { messages ->
-                        UiMessageCommitPolicy.upsert(messages, listOf(message))
-                    }
+                    // Normal/error completion needs the same atomic overlay -> persisted-row
+                    // handoff as Stop. Independent updates let a queued Room SENDING projection
+                    // land between them and leave the row stuck in Answering after loading exits.
+                    renderStore.commitTerminalStreamingMessage(message)
                 }
             }
         }

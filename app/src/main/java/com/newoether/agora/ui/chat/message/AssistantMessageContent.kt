@@ -126,6 +126,7 @@ internal fun AssistantMessageContent(
     contextAlpha: Modifier,
     isStreaming: Boolean,
     isLoading: Boolean,
+    isRegenerationExiting: Boolean,
     isEditingAllowed: Boolean,
     showActions: Boolean,
     actionCopyText: String?,
@@ -150,7 +151,23 @@ internal fun AssistantMessageContent(
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
-    var showMenu by remember { mutableStateOf(false) }
+    var showMenu by remember(message.id) { mutableStateOf(false) }
+    var regenerateRequested by remember(message.id) { mutableStateOf(false) }
+    var observedRegenerationExit by remember(message.id) { mutableStateOf(false) }
+    LaunchedEffect(isRegenerationExiting) {
+        if (isRegenerationExiting) {
+            observedRegenerationExit = true
+        } else if (observedRegenerationExit) {
+            // An aborted transition keeps the old answer composed. Restore its controls only
+            // after the externally-owned regeneration state has genuinely ended.
+            regenerateRequested = false
+            observedRegenerationExit = false
+        }
+    }
+    val regenerationActionsExiting = regenerateRequested || isRegenerationExiting
+    LaunchedEffect(regenerationActionsExiting) {
+        if (regenerationActionsExiting) showMenu = false
+    }
     // During generation, eat horizontal nested-scroll so code blocks
     // cannot be panned. Vertical scroll and taps (thinking header,
     // stop button) pass through normally. Text selection is already
@@ -247,8 +264,18 @@ internal fun AssistantMessageContent(
                     mergedSegments.filter { it.type != "answer" }
                 }
                 val compactVisible = !useTimelineSegments && detailSegments.isNotEmpty()
-                val compactAppearanceKey = "${message.id}:compact"
+                val compactAppearanceKey = compactSegmentBlockAppearanceKey(message.id)
                 val compactCardAppearanceKey = "$compactAppearanceKey:card"
+                val latestVisibleAnswerIndex =
+                    mergedSegments.indexOfLast { it.isVisibleAnswerSegment() }
+                val latestVisibleAnswer = mergedSegments.getOrNull(latestVisibleAnswerIndex)
+                val compactAnswerAppearanceKey = latestVisibleAnswer?.let { segment ->
+                    "${segmentAppearanceKey(
+                        message.id,
+                        latestVisibleAnswerIndex,
+                        segment,
+                    )}:compact-answer"
+                }
 
                 if (useTimelineSegments) {
                     TimelineSegmentsContent(
@@ -315,13 +342,29 @@ internal fun AssistantMessageContent(
                             }
                         }
                     } else if (renderedText.isNotEmpty() && !useTimelineSegments) {
-                        StreamingMarkdownDocument(
-                            content = renderedText,
-                            isStreaming = isStreaming,
-                            renderContext = renderContext,
-                            modifier = Modifier.fillMaxWidth(),
-                            selectionEnabled = !isStreaming,
-                        )
+                        if (compactAnswerAppearanceKey != null) {
+                            AnimatedTimelineBlockAppearance(
+                                animationKey = compactAnswerAppearanceKey,
+                                appearanceRegistry = segmentAppearanceRegistry,
+                                isStreaming = isStreaming,
+                            ) {
+                                StreamingMarkdownDocument(
+                                    content = renderedText,
+                                    isStreaming = isStreaming,
+                                    renderContext = renderContext,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    selectionEnabled = !isStreaming,
+                                )
+                            }
+                        } else {
+                            StreamingMarkdownDocument(
+                                content = renderedText,
+                                isStreaming = isStreaming,
+                                renderContext = renderContext,
+                                modifier = Modifier.fillMaxWidth(),
+                                selectionEnabled = !isStreaming,
+                            )
+                        }
                     }
                 }
                 if (message.participant == Participant.MODEL && message.images.isNotEmpty()) {
@@ -351,15 +394,27 @@ internal fun AssistantMessageContent(
                     }
                 }
                 if (message.participant == Participant.MODEL && showActions) {
-                    val actionsVisible = assistantActionsVisible(
+                    val actionAvailability = assistantActionAvailability(
                         isStreaming = isStreaming,
-                        regenerateRequested = false,
+                        isLoading = isLoading,
+                        regenerateRequested = regenerationActionsExiting,
                     )
-                    val actionsEnabled = actionsVisible && !isLoading
-                    val actionsAlpha by animateFloatAsState(
-                        targetValue = if (actionsVisible) 1f else 0f,
+                    val informationActionsAlpha by animateFloatAsState(
+                        targetValue = if (actionAvailability.informationVisible) 1f else 0f,
                         animationSpec = tween(
-                            durationMillis = if (actionsVisible) {
+                            durationMillis = if (actionAvailability.informationVisible) {
+                                ACTIONS_ENTER_DURATION_MS
+                            } else {
+                                ACTIONS_EXIT_DURATION_MS
+                            },
+                            easing = LinearEasing,
+                        ),
+                        label = "assistantInformationActions:${message.id}",
+                    )
+                    val terminalActionsAlpha by animateFloatAsState(
+                        targetValue = if (actionAvailability.terminalVisible) 1f else 0f,
+                        animationSpec = tween(
+                            durationMillis = if (actionAvailability.terminalVisible) {
                                 ACTIONS_ENTER_DURATION_MS
                             } else {
                                 ACTIONS_EXIT_DURATION_MS
@@ -368,12 +423,15 @@ internal fun AssistantMessageContent(
                         ),
                         label = "assistantActions:${message.id}",
                     )
-                    LaunchedEffect(actionsEnabled) {
-                        if (!actionsEnabled) showMenu = false
-                    }
-                    val actionTint =
+                    val enabledActionTint =
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    val terminalActionTint =
                         MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                            alpha = if (actionsEnabled) 0.6f else 0.3f
+                            alpha = if (actionAvailability.terminalEnabled) 0.6f else 0.3f
+                        )
+                    val destructiveActionTint =
+                        MaterialTheme.colorScheme.error.copy(
+                            alpha = if (actionAvailability.terminalEnabled) 1f else 0.38f
                         )
                     Row(
                         modifier = Modifier
@@ -381,8 +439,7 @@ internal fun AssistantMessageContent(
                             // Reserve the terminal action row from the first Sending frame. Only
                             // its draw alpha changes, so completion cannot grow the message item.
                             .height(44.dp)
-                            .padding(top = 12.dp)
-                            .graphicsLayer { alpha = actionsAlpha },
+                            .padding(top = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -392,53 +449,64 @@ internal fun AssistantMessageContent(
                                     clipboardManager.setText(AnnotatedString(actionCopyText))
                                     haptics.confirm()
                                 },
-                                enabled = actionsEnabled,
-                                modifier = Modifier.size(32.dp),
+                                enabled = actionAvailability.informationEnabled,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .graphicsLayer { alpha = informationActionsAlpha },
                             ) {
                                 Icon(
                                     Icons.Default.ContentCopy,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
-                                    tint = actionTint,
+                                    tint = enabledActionTint,
                                 )
                             }
                         }
                         IconButton(
                             onClick = {
-                                onRegenerate(message.id)
+                                if (onRegenerate(message.id)) {
+                                    regenerateRequested = true
+                                    showMenu = false
+                                }
                             },
-                            enabled = actionsEnabled,
-                            modifier = Modifier.size(32.dp),
+                            enabled = actionAvailability.terminalEnabled,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .graphicsLayer { alpha = terminalActionsAlpha },
                         ) {
                             Icon(
                                 Icons.Default.Refresh,
                                 contentDescription = null,
                                 modifier = Modifier.size(19.dp),
-                                tint = actionTint,
+                                tint = terminalActionTint,
                             )
                         }
                         IconButton(
                             onClick = onFork,
-                            enabled = actionsEnabled,
-                            modifier = Modifier.size(32.dp),
+                            enabled = actionAvailability.terminalEnabled,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .graphicsLayer { alpha = terminalActionsAlpha },
                         ) {
                             Icon(
                                 Icons.Default.CallSplit,
                                 contentDescription = stringResource(R.string.conversation_fork_from_here),
                                 modifier = Modifier.size(18.dp),
-                                tint = actionTint,
+                                tint = terminalActionTint,
                             )
                         }
                         IconButton(
                             onClick = onShare,
-                            enabled = actionsEnabled,
-                            modifier = Modifier.size(32.dp),
+                            enabled = actionAvailability.terminalEnabled,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .graphicsLayer { alpha = terminalActionsAlpha },
                         ) {
                             Icon(
                                 Icons.Default.Share,
                                 contentDescription = stringResource(R.string.conversation_share),
                                 modifier = Modifier.size(16.dp),
-                                tint = actionTint,
+                                tint = terminalActionTint,
                             )
                         }
                         Box {
@@ -447,21 +515,23 @@ internal fun AssistantMessageContent(
                                     haptics.tap()
                                     showMenu = true
                                 },
-                                enabled = actionsEnabled,
-                                modifier = Modifier.size(32.dp),
+                                enabled = actionAvailability.informationEnabled,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .graphicsLayer { alpha = informationActionsAlpha },
                             ) {
                                 Icon(
                                     Icons.Default.MoreVert,
                                     contentDescription = null,
                                     modifier = Modifier.size(18.dp),
-                                    tint = actionTint,
+                                    tint = enabledActionTint,
                                 )
                             }
                             DropdownMenu(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
                                 tonalElevation = 16.dp,
                                 shape = RoundedCornerShape(12.dp),
-                                expanded = showMenu,
+                                expanded = showMenu && actionAvailability.informationVisible,
                                 onDismissRequest = { showMenu = false },
                             ) {
                                 DropdownMenuItem(
@@ -471,27 +541,29 @@ internal fun AssistantMessageContent(
                                         showMenu = false
                                         onShowInfo()
                                     },
-                                    enabled = actionsEnabled,
+                                    enabled = actionAvailability.informationEnabled,
                                     leadingIcon = { Icon(Icons.Default.Info, null) },
                                 )
                                 DropdownMenuItem(
                                     text = {
                                         Text(
                                             stringResource(R.string.delete),
-                                            color = MaterialTheme.colorScheme.error,
+                                            color = destructiveActionTint,
                                         )
                                     },
                                     onClick = {
-                                        haptics.tap()
-                                        showMenu = false
-                                        onShowDelete()
+                                        if (actionAvailability.terminalEnabled) {
+                                            haptics.tap()
+                                            showMenu = false
+                                            onShowDelete()
+                                        }
                                     },
-                                    enabled = actionsEnabled,
+                                    enabled = actionAvailability.terminalEnabled,
                                     leadingIcon = {
                                         Icon(
                                             Icons.Default.Delete,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.error,
+                                            tint = destructiveActionTint,
                                         )
                                     },
                                 )
@@ -503,6 +575,7 @@ internal fun AssistantMessageContent(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .padding(start = 8.dp)
+                                    .graphicsLayer { alpha = terminalActionsAlpha }
                                     .clip(RoundedCornerShape(100))
                                     .background(
                                         MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -511,7 +584,10 @@ internal fun AssistantMessageContent(
                             ) {
                                 IconButton(
                                     onClick = { onSwitchBranch(-1) },
-                                    enabled = actionsEnabled && branchIndex > 0 && isEditingAllowed,
+                                    enabled =
+                                        actionAvailability.terminalEnabled &&
+                                            branchIndex > 0 &&
+                                            isEditingAllowed,
                                     modifier = Modifier.size(24.dp),
                                 ) {
                                     Icon(
@@ -526,7 +602,7 @@ internal fun AssistantMessageContent(
                                 )
                                 IconButton(
                                     onClick = { onSwitchBranch(1) },
-                                    enabled = actionsEnabled &&
+                                    enabled = actionAvailability.terminalEnabled &&
                                         branchIndex < totalBranches - 1 &&
                                         isEditingAllowed,
                                     modifier = Modifier.size(24.dp),

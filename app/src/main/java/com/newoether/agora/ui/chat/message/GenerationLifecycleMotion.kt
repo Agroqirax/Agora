@@ -65,3 +65,29 @@ internal fun assistantActionsVisible(
     isStreaming: Boolean,
     regenerateRequested: Boolean,
 ): Boolean = !isStreaming && !regenerateRequested
+
+internal data class AssistantActionAvailability(
+    val informationVisible: Boolean,
+    val informationEnabled: Boolean,
+    val terminalVisible: Boolean,
+    val terminalEnabled: Boolean,
+)
+
+/**
+ * Copy and message metadata are read-only snapshots, so they stay available during streaming.
+ * Tree-mutating actions wait for the active generation to become fully idle.
+ */
+internal fun assistantActionAvailability(
+    isStreaming: Boolean,
+    isLoading: Boolean,
+    regenerateRequested: Boolean = false,
+): AssistantActionAvailability {
+    val terminalVisible = assistantActionsVisible(isStreaming, regenerateRequested)
+    val informationVisible = !isStreaming && !regenerateRequested
+    return AssistantActionAvailability(
+        informationVisible = informationVisible,
+        informationEnabled = informationVisible,
+        terminalVisible = terminalVisible,
+        terminalEnabled = terminalVisible && !isLoading,
+    )
+}

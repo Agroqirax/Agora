@@ -108,6 +108,11 @@ private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
 private const val DRAFT_PERSIST_RETRY_COUNT = 2
 private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
 
+private data class AbsoluteBottomRequest(
+    val token: Long = 0L,
+    val attachStreamingTailOnArrival: Boolean = false,
+)
+
 private data class ComposerDraftUiSnapshot(
     val text: String,
     val attachments: List<SelectedAttachment>,
@@ -475,8 +480,8 @@ fun ChatApp(
     var absoluteBottomScrollPhase by remember(currentConversationId) {
         mutableStateOf(AbsoluteBottomScrollPhase.IDLE)
     }
-    var absoluteBottomRequestToken by remember(currentConversationId) {
-        mutableLongStateOf(0L)
+    var absoluteBottomRequest by remember(currentConversationId) {
+        mutableStateOf(AbsoluteBottomRequest())
     }
     val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
     val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
@@ -491,18 +496,21 @@ fun ChatApp(
     // Follow state belongs to one conversation. Reusing it across a conversation switch can
     // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
     val streamingTailController = rememberStreamingTailController(currentConversationId)
-    fun requestAbsoluteBottomScroll(): Boolean {
+    fun requestAbsoluteBottomScroll(
+        attachStreamingTailOnArrival: Boolean = false,
+    ): Boolean {
         if (absoluteBottomScrollPhase.isActive) return false
         absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
             absoluteBottomScrollPhase,
             AbsoluteBottomScrollEvent.Requested,
         )
-        absoluteBottomRequestToken =
-            if (absoluteBottomRequestToken == Long.MAX_VALUE) {
-                1L
-            } else {
-                absoluteBottomRequestToken + 1L
-            }
+        val nextToken =
+            if (absoluteBottomRequest.token == Long.MAX_VALUE) 1L
+            else absoluteBottomRequest.token + 1L
+        absoluteBottomRequest = AbsoluteBottomRequest(
+            token = nextToken,
+            attachStreamingTailOnArrival = attachStreamingTailOnArrival,
+        )
         return true
     }
     LaunchedEffect(
@@ -1062,8 +1070,10 @@ fun ChatApp(
     }
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
-    LaunchedEffect(absoluteBottomRequestToken, currentConversationId) {
-        if (absoluteBottomRequestToken == 0L) return@LaunchedEffect
+    LaunchedEffect(absoluteBottomRequest.token, currentConversationId) {
+        val request = absoluteBottomRequest
+        if (request.token == 0L) return@LaunchedEffect
+        var reattachAfterHandoff = false
         try {
             val reachedBottom = listState.animateToAbsoluteBottom(
                 isGenerationActive = { latestGenerationCanGrow },
@@ -1071,13 +1081,11 @@ fun ChatApp(
                 minimumStepPx = with(density) { 2.dp.toPx() },
                 onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
             )
-            if (
-                reachedBottom &&
-                latestGenerationCanGrow &&
-                !listState.canScrollForward
-            ) {
-                streamingTailController.requestReattach()
-            }
+            reattachAfterHandoff =
+                request.attachStreamingTailOnArrival &&
+                    reachedBottom &&
+                    latestGenerationCanGrow &&
+                    !listState.canScrollForward
         } finally {
             if (absoluteBottomScrollPhase.isActive) {
                 absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
@@ -1085,6 +1093,12 @@ fun ChatApp(
                     AbsoluteBottomScrollEvent.Cancelled,
                 )
             }
+        }
+        // The MessageList follow owner is paused while the absolute-bottom actor runs. Publish the
+        // explicit reattach only after that handoff has ended, otherwise the request observes
+        // autoFollowEnabled=false and is permanently consumed.
+        if (reattachAfterHandoff) {
+            streamingTailController.requestReattach()
         }
     }
     LaunchedEffect(listState, currentConversationId) {
@@ -1097,7 +1111,7 @@ fun ChatApp(
                     absoluteBottomScrollPhase,
                     AbsoluteBottomScrollEvent.Cancelled,
                 )
-                absoluteBottomRequestToken = 0L
+                absoluteBottomRequest = AbsoluteBottomRequest()
             }
         }
     }
@@ -1119,7 +1133,7 @@ fun ChatApp(
                 absoluteBottomScrollPhase,
                 AbsoluteBottomScrollEvent.Cancelled,
             )
-            absoluteBottomRequestToken = 0L
+            absoluteBottomRequest = AbsoluteBottomRequest()
         }
     }
     LaunchedEffect(
@@ -1405,6 +1419,20 @@ fun ChatApp(
                             } else {
                                 Modifier.fillMaxSize()
                             }
+                            val streamingFollowAvailability = streamingTailAvailability(
+                                generationActive = isLoading,
+                                blocked =
+                                    isStopping ||
+                                        isSwitching ||
+                                        conversationSearchActive ||
+                                        shareSelectionActive,
+                                programmaticHandoff =
+                                    absoluteBottomScrollPhase.isActive ||
+                                        animatedScrollRequest?.conversationId ==
+                                            currentConversationId ||
+                                        regenerationTransition?.conversationId ==
+                                            currentConversationId,
+                            )
                             Box(modifier = Modifier.fillMaxSize()) {
                             MessageList(
                                 messages = StableMessageList(renderMessagesState.value),
@@ -1420,27 +1448,9 @@ fun ChatApp(
                                 isStopping = isStopping,
                                 isSwitching = isSwitching,
                                 streamingAutoFollowEnabled =
-                                    isLoading &&
-                                        !isStopping &&
-                                        !isSwitching &&
-                                        !conversationSearchActive &&
-                                        !shareSelectionActive &&
-                                        !absoluteBottomScrollPhase.isActive &&
-                                        animatedScrollRequest == null &&
-                                        regenerationTransition == null,
+                                    streamingFollowAvailability.enabled,
                                 streamingAutoFollowPaused =
-                                    isLoading &&
-                                        !isStopping &&
-                                        !isSwitching &&
-                                        !conversationSearchActive &&
-                                        !shareSelectionActive &&
-                                        !absoluteBottomScrollPhase.isActive &&
-                                        (
-                                            animatedScrollRequest?.conversationId ==
-                                                currentConversationId ||
-                                                regenerationTransition?.conversationId ==
-                                                currentConversationId
-                                        ),
+                                    streamingFollowAvailability.paused,
                                 programmaticScrollActive =
                                     animatedScrollRequest?.conversationId ==
                                         currentConversationId,
@@ -1611,7 +1621,11 @@ fun ChatApp(
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             FloatingActionButton(onClick = {
-                                if (requestAbsoluteBottomScroll()) {
+                                if (
+                                    requestAbsoluteBottomScroll(
+                                        attachStreamingTailOnArrival = true,
+                                    )
+                                ) {
                                     haptics.tap()
                                 }
                             }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {

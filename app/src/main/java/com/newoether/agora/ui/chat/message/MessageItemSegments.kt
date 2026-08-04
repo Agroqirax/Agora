@@ -64,6 +64,40 @@ internal fun ChatMessage.hasActiveAnswerSegment(): Boolean {
     }
 }
 
+/**
+ * Stable render identity for one merged message segment.
+ *
+ * Segment content, tool arguments/results, and lifecycle state are deliberately excluded: those
+ * fields grow in place while streaming and must never restart the one-shot entrance animation.
+ * The append-only merged index plus type changes only when a genuinely new visible segment enters
+ * the message timeline.
+ */
+internal fun segmentAppearanceKey(
+    messageId: String,
+    mergedIndex: Int,
+    segment: MessageSegment,
+): String = "$messageId:segment:$mergedIndex:${segment.type}"
+
+/**
+ * Stable identity for one non-answer segment across compact, grouped, and timeline layouts.
+ *
+ * The detail index is append-only within a message. Keeping layout mode and payload fields out of
+ * this key prevents a settings change or a streaming payload update from replaying the entrance.
+ */
+internal fun detailSegmentAppearanceKey(
+    messageId: String,
+    detailIndex: Int,
+    segment: MessageSegment,
+): String = "$messageId:detail-segment:$detailIndex:${segment.type}"
+
+internal fun compactSegmentBlockAppearanceKey(messageId: String): String =
+    "$messageId:compact"
+
+internal fun groupedSegmentBlockAppearanceKey(
+    messageId: String,
+    firstDetailIndex: Int,
+): String = "$messageId:group:$firstDetailIndex"
+
 internal fun buildTimelineBlockKeys(
     messageId: String,
     segments: List<MessageSegment>,
@@ -107,7 +141,7 @@ internal fun buildTimelineBlockKeys(
 }
 
 /**
- * Session-scoped first-appearance memory for thinking/tool timeline blocks.
+ * Session-scoped first-appearance memory for every rendered message segment.
  *
  * This deliberately lives above LazyColumn items: local remember state is lost when an off-screen
  * message is disposed, which would replay the entrance when it is composed again.

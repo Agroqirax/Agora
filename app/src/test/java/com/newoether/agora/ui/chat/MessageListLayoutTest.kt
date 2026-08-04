@@ -5,6 +5,7 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.ui.chat.message.assistantActionAvailability
 import com.newoether.agora.ui.chat.message.assistantActionsVisible
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -414,6 +415,11 @@ class MessageListLayoutTest {
             StreamingTailFollowMode.INACTIVE,
             StreamingTailFollowEvent.GenerationChanged(
                 active = true,
+            ),
+        )
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ExplicitBottomReached(
                 atAbsoluteBottom = true,
             ),
         )
@@ -421,21 +427,22 @@ class MessageListLayoutTest {
 
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ViewportSettled(
-                atAbsoluteBottom = false,
-                userDragInProgress = false,
-            ),
+            StreamingTailFollowEvent.GenerationChanged(active = true),
         )
-
         assertEquals(StreamingTailFollowMode.ATTACHED, mode)
     }
 
     @Test
-    fun realUserDragDetachesUntilTheViewportReturnsToBottom() {
+    fun realUserDragDetachesUntilAnExplicitBottomRequestCompletes() {
         var mode = reduceStreamingTailFollow(
             StreamingTailFollowMode.INACTIVE,
             StreamingTailFollowEvent.GenerationChanged(
                 active = true,
+            ),
+        )
+        mode = reduceStreamingTailFollow(
+            mode,
+            StreamingTailFollowEvent.ExplicitBottomReached(
                 atAbsoluteBottom = true,
             ),
         )
@@ -447,28 +454,7 @@ class MessageListLayoutTest {
 
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ViewportSettled(
-                atAbsoluteBottom = true,
-                userDragInProgress = true,
-            ),
-        )
-        assertEquals(StreamingTailFollowMode.DETACHED, mode)
-
-        mode = reduceStreamingTailFollow(
-            mode,
-            StreamingTailFollowEvent.ViewportSettled(
-                atAbsoluteBottom = false,
-                userDragInProgress = false,
-            ),
-        )
-        assertEquals(StreamingTailFollowMode.DETACHED, mode)
-
-        mode = reduceStreamingTailFollow(
-            mode,
-            StreamingTailFollowEvent.ViewportSettled(
-                atAbsoluteBottom = true,
-                userDragInProgress = false,
-            ),
+            StreamingTailFollowEvent.GenerationChanged(active = true),
         )
         assertEquals(StreamingTailFollowMode.DETACHED, mode)
 
@@ -487,16 +473,6 @@ class MessageListLayoutTest {
             StreamingTailFollowMode.DETACHED,
             StreamingTailFollowEvent.GenerationChanged(
                 active = true,
-                atAbsoluteBottom = true,
-            ),
-        )
-        assertEquals(StreamingTailFollowMode.DETACHED, mode)
-
-        mode = reduceStreamingTailFollow(
-            mode,
-            StreamingTailFollowEvent.ViewportSettled(
-                atAbsoluteBottom = true,
-                userDragInProgress = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.DETACHED, mode)
@@ -508,7 +484,6 @@ class MessageListLayoutTest {
             StreamingTailFollowMode.ATTACHED,
             StreamingTailFollowEvent.GenerationChanged(
                 active = false,
-                atAbsoluteBottom = true,
             ),
         )
 
@@ -526,7 +501,6 @@ class MessageListLayoutTest {
             StreamingTailFollowMode.DETACHED,
             StreamingTailFollowEvent.GenerationChanged(
                 active = false,
-                atAbsoluteBottom = true,
             ),
         )
 
@@ -534,21 +508,19 @@ class MessageListLayoutTest {
     }
 
     @Test
-    fun streamingTailArmsUntilThePageReachesAbsoluteBottom() {
+    fun streamingTailOnlyAttachesAfterExplicitBottomRequestCompletes() {
         var mode = reduceStreamingTailFollow(
             StreamingTailFollowMode.INACTIVE,
             StreamingTailFollowEvent.GenerationChanged(
                 active = true,
-                atAbsoluteBottom = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.ARMED, mode)
 
         mode = reduceStreamingTailFollow(
             mode,
-            StreamingTailFollowEvent.ViewportSettled(
+            StreamingTailFollowEvent.ExplicitBottomReached(
                 atAbsoluteBottom = true,
-                userDragInProgress = false,
             ),
         )
         assertEquals(StreamingTailFollowMode.ATTACHED, mode)
@@ -561,7 +533,6 @@ class MessageListLayoutTest {
             active = true,
             autoFollowEnabled = false,
             autoFollowPaused = true,
-            atAbsoluteBottom = false,
         )
         assertEquals(StreamingTailFollowMode.INACTIVE, mode)
 
@@ -570,9 +541,41 @@ class MessageListLayoutTest {
             active = true,
             autoFollowEnabled = true,
             autoFollowPaused = false,
-            atAbsoluteBottom = false,
         )
         assertEquals(StreamingTailFollowMode.ARMED, mode)
+    }
+
+    @Test
+    fun absoluteBottomScrollIsAFollowHandoffRatherThanDetachment() {
+        val availability = streamingTailAvailability(
+            generationActive = true,
+            blocked = false,
+            programmaticHandoff = true,
+        )
+
+        assertFalse(availability.enabled)
+        assertTrue(availability.paused)
+        assertEquals(
+            StreamingTailFollowMode.ATTACHED,
+            reduceStreamingTailGenerationAvailability(
+                current = StreamingTailFollowMode.ATTACHED,
+                active = true,
+                autoFollowEnabled = availability.enabled,
+                autoFollowPaused = availability.paused,
+            ),
+        )
+    }
+
+    @Test
+    fun realCompetingUiStillDisablesStreamingFollow() {
+        val availability = streamingTailAvailability(
+            generationActive = true,
+            blocked = true,
+            programmaticHandoff = true,
+        )
+
+        assertFalse(availability.enabled)
+        assertFalse(availability.paused)
     }
 
     @Test
@@ -582,7 +585,6 @@ class MessageListLayoutTest {
             active = true,
             autoFollowEnabled = false,
             autoFollowPaused = false,
-            atAbsoluteBottom = true,
         )
 
         assertEquals(StreamingTailFollowMode.DETACHED, mode)
@@ -835,6 +837,46 @@ class MessageListLayoutTest {
                 regenerateRequested = true,
             )
         )
+    }
+
+    @Test
+    fun currentStreamingActionsHideWhileCompletedMessageInfoStaysEnabled() {
+        val currentStreaming = assistantActionAvailability(
+            isStreaming = true,
+            isLoading = true,
+        )
+        assertFalse(currentStreaming.informationVisible)
+        assertFalse(currentStreaming.informationEnabled)
+        assertFalse(currentStreaming.terminalVisible)
+        assertFalse(currentStreaming.terminalEnabled)
+
+        val previousCompletedDuringGeneration = assistantActionAvailability(
+            isStreaming = false,
+            isLoading = true,
+        )
+        assertTrue(previousCompletedDuringGeneration.informationVisible)
+        assertTrue(previousCompletedDuringGeneration.informationEnabled)
+        assertTrue(previousCompletedDuringGeneration.terminalVisible)
+        assertFalse(previousCompletedDuringGeneration.terminalEnabled)
+
+        val completeAndIdle = assistantActionAvailability(
+            isStreaming = false,
+            isLoading = false,
+        )
+        assertTrue(completeAndIdle.informationVisible)
+        assertTrue(completeAndIdle.informationEnabled)
+        assertTrue(completeAndIdle.terminalVisible)
+        assertTrue(completeAndIdle.terminalEnabled)
+
+        val regenerating = assistantActionAvailability(
+            isStreaming = false,
+            isLoading = true,
+            regenerateRequested = true,
+        )
+        assertFalse(regenerating.informationVisible)
+        assertFalse(regenerating.informationEnabled)
+        assertFalse(regenerating.terminalVisible)
+        assertFalse(regenerating.terminalEnabled)
     }
 
     @Test

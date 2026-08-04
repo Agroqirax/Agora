@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -317,15 +318,24 @@ internal fun CompactSegmentBlock(
                     Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
                 }
                 Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    collapsedTitle,
-                    style = ChatType.thoughtTitle,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                Crossfade(
+                    targetState = collapsedTitle,
+                    animationSpec = tween(
+                        durationMillis = STATUS_CROSSFADE_DURATION_MS,
+                        easing = LinearEasing,
+                    ),
+                    label = "compactSegmentTitle:$expansionKey",
                     modifier = Modifier.weight(1f),
-                )
+                ) { title ->
+                    Text(
+                        text = title,
+                        style = ChatType.thoughtTitle,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Icon(
                     if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
                     null,
@@ -341,9 +351,15 @@ internal fun CompactSegmentBlock(
                 Column {
                     Spacer(modifier = Modifier.height(2.dp))
                     segs.forEachIndexed { idx, seg ->
+                      val detailIndex = segmentIndices.getOrElse(idx) { idx }
                       AnimatedTimelineBlockAppearance(
-                        animationKey = "$expansionKey:seg:$idx",
-                        animate = false
+                        animationKey = detailSegmentAppearanceKey(
+                            message.id,
+                            detailIndex,
+                            seg,
+                        ),
+                        appearanceRegistry = segmentAppearanceRegistry,
+                        isStreaming = isStreaming,
                       ) {
                        Column {
                         if ((seg.type == "thought" && seg.content.isNotBlank()) || seg.type == "transcription") {
@@ -449,26 +465,38 @@ internal fun TimelineSegmentsContent(
         var index = 0
         var groupedBlockIndex = 0
         var previousVisibleWasAnswer = false
+        val lastVisibleSegmentIndex = segments.indexOfLast { segment ->
+            segment.isVisibleAnswerSegment() || segment.isInfoSegment()
+        }
         while (index < segments.size) {
             val seg = segments[index]
             when (seg.type) {
                 "answer" -> {
                     if (seg.content.isNotBlank()) {
-                        val answerIsStreaming = isStreaming && index == segments.lastIndex
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = if (index == 0) 0.dp else 6.dp)
+                        val answerIsStreaming =
+                            isStreaming && index == lastVisibleSegmentIndex
+                        val answerAppearanceKey =
+                            "${segmentAppearanceKey(message.id, index, seg)}:timeline"
+                        AnimatedTimelineBlockAppearance(
+                            animationKey = answerAppearanceKey,
+                            appearanceRegistry = segmentAppearanceRegistry,
+                            isStreaming = isStreaming,
                         ) {
-                            StreamingMarkdownDocument(
-                                content = seg.content,
-                                isStreaming = answerIsStreaming,
-                                renderContext = renderContext,
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .noOpBringIntoView(),
-                                selectionEnabled = !answerIsStreaming,
-                            )
+                                    .padding(top = if (index == 0) 0.dp else 6.dp)
+                            ) {
+                                StreamingMarkdownDocument(
+                                    content = seg.content,
+                                    isStreaming = answerIsStreaming,
+                                    renderContext = renderContext,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .noOpBringIntoView(),
+                                    selectionEnabled = !answerIsStreaming,
+                                )
+                            }
                         }
                         previousVisibleWasAnswer = true
                     }
@@ -488,7 +516,10 @@ internal fun TimelineSegmentsContent(
                             }
                             blockEnd++
                         }
-                        val expansionKey = "${message.id}:group:${blockDetailIndices.firstOrNull() ?: index}"
+                        val expansionKey = groupedSegmentBlockAppearanceKey(
+                            message.id,
+                            blockDetailIndices.firstOrNull() ?: index,
+                        )
                         val blockTopPaddingExtra = if (groupedBlockIndex > 0) 8.dp else 0.dp
                         val blockContent: @Composable () -> Unit = {
                             CompactSegmentBlock(
@@ -522,13 +553,19 @@ internal fun TimelineSegmentsContent(
                         val currentDetailIndex = detailIndex
                         detailIndex++
                         val cardTopPaddingExtra = if (previousVisibleWasAnswer) 8.dp else 0.dp
-                        val timelineKey = "${message.id}:timeline:$currentDetailIndex"
+                        val timelineKey = detailSegmentAppearanceKey(
+                            message.id,
+                            currentDetailIndex,
+                            seg,
+                        )
                         val cardContent: @Composable () -> Unit = {
                             TimelineInfoSegmentCard(
                                 seg = seg,
                                 detailSegments = detailSegments,
                                 detailIndex = currentDetailIndex,
-                                isStreaming = isStreaming && index == segments.lastIndex,
+                                isStreamingContent =
+                                    isStreaming && index == lastVisibleSegmentIndex,
+                                animateAppearance = isStreaming,
                                 topPaddingExtra = cardTopPaddingExtra,
                                 cardAnimationKey = "$timelineKey:card",
                                 segmentAppearanceRegistry = segmentAppearanceRegistry,
@@ -559,7 +596,8 @@ private fun TimelineInfoSegmentCard(
     seg: MessageSegment,
     detailSegments: List<MessageSegment>,
     detailIndex: Int,
-    isStreaming: Boolean,
+    isStreamingContent: Boolean,
+    animateAppearance: Boolean,
     topPaddingExtra: Dp = 0.dp,
     cardAnimationKey: String,
     segmentAppearanceRegistry: SegmentAppearanceRegistry,
@@ -569,7 +607,7 @@ private fun TimelineInfoSegmentCard(
     val animateCardAppearance = rememberSegmentAppearance(
         registry = segmentAppearanceRegistry,
         animationKey = cardAnimationKey,
-        isStreaming = isStreaming,
+        isStreaming = animateAppearance,
     )
     val cardAppearanceModifier = generationLifecycleAppearanceModifier(
         animationKey = cardAnimationKey,
@@ -621,7 +659,7 @@ private fun TimelineInfoSegmentCard(
                 if (seg.type == "thought" && seg.content.isNotBlank()) {
                     StreamingThoughtPreviewText(
                         content = seg.content,
-                        streaming = isStreaming,
+                        streaming = isStreamingContent,
                     )
                 } else {
                     val summary = when (seg.type) {

@@ -64,12 +64,40 @@ internal class StreamingTailController {
 internal fun rememberStreamingTailController(ownerKey: Any? = Unit): StreamingTailController =
     remember(ownerKey) { StreamingTailController() }
 
+internal data class StreamingTailAvailability(
+    val enabled: Boolean,
+    val paused: Boolean,
+)
+
+/**
+ * A programmatic trip to the physical bottom is a temporary ownership handoff, not detachment.
+ * Search/share/switch/Stop are real competitors and disable following instead.
+ */
+internal fun streamingTailAvailability(
+    generationActive: Boolean,
+    blocked: Boolean,
+    programmaticHandoff: Boolean,
+): StreamingTailAvailability = when {
+    !generationActive || blocked -> StreamingTailAvailability(
+        enabled = false,
+        paused = false,
+    )
+    programmaticHandoff -> StreamingTailAvailability(
+        enabled = false,
+        paused = true,
+    )
+    else -> StreamingTailAvailability(
+        enabled = true,
+        paused = false,
+    )
+}
+
 /**
  * Explicit auto-follow state.
  *
- * ARMED waits for a programmatic Send/Regenerate scroll to reach the physical page bottom.
- * ATTACHED keeps that bottom stationary as the page extent grows. A real user drag latches
- * DETACHED; only an explicit scroll-to-bottom completion may reattach it.
+ * ARMED is generation-active but not following. ATTACHED keeps the physical page bottom
+ * stationary as the page extent grows. Geometry never grants attachment: only completion of a
+ * user-initiated scroll-to-bottom request can enter ATTACHED. A real user drag latches DETACHED.
  */
 internal enum class StreamingTailFollowMode {
     INACTIVE,
@@ -82,7 +110,6 @@ internal enum class StreamingTailFollowMode {
 internal sealed interface StreamingTailFollowEvent {
     data class GenerationChanged(
         val active: Boolean,
-        val atAbsoluteBottom: Boolean,
     ) : StreamingTailFollowEvent
 
     data object UserDragStarted : StreamingTailFollowEvent
@@ -93,10 +120,6 @@ internal sealed interface StreamingTailFollowEvent {
 
     data object SettlingFinished : StreamingTailFollowEvent
 
-    data class ViewportSettled(
-        val atAbsoluteBottom: Boolean,
-        val userDragInProgress: Boolean,
-    ) : StreamingTailFollowEvent
 }
 
 internal fun reduceStreamingTailFollow(
@@ -112,7 +135,6 @@ internal fun reduceStreamingTailFollow(
         current == StreamingTailFollowMode.DETACHED -> StreamingTailFollowMode.DETACHED
         current == StreamingTailFollowMode.ATTACHED ||
             current == StreamingTailFollowMode.SETTLING -> current
-        event.atAbsoluteBottom -> StreamingTailFollowMode.ATTACHED
         else -> StreamingTailFollowMode.ARMED
     }
 
@@ -142,16 +164,6 @@ internal fun reduceStreamingTailFollow(
         } else {
             current
         }
-
-    is StreamingTailFollowEvent.ViewportSettled -> when {
-        current == StreamingTailFollowMode.INACTIVE -> current
-        event.userDragInProgress -> current
-        current == StreamingTailFollowMode.ATTACHED ||
-            current == StreamingTailFollowMode.SETTLING -> current
-        current == StreamingTailFollowMode.DETACHED -> StreamingTailFollowMode.DETACHED
-        event.atAbsoluteBottom -> StreamingTailFollowMode.ATTACHED
-        else -> current
-    }
 }
 
 /**
@@ -164,13 +176,11 @@ internal fun reduceStreamingTailGenerationAvailability(
     active: Boolean,
     autoFollowEnabled: Boolean,
     autoFollowPaused: Boolean,
-    atAbsoluteBottom: Boolean,
 ): StreamingTailFollowMode = when {
     !active -> reduceStreamingTailFollow(
         current,
         StreamingTailFollowEvent.GenerationChanged(
             active = false,
-            atAbsoluteBottom = atAbsoluteBottom,
         ),
     )
 
@@ -180,7 +190,6 @@ internal fun reduceStreamingTailGenerationAvailability(
         current,
         StreamingTailFollowEvent.GenerationChanged(
             active = true,
-            atAbsoluteBottom = atAbsoluteBottom,
         ),
     )
 }
