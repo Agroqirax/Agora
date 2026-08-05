@@ -57,7 +57,7 @@
 - Per-provider base URL override for proxies and self-hosted endpoints
 
 ### Agentic Tools
-- **Web Search** — DuckDuckGo Lite (anonymous, no key), Brave, Serper, Tavily, and SearXNG integration
+- **Web Search** — DuckDuckGo Lite (anonymous, no key), Brave, Kagi, Serper, Tavily, and SearXNG integration
 - **Code Execution** — Gemini code execution for running and testing code inline; Alpine Linux sandbox via PRoot with SAF file access
 - **Image Generation** — BYOK text-to-image via OpenAI-compatible `/v1/images/generations`, rendered inline in chat
 - **Remote Shell & File I/O** — Execute commands, read/write/edit/glob/grep files on remote servers via [Conch](https://github.com/newo-ether/conch)

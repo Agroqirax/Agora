@@ -20,7 +20,7 @@ class SearchResultFormatterTest {
         R.string.conversation_list_more -> "More conversations available"
         R.string.conversation_read_empty -> "No messages"
         R.string.conversation_read_more -> "More messages available"
-        R.string.provider_no_keys -> "No API keys configured for Brave Search"
+        R.string.provider_no_keys -> "No API keys configured for ${args.getOrNull(0)}"
         R.string.search_error_format -> "Error: ${args.getOrNull(0) ?: "unknown"}"
         R.string.search_found_results -> "Found ${args[0]} results for '${args[1]}'"
         R.string.search_found_results_no_query -> "Found ${args[0]} results"
@@ -91,6 +91,13 @@ class SearchResultFormatterTest {
         val json = """{"type":"web_search","query":"test","error":"no_results"}"""
         val result = SearchResultFormatter.format(json, context)
         assertEquals("No results found", result)
+    }
+
+    @Test
+    fun format_webSearch_missingKeyUsesSelectedProvider() {
+        val json = """{"type":"web_search","query":"test","error":"no_api_key","provider":"Kagi"}"""
+        val result = SearchResultFormatter.format(json, context)
+        assertEquals("No API keys configured for Kagi", result)
     }
 
     @Test

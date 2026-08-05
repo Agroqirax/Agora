@@ -8,6 +8,7 @@ Let the model search the internet and fetch web pages in real time. When enabled
 |----------|-------------|-----------|-------|
 | **DuckDuckGo Lite** | Anonymous, no API key needed | Yes (unlimited, best-effort) | No setup — works out of the box |
 | **Brave** | Privacy-focused search API | Yes (2,000 queries/month) | [api.search.brave.com](https://api.search.brave.com/) |
+| **Kagi** | Premium, personalized search API | No (pay per use) | [kagi.com/api](https://kagi.com/api) |
 | **Serper** | Fast Google Search API | Yes (2,500 queries/month) | [serper.dev](https://serper.dev) |
 | **Tavily** | AI-optimized search, built for LLM agents | Yes (1,000 queries/month) | [tavily.com](https://tavily.com) |
 | **SearXNG** | Self-hosted metasearch engine | Self-hosted (unlimited) | Your own instance |
@@ -31,6 +32,15 @@ DuckDuckGo Lite is the **default** search provider — no API key required, work
 2. In Agora, go to **Settings → Web Search**
 3. Select **Brave** as the search provider
 4. Paste your API key
+
+### Kagi
+
+1. Create an API key in the [Kagi API Portal](https://kagi.com/api/keys)
+2. In Agora, go to **Settings → Web Search**
+3. Select **Kagi**
+4. Paste your API key
+
+Agora uses Kagi's current v1 Search API. Searches are billed by Kagi according to your API account.
 
 ### Serper
 

@@ -557,6 +557,8 @@
     <string name="visual_effects">المؤثرات البصرية</string>
     <string name="blur_effects">تأثيرات التمويه</string>
     <string name="blur_effects_desc">تمويه أعلى قائمة الدردشة أسفل شريط الأدوات. عطّله لتوفير الأداء.</string>
+    <string name="reduce_motion">تقليل الحركة</string>
+    <string name="reduce_motion_desc">إيقاف الحركة الزخرفية المستمرة وتأثير الكتابة، مع إبقاء مؤشرات التحميل وانتقالات الحالة.</string>
 
     <!-- Language -->
     <string name="language_title">اللغة</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">جارٍ إيقاف مهمة الصدفة %1$s…</string>
     <string name="tool_unknown_device">جهاز غير معروف</string>
     <string name="tool_web_result">النتيجة %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">واجهة بحث مميزة بنتائج مخصصة. الدفع حسب الاستخدام.</string>
+    <string name="web_search_kagi_key">مفتاح API لـ Kagi Search</string>
+    <string name="web_search_kagi_key_hint">مفتاح API من kagi.com/api/keys</string>
 </resources>

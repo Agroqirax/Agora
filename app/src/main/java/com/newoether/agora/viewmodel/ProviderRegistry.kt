@@ -16,6 +16,7 @@ import com.newoether.agora.api.openai.QwenProvider
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.util.Constants
@@ -31,11 +32,14 @@ import java.util.concurrent.ConcurrentHashMap
 internal fun createCustomProvider(
     config: CustomProviderConfig,
     baseUrl: String,
-): LlmProvider? = when (config.protocol) {
-    CustomEndpointProtocol.OPENAI -> CustomOpenAiProvider(config.name, baseUrl)
-    CustomEndpointProtocol.GOOGLE -> GeminiProvider(config.name, baseUrl)
-    CustomEndpointProtocol.ANTHROPIC -> AnthropicProvider(config.name, baseUrl)
-    CustomEndpointProtocol.UNKNOWN -> null
+): LlmProvider? {
+    if (!CustomProviderNamePolicy.isAllowed(config.name)) return null
+    return when (config.protocol) {
+        CustomEndpointProtocol.OPENAI -> CustomOpenAiProvider(config.name, baseUrl)
+        CustomEndpointProtocol.GOOGLE -> GeminiProvider(config.name, baseUrl)
+        CustomEndpointProtocol.ANTHROPIC -> AnthropicProvider(config.name, baseUrl)
+        CustomEndpointProtocol.UNKNOWN -> null
+    }
 }
 
 internal fun customEndpointBaseUrlCandidates(
@@ -180,25 +184,44 @@ class ProviderRegistry(
         baseUrl: String,
         protocol: CustomEndpointProtocol = CustomEndpointProtocol.OPENAI,
     ) {
-        val config = CustomProviderConfig(name = name, protocol = protocol)
+        val normalizedName = name.trim()
+        if (
+            CustomProviderNamePolicy.hasConflict(
+                name = normalizedName,
+                existingNames = settings.customProviders.value.map { it.name },
+            )
+        ) return
+        val config = CustomProviderConfig(name = normalizedName, protocol = protocol)
         val provider = createCustomProvider(config, baseUrl) ?: return
-        runtimeEndpointResolutions.remove(name)
-        providers[name] = provider
+        runtimeEndpointResolutions.remove(normalizedName)
+        providers[normalizedName] = provider
         settings.addCustomProvider(config, baseUrl)
     }
 
     fun renameCustom(oldName: String, newName: String) {
+        if (!CustomProviderNamePolicy.isAllowed(oldName)) return
+        val normalizedNewName = newName.trim()
+        if (
+            CustomProviderNamePolicy.hasConflict(
+                name = normalizedNewName,
+                existingNames = settings.customProviders.value.map { it.name },
+                currentName = oldName,
+            )
+        ) return
         val url = settings.providerBaseUrls.value[oldName] ?: return
         val oldConfig = settings.customProviders.value.firstOrNull { it.name == oldName } ?: return
-        val newConfig = oldConfig.copy(name = newName)
+        val newConfig = oldConfig.copy(name = normalizedNewName)
         val provider = createCustomProvider(newConfig, url) ?: return
         providers.remove(oldName)
-        providers[newName] = provider
-        runtimeEndpointResolutions.remove(oldName)?.let { runtimeEndpointResolutions[newName] = it }
-        settings.renameCustomProvider(oldName, newName)
+        providers[normalizedNewName] = provider
+        runtimeEndpointResolutions.remove(oldName)?.let {
+            runtimeEndpointResolutions[normalizedNewName] = it
+        }
+        settings.renameCustomProvider(oldName, normalizedNewName)
     }
 
     fun updateCustomProtocol(name: String, protocol: CustomEndpointProtocol) {
+        if (!CustomProviderNamePolicy.isAllowed(name)) return
         val current = settings.customProviders.value.firstOrNull { it.name == name } ?: return
         val updated = current.copy(protocol = protocol)
         val url = settings.providerBaseUrls.value[name].orEmpty()
@@ -209,6 +232,7 @@ class ProviderRegistry(
     }
 
     fun deleteCustom(name: String) {
+        if (!CustomProviderNamePolicy.isAllowed(name)) return
         providers.remove(name)
         runtimeEndpointResolutions.remove(name)
         settings.deleteCustomProvider(name)

@@ -54,7 +54,11 @@ internal fun ComposerSendButton(
      *  the send form returning is the contract that the next message launches immediately. */
     isStopping: Boolean = false,
     isModelValid: Boolean,
-    onSendMessage: suspend (String, List<SelectedAttachment>) -> SendAcceptance?,
+    onSendMessage: suspend (
+        String,
+        List<SelectedAttachment>,
+        suspend () -> Unit,
+    ) -> SendAcceptance?,
     onStopGeneration: () -> Unit,
     onCollapse: () -> Unit,
 ) {
@@ -63,25 +67,40 @@ internal fun ComposerSendButton(
     var isSubmitting by remember { mutableStateOf(false) }
     // Pending send: wait for processing to finish, then auto-send
     val anyProcessing = composer.processingStates.isNotEmpty()
+
+    suspend fun submit(
+        submittedText: String,
+        submittedAttachments: List<SelectedAttachment>,
+    ) {
+        val submittedAttachmentIds = submittedAttachments.map { it.localId }
+        isSubmitting = true
+        try {
+            onSendMessage(
+                submittedText,
+                submittedAttachments,
+            ) {
+                if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
+                    composer.clearAttachments()
+                }
+                if (textFieldState.text.toString() == submittedText) {
+                    textFieldState.edit { replace(0, length, "") }
+                }
+                // End the gray busy state in the same successful handoff that clears the input.
+                // The Controller publishes the bubble and scroll only after this callback returns.
+                composer.pendingSend = false
+                isSubmitting = false
+                onCollapse()
+            }
+        } finally {
+            isSubmitting = false
+        }
+    }
+
     LaunchedEffect(composer.pendingSend, anyProcessing) {
         if (composer.pendingSend && !anyProcessing) {
             val submittedText = textFieldState.text.toString()
-            val submittedAttachmentIds = composer.selectedAttachments.map { it.localId }
-            isSubmitting = true
-            try {
-                val acceptance = onSendMessage(submittedText, composer.selectedAttachments)
-                if (acceptance != null) {
-                    if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
-                        composer.clearAttachments()
-                    }
-                    if (textFieldState.text.toString() == submittedText) {
-                        textFieldState.edit { replace(0, length, "") }
-                    }
-                    onCollapse()
-                }
-            } finally {
-                isSubmitting = false
-            }
+            val submittedAttachments = composer.selectedAttachments.toList()
+            submit(submittedText, submittedAttachments)
             composer.pendingSend = false
         }
     }
@@ -93,7 +112,8 @@ internal fun ComposerSendButton(
 
     val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching && !isStopping && !isSubmitting
             && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
-    val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching && !isStopping
+    val isBusy = isStopping || isSubmitting || composer.pendingSend
+    val isActionable = (isLoading || canSend) && !isSwitching && !isBusy
     val containerColor by animateColorAsState(
         targetValue = if (isActionable) {
             MaterialTheme.colorScheme.primary
@@ -128,24 +148,9 @@ internal fun ComposerSendButton(
                     composer.pendingSend = true
                 } else {
                     val submittedText = textFieldState.text.toString()
-                    val submittedAttachments = composer.selectedAttachments
-                    val submittedAttachmentIds = submittedAttachments.map { it.localId }
-                    isSubmitting = true
+                    val submittedAttachments = composer.selectedAttachments.toList()
                     submitScope.launch {
-                        try {
-                            val acceptance = onSendMessage(submittedText, submittedAttachments)
-                            if (acceptance != null) {
-                                if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
-                                    composer.clearAttachments()
-                                }
-                                if (textFieldState.text.toString() == submittedText) {
-                                    textFieldState.edit { replace(0, length, "") }
-                                }
-                                onCollapse()
-                            }
-                        } finally {
-                            isSubmitting = false
-                        }
+                        submit(submittedText, submittedAttachments)
                     }
                 }
             }
@@ -179,7 +184,7 @@ internal fun ComposerSendButton(
                 ComposerActionIcon.PENDING -> CircularProgressIndicator(
                     modifier = Modifier.size(24.dp),
                     strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 ComposerActionIcon.STOP -> Icon(
                     Icons.Default.Stop,

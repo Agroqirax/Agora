@@ -6,6 +6,7 @@ import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.PromptTemplateItem
@@ -151,6 +152,7 @@ class SettingsRepository(
     val colorScheme: StateFlow<String> = hot(settingsManager.colorScheme, "DEFAULT")
     val dynamicColor: StateFlow<Boolean> = hot(settingsManager.dynamicColor, true)
     val blurEffectsEnabled: StateFlow<Boolean> = hot(settingsManager.blurEffectsEnabled, true)
+    val reduceMotion: StateFlow<Boolean> = hot(settingsManager.reduceMotion, false)
     val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
     val autoExpandActiveGroup: StateFlow<Boolean> =
@@ -284,6 +286,12 @@ class SettingsRepository(
 
     // Custom provider CRUD. ProviderRegistry owns live instance construction.
     fun addCustomProvider(config: CustomProviderConfig, baseUrl: String) {
+        if (
+            CustomProviderNamePolicy.hasConflict(
+                name = config.name,
+                existingNames = customProviders.value.map { it.name },
+            )
+        ) return
         scope.launch {
             settingsManager.saveCustomEndpointResolution(config.name, null)
             settingsManager.saveProviderBaseUrl(config.name, baseUrl)
@@ -292,6 +300,14 @@ class SettingsRepository(
     }
 
     fun renameCustomProvider(oldName: String, newName: String) {
+        if (!CustomProviderNamePolicy.isAllowed(oldName)) return
+        if (
+            CustomProviderNamePolicy.hasConflict(
+                name = newName,
+                existingNames = customProviders.value.map { it.name },
+                currentName = oldName,
+            )
+        ) return
         val url = providerBaseUrls.value[oldName] ?: return
         scope.launch {
             val updated = customProviders.value.toMutableList()
@@ -319,6 +335,7 @@ class SettingsRepository(
     }
 
     fun updateCustomProviderProtocol(name: String, protocol: CustomEndpointProtocol) {
+        if (!CustomProviderNamePolicy.isAllowed(name)) return
         scope.launch {
             val updated = customProviders.value.map { config ->
                 if (config.name == name) config.copy(protocol = protocol) else config
@@ -329,6 +346,7 @@ class SettingsRepository(
     }
 
     fun deleteCustomProvider(name: String) {
+        if (!CustomProviderNamePolicy.isAllowed(name)) return
         scope.launch {
             settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
             settingsManager.saveCustomEndpointResolution(name, null)
@@ -412,6 +430,7 @@ class SettingsRepository(
     fun setColorScheme(scheme: String) = scope.launch { settingsManager.saveColorScheme(scheme) }
     fun setDynamicColor(enabled: Boolean) = scope.launch { settingsManager.saveDynamicColor(enabled) }
     fun setBlurEffectsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveBlurEffectsEnabled(enabled) }
+    fun setReduceMotion(enabled: Boolean) = scope.launch { settingsManager.saveReduceMotion(enabled) }
     fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
     fun setAutoExpandActiveGroup(enabled: Boolean) =

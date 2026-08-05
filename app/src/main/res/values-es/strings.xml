@@ -557,6 +557,8 @@
     <string name="visual_effects">Efectos visuales</string>
     <string name="blur_effects">Efectos de desenfoque</string>
     <string name="blur_effects_desc">Desenfoca la parte superior de la lista de chat bajo la barra. Desactívalo para ahorrar rendimiento.</string>
+    <string name="reduce_motion">Reducir movimiento</string>
+    <string name="reduce_motion_desc">Detiene las animaciones decorativas continuas y el efecto de escritura. Mantiene los indicadores de carga y las transiciones de estado.</string>
 
     <!-- Language -->
     <string name="language_title">Idioma</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">Deteniendo la tarea de shell %1$s…</string>
     <string name="tool_unknown_device">Dispositivo desconocido</string>
     <string name="tool_web_result">Resultado %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">API de búsqueda prémium con resultados personalizados. Pago por uso.</string>
+    <string name="web_search_kagi_key">Clave de API de Kagi Search</string>
+    <string name="web_search_kagi_key_hint">Clave de API de kagi.com/api/keys</string>
 </resources>

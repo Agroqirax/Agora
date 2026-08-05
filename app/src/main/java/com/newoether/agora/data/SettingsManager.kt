@@ -194,6 +194,7 @@ class SettingsManager(private val context: Context) {
         val COLOR_SCHEME = stringPreferencesKey("color_scheme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
+        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
         val AUTO_EXPAND_ACTIVE_GROUP = booleanPreferencesKey("auto_expand_active_group")
@@ -348,7 +349,21 @@ class SettingsManager(private val context: Context) {
     }
     val customProviders: Flow<List<CustomProviderConfig>> = context.dataStore.data.map { pref ->
         val jsonStr = pref[CUSTOM_PROVIDERS_JSON] ?: "[]"
-        try { json.decodeFromString<List<CustomProviderConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
+        try {
+            val decoded = json.decodeFromString<List<CustomProviderConfig>>(jsonStr)
+            val sanitized = CustomProviderNamePolicy.sanitize(decoded)
+            if (sanitized.rejected.isNotEmpty()) {
+                DebugLog.w(
+                    "SettingsManager",
+                    "Quarantined invalid custom provider names: " +
+                        sanitized.rejected.joinToString { it.name },
+                )
+            }
+            sanitized.accepted
+        } catch (e: Exception) {
+            DebugLog.e("SettingsManager", "Failed to decode customProviders", e)
+            emptyList()
+        }
     }
 
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
@@ -386,6 +401,7 @@ class SettingsManager(private val context: Context) {
     val colorScheme: Flow<String> = context.dataStore.data.map { it[COLOR_SCHEME] ?: "DEFAULT" }
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
+    val reduceMotion: Flow<Boolean> = context.dataStore.data.map { it[REDUCE_MOTION] ?: false }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
     val autoExpandActiveGroup: Flow<Boolean> =
@@ -736,7 +752,10 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[LOCAL_CHAT_MODELS_JSON] = json.encodeToString(models) }
     }
     suspend fun saveCustomProviders(providers: List<CustomProviderConfig>) {
-        context.dataStore.edit { it[CUSTOM_PROVIDERS_JSON] = json.encodeToString(providers) }
+        val sanitized = CustomProviderNamePolicy.sanitize(providers)
+        context.dataStore.edit {
+            it[CUSTOM_PROVIDERS_JSON] = json.encodeToString(sanitized.accepted)
+        }
     }
 
     suspend fun saveTitleGenerationModel(model: String?) {
@@ -833,6 +852,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveBlurEffectsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[BLUR_EFFECTS_ENABLED] = enabled }
+    }
+
+    suspend fun saveReduceMotion(enabled: Boolean) {
+        context.dataStore.edit { it[REDUCE_MOTION] = enabled }
     }
 
     suspend fun saveHapticsEnabled(enabled: Boolean) {

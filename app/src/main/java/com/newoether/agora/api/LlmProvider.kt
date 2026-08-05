@@ -232,7 +232,11 @@ data class OpenAiCompletionTokensDetails(
 )
 
 @Serializable
-data class OpenAiModelListResponse(val data: List<OpenAiModelInfo>)
+data class OpenAiModelListResponse(
+    val data: List<OpenAiModelInfo>,
+    @SerialName("has_more") val hasMore: Boolean = false,
+    @SerialName("last_id") val lastId: String? = null
+)
 
 @Serializable
 data class OpenAiModelInfo(val id: String)

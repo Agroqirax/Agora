@@ -12,9 +12,9 @@ import kotlinx.serialization.json.Json
  * Individual tool results are already clipped at capture time
  * ([Constants.MAX_TOOL_RESULT_LENGTH]), but a *model* message aggregates many tool rounds into a
  * single `toolCallJson` column — and the model answer `text` column is otherwise unbounded. This
- * guard bounds both: [clipText] caps a text column, and [encodeSegmentsBounded] encodes a segment
- * list while progressively trimming the largest stored fields until the encoded row fits the
- * budget.
+ * guard bounds the large columns independently: [clipText] caps answer/reasoning text, and
+ * [encodeSegmentsBounded] encodes a segment list while progressively trimming the largest stored
+ * fields until the encoded value fits its share of the row budget.
  *
  * When trimming is needed, the largest tool-result field (including independently persisted
  * structured/display content, then live output and non-tool content) is halved with a truncation
@@ -29,12 +29,24 @@ object MessagePersistenceGuard {
      *  uselessly tiny one, and guarantees termination when a row has many small segments). */
     private const val TRIM_FLOOR_CHARS = 2000
 
-    private const val TRUNCATION_MARKER = "\n…[truncated for persistence]"
+    internal const val TRUNCATION_MARKER = "\n…[truncated for persistence]"
 
-    /** Trim a persisted text column to a safe length. Preserves the un-truncated text otherwise. */
-    fun clipText(text: String): String =
-        if (text.length <= Constants.MAX_PERSISTED_TEXT_CHARS) text
-        else text.take(Constants.MAX_PERSISTED_TEXT_CHARS) + TRUNCATION_MARKER
+    /**
+     * Trim a persisted text column to a safe length. Avoid ending on an unmatched UTF-16 high
+     * surrogate so a boundary through an emoji still persists valid Unicode.
+     */
+    fun clipText(text: String): String {
+        if (text.length <= Constants.MAX_PERSISTED_TEXT_CHARS) return text
+        var end = Constants.MAX_PERSISTED_TEXT_CHARS
+        if (
+            end in 1 until text.length &&
+            Character.isHighSurrogate(text[end - 1]) &&
+            Character.isLowSurrogate(text[end])
+        ) {
+            end--
+        }
+        return text.substring(0, end) + TRUNCATION_MARKER
+    }
 
     /**
      * Encode [segments] to JSON, bounded to [maxBytes] UTF-8 bytes. When the encoded form would
@@ -45,7 +57,7 @@ object MessagePersistenceGuard {
      */
     fun encodeSegmentsBounded(
         segments: List<MessageSegment>?,
-        maxBytes: Int = Constants.MAX_PERSISTED_ROW_BYTES,
+        maxBytes: Int = Constants.MAX_PERSISTED_SEGMENTS_BYTES,
     ): String? {
         if (segments.isNullOrEmpty()) return null
         var current: List<MessageSegment> = segments
@@ -54,7 +66,11 @@ object MessagePersistenceGuard {
             if (utf8Size(json) <= maxBytes) return json
             val pick = current.withIndex().maxByOrNull { (_, s) -> trimmableSize(s) } ?: return json
             val seg = pick.value
-            if (!canTrim(seg)) return json // every field already at the floor; can't shrink further
+            // A large number of individually-small segments, huge arguments, signatures, or image
+            // metadata can exceed the budget even when no result/content field is trimmable.
+            // Persisting the oversized JSON would recreate #51, so fail closed to SQL NULL; the
+            // message's separately-persisted text remains readable and the database stays usable.
+            if (!canTrim(seg)) return null
             current = current.toMutableList().also { it[pick.index] = trimLargest(seg) }
         }
     }

@@ -12,6 +12,8 @@ import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -20,6 +22,76 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.encodeToString
 import java.util.concurrent.TimeUnit
+
+internal fun searxngSearchUrl(configuredBaseUrl: String, query: String): String {
+    val baseUrl = configuredBaseUrl.ifBlank { "https://searx.be" }.trimEnd('/')
+    val encodedQuery = java.net.URLEncoder.encode(query, Charsets.UTF_8.name())
+    return "$baseUrl/search?q=$encodedQuery&format=json"
+}
+
+internal fun kagiSearchRequestBody(query: String, numResults: Int): String =
+    Json.encodeToString(
+        buildJsonObject {
+            put("query", query)
+            put("workflow", "search")
+            put("limit", numResults.coerceIn(1, 10))
+        }
+    )
+
+internal fun normalizeKagiSearchResponse(
+    responseBody: String,
+    query: String,
+    numResults: Int,
+): String {
+    val root = Json.parseToJsonElement(responseBody) as? JsonObject
+    val data = root?.get("data") as? JsonObject
+    val searchResults = data?.get("search") as? JsonArray
+        ?: return buildJsonObject {
+            put("type", "web_search")
+            put("query", query)
+            put("error", "no_results")
+        }.toString()
+
+    val normalizedResults = buildJsonArray {
+        var added = 0
+        for (element in searchResults) {
+            if (added >= numResults.coerceIn(1, 10)) break
+            val result = element as? JsonObject ?: continue
+            val url = (result["url"] as? JsonPrimitive)?.content.orEmpty()
+            if (url.isBlank()) continue
+            add(
+                buildJsonObject {
+                    put("title", (result["title"] as? JsonPrimitive)?.content.orEmpty())
+                    put("url", url)
+                    put("description", (result["snippet"] as? JsonPrimitive)?.content.orEmpty())
+                }
+            )
+            added++
+        }
+    }
+    if (normalizedResults.isEmpty()) {
+        return buildJsonObject {
+            put("type", "web_search")
+            put("query", query)
+            put("error", "no_results")
+        }.toString()
+    }
+
+    return buildJsonObject {
+        put("type", "web_search")
+        put("query", query)
+        put("results", normalizedResults)
+    }.toString()
+}
+
+internal fun webSearchProviderDisplayName(provider: String): String = when (provider) {
+    "kagi" -> "Kagi"
+    "serper" -> "Serper"
+    "tavily" -> "Tavily"
+    "searxng" -> "SearXNG"
+    "duckduckgo" -> "DuckDuckGo"
+    else -> "Brave Search"
+}
 
 class WebSearchToolProvider : ToolProvider {
     private val webClient = HttpClient.client.newBuilder()
@@ -110,9 +182,23 @@ class WebSearchToolProvider : ToolProvider {
 
             val apiKey = ctx.webSearchApiKeys[ctx.webSearchProvider].orEmpty()
             if (ctx.webSearchProvider != "searxng" && apiKey.isBlank()) {
-                return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_api_key") }.toString()
+                return buildJsonObject {
+                    put("type", "web_search")
+                    put("query", query)
+                    put("error", "no_api_key")
+                    put("provider", webSearchProviderDisplayName(ctx.webSearchProvider))
+                }.toString()
             }
             val body = when (ctx.webSearchProvider) {
+                "kagi" -> HttpClient.post(
+                    "https://kagi.com/api/v1/search",
+                    kagiSearchRequestBody(query, numResults),
+                    mapOf(
+                        "Accept" to "application/json",
+                        "Authorization" to "Bearer $apiKey",
+                    ),
+                    callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
+                )
                 "serper" -> HttpClient.post(
                     "https://google.serper.dev/search",
                     Json.encodeToString(buildJsonObject { put("q", query); put("num", numResults) }),
@@ -132,14 +218,13 @@ class WebSearchToolProvider : ToolProvider {
                     callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                 )
                 "searxng" -> {
-                    val baseUrl = ctx.webSearchBaseUrl.ifBlank { "https://searx.be" }
                     // Don't pin engines=google,brave: many public/self-hosted SearXNG instances
                     // disable those engines (rate-limited/require config), and pinning them yields
                     // an empty result set. Letting the instance use its own default-enabled engines
                     // matches how other SearXNG clients behave. Send a browser-like User-Agent so
                     // bot-filtering instances don't 403 us (same reason web_fetch sets one).
                     HttpClient.fetchModels(
-                        "$baseUrl/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&format=json",
+                        searxngSearchUrl(ctx.webSearchBaseUrl, query),
                         mapOf("User-Agent" to Constants.WEB_FETCH_USER_AGENT),
                         callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                     )
@@ -150,6 +235,10 @@ class WebSearchToolProvider : ToolProvider {
                     callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
                 )
             } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
+
+            if (ctx.webSearchProvider == "kagi") {
+                return normalizeKagiSearchResponse(body, query, numResults)
+            }
 
             val json: Map<String, kotlinx.serialization.json.JsonElement> = Json.decodeFromString(body)
 

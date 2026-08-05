@@ -125,6 +125,30 @@ internal fun composerDraftWriteDelayMillis(
         DRAFT_TEXT_DEBOUNCE_MS
     }
 
+internal data class NewChatMotionPolicy(
+    val animateBackground: Boolean,
+    val animateWelcomeText: Boolean,
+)
+
+internal fun newChatMotionPolicy(
+    reduceMotion: Boolean,
+    isNewChatMode: Boolean,
+    isLoading: Boolean,
+    isSwitching: Boolean,
+    newChatEntryId: Long,
+): NewChatMotionPolicy {
+    if (reduceMotion) {
+        return NewChatMotionPolicy(
+            animateBackground = false,
+            animateWelcomeText = false,
+        )
+    }
+    return NewChatMotionPolicy(
+        animateBackground = isNewChatMode && !isLoading && !isSwitching,
+        animateWelcomeText = newChatEntryId == 1L,
+    )
+}
+
 /**
  * Text/argument growth within an existing message tree can be coalesced while LazyColumn owns a
  * scroll animation. Structural changes remain immediate so a new thinking/tool block or lifecycle
@@ -425,6 +449,7 @@ fun ChatApp(
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = convOverride?.contextWindow ?: maxContextWindow
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
+    val reduceMotion by viewModel.settings.reduceMotion.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
 
@@ -485,6 +510,9 @@ fun ChatApp(
     var absoluteBottomRequestToken by remember(currentConversationId) {
         mutableLongStateOf(0L)
     }
+    var absoluteBottomRequestEasing by remember(currentConversationId) {
+        mutableStateOf<Easing?>(null)
+    }
     val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
     val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
     var isNearAbsoluteBottom by remember(currentConversationId) {
@@ -527,7 +555,7 @@ fun ChatApp(
     // Follow state belongs to one conversation. Reusing it across a conversation switch can
     // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
     val streamingTailController = rememberStreamingTailController(currentConversationId)
-    fun requestAbsoluteBottomScroll(): Boolean {
+    fun requestAbsoluteBottomScroll(easing: Easing? = null): Boolean {
         if (absoluteBottomScrollPhase.isActive) return false
         imeBottomAnchorState = reduceImeBottomAnchor(
             imeBottomAnchorState,
@@ -537,6 +565,7 @@ fun ChatApp(
             absoluteBottomScrollPhase,
             AbsoluteBottomScrollEvent.Requested,
         )
+        absoluteBottomRequestEasing = easing
         absoluteBottomRequestToken =
             if (absoluteBottomRequestToken == Long.MAX_VALUE) 1L
             else absoluteBottomRequestToken + 1L
@@ -1193,6 +1222,7 @@ fun ChatApp(
                 estimateRemainingDistancePx = ::estimateRemainingAbsoluteBottomDistance,
                 minimumStepPx = with(density) { 2.dp.toPx() },
                 onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
+                easing = absoluteBottomRequestEasing,
             )
             if (reachedBottom) {
                 imeBottomAnchorState = reduceImeBottomAnchor(
@@ -1326,7 +1356,7 @@ fun ChatApp(
                     targetCommitted &&
                     request.conversationId == currentConversationId
                 ) {
-                    requestAbsoluteBottomScroll()
+                    requestAbsoluteBottomScroll(easing = FastOutSlowInEasing)
                 } else if (!targetCommitted) {
                     DebugLog.e(
                         "AgoraUI",
@@ -1413,13 +1443,20 @@ fun ChatApp(
             }
             val ca by animateFloatAsState(targetCa, tween(800))
             val qa by animateFloatAsState(targetQa, tween(800))
+            val newChatMotion = newChatMotionPolicy(
+                reduceMotion = reduceMotion,
+                isNewChatMode = isNewChatMode,
+                isLoading = isLoading,
+                isSwitching = isSwitching,
+                newChatEntryId = newChatEntryId,
+            )
             AnimatedBlobBackground(
                 centerAlpha = ca,
                 quarterAlpha = qa,
                 blurRadius = 40f,
                 dark = dark,
                 blurEnabled = blurEffectsEnabled,
-                motionEnabled = isNewChatMode && !isLoading && !isSwitching,
+                motionEnabled = newChatMotion.animateBackground,
             )
 
             Scaffold(
@@ -1694,7 +1731,7 @@ fun ChatApp(
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onBackground,
                                         typeSpeedMs = 100,
-                                        animate = newChatEntryId == 1L,
+                                        animate = newChatMotion.animateWelcomeText,
                                         mode = TypewriterMode.TEXT_GRADIENT,
                                         modifier = welcomeModifier,
                                     )
@@ -1892,8 +1929,12 @@ fun ChatApp(
                         contentAlignment = Alignment.BottomCenter
                     ) {
                         ChatBottomBar(
-                        onSendMessage = { text, attachments ->
-                            viewModel.sendMessage(text, attachments = attachments)
+                        onSendMessage = { text, attachments, onAccepted ->
+                            viewModel.sendMessage(
+                                text = text,
+                                attachments = attachments,
+                                onAccepted = onAccepted,
+                            )
                         },
                         onStopGeneration = {
                             haptics.destructive()

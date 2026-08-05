@@ -557,6 +557,8 @@
     <string name="visual_effects">Визуальные эффекты</string>
     <string name="blur_effects">Эффекты размытия</string>
     <string name="blur_effects_desc">Размывать верхнюю часть списка чата под панелью инструментов. Отключите, чтобы сэкономить производительность.</string>
+    <string name="reduce_motion">Уменьшить движение</string>
+    <string name="reduce_motion_desc">Останавливает непрерывную декоративную анимацию и эффект печати. Индикаторы загрузки и переходы состояний сохраняются.</string>
 
     <!-- Language -->
     <string name="language_title">Язык</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">Остановка задачи оболочки %1$s…</string>
     <string name="tool_unknown_device">Неизвестное устройство</string>
     <string name="tool_web_result">Результат %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">Премиальный поисковый API с персонализированными результатами. Оплата по мере использования.</string>
+    <string name="web_search_kagi_key">API-ключ Kagi Search</string>
+    <string name="web_search_kagi_key_hint">API-ключ с kagi.com/api/keys</string>
 </resources>

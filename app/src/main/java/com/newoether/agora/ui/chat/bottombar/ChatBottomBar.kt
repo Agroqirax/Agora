@@ -69,7 +69,11 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatBottomBar(
-    onSendMessage: suspend (String, List<com.newoether.agora.model.SelectedAttachment>) -> SendAcceptance?,
+    onSendMessage: suspend (
+        String,
+        List<com.newoether.agora.model.SelectedAttachment>,
+        suspend () -> Unit,
+    ) -> SendAcceptance?,
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
     isSwitching: Boolean = false,

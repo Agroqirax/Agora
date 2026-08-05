@@ -264,11 +264,13 @@
     <string name="web_search_enable_desc">允許模型透過工具呼叫搜尋網頁</string>
     <string name="web_search_provider_label">搜尋服務商</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">注重隱私的搜尋 API。提供免費方案。</string>
+    <string name="web_search_kagi_desc">支援個人化結果的進階搜尋 API，按量付費。</string>
     <string name="web_search_serper_desc">快速 Google 搜尋 API。每月 2,500 次免費查詢。</string>
     <string name="web_search_tavily_desc">面向 AI 優化的搜尋 API。專為 LLM 代理建置。</string>
     <string name="web_search_searxng_desc">自行託管元搜尋引擎。建議使用自己的執行個體。</string>
@@ -276,6 +278,8 @@
     <string name="web_search_select_provider">選擇搜尋服務商</string>
     <string name="web_search_brave_key">Brave 搜尋 API 金鑰</string>
     <string name="web_search_brave_key_hint">來自 brave.com/search/api/ 的 API 金鑰</string>
+    <string name="web_search_kagi_key">Kagi 搜尋 API 金鑰</string>
+    <string name="web_search_kagi_key_hint">來自 kagi.com/api/keys 的 API 金鑰</string>
     <string name="web_search_serper_key">Serper API 金鑰</string>
     <string name="web_search_serper_key_hint">來自 serper.dev 的 API 金鑰</string>
     <string name="web_search_tavily_key">Tavily API 金鑰</string>
@@ -471,6 +475,8 @@
     <string name="visual_effects">視覺效果</string>
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">對聊天列表頂部工具列下方套用模糊。關閉可節省效能。</string>
+    <string name="reduce_motion">減少動態效果</string>
+    <string name="reduce_motion_desc">停止持續的裝飾動畫與打字效果，同時保留載入指示與狀態切換回饋。</string>
     <string name="message_display">訊息顯示</string>
     <string name="tool_call_display_mode">思考與工具區塊</string>
     <string name="tool_call_display_mode_timeline">時間軸</string>

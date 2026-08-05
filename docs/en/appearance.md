@@ -57,6 +57,14 @@ Toggle **Enable Blur Effects** to control background blur and gradient blur thro
 
 ---
 
+## Reduce Motion
+
+Enable **Reduce motion** to stop the continuously moving background on the new-chat screen and show the welcome text without its typing effect. Loading indicators and state-transition feedback remain enabled.
+
+This preference is included in settings export and import.
+
+---
+
 ## Dynamic Color (Android 12+)
 
 When enabled on devices running Android 12 or higher, Agora extracts a color palette from your system wallpaper and applies it automatically.

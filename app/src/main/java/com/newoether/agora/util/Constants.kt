@@ -22,17 +22,16 @@ object Constants {
      *  (head/scripts/nav, often tens of KB) is no longer cut off. */
     const val MAX_WEB_FETCH_HTML_LENGTH = 600_000
     /** Max characters per tool result. Bounds a *single* tool result, but a model message row
-     *  aggregates many tool rounds into one toolCallJson column — see MAX_PERSISTED_ROW_BYTES
-     *  for the aggregate bound that actually prevents "Row too big to fit into CursorWindow". */
+     *  aggregates many tool rounds into one toolCallJson column — see
+     *  MAX_PERSISTED_SEGMENTS_BYTES for the aggregate bound. */
     const val MAX_TOOL_RESULT_LENGTH = 100_000
-    /** Hard ceiling on a single persisted messages row (text + toolCallJson columns together),
-     *  kept well under the ~2MB CursorWindow so no row can trigger "Row too big to fit into
-     *  CursorWindow". Individual tool results are bounded by MAX_TOOL_RESULT_LENGTH, but a model
-     *  message aggregates many tool rounds into one toolCallJson column — this bounds that
-     *  aggregate (and the unbounded model answer text). */
-    const val MAX_PERSISTED_ROW_BYTES = 1_500_000
-    /** Max characters persisted in a messages.text row (model answer text is otherwise unbounded). */
-    const val MAX_PERSISTED_TEXT_CHARS = 500_000
+    /** UTF-8 byte budget for the serialized segment column inside one message row. Text and
+     *  thoughts have separate conservative caps below, so their combined worst case remains
+     *  comfortably below Android's roughly 2 MB CursorWindow row limit. */
+    const val MAX_PERSISTED_SEGMENTS_BYTES = 600_000
+    /** Max UTF-16 code units persisted in either messages.text or messages.thoughts. At worst this
+     *  is about 300 KB of UTF-8, leaving room for both columns, segments, and row metadata. */
+    const val MAX_PERSISTED_TEXT_CHARS = 100_000
     /** Timeout for fetching available models from a single provider (ms) */
     const val MODEL_FETCH_TIMEOUT_MS = 10_000L
     /** Connection establishment and request writes should fail fast; long-running response work is

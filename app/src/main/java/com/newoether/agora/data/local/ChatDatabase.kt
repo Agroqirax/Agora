@@ -15,6 +15,7 @@ import com.newoether.agora.model.RunStatus
 import com.newoether.agora.data.local.migration.MIGRATION_16_17
 import com.newoether.agora.data.local.migration.MIGRATION_17_18
 import com.newoether.agora.data.local.migration.MIGRATION_18_19
+import com.newoether.agora.data.local.migration.MIGRATION_19_20
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -540,6 +541,26 @@ interface ChatDao {
         return RunGraphCommit(messages, messageSelections, runSelections)
     }
 
+    /**
+     * First Send in a new chat is one durable acceptance boundary. A failed Run/message insert
+     * must not leave an empty conversation row behind.
+     */
+    @Transaction
+    suspend fun createConversationRunWithMessages(
+        conversation: ChatEntity,
+        run: RunEntity,
+        messages: List<MessageEntity>,
+        messageSelectionUpdates: Map<String?, String>,
+        at: Long,
+    ): RunGraphCommit {
+        require(conversation.id == run.conversationId)
+        check(getConversation(conversation.id) == null) {
+            "Conversation ${conversation.id} already exists"
+        }
+        upsertConversation(conversation)
+        return createRunWithMessages(run, messages, messageSelectionUpdates, at)
+    }
+
     @Transaction
     suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) {
         require(runs.all { it.status.isTerminal }) {
@@ -564,6 +585,7 @@ interface ChatDao {
         conversation: ChatEntity,
         runs: List<RunEntity>,
         messages: List<MessageEntity>,
+        sourceToForkMessageIds: Map<String, String>,
     ) {
         require(getConversation(conversation.id) == null) {
             "Fork conversation ${conversation.id} already exists"
@@ -583,8 +605,25 @@ interface ChatDao {
         require(messages.all { it.runId in runIds }) {
             "Every forked message must reference a forked Run"
         }
+        require(sourceToForkMessageIds.size == messages.size)
+        require(sourceToForkMessageIds.values.toSet() == messageIds) {
+            "Every forked message must have exactly one source message"
+        }
+        require(sourceToForkMessageIds.keys.intersect(messageIds).isEmpty()) {
+            "Forked messages must not reuse source message identities"
+        }
+        val clonedEmbeddings = ForkEmbeddingClonePolicy.cloneAll(
+            sourceEmbeddings = getEmbeddingsByMessageIds(sourceToForkMessageIds.keys.toList()),
+            sourceToForkMessageIds = sourceToForkMessageIds,
+        )
         upsertConversation(conversation)
         importRunGraph(runs, messages)
+        if (clonedEmbeddings.isNotEmpty()) {
+            val insertedIds = insertEmbeddings(clonedEmbeddings)
+            check(insertedIds.size == clonedEmbeddings.size && insertedIds.all { it > 0L }) {
+                "Every forked embedding must be inserted as a new database row"
+            }
+        }
     }
 
     @Transaction
@@ -970,8 +1009,14 @@ interface ChatDao {
     fun observeExecutionMessagesForTask(taskId: String): Flow<List<MessageEntity>>
 
     // Embeddings
+    @Insert
+    suspend fun insertEmbeddings(embeddings: List<EmbeddingEntity>): LongArray
+
     @Upsert
     suspend fun upsertEmbedding(embedding: EmbeddingEntity)
+
+    @Query("SELECT * FROM embeddings WHERE messageId IN (:messageIds)")
+    suspend fun getEmbeddingsByMessageIds(messageIds: List<String>): List<EmbeddingEntity>
 
     @Query("SELECT * FROM embeddings WHERE messageId = :messageId LIMIT 1")
     suspend fun getEmbedding(messageId: String): EmbeddingEntity?
@@ -1224,7 +1269,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 19
+        const val CURRENT_VERSION = 20
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -1356,6 +1401,7 @@ abstract class ChatDatabase : RoomDatabase() {
             MIGRATION_16_17,
             MIGRATION_17_18,
             MIGRATION_18_19,
+            MIGRATION_19_20,
         )
 
         fun getStoredVersion(context: Context): Int {

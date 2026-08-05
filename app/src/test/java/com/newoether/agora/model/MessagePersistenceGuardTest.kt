@@ -1,5 +1,8 @@
 package com.newoether.agora.model
 
+import com.newoether.agora.util.Constants
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,5 +34,31 @@ class MessagePersistenceGuardTest {
                 segment.toolStructuredResult,
             ).any { it.orEmpty().length < originalLength },
         )
+    }
+
+    @Test
+    fun unshrinkableAggregateFailsClosedInsteadOfPersistingAnOversizedRow() {
+        val encoded = MessagePersistenceGuard.encodeSegmentsBounded(
+            segments = List(40) {
+                MessageSegment(
+                    type = "tool",
+                    toolName = "tool_$it",
+                    toolArgs = """{"payload":"${"x".repeat(2_000)}"}""",
+                )
+            },
+            maxBytes = 8_000,
+        )
+
+        assertNull(encoded)
+    }
+
+    @Test
+    fun clippedTextDoesNotSplitASurrogatePair() {
+        val prefix = "a".repeat(Constants.MAX_PERSISTED_TEXT_CHARS - 1)
+        val clipped = MessagePersistenceGuard.clipText(prefix + "😀" + "tail")
+        val retained = clipped.removeSuffix(MessagePersistenceGuard.TRUNCATION_MARKER)
+
+        assertTrue(clipped.endsWith(MessagePersistenceGuard.TRUNCATION_MARKER))
+        assertFalse(retained.last().isHighSurrogate())
     }
 }

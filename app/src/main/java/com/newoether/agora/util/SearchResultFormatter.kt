@@ -62,7 +62,11 @@ object SearchResultFormatter {
             "no_query" -> context.getString(R.string.search_no_query)
             "no_results" -> context.getString(R.string.search_no_results)
             "no_response" -> context.getString(R.string.search_no_response)
-            "no_api_key" -> context.getString(R.string.provider_no_keys, "Brave Search")
+            "no_api_key" -> {
+                val provider = json["provider"]?.let { (it as? JsonPrimitive)?.content }
+                    ?: "web search"
+                context.getString(R.string.provider_no_keys, provider)
+            }
             "search_error" -> {
                 val msg = json["message"]?.let { (it as? JsonPrimitive)?.content } ?: context.getString(R.string.unknown)
                 context.getString(R.string.search_error_format, msg)

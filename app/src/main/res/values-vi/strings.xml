@@ -557,6 +557,8 @@
     <string name="visual_effects">Hiệu ứng thị giác</string>
     <string name="blur_effects">Hiệu ứng làm mờ</string>
     <string name="blur_effects_desc">Làm mờ phần đầu của danh sách trò chuyện dưới thanh công cụ. Tắt đi để tiết kiệm hiệu năng.</string>
+    <string name="reduce_motion">Giảm chuyển động</string>
+    <string name="reduce_motion_desc">Dừng hiệu ứng trang trí lặp lại và hiệu ứng gõ chữ. Vẫn giữ chỉ báo tải và chuyển đổi trạng thái.</string>
     <string name="interaction_feedback">Phản hồi tương tác</string>
     <string name="haptic_feedback">Phản hồi xúc giác (Haptic)</string>
     <string name="haptic_feedback_desc">Sử dụng rung nhẹ cho trạng thái tạo và các hành động chính.</string>
@@ -1009,4 +1011,8 @@
     <string name="tool_stopping_shell_job">Đang dừng tác vụ shell %1$s…</string>
     <string name="tool_unknown_device">Thiết bị không xác định</string>
     <string name="tool_web_result">Kết quả %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">API tìm kiếm cao cấp với kết quả được cá nhân hóa. Trả phí theo mức sử dụng.</string>
+    <string name="web_search_kagi_key">Khóa API Kagi Search</string>
+    <string name="web_search_kagi_key_hint">Khóa API từ kagi.com/api/keys</string>
 </resources>

@@ -70,6 +70,7 @@ object ExportExtraSettings {
         put("colorScheme", JsonPrimitive(sm.colorScheme.first()))
         put("dynamicColor", JsonPrimitive(sm.dynamicColor.first()))
         put("blurEffectsEnabled", JsonPrimitive(sm.blurEffectsEnabled.first()))
+        put("reduceMotion", JsonPrimitive(sm.reduceMotion.first()))
         put("hapticsEnabled", JsonPrimitive(sm.hapticsEnabled.first()))
         put("autoExpandActiveGroup", JsonPrimitive(sm.autoExpandActiveGroup.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
@@ -146,6 +147,7 @@ object ExportExtraSettings {
         obj["colorScheme"]?.jsonPrimitive?.contentOrNull?.let { sm.saveColorScheme(it) }
         obj["dynamicColor"]?.jsonPrimitive?.boolean?.let { sm.saveDynamicColor(it) }
         obj["blurEffectsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveBlurEffectsEnabled(it) }
+        obj["reduceMotion"]?.jsonPrimitive?.boolean?.let { sm.saveReduceMotion(it) }
         obj["hapticsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveHapticsEnabled(it) }
         obj["autoExpandActiveGroup"]?.jsonPrimitive?.boolean?.let {
             sm.saveAutoExpandActiveGroup(it)

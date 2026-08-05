@@ -58,7 +58,7 @@
 
 ### 智能代理工具
 模型可在多轮循环中自主调用以下工具：
-- **联网搜索** — DuckDuckGo Lite（匿名免密钥）、Brave、Serper、Tavily、SearXNG
+- **联网搜索** — DuckDuckGo Lite（匿名免密钥）、Brave、Kagi、Serper、Tavily、SearXNG
 - **代码执行** — Gemini 代码执行、PRoot Alpine Linux 沙盒 + SAF 文件访问
 - **图片生成** — BYOK 文生图，OpenAI 兼容 `/v1/images/generations`，聊天内直接渲染
 - **远程 Shell 与文件 I/O** — 通过 [Conch](https://github.com/newo-ether/conch) 协议执行命令、读写/编辑/搜索远程文件

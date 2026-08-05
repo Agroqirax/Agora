@@ -185,7 +185,12 @@ class ConversationForkShareService(
             return ForkResult.Failure("Fork validation found a truncated visible path")
         }
         return try {
-            conversations.createForkGraph(forkConversation, clonedRuns, clonedMessages)
+            conversations.createForkGraph(
+                conversation = forkConversation,
+                runs = clonedRuns,
+                messages = clonedMessages,
+                sourceToForkMessageIds = messageIds,
+            )
             graphCommitted = true
             attachmentClones.commit()
             try {

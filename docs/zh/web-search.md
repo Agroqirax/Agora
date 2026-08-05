@@ -8,6 +8,7 @@
 |----------|-------------|-----------|-------|
 | **DuckDuckGo Lite** | 匿名、无需 API 密钥 | 有（无限，尽力服务） | 无需设置 — 开箱即用 |
 | **Brave** | 隐私优先的搜索 API | 有（2,000 次/月） | [api.search.brave.com](https://api.search.brave.com/) |
+| **Kagi** | 高级个性化搜索 API | 无（按量付费） | [kagi.com/api](https://kagi.com/api) |
 | **Serper** | 快速 Google Search API | 有（2,500 次/月） | [serper.dev](https://serper.dev) |
 | **Tavily** | AI 优化的搜索，专为 LLM 代理构建 | 有（1,000 次/月） | [tavily.com](https://tavily.com) |
 | **SearXNG** | 自托管元搜索引擎 | 自托管（无限） | 你自己的实例 |
@@ -31,6 +32,15 @@ DuckDuckGo Lite 是**默认**搜索提供商 — 无需 API 密钥，立即可�
 2. 在 Agora 中，前往 **设置 → 网络搜索**
 3. 选择 **Brave** 作为搜索提供商
 4. 粘贴 API 密钥
+
+### Kagi
+
+1. 在 [Kagi API Portal](https://kagi.com/api/keys) 创建 API 密钥
+2. 在 Agora 中，前往 **设置 → 网络搜索**
+3. 选择 **Kagi**
+4. 粘贴 API 密钥
+
+Agora 使用 Kagi 当前的 v1 Search API。搜索费用由 Kagi 按 API 账户用量计费。
 
 ### Serper
 

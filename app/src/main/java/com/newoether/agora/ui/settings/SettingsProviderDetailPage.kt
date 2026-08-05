@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ApiKeyEntry
+import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.clearFocusOnTap
@@ -605,12 +606,15 @@ fun SettingsProviderDetailPage(
     if (showRenameProvider) {
         var renameValue by remember { mutableStateOf(providerName) }
         var renameError by remember { mutableStateOf(false) }
-        val allNames = listOf(Constants.PROVIDER_GOOGLE, Constants.PROVIDER_OPENAI, Constants.PROVIDER_ANTHROPIC, Constants.PROVIDER_DEEPSEEK, Constants.PROVIDER_QWEN, Constants.PROVIDER_GROQ, Constants.PROVIDER_OLLAMA, Constants.PROVIDER_OPEN_ROUTER) + customProviders.map { it.name }
         AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showRenameProvider = false }, title = { Text(stringResource(R.string.custom_provider_rename_title), fontWeight = FontWeight.Bold) }, text = {
             OutlinedTextField(value = renameValue, onValueChange = { renameValue = it; renameError = false }, label = { Text(stringResource(R.string.custom_provider_name_label)) }, isError = renameError, supportingText = if (renameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
         }, confirmButton = { TextButton(onClick = {
             val trimmed = renameValue.trim()
-            renameError = trimmed.isBlank() || (trimmed != providerName && trimmed in allNames)
+            renameError = CustomProviderNamePolicy.hasConflict(
+                name = trimmed,
+                existingNames = customProviders.map { it.name },
+                currentName = providerName,
+            )
             if (!renameError) { viewModel.renameCustomProvider(providerName, trimmed); showRenameProvider = false; onBack() }
         }) { Text(stringResource(R.string.custom_provider_rename)) } }, dismissButton = { TextButton(onClick = { showRenameProvider = false }) { Text(stringResource(R.string.cancel)) } })
     }

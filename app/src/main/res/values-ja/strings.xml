@@ -557,6 +557,8 @@
     <string name="visual_effects">視覚効果</string>
     <string name="blur_effects">ぼかし効果</string>
     <string name="blur_effects_desc">ツールバー下のチャット一覧上部をぼかします。オフにするとパフォーマンスを節約できます。</string>
+    <string name="reduce_motion">モーションを減らす</string>
+    <string name="reduce_motion_desc">継続的な装飾アニメーションとタイプ入力効果を停止します。読み込み表示と状態遷移は維持されます。</string>
 
     <!-- Language -->
     <string name="language_title">言語</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">シェルジョブ %1$s を停止中…</string>
     <string name="tool_unknown_device">不明なデバイス</string>
     <string name="tool_web_result">結果 %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">パーソナライズされた結果を提供するプレミアム検索 API。従量課金。</string>
+    <string name="web_search_kagi_key">Kagi Search API キー</string>
+    <string name="web_search_kagi_key_hint">kagi.com/api/keys の API キー</string>
 </resources>

@@ -20,6 +20,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -511,6 +512,70 @@ abstract class BaseOpenAiProvider : LlmProvider {
     private fun authHeaders(apiKey: String): Map<String, String> =
         if (apiKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $apiKey")
 
+    private fun fetchModelPages(
+        endpointUrl: String,
+        headers: Map<String, String>,
+    ): List<String> {
+        val modelIds = linkedSetOf<String>()
+        val seenCursors = mutableSetOf<String>()
+        var pageUrl = endpointUrl
+
+        repeat(MAX_MODEL_LIST_PAGES) { pageIndex ->
+            val page = try {
+                val responseText = HttpClient.fetchModelsResponse(pageUrl, headers)
+                    .requireModelFetchBody()
+                decodeModelFetchResponse {
+                    json.decodeFromString<OpenAiModelListResponse>(responseText)
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (pageIndex == 0) throw error
+                DebugLog.w(
+                    "AgoraAPI",
+                    "Stopped paginating $name models after $pageIndex completed pages; " +
+                        "returning ${modelIds.size} models",
+                )
+                return modelIds.sorted()
+            }
+
+            modelIds += page.data.map { it.id }
+            if (!page.hasMore) return modelIds.sorted()
+
+            val cursor = page.lastId?.takeIf(String::isNotBlank)
+                ?: page.data.lastOrNull()?.id?.takeIf(String::isNotBlank)
+            if (cursor == null) {
+                DebugLog.w(
+                    "AgoraAPI",
+                    "$name model list reported has_more without a usable cursor; " +
+                        "returning ${modelIds.size} models",
+                )
+                return modelIds.sorted()
+            }
+            if (!seenCursors.add(cursor)) {
+                DebugLog.w(
+                    "AgoraAPI",
+                    "$name model list repeated cursor '$cursor'; " +
+                        "returning ${modelIds.size} models",
+                )
+                return modelIds.sorted()
+            }
+
+            pageUrl = endpointUrl.toHttpUrl()
+                .newBuilder()
+                .addQueryParameter("after", cursor)
+                .build()
+                .toString()
+        }
+
+        DebugLog.w(
+            "AgoraAPI",
+            "$name model list exceeded $MAX_MODEL_LIST_PAGES pages; " +
+                "returning ${modelIds.size} models",
+        )
+        return modelIds.sorted()
+    }
+
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = withContext(Dispatchers.IO) {
         val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
         val endpointUrls = endpointCandidates(effectiveBaseUrl, "models")
@@ -519,12 +584,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
         for ((index, endpointUrl) in endpointUrls.withIndex()) {
             try {
-                val responseText = HttpClient.fetchModelsResponse(endpointUrl, headers)
-                    .requireModelFetchBody()
-                val models = decodeModelFetchResponse {
-                    json.decodeFromString<OpenAiModelListResponse>(responseText)
-                        .data.map { it.id }.sorted()
-                }
+                val models = fetchModelPages(endpointUrl, headers)
                 if (models.isEmpty()) throw ModelFetchEmptyResultException()
                 return@withContext models
             } catch (error: CancellationException) {
@@ -544,5 +604,9 @@ abstract class BaseOpenAiProvider : LlmProvider {
         val failure = lastFailure ?: ModelFetchEmptyResultException()
         DebugLog.e("AgoraAPI", "Failed to fetch $name models", failure)
         throw failure
+    }
+
+    private companion object {
+        const val MAX_MODEL_LIST_PAGES = 50
     }
 }

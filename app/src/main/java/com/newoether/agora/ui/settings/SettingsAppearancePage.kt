@@ -46,6 +46,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val schemeStyleName by viewModel.settings.schemeStyle.collectAsState()
     val dynamicColor by viewModel.settings.dynamicColor.collectAsState()
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
+    val reduceMotion by viewModel.settings.reduceMotion.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
     val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
@@ -217,6 +218,21 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     )
                                 },
                                 modifier = Modifier.clickable { viewModel.settings.setBlurEffectsEnabled(!blurEffectsEnabled) }
+                            )
+                        }
+                        add {
+                            SettingsItem(
+                                headlineContent = { Text(stringResource(R.string.reduce_motion)) },
+                                supportingContent = { Text(stringResource(R.string.reduce_motion_desc)) },
+                                trailingContent = {
+                                    Switch(
+                                        checked = reduceMotion,
+                                        onCheckedChange = { viewModel.settings.setReduceMotion(it) }
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    viewModel.settings.setReduceMotion(!reduceMotion)
+                                }
                             )
                         }
                         add {

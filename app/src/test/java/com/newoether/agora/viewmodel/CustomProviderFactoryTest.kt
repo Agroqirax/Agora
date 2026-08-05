@@ -6,6 +6,7 @@ import com.newoether.agora.api.openai.CustomOpenAiProvider
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.util.Constants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,6 +44,22 @@ class CustomProviderFactoryTest {
         assertNull(
             createCustomProvider(
                 CustomProviderConfig("Unknown", CustomEndpointProtocol.UNKNOWN),
+                "https://example.test",
+            ),
+        )
+    }
+
+    @Test
+    fun builtInNameCannotBeRegisteredAsCustomProvider() {
+        assertNull(
+            createCustomProvider(
+                CustomProviderConfig(Constants.PROVIDER_LOCAL),
+                "https://example.test",
+            ),
+        )
+        assertNull(
+            createCustomProvider(
+                CustomProviderConfig(Constants.PROVIDER_LOCAL.lowercase()),
                 "https://example.test",
             ),
         )

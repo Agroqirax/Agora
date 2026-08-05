@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
@@ -821,6 +822,36 @@ class MessageListLayoutTest {
     }
 
     @Test
+    fun sendEasingOnlyShapesStartupThenReturnsTheAdaptiveTailUnchanged() {
+        val adaptiveStep = 120f
+        val initial = applySeekStartupEasing(
+            adaptiveStepPx = adaptiveStep,
+            elapsedNanos = 0L,
+            easing = FastOutSlowInEasing,
+        )
+        val startup = applySeekStartupEasing(
+            adaptiveStepPx = adaptiveStep,
+            elapsedNanos = 120_000_000L,
+            easing = FastOutSlowInEasing,
+        )
+        val adaptiveTail = applySeekStartupEasing(
+            adaptiveStepPx = adaptiveStep,
+            elapsedNanos = 240_000_000L,
+            easing = FastOutSlowInEasing,
+        )
+        val bottomButtonStep = applySeekStartupEasing(
+            adaptiveStepPx = -adaptiveStep,
+            elapsedNanos = 0L,
+            easing = null,
+        )
+
+        assertEquals(0f, initial, 0.001f)
+        assertTrue(startup in 0f..adaptiveStep)
+        assertEquals(adaptiveStep, adaptiveTail, 0.001f)
+        assertEquals(-adaptiveStep, bottomButtonStep, 0.001f)
+    }
+
+    @Test
     fun scrollStateMachineOnlyCorrectsStableVisibleLayouts() {
         assertEquals(
             MessageListLayoutMode.STABLE,
@@ -1002,6 +1033,22 @@ class MessageListLayoutTest {
                 lastUserMessageId = "user",
                 requestedTargetMessageId = "user",
             )
+        )
+    }
+
+    @Test
+    fun acceptedSendTargetAnimatesBeforeLoadingStateIsObserved() {
+        val user = message("user", Participant.USER)
+
+        assertTrue(
+            shouldAnimateMessageLifecycleEntrance(
+                message = user,
+                isKnown = false,
+                isLoading = false,
+                isStreaming = false,
+                lastUserMessageId = user.id,
+                requestedTargetMessageId = user.id,
+            ),
         )
     }
 

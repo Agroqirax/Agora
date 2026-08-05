@@ -557,6 +557,8 @@
     <string name="visual_effects">Effets visuels</string>
     <string name="blur_effects">Effets de flou</string>
     <string name="blur_effects_desc">Floute le haut de la liste de discussion sous la barre d’outils. Désactivez cette option pour économiser les performances.</string>
+    <string name="reduce_motion">Réduire les animations</string>
+    <string name="reduce_motion_desc">Arrête les animations décoratives continues et l’effet de saisie. Conserve les indicateurs de chargement et les transitions d’état.</string>
 
     <!-- Language -->
     <string name="language_title">Langue</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">Arrêt de la tâche shell %1$s…</string>
     <string name="tool_unknown_device">Appareil inconnu</string>
     <string name="tool_web_result">Résultat %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">API de recherche premium avec résultats personnalisés. Paiement à l’usage.</string>
+    <string name="web_search_kagi_key">Clé d\'API Kagi Search</string>
+    <string name="web_search_kagi_key_hint">Clé d\'API depuis kagi.com/api/keys</string>
 </resources>

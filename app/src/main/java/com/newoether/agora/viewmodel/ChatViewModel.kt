@@ -1429,18 +1429,27 @@ class ChatViewModel(
         text: String,
         images: List<String> = emptyList(),
         attachments: List<SelectedAttachment> = emptyList(),
-    ): SendAcceptance? {
-        val acceptance = generationController.sendMessage(text, images, attachments)
-        if (acceptance != null) {
+        onAccepted: suspend () -> Unit = {},
+    ): SendAcceptance? =
+        generationController.sendMessage(text, images, attachments) { acceptance ->
             // Durable message acceptance transfers attachment ownership before the composer
-            // clears. Invalidate older draft revisions synchronously so a cancelled UI tail-flush
-            // can never restore the submitted payload, even if the user switched conversations.
-            withContext(NonCancellable) {
+            // clears. Invalidate older draft revisions, clear the exact submitted UI, and only
+            // then let the Controller publish the bubble and its scroll request.
+            val attachmentsToReclaim = withContext(NonCancellable) {
                 clearAcceptedComposerDraft(acceptance.conversationId)
             }
+            withContext(Dispatchers.Main.immediate + NonCancellable) {
+                onAccepted()
+            }
+            if (attachmentsToReclaim.isNotEmpty()) {
+                // Reclamation is no longer part of the visible Send handshake. The durable
+                // MessageEntity already owns these paths, and repository cleanup rechecks every
+                // remaining message/draft reference before deleting anything.
+                viewModelScope.launch(Dispatchers.IO) {
+                    reclaimDraftAttachmentFiles(attachmentsToReclaim)
+                }
+            }
         }
-        return acceptance
-    }
 
     /**
      * Onboarding-focused model fetch for a single provider.
@@ -1644,7 +1653,9 @@ class ChatViewModel(
      * A successfully accepted send owns the submitted files through its durable MessageEntity.
      * Force-clearing advances the revision, invalidating every older UI tail-flush.
      */
-    private suspend fun clearAcceptedComposerDraft(conversationId: String) =
+    private suspend fun clearAcceptedComposerDraft(
+        conversationId: String,
+    ): List<SelectedAttachment> =
         withContext(Dispatchers.IO + NonCancellable) {
             draftPersistenceMutex.withLock {
                 try {
@@ -1656,13 +1667,14 @@ class ChatViewModel(
                         attachments = emptyList(),
                         revision = current.revision + 1L,
                     )
-                    reclaimDraftAttachmentFiles(current.attachments)
+                    current.attachments
                 } catch (e: Exception) {
                     DebugLog.e(
                         "ChatViewModel",
                         "Failed to clear accepted draft for $conversationId",
                         e,
                     )
+                    emptyList()
                 }
             }
         }

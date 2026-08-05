@@ -557,6 +557,8 @@
     <string name="visual_effects">Visuelle Effekte</string>
     <string name="blur_effects">Unschärfeeffekte</string>
     <string name="blur_effects_desc">Den oberen Bereich der Chatliste unter der Toolbar weichzeichnen. Zum Sparen von Leistung deaktivieren.</string>
+    <string name="reduce_motion">Bewegung reduzieren</string>
+    <string name="reduce_motion_desc">Stoppt fortlaufende dekorative Animationen und den Schreibmaschineneffekt. Ladeanzeigen und Statusübergänge bleiben erhalten.</string>
 
     <!-- Language -->
     <string name="language_title">Sprache</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">Shell-Auftrag %1$s wird gestoppt…</string>
     <string name="tool_unknown_device">Unbekanntes Gerät</string>
     <string name="tool_web_result">Ergebnis %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">Premium-Such-API mit personalisierten Ergebnissen. Nutzungsabhängige Abrechnung.</string>
+    <string name="web_search_kagi_key">Kagi-Search-API-Schlüssel</string>
+    <string name="web_search_kagi_key_hint">API-Schlüssel von kagi.com/api/keys</string>
 </resources>

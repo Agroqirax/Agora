@@ -753,14 +753,16 @@ internal class MessageGenerationController(
         text: String,
         images: List<String> = emptyList(),
         attachments: List<SelectedAttachment> = emptyList(),
+        onAccepted: suspend (SendAcceptance) -> Unit = {},
     ): SendAcceptance? = withContext(Dispatchers.Default) {
-        sendMessageOffMain(text, images, attachments)
+        sendMessageOffMain(text, images, attachments, onAccepted)
     }
 
     private suspend fun sendMessageOffMain(
         text: String,
         images: List<String>,
         attachments: List<SelectedAttachment>,
+        onAccepted: suspend (SendAcceptance) -> Unit,
     ): SendAcceptance? {
         val selectedModelId = currentActiveModel.value
         // Pre-flight: a blank model fails fast BEFORE creating a new-chat row or enqueueing, so the
@@ -769,26 +771,57 @@ internal class MessageGenerationController(
             onSnackbar(application.getString(R.string.no_model_selected))
             return null
         }
-        // G9: resolve the conversation id on the calling thread BEFORE launching the generation
-        // coroutine, so the registry keys the new generation on the correct conversation even if
-        // the user switches chats before the coroutine runs. The new-conversation row is a fast DB
-        // insert; doing it here closes the race where genId was unknown on the calling thread.
+        // Resolve a stable id before claiming the generation slot, but do not publish a new-chat
+        // transition yet. Its conversation + Run + message graph commit atomically below; only
+        // after the composer acknowledges that durable success may the screen switch and render.
         val wasNewChat = isNewChatMode.value || currentConversationId.value == null
-        if (wasNewChat) {
-            val newId = UUID.randomUUID().toString()
-            convRepo.upsertConversation(ChatEntity(
-                id = newId,
+        val genId = if (wasNewChat) {
+            UUID.randomUUID().toString()
+        } else {
+            currentConversationId.value ?: return null
+        }
+        val newConversation = if (wasNewChat) {
+            ChatEntity(
+                id = genId,
                 title = appContext.getString(R.string.new_chat),
                 modelId = selectedModelId,
-                systemPromptId = pendingSystemPromptId.value
-            ))
-            // Suppress the conversation-open auto-scroll BEFORE the id change triggers it.
-            onConversationCreatedBySend()
-            currentConversationId.value = newId
-            isNewChatMode.value = false
+                systemPromptId = pendingSystemPromptId.value,
+            )
+        } else {
+            null
         }
-        val genId = currentConversationId.value ?: return null
-        return sendInto(genId, wasNewChat, text, images, attachments, selectedModelId)
+        return sendInto(
+            genId = genId,
+            wasNewChat = wasNewChat,
+            newConversation = newConversation,
+            text = text,
+            images = images,
+            attachments = attachments,
+            modelId = selectedModelId,
+            onAccepted = onAccepted,
+        )
+    }
+
+    /**
+     * The durable database commit is authoritative even if a UI acknowledgement is cancelled by
+     * Activity teardown. Never turn an already-persisted Send into a setup failure or duplicate it
+     * on retry because a presentation callback failed.
+     */
+    private suspend fun notifySendAccepted(
+        acceptance: SendAcceptance,
+        onAccepted: suspend (SendAcceptance) -> Unit,
+    ) {
+        try {
+            withContext(kotlinx.coroutines.NonCancellable) {
+                onAccepted(acceptance)
+            }
+        } catch (error: Exception) {
+            DebugLog.e(
+                "MessageGenerationController",
+                "Failed to acknowledge accepted Send ${acceptance.messageId}",
+                error,
+            )
+        }
     }
 
     /** Release [uiToken]'s slot and, only if this call actually released it, flush the WHOLE
@@ -948,10 +981,12 @@ internal class MessageGenerationController(
     private suspend fun sendInto(
         genId: String,
         wasNewChat: Boolean,
+        newConversation: ChatEntity?,
         text: String,
         images: List<String>,
         attachments: List<SelectedAttachment>,
         modelId: String,
+        onAccepted: suspend (SendAcceptance) -> Unit,
     ): SendAcceptance? {
         val state = registry.getOrCreate(genId)
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return null
@@ -1000,6 +1035,10 @@ internal class MessageGenerationController(
                         state.enqueueSend(queued)
                         try {
                             persistIntervention(genId, runId, queued, payload)
+                            notifySendAccepted(
+                                acceptance = SendAcceptance.Queued(queued.id, genId),
+                                onAccepted = onAccepted,
+                            )
                             SendPlacement.Queued(queued.id)
                         } catch (e: Exception) {
                             state.removeQueuedSend(queued.id)
@@ -1031,6 +1070,7 @@ internal class MessageGenerationController(
         lateinit var userMessageId: String
         var setupModelMessageId: String? = null
         var startTime = 0L
+        var roomProjectionFence: RoomMessageProjectionFence? = null
         try {
             executionCoordinator.withConversationLock(genId) {
                 val pendingSettings = pendingConversationSettings.value
@@ -1079,42 +1119,99 @@ internal class MessageGenerationController(
                     runId = runId,
                     runSequence = 1,
                 )
-                val graphCommit = convRepo.createRunWithMessages(
-                    RunEntity(
-                        id = runId,
-                        conversationId = genId,
-                        parentRunId = lastMessage?.runId,
-                        status = RunStatus.ACTIVE,
-                        activeSlot = 1,
-                        startedAt = userEntity.timestamp,
-                        lastCheckpointAt = startTime,
-                    ),
-                    listOf(userEntity, modelEntity),
-                    messageSelectionUpdates = mapOf(
-                        userEntity.parentId to userEntity.id,
-                        userEntity.id to modelEntity.id,
-                    ),
+                val run = RunEntity(
+                    id = runId,
+                    conversationId = genId,
+                    parentRunId = lastMessage?.runId,
+                    status = RunStatus.ACTIVE,
+                    activeSlot = 1,
+                    startedAt = userEntity.timestamp,
+                    lastCheckpointAt = startTime,
                 )
-                if (text.isNotBlank()) onUserMessagePersisted(userMessageId, text)
-                settings.incrementMessagesSent()
-                val placeholder = modelEntity.toUiChatMessage(appContext)
-                // Publish the one explicit scroll owner before loading/stream state can activate
-                // the tail follower. The request waits for the target commit below.
-                ifOpenOn(genId) {
-                    onScrollToAbsoluteBottomAfter(userMessageId)
+                val committedMessages = listOf(userEntity, modelEntity)
+                val messageSelectionUpdates = mapOf(
+                    userEntity.parentId to userEntity.id,
+                    userEntity.id to modelEntity.id,
+                )
+                if (!wasNewChat) {
+                    ifOpenOn(genId) {
+                        roomProjectionFence = renderStore.beginRoomMessageProjectionFence()
+                    }
                 }
+                val graphCommit = if (newConversation != null) {
+                    convRepo.createConversationRunWithMessages(
+                        conversation = newConversation,
+                        run = run,
+                        messages = committedMessages,
+                        messageSelectionUpdates = messageSelectionUpdates,
+                    )
+                } else {
+                    convRepo.createRunWithMessages(
+                        run = run,
+                        messages = committedMessages,
+                        messageSelectionUpdates = messageSelectionUpdates,
+                    )
+                }
+                if (text.isNotBlank()) {
+                    runCatching { onUserMessagePersisted(userMessageId, text) }
+                        .onFailure { error ->
+                            DebugLog.w(
+                                "MessageGenerationController",
+                                "Failed to enqueue user-message indexing for $userMessageId",
+                                error,
+                            )
+                        }
+                }
+                try {
+                    settings.incrementMessagesSent()
+                } catch (error: Exception) {
+                    // Usage counters are secondary bookkeeping. A durable graph commit remains a
+                    // successful Send even if its aggregate counter cannot be advanced.
+                    DebugLog.w(
+                        "MessageGenerationController",
+                        "Failed to increment the sent-message counter",
+                        error,
+                    )
+                }
+                val acceptance = SendAcceptance.Direct(userMessageId, genId)
+                notifySendAccepted(acceptance, onAccepted)
+
+                if (wasNewChat) {
+                    // The composer is already cleared. Publish the new conversation only now, so
+                    // its first Room snapshot cannot expose the bubble during media processing.
+                    onConversationCreatedBySend()
+                    currentConversationId.value = genId
+                    isNewChatMode.value = false
+                }
+
+                val placeholder = modelEntity.toUiChatMessage(appContext)
                 state.loadingChange(myUiToken, true)
                 state.streamUpdate(myUiToken, placeholder)
                 ifOpenOn(genId) {
+                    // Arm the request after durable acceptance/composer clearing, but before the
+                    // graph becomes visible. The request actor waits for userMessageId to be
+                    // committed, so no scrolling can start early; keeping the request alive
+                    // across that first composition also gives the new bubbles their one-shot
+                    // lifecycle entrance target.
+                    //
+                    // Send is the only absolute-bottom request that opts into tween easing. The
+                    // ordinary bottom button keeps the actor's default adaptive curve.
+                    onScrollToAbsoluteBottomAfter(userMessageId)
                     renderStore.commitGraph(
                         committedMessages =
                             listOf(userEntity.toUiChatMessage(appContext), placeholder),
                         selectedChildren = graphCommit.messageSelections,
                         streamingMessage = placeholder,
+                        roomProjectionFence = roomProjectionFence,
                     )
+                    roomProjectionFence = null
                 }
+                roomProjectionFence?.let(renderStore::releaseRoomMessageProjectionFence)
+                roomProjectionFence = null
             }
         } catch (e: Exception) {
+            roomProjectionFence?.let(renderStore::releaseRoomMessageProjectionFence)
+            roomProjectionFence = null
             failGenerationSetup(
                 conversationId = genId,
                 runId = runId,

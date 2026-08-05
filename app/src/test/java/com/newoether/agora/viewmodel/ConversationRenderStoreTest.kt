@@ -140,6 +140,69 @@ class ConversationRenderStoreTest {
         assertEquals(listOf(user.id), store.snapshot.value.allMessages.map { it.id })
     }
 
+    @Test
+    fun acceptedSendFence_withholdsRoomProjectionUntilComposerAcknowledgementCommit() {
+        val oldUser = message("old-user", null, Participant.USER)
+        val oldModel = message("old-model", oldUser.id, Participant.MODEL)
+        val newUser = message("new-user", oldModel.id, Participant.USER)
+        val placeholder = message(
+            "new-model",
+            newUser.id,
+            Participant.MODEL,
+            MessageStatus.SENDING,
+        )
+        val oldSelections = mapOf(null to oldUser.id, oldUser.id to oldModel.id)
+        val newSelections = oldSelections + mapOf(
+            oldModel.id to newUser.id,
+            newUser.id to placeholder.id,
+        )
+        val store = ConversationRenderStore()
+        store.replaceConversation(
+            allMessages = listOf(oldUser, oldModel),
+            selectedChildren = oldSelections,
+        )
+
+        val fence = store.beginRoomMessageProjectionFence()
+        store.setAllMessages(listOf(oldUser, oldModel, newUser, placeholder))
+
+        // Room has committed, but the composer has not acknowledged success yet.
+        assertEquals(listOf(oldUser.id, oldModel.id), store.allMessages.map { it.id })
+
+        store.commitGraph(
+            committedMessages = listOf(newUser, placeholder),
+            selectedChildren = newSelections,
+            streamingMessage = placeholder,
+            roomProjectionFence = fence,
+        )
+
+        val published = store.snapshot.value
+        assertEquals(
+            listOf(oldUser.id, oldModel.id, newUser.id, placeholder.id),
+            published.allMessages.map { it.id },
+        )
+        assertSame(placeholder, published.streamingMessage)
+        assertEquals(newUser.id, published.selectedChildren[oldModel.id])
+    }
+
+    @Test
+    fun failedSendFence_releasesDeferredRoomProgressWithoutGraphCommit() {
+        val original = message("original", null, Participant.USER)
+        val checkpoint = original.copy(text = "new checkpoint")
+        val store = ConversationRenderStore()
+        store.replaceConversation(
+            allMessages = listOf(original),
+            selectedChildren = mapOf(null to original.id),
+        )
+
+        val fence = store.beginRoomMessageProjectionFence()
+        store.setAllMessages(listOf(checkpoint))
+        assertSame(original, store.allMessages.single())
+
+        store.releaseRoomMessageProjectionFence(fence)
+
+        assertSame(checkpoint, store.allMessages.single())
+    }
+
     private fun message(
         id: String,
         parentId: String?,

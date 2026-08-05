@@ -148,6 +148,23 @@ class ConversationRepository(
         return chatDao.createRunWithMessages(run, messages, messageSelectionUpdates, at)
     }
 
+    suspend fun createConversationRunWithMessages(
+        conversation: ChatEntity,
+        run: RunEntity,
+        messages: List<MessageEntity>,
+        messageSelectionUpdates: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ): RunGraphCommit {
+        ensureRunRecovery()
+        return chatDao.createConversationRunWithMessages(
+            conversation,
+            run,
+            messages,
+            messageSelectionUpdates,
+            at,
+        )
+    }
+
     suspend fun importRunGraph(runs: List<RunEntity>, messages: List<MessageEntity>) =
         chatDao.importRunGraph(runs, messages)
 
@@ -155,7 +172,8 @@ class ConversationRepository(
         conversation: ChatEntity,
         runs: List<RunEntity>,
         messages: List<MessageEntity>,
-    ) = chatDao.createForkGraph(conversation, runs, messages)
+        sourceToForkMessageIds: Map<String, String>,
+    ) = chatDao.createForkGraph(conversation, runs, messages, sourceToForkMessageIds)
 
     suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
         ensureRunRecovery()
@@ -320,7 +338,7 @@ class ConversationRepository(
             id = id,
             text = MessagePersistenceGuard.clipText(text),
             images = images,
-            thoughts = thoughts,
+            thoughts = thoughts?.let(MessagePersistenceGuard::clipText),
             thoughtTitle = thoughtTitle,
             tokenCount = tokenCount,
             status = status,

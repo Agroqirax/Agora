@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat
 
+import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
@@ -7,6 +8,26 @@ import androidx.compose.runtime.withFrameNanos
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
+
+private const val SEEK_STARTUP_EASING_DURATION_NANOS = 240_000_000L
+
+/**
+ * Applies an optional short easing envelope only to the seek's initial velocity. Once the envelope
+ * reaches one, [coalescedScrollStep] is returned unchanged, preserving its existing long adaptive
+ * ease-out as the target becomes measured and the remaining error shrinks.
+ */
+internal fun applySeekStartupEasing(
+    adaptiveStepPx: Float,
+    elapsedNanos: Long,
+    easing: Easing?,
+): Float {
+    if (adaptiveStepPx == 0f || easing == null) return adaptiveStepPx
+    val progress =
+        (elapsedNanos.coerceAtLeast(0L).toFloat() /
+            SEEK_STARTUP_EASING_DURATION_NANOS.toFloat())
+            .coerceIn(0f, 1f)
+    return adaptiveStepPx * easing.transform(progress).coerceIn(0f, 1f)
+}
 
 /**
  * Progressively seeks a LazyColumn item without `animateScrollToItem`.
@@ -28,6 +49,7 @@ internal suspend fun LazyListState.smoothSeekToItem(
     targetTolerancePx: Float = 1.5f,
     stableFrameCount: Int = 4,
     maximumDurationMillis: Long = 30_000L,
+    easing: Easing? = null,
 ): Boolean {
     var reached = false
     scroll(MutatePriority.Default) {
@@ -40,9 +62,10 @@ internal suspend fun LazyListState.smoothSeekToItem(
             val frameNanos = withFrameNanos { it }
             if ((frameNanos - startedAtNanos) / 1_000_000L >= maximumDurationMillis) break
 
-            val elapsedSeconds =
-                ((frameNanos - previousFrameNanos).coerceAtLeast(1L) / 1_000_000_000f)
-                    .coerceAtMost(0.05f)
+            val frameDurationNanos =
+                (frameNanos - previousFrameNanos)
+                    .coerceIn(1L, 50_000_000L)
+            val elapsedSeconds = frameDurationNanos / 1_000_000_000f
             previousFrameNanos = frameNanos
 
             val layout = layoutInfo
@@ -103,12 +126,17 @@ internal suspend fun LazyListState.smoothSeekToItem(
             val targetIsMeasured = visibleTarget != null
             val maximumVelocityPxPerSecond = viewportSizePx *
                 if (targetIsMeasured) 16f else 52f
-            val step = coalescedScrollStep(
+            val adaptiveStep = coalescedScrollStep(
                 errorPx = error,
                 elapsedSeconds = elapsedSeconds,
                 timeConstantSeconds = if (targetIsMeasured) 0.09f else 0.16f,
                 maximumVelocityPxPerSecond = maximumVelocityPxPerSecond,
                 minimumStepPx = minimumStepPx,
+            )
+            val step = applySeekStartupEasing(
+                adaptiveStepPx = adaptiveStep,
+                elapsedNanos = frameNanos - startedAtNanos,
+                easing = easing,
             ).coerceIn(-viewportSizePx * 0.82f, viewportSizePx * 0.82f)
 
             if (abs(step) <= 0.05f) continue

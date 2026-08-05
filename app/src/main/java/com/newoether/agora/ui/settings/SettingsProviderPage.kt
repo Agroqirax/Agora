@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.displayName
@@ -175,7 +176,6 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     var customName by remember { mutableStateOf("") }; var customBaseUrl by remember { mutableStateOf("") }
                     var customProtocol by remember { mutableStateOf(CustomEndpointProtocol.OPENAI) }
                     var nameError by remember { mutableStateOf(false) }; var urlError by remember { mutableStateOf(false) }
-                    val allNames = builtInNames + customProviders.map { it.name }
                     AlertDialog(
                         modifier = Modifier.clearFocusOnTap(),
                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -202,7 +202,10 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             TextButton(onClick = {
                                 val tn = customName.trim()
                                 val tu = customBaseUrl.trim()
-                                nameError = tn.isBlank() || tn in allNames
+                                nameError = CustomProviderNamePolicy.hasConflict(
+                                    name = tn,
+                                    existingNames = customProviders.map { it.name },
+                                )
                                 urlError = tu.isBlank()
                                 if (!nameError && !urlError) {
                                     viewModel.addCustomProvider(tn, tu, customProtocol)

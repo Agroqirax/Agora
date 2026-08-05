@@ -384,11 +384,13 @@
     <string name="web_search_enable_desc">Allow models to search the web via tool calling</string>
     <string name="web_search_provider_label">Search Provider</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">Privacy-focused search API. Free tier available.</string>
+    <string name="web_search_kagi_desc">Premium search API with personalized results. Pay per use.</string>
     <string name="web_search_serper_desc">Fast Google Search API. 2,500 free queries/month.</string>
     <string name="web_search_tavily_desc">AI-optimized search API. Built for LLM agents.</string>
     <string name="web_search_searxng_desc">Self-hosted metasearch engine. Best used with your own instance.</string>
@@ -396,6 +398,8 @@
     <string name="web_search_select_provider">Select Search Provider</string>
     <string name="web_search_brave_key">Brave Search API Key</string>
     <string name="web_search_brave_key_hint">API key from brave.com/search/api/</string>
+    <string name="web_search_kagi_key">Kagi Search API Key</string>
+    <string name="web_search_kagi_key_hint">API key from kagi.com/api/keys</string>
     <string name="web_search_serper_key">Serper API Key</string>
     <string name="web_search_serper_key_hint">API key from serper.dev</string>
     <string name="web_search_tavily_key">Tavily API Key</string>
@@ -591,6 +595,8 @@
     <string name="visual_effects">Visual Effects</string>
     <string name="blur_effects">Blur Effects</string>
     <string name="blur_effects_desc">Blur the top of the chat list under the toolbar. Turn off to save performance.</string>
+    <string name="reduce_motion">Reduce motion</string>
+    <string name="reduce_motion_desc">Stop continuous decorative motion and the welcome typing effect. Loading indicators and state feedback remain available.</string>
     <string name="interaction_feedback">Interaction Feedback</string>
     <string name="haptic_feedback">Haptic Feedback</string>
     <string name="haptic_feedback_desc">Use subtle vibration for generation status and key actions.</string>

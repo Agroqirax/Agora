@@ -21,11 +21,16 @@ internal data class ConversationRenderSnapshot(
     val selectedChildren: Map<String?, String> = emptyMap(),
 )
 
+internal data class RoomMessageProjectionFence internal constructor(val id: Long)
+
 internal class ConversationRenderStore {
     private val _snapshot = MutableStateFlow(ConversationRenderSnapshot())
     val snapshot: StateFlow<ConversationRenderSnapshot> = _snapshot.asStateFlow()
     private val streamingHandoffLock = Any()
     private var retiredStreamingMessageId: String? = null
+    private var nextRoomProjectionFenceId = 0L
+    private var activeRoomProjectionFence: RoomMessageProjectionFence? = null
+    private var deferredRoomMessages: List<ChatMessage>? = null
 
     val allMessages: List<ChatMessage> get() = _snapshot.value.allMessages
     val streamingMessage: ChatMessage? get() = _snapshot.value.streamingMessage
@@ -37,6 +42,7 @@ internal class ConversationRenderStore {
         streamingMessage: ChatMessage? = null,
     ) {
         synchronized(streamingHandoffLock) {
+            invalidateRoomProjectionFenceLocked()
             retiredStreamingMessageId = null
             _snapshot.value = ConversationRenderSnapshot(
                 allMessages = allMessages,
@@ -48,50 +54,89 @@ internal class ConversationRenderStore {
 
     fun clear() {
         synchronized(streamingHandoffLock) {
+            invalidateRoomProjectionFenceLocked()
             retiredStreamingMessageId = null
             _snapshot.value = ConversationRenderSnapshot()
         }
     }
 
+    /**
+     * Holds Room's next complete-message projection while a durable Send is crossing the
+     * database-to-composer boundary. The database may invalidate its Flow immediately after the
+     * transaction, but the newly accepted bubble must not render before the submitted composer
+     * has been cleared.
+     */
+    fun beginRoomMessageProjectionFence(): RoomMessageProjectionFence =
+        synchronized(streamingHandoffLock) {
+            check(activeRoomProjectionFence == null) {
+                "A Room message projection fence is already active"
+            }
+            nextRoomProjectionFenceId =
+                if (nextRoomProjectionFenceId == Long.MAX_VALUE) 1L
+                else nextRoomProjectionFenceId + 1L
+            RoomMessageProjectionFence(nextRoomProjectionFenceId).also { fence ->
+                activeRoomProjectionFence = fence
+                deferredRoomMessages = null
+            }
+        }
+
+    /** Releases a failed/abandoned Send and publishes any unrelated Room progress it held. */
+    fun releaseRoomMessageProjectionFence(fence: RoomMessageProjectionFence) {
+        synchronized(streamingHandoffLock) {
+            if (activeRoomProjectionFence != fence) return
+            val deferred = deferredRoomMessages
+            invalidateRoomProjectionFenceLocked()
+            if (deferred != null) setAllMessagesLocked(deferred)
+        }
+    }
+
     fun setAllMessages(messages: List<ChatMessage>) {
         synchronized(streamingHandoffLock) {
-            val retiredId = retiredStreamingMessageId
-            if (retiredId == null) {
-                _snapshot.update { it.copy(allMessages = messages) }
+            if (activeRoomProjectionFence != null) {
+                deferredRoomMessages = messages
                 return
             }
+            setAllMessagesLocked(messages)
+        }
+    }
 
-            val incoming = messages.firstOrNull { it.id == retiredId }
-            val currentTerminal = _snapshot.value.allMessages.firstOrNull {
-                it.id == retiredId && !it.status.isStreamingStatus()
+    private fun setAllMessagesLocked(messages: List<ChatMessage>) {
+        val retiredId = retiredStreamingMessageId
+        if (retiredId == null) {
+            _snapshot.update { it.copy(allMessages = messages) }
+            return
+        }
+
+        val incoming = messages.firstOrNull { it.id == retiredId }
+        val currentTerminal = _snapshot.value.allMessages.firstOrNull {
+            it.id == retiredId && !it.status.isStreamingStatus()
+        }
+        when {
+            // A deletion is authoritative; never retain a terminal row as a ghost.
+            incoming == null -> {
+                retiredStreamingMessageId = null
+                _snapshot.update { it.copy(allMessages = messages) }
             }
-            when {
-                // A deletion is authoritative; never retain a terminal row as a ghost.
-                incoming == null -> {
-                    retiredStreamingMessageId = null
-                    _snapshot.update { it.copy(allMessages = messages) }
+            // Room has caught up to a terminal checkpoint. Keep the monotonic fence until a
+            // new stream starts (or the row is deleted), because an older projection may
+            // already have completed its off-main mapping and still be queued for delivery.
+            !incoming.status.isStreamingStatus() -> {
+                _snapshot.update { it.copy(allMessages = messages) }
+            }
+            // A projection that started before the terminal transaction must not regress the
+            // visible row from SUCCESS/ERROR/STOPPED back to Answering.
+            currentTerminal != null -> {
+                _snapshot.update { snapshot ->
+                    snapshot.copy(
+                        allMessages = messages.map { message ->
+                            if (message.id == retiredId) currentTerminal else message
+                        },
+                    )
                 }
-                // Room has caught up to a terminal checkpoint. Keep the monotonic fence until a
-                // new stream starts (or the row is deleted), because an older projection may
-                // already have completed its off-main mapping and still be queued for delivery.
-                !incoming.status.isStreamingStatus() -> {
-                    _snapshot.update { it.copy(allMessages = messages) }
-                }
-                // A projection that started before the terminal transaction must not regress the
-                // visible row from SUCCESS/ERROR/STOPPED back to Answering.
-                currentTerminal != null -> {
-                    _snapshot.update { snapshot ->
-                        snapshot.copy(
-                            allMessages = messages.map { message ->
-                                if (message.id == retiredId) currentTerminal else message
-                            },
-                        )
-                    }
-                }
-                else -> {
-                    retiredStreamingMessageId = null
-                    _snapshot.update { it.copy(allMessages = messages) }
-                }
+            }
+            else -> {
+                retiredStreamingMessageId = null
+                _snapshot.update { it.copy(allMessages = messages) }
             }
         }
     }
@@ -141,21 +186,35 @@ internal class ConversationRenderStore {
         committedMessages: List<ChatMessage>,
         selectedChildren: Map<String?, String>,
         streamingMessage: ChatMessage?,
+        roomProjectionFence: RoomMessageProjectionFence? = null,
     ) {
         synchronized(streamingHandoffLock) {
+            if (
+                roomProjectionFence != null &&
+                activeRoomProjectionFence != roomProjectionFence
+            ) {
+                // A conversation replacement invalidates its old fence. Never let that stale Send
+                // commit into the newly-open conversation's render store.
+                return
+            }
             if (streamingMessage != null && streamingMessage.id != retiredStreamingMessageId) {
                 retiredStreamingMessageId = null
             }
-            _snapshot.update { current ->
-                current.copy(
-                    allMessages = UiMessageCommitPolicy.upsert(
-                        existing = current.allMessages,
-                        committed = committedMessages,
-                    ),
-                    streamingMessage = streamingMessage,
-                    selectedChildren = selectedChildren.toMap(),
-                )
+            val current = _snapshot.value
+            val roomMessages = if (roomProjectionFence != null) {
+                deferredRoomMessages ?: current.allMessages
+            } else {
+                current.allMessages
             }
+            if (roomProjectionFence != null) invalidateRoomProjectionFenceLocked()
+            _snapshot.value = current.copy(
+                allMessages = UiMessageCommitPolicy.upsert(
+                    existing = roomMessages,
+                    committed = committedMessages,
+                ),
+                streamingMessage = streamingMessage,
+                selectedChildren = selectedChildren.toMap(),
+            )
         }
     }
 
@@ -169,6 +228,11 @@ internal class ConversationRenderStore {
                 selectedChildren = selectedChildren.toMap(),
             )
         }
+    }
+
+    private fun invalidateRoomProjectionFenceLocked() {
+        activeRoomProjectionFence = null
+        deferredRoomMessages = null
     }
 }
 

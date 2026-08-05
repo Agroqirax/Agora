@@ -557,6 +557,8 @@
     <string name="visual_effects">시각 효과</string>
     <string name="blur_effects">블러 효과</string>
     <string name="blur_effects_desc">도구 모음 아래 채팅 목록 상단을 흐리게 처리합니다. 성능을 절약하려면 끄세요.</string>
+    <string name="reduce_motion">모션 줄이기</string>
+    <string name="reduce_motion_desc">반복되는 장식 애니메이션과 타이핑 효과를 중지합니다. 로딩 표시와 상태 전환은 유지됩니다.</string>
 
     <!-- Language -->
     <string name="language_title">언어</string>
@@ -1003,4 +1005,8 @@
     <string name="tool_stopping_shell_job">셸 작업 %1$s 중지 중…</string>
     <string name="tool_unknown_device">알 수 없는 기기</string>
     <string name="tool_web_result">결과 %1$d</string>
+    <string name="web_search_kagi">Kagi</string>
+    <string name="web_search_kagi_desc">개인화된 결과를 제공하는 프리미엄 검색 API. 사용량 기반 과금.</string>
+    <string name="web_search_kagi_key">Kagi Search API 키</string>
+    <string name="web_search_kagi_key_hint">kagi.com/api/keys의 API 키</string>
 </resources>

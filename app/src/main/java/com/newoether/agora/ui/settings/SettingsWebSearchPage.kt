@@ -69,6 +69,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     Text(
                                         when (webSearchProvider) {
                                             "searxng" -> stringResource(R.string.web_search_searxng)
+                                            "kagi" -> stringResource(R.string.web_search_kagi)
                                             "serper" -> stringResource(R.string.web_search_serper)
                                             "tavily" -> stringResource(R.string.web_search_tavily)
                                             "duckduckgo" -> stringResource(R.string.web_search_duckduckgo)
@@ -96,6 +97,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             Text(
                                                 stringResource(
                                                     when (webSearchProvider) {
+                                                        "kagi" -> R.string.web_search_kagi_key
                                                         "serper" -> R.string.web_search_serper_key
                                                         "tavily" -> R.string.web_search_tavily_key
                                                         else -> R.string.web_search_brave_key
@@ -111,6 +113,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                         Text(
                                                             stringResource(
                                                                 when (webSearchProvider) {
+                                                                    "kagi" -> R.string.web_search_kagi_key_hint
                                                                     "serper" -> R.string.web_search_serper_key_hint
                                                                     "tavily" -> R.string.web_search_tavily_key_hint
                                                                     else -> R.string.web_search_brave_key_hint
@@ -232,6 +235,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 Column {
                     val providers = listOf(
                         "brave" to R.string.web_search_brave,
+                        "kagi" to R.string.web_search_kagi,
                         "serper" to R.string.web_search_serper,
                         "tavily" to R.string.web_search_tavily,
                         "searxng" to R.string.web_search_searxng,
@@ -245,6 +249,7 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     stringResource(
                                         when (key) {
                                             "brave" -> R.string.web_search_brave_desc
+                                            "kagi" -> R.string.web_search_kagi_desc
                                             "serper" -> R.string.web_search_serper_desc
                                             "tavily" -> R.string.web_search_tavily_desc
                                             "searxng" -> R.string.web_search_searxng_desc

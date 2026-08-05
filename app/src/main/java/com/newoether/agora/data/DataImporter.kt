@@ -1052,6 +1052,8 @@ class DataImporter(
                 try {
                     archive["settings.json"]?.decodeToString()?.let { json ->
                         val s = importJson.decodeFromString<ExportSettings>(json)
+                        val customProviderSanitization =
+                            CustomProviderNamePolicy.sanitize(s.customProviders)
                         settingsManager.saveSelectedModel(s.selectedModel)
                         for ((provider, models) in s.availableModels) {
                             settingsManager.saveAvailableModels(provider, models)
@@ -1084,7 +1086,13 @@ class DataImporter(
                         settingsManager.saveModelSearchMethod(s.modelSearchMethod)
                         settingsManager.saveManualSearchMethod(s.manualSearchMethod)
                         // Skip embedding models — local GGUF/index, don't transfer across devices
-                        settingsManager.saveCustomProviders(s.customProviders)
+                        settingsManager.saveCustomProviders(customProviderSanitization.accepted)
+                        if (customProviderSanitization.rejected.isNotEmpty()) {
+                            errors.add(
+                                "Settings: skipped invalid custom provider name(s): " +
+                                    customProviderSanitization.rejected.joinToString { it.name },
+                            )
+                        }
                         settingsManager.saveAppLanguage(s.appLanguage)
                         settingsManager.saveWebSearchEnabled(s.webSearchEnabled)
                         settingsManager.saveWebSearchProvider(s.webSearchProvider)
