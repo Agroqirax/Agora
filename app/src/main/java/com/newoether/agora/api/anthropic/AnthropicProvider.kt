@@ -670,32 +670,30 @@ class AnthropicProvider(
     }
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
-            val headers = mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
-            // /v1/models is paginated (default page ~20); follow has_more/last_id so accounts
-            // with long model lists aren't silently truncated to the first page.
-            val all = mutableListOf<String>()
-            var afterId: String? = null
-            var pages = 0
-            while (pages < 10) {
-                val url = buildString {
-                    append(effectiveBaseUrl).append("/models?limit=100")
-                    afterId?.let { append("&after_id=").append(java.net.URLEncoder.encode(it, "UTF-8")) }
-                }
-                val responseText = HttpClient.fetchModels(url, headers) ?: break
-                val page = json.decodeFromString<AnthropicModelsResponse>(responseText)
-                all += page.data.map { it.id }
-                if (!page.hasMore || page.data.isEmpty()) break
-                afterId = page.lastId ?: page.data.last().id
-                pages++
+        val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
+        val headers = mapOf("x-api-key" to apiKey, "anthropic-version" to "2023-06-01")
+        // /v1/models is paginated (default page ~20); follow has_more/last_id so accounts
+        // with long model lists aren't silently truncated to the first page.
+        val all = mutableListOf<String>()
+        var afterId: String? = null
+        var pages = 0
+        while (pages < 10) {
+            val url = buildString {
+                append(effectiveBaseUrl).append("/models?limit=100")
+                afterId?.let { append("&after_id=").append(java.net.URLEncoder.encode(it, "UTF-8")) }
             }
-            if (all.isEmpty()) DebugLog.e("AgoraAPI", "Failed to fetch Anthropic models: empty response")
-            all
-        } catch (e: Exception) {
-            DebugLog.e("AgoraAPI", "Failed to fetch Anthropic models", e)
-            emptyList()
+            val responseText = HttpClient.fetchModelsResponse(url, headers)
+                .requireModelFetchBody()
+            val page = decodeModelFetchResponse {
+                json.decodeFromString<AnthropicModelsResponse>(responseText)
+            }
+            all += page.data.map { it.id }
+            if (!page.hasMore || page.data.isEmpty()) break
+            afterId = page.lastId ?: page.data.last().id
+            pages++
         }
+        if (all.isEmpty()) throw ModelFetchEmptyResultException()
+        all
     }
 }
 

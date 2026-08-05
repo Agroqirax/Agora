@@ -677,11 +677,6 @@ private fun ApiKeyPage(
                     Text(provider, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 }
                 Spacer(Modifier.height(20.dp))
-                Text(
-                    stringResource(R.string.custom_provider_protocol_label),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Spacer(Modifier.height(8.dp))
                 CustomEndpointProtocolSelector(
                     selected = customProtocol,
                     onSelected = onCustomProtocolChange,

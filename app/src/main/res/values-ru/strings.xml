@@ -568,6 +568,9 @@
     <string name="sync_failed_providers">Не удалось синхронизировать: %1$s</string>
     <string name="sync_no_providers">Нет провайдеров для синхронизации</string>
     <string name="sync_completed">Синхронизация завершена</string>
+    <string name="sync_error_no_models">Модели не возвращены</string>
+    <string name="sync_error_timeout">Время ожидания запроса истекло</string>
+    <string name="sync_error_invalid_response">Недопустимый ответ</string>
 
     <!-- Memory Access -->
     <string name="memory_access_title">Доступ</string>
@@ -875,7 +878,7 @@
     <string name="onboarding_ollama_desc">Введите URL вашего сервера Ollama.</string>
     <string name="onboarding_api_key_for">Введите API-ключ для %1$s.</string>
     <string name="onboarding_custom_title">Свой провайдер</string>
-    <string name="onboarding_custom_desc">Подключите конечную точку, совместимую с OpenAI, Gemini или Anthropic. Выберите протокол, затем укажите базовый URL и ключ API.</string>
+    <string name="onboarding_custom_desc">Подключите пользовательскую конечную точку.</string>
     <string name="onboarding_custom_base_url_hint">Базовый URL (например, https://api.example.com/v1)</string>
     <string name="onboarding_skip">Пропустить</string>
     <string name="onboarding_continue">Продолжить</string>

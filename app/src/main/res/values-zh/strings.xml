@@ -593,6 +593,9 @@
     <string name="sync_failed_providers">同步失败：%1$s</string>
     <string name="sync_no_providers">没有配置的提供商可供同步</string>
     <string name="sync_completed">同步完成</string>
+    <string name="sync_error_no_models">未返回任何模型</string>
+    <string name="sync_error_timeout">请求超时</string>
+    <string name="sync_error_invalid_response">响应无效</string>
 
     <!-- Memory Access -->
     <string name="memory_access_title">访问权限</string>
@@ -1016,7 +1019,7 @@
     <string name="onboarding_ollama_desc">输入 Ollama 服务器地址。</string>
     <string name="onboarding_api_key_for">输入 %1$s 的 API 密钥。</string>
     <string name="onboarding_custom_title">自定义服务商</string>
-    <string name="onboarding_custom_desc">接入兼容 OpenAI、Gemini 或 Anthropic 协议的服务。选择协议，然后填写 Base URL 和 API Key。</string>
+    <string name="onboarding_custom_desc">连接自定义端点。</string>
     <string name="onboarding_custom_base_url_hint">Base URL（如 https://api.example.com/v1）</string>
     <string name="onboarding_skip">跳过</string>
     <string name="onboarding_continue">继续</string>

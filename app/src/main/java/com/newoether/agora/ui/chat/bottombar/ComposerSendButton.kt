@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.chat.bottombar
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
@@ -93,6 +94,24 @@ internal fun ComposerSendButton(
     val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching && !isStopping && !isSubmitting
             && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
     val isActionable = (isLoading || canSend || composer.pendingSend) && !isSwitching && !isStopping
+    val containerColor by animateColorAsState(
+        targetValue = if (isActionable) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
+        animationSpec = tween(durationMillis = 400),
+        label = "fabContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (isActionable) {
+            MaterialTheme.colorScheme.onPrimary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = tween(durationMillis = 400),
+        label = "fabContent",
+    )
     FloatingActionButton(
         onClick = {
             if (isSwitching || isStopping) return@FloatingActionButton
@@ -131,8 +150,8 @@ internal fun ComposerSendButton(
                 }
             }
         },
-        containerColor = if (isActionable) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (isActionable) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        containerColor = containerColor,
+        contentColor = contentColor,
         modifier = Modifier.size(46.dp),
         shape = CircleShape,
         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)

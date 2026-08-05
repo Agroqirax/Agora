@@ -338,17 +338,14 @@ class OllamaProvider : LlmProvider {
     }.flowOn(Dispatchers.IO)
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "http://localhost:11434"
-            val responseText = HttpClient.fetchModels("$effectiveBaseUrl/api/tags") ?: run {
-                DebugLog.e("AgoraAPI", "Failed to fetch Ollama models: empty response")
-                return@withContext emptyList()
-            }
-            val json = Json { ignoreUnknownKeys = true }
-            json.decodeFromString<OllamaTagsResponse>(responseText).models.map { it.name }
-        } catch (e: Exception) {
-            DebugLog.e("AgoraAPI", "Ollama fetch failed: ${e.message}", e)
-            emptyList()
+        val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: "http://localhost:11434"
+        val responseText = HttpClient.fetchModelsResponse("$effectiveBaseUrl/api/tags")
+            .requireModelFetchBody()
+        val models = decodeModelFetchResponse {
+            json.decodeFromString<OllamaTagsResponse>(responseText)
+                .models.map { it.name }
         }
+        if (models.isEmpty()) throw ModelFetchEmptyResultException()
+        models
     }
 }

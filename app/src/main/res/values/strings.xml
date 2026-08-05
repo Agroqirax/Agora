@@ -605,6 +605,9 @@
     <string name="sync_failed_providers">Failed to sync: %1$s</string>
     <string name="sync_no_providers">No providers configured to sync</string>
     <string name="sync_completed">Sync completed</string>
+    <string name="sync_error_no_models">No models returned</string>
+    <string name="sync_error_timeout">Request timed out</string>
+    <string name="sync_error_invalid_response">Invalid response</string>
 
     <!-- Memory Access -->
     <string name="memory_access_title">Access</string>
@@ -917,7 +920,7 @@
     <string name="onboarding_ollama_desc">Enter your Ollama server URL.</string>
     <string name="onboarding_api_key_for">Enter your API key for %1$s.</string>
     <string name="onboarding_custom_title">Custom Provider</string>
-    <string name="onboarding_custom_desc">Connect an OpenAI-, Gemini-, or Anthropic-compatible endpoint. Choose a protocol, then enter its base URL and API key.</string>
+    <string name="onboarding_custom_desc">Connect a custom endpoint.</string>
     <string name="onboarding_custom_base_url_hint">Base URL (e.g. https://api.example.com/v1)</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_continue">Continue</string>

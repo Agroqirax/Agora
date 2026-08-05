@@ -1,6 +1,8 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.api.LlmProvider
+import com.newoether.agora.api.ModelFetchEmptyResultException
+import com.newoether.agora.api.ModelFetchTimeoutException
 import com.newoether.agora.api.anthropic.AnthropicProvider
 import com.newoether.agora.api.gemini.GeminiProvider
 import com.newoether.agora.api.local.LocalProvider
@@ -17,8 +19,10 @@ import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.util.Constants
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
@@ -254,23 +258,34 @@ class ProviderRegistry(
             listOf(baseUrl)
         }
 
+        var lastFailure: Exception? = null
         for (candidate in candidates) {
-            val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) { provider.fetchModels(activeKey, candidate) }
-            if (raw.isEmpty()) continue
-            if (customConfig != null && candidate != null && baseUrl != null) {
-                val resolution = CustomEndpointResolution(
-                    protocol = customConfig.protocol,
-                    configuredBaseUrl = baseUrl,
-                    effectiveBaseUrl = candidate,
-                )
-                runtimeEndpointResolutions[name] = resolution
-                settings.saveCustomEndpointResolution(name, resolution)
+            try {
+                val raw = withTimeout(Constants.MODEL_FETCH_TIMEOUT_MS) {
+                    provider.fetchModels(activeKey, candidate)
+                }
+                if (raw.isEmpty()) throw ModelFetchEmptyResultException()
+                if (customConfig != null && candidate != null && baseUrl != null) {
+                    val resolution = CustomEndpointResolution(
+                        protocol = customConfig.protocol,
+                        configuredBaseUrl = baseUrl,
+                        effectiveBaseUrl = candidate,
+                    )
+                    runtimeEndpointResolutions[name] = resolution
+                    settings.saveCustomEndpointResolution(name, resolution)
+                }
+                val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
+                settings.saveAvailableModels(name, prefixed)
+                return prefixed
+            } catch (error: TimeoutCancellationException) {
+                lastFailure = ModelFetchTimeoutException()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastFailure = error
             }
-            val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
-            settings.saveAvailableModels(name, prefixed)
-            return prefixed
         }
-        return emptyList()
+        throw lastFailure ?: ModelFetchEmptyResultException()
     }
 
     /** Identity fingerprint of all providers' credentials/URLs — used to skip redundant syncs. */

@@ -512,41 +512,37 @@ abstract class BaseOpenAiProvider : LlmProvider {
         if (apiKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $apiKey")
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = withContext(Dispatchers.IO) {
-        try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
-            val endpointUrls = endpointCandidates(effectiveBaseUrl, "models")
-            val headers = authHeaders(apiKey)
-            var lastParseError: Exception? = null
+        val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
+        val endpointUrls = endpointCandidates(effectiveBaseUrl, "models")
+        val headers = authHeaders(apiKey)
+        var lastFailure: Exception? = null
 
-            for ((index, endpointUrl) in endpointUrls.withIndex()) {
-                val responseText = HttpClient.fetchModels(endpointUrl, headers)
-                if (responseText == null) {
-                    if (index < endpointUrls.lastIndex) {
-                        DebugLog.w("AgoraAPI", "Failed to fetch $name models from $endpointUrl; retrying ${endpointUrls[index + 1]}")
-                    }
-                    continue
-                }
-
-                try {
-                    return@withContext json.decodeFromString<OpenAiModelListResponse>(responseText)
+        for ((index, endpointUrl) in endpointUrls.withIndex()) {
+            try {
+                val responseText = HttpClient.fetchModelsResponse(endpointUrl, headers)
+                    .requireModelFetchBody()
+                val models = decodeModelFetchResponse {
+                    json.decodeFromString<OpenAiModelListResponse>(responseText)
                         .data.map { it.id }.sorted()
-                } catch (e: Exception) {
-                    lastParseError = e
-                    if (index < endpointUrls.lastIndex) {
-                        DebugLog.w("AgoraAPI", "Failed to parse $name models from $endpointUrl; retrying ${endpointUrls[index + 1]}")
-                    }
+                }
+                if (models.isEmpty()) throw ModelFetchEmptyResultException()
+                return@withContext models
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                lastFailure = error
+                if (index < endpointUrls.lastIndex) {
+                    DebugLog.w(
+                        "AgoraAPI",
+                        "Failed to fetch $name models from $endpointUrl; " +
+                            "retrying ${endpointUrls[index + 1]}",
+                    )
                 }
             }
-
-            if (lastParseError != null) {
-                DebugLog.e("AgoraAPI", "Failed to parse $name models", lastParseError)
-            } else {
-                DebugLog.e("AgoraAPI", "Failed to fetch $name models: empty response")
-            }
-            emptyList()
-        } catch (e: Exception) {
-            DebugLog.e("AgoraAPI", "Failed to fetch $name models", e)
-            emptyList()
         }
+
+        val failure = lastFailure ?: ModelFetchEmptyResultException()
+        DebugLog.e("AgoraAPI", "Failed to fetch $name models", failure)
+        throw failure
     }
 }

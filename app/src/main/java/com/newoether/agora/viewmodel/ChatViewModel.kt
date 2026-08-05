@@ -1463,32 +1463,38 @@ class ChatViewModel(
         viewModelScope.launch {
             if (_isSyncingModels.value) return@launch
             _isSyncingModels.value = true
-            val successProviders = mutableListOf<String>()
-            val failedProviders = mutableListOf<String>()
-            var skippedCount = 0
+            val failures = mutableListOf<ProviderModelSyncFailure>()
+            var successProviderCount = 0
+            var skippedProviderCount = 0
+            val failureLabels = ModelSyncFailureLabels(
+                noModels = appContext.getString(R.string.sync_error_no_models),
+                timeout = appContext.getString(R.string.sync_error_timeout),
+                invalidResponse = appContext.getString(R.string.sync_error_invalid_response),
+                unknown = appContext.getString(R.string.unknown_error),
+            )
 
-            // Ensure custom providers are loaded into the providers map before iterating
-            providerRegistry.ensureCustomProvidersRegistered()
-
-            val message = try {
+            try {
+                // Ensure custom providers are loaded into the providers map before iterating.
+                providerRegistry.ensureCustomProvidersRegistered()
                 providerRegistry.all.forEach { (name, _) ->
                     if (name == Constants.PROVIDER_LOCAL) return@forEach
 
                     try {
                         if (!providerRegistry.isConfigured(name, settings.resolveActiveKey(name) ?: "")) {
-                            skippedCount++
+                            skippedProviderCount++
                             settings.saveAvailableModels(name, emptyList())
                             return@forEach
                         }
 
-                        val models = providerRegistry.fetchModelsForProvider(name)
-                        if (models.isNotEmpty()) {
-                            successProviders.add(name)
-                        } else {
-                            failedProviders.add(name)
-                        }
-                    } catch (e: Exception) {
-                        failedProviders.add(name)
+                        providerRegistry.fetchModelsForProvider(name)
+                        successProviderCount++
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        failures += ProviderModelSyncFailure(
+                            providerName = name,
+                            reason = modelSyncFailureReason(error, failureLabels),
+                        )
                     }
                 }
 
@@ -1496,25 +1502,30 @@ class ChatViewModel(
                 val newEnabled = settings.enabledModels.value.intersect(allFetchedModels)
                 settings.setEnabledModels(newEnabled)
 
-                // Save fingerprint on any successful fetch so we don't re-fetch on next visit
-                settings.saveLastModelsFetchFingerprint(computeProviderFingerprint())
-
-                when {
-                    successProviders.isNotEmpty() && failedProviders.isEmpty() ->
-                        appContext.getString(R.string.sync_success_providers, successProviders.size)
-                    successProviders.isNotEmpty() && failedProviders.isNotEmpty() ->
-                        appContext.getString(R.string.sync_partial, successProviders.joinToString(), failedProviders.joinToString())
-                    successProviders.isEmpty() && failedProviders.isNotEmpty() ->
-                        appContext.getString(R.string.sync_failed_providers, failedProviders.joinToString())
-                    else -> if (skippedCount > 0) appContext.getString(R.string.sync_no_providers) else appContext.getString(R.string.sync_completed)
+                // A failed provider must remain eligible for automatic retry on the next visit.
+                if (failures.isEmpty()) {
+                    settings.saveLastModelsFetchFingerprint(computeProviderFingerprint())
                 }
-            } catch (e: Exception) {
-                appContext.getString(R.string.sync_failed_providers, e.message ?: appContext.getString(R.string.unknown_error))
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                failures += ProviderModelSyncFailure(
+                    providerName = appContext.getString(R.string.models_title),
+                    reason = modelSyncFailureReason(error, failureLabels),
+                )
             } finally {
                 _isSyncingModels.value = false
             }
 
-            _snackbarMessage.tryEmit(SnackbarEvent(message))
+            val message = providerModelSyncFailureMessage(failures) ?: when {
+                successProviderCount > 0 ->
+                    appContext.getString(R.string.sync_success_providers, successProviderCount)
+                skippedProviderCount > 0 ->
+                    appContext.getString(R.string.sync_no_providers)
+                else ->
+                    appContext.getString(R.string.sync_completed)
+            }
+            _snackbarMessage.emit(SnackbarEvent(message))
         }
     }
 

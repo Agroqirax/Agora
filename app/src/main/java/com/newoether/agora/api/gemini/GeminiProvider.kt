@@ -595,28 +595,25 @@ class GeminiProvider(
     }.flowOn(Dispatchers.IO)
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        try {
-            val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
-            val finalUrlString = if (effectiveBaseUrl.contains("/v1") || effectiveBaseUrl.contains("/v1beta")) {
-                "$effectiveBaseUrl/models"
-            } else {
-                "$effectiveBaseUrl/v1beta/models"
-            }
+        val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
+        val finalUrlString = if (effectiveBaseUrl.contains("/v1") || effectiveBaseUrl.contains("/v1beta")) {
+            "$effectiveBaseUrl/models"
+        } else {
+            "$effectiveBaseUrl/v1beta/models"
+        }
 
-            val responseText = HttpClient.fetchModels(
-                finalUrlString,
-                mapOf("x-goog-api-key" to apiKey)
-            ) ?: run {
-                DebugLog.e("AgoraAPI", "Failed to fetch Gemini models: empty response")
-                return@withContext emptyList()
-            }
-            val json = Json { ignoreUnknownKeys = true }
-            json.decodeFromString<ModelListResponse>(responseText).models
+        val responseText = HttpClient.fetchModelsResponse(
+            finalUrlString,
+            mapOf("x-goog-api-key" to apiKey),
+        ).requireModelFetchBody()
+        val models = decodeModelFetchResponse {
+            json.decodeFromString<ModelListResponse>(responseText)
+                .models
                 .filter { it.supportedGenerationMethods.contains("generateContent") }
                 .map { it.name.removePrefix("models/") }
-        } catch (e: Exception) {
-            emptyList()
         }
+        if (models.isEmpty()) throw ModelFetchEmptyResultException()
+        models
     }
 
     private fun buildGeminiFunctionResponse(result: String): JsonObject {

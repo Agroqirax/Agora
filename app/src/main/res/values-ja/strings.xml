@@ -568,6 +568,9 @@
     <string name="sync_failed_providers">同期に失敗しました: %1$s</string>
     <string name="sync_no_providers">同期するプロバイダーが設定されていません</string>
     <string name="sync_completed">同期が完了しました</string>
+    <string name="sync_error_no_models">モデルが返されませんでした</string>
+    <string name="sync_error_timeout">リクエストがタイムアウトしました</string>
+    <string name="sync_error_invalid_response">無効なレスポンス</string>
 
     <!-- Memory Access -->
     <string name="memory_access_title">アクセス</string>
@@ -875,7 +878,7 @@
     <string name="onboarding_ollama_desc">Ollama サーバーの URL を入力してください。</string>
     <string name="onboarding_api_key_for">%1$s の API キーを入力してください。</string>
     <string name="onboarding_custom_title">カスタムプロバイダー</string>
-    <string name="onboarding_custom_desc">OpenAI、Gemini、または Anthropic 互換のエンドポイントに接続します。プロトコルを選択し、ベース URL と API キーを入力してください。</string>
+    <string name="onboarding_custom_desc">カスタムエンドポイントに接続します。</string>
     <string name="onboarding_custom_base_url_hint">ベース URL（例: https://api.example.com/v1）</string>
     <string name="onboarding_skip">スキップ</string>
     <string name="onboarding_continue">続行</string>

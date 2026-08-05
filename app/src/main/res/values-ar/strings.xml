@@ -568,6 +568,9 @@
     <string name="sync_failed_providers">فشلت المزامنة: %1$s</string>
     <string name="sync_no_providers">لا يوجد مزوّدون مهيأون للمزامنة</string>
     <string name="sync_completed">اكتملت المزامنة</string>
+    <string name="sync_error_no_models">لم يتم إرجاع أي نماذج</string>
+    <string name="sync_error_timeout">انتهت مهلة الطلب</string>
+    <string name="sync_error_invalid_response">استجابة غير صالحة</string>
 
     <!-- Memory Access -->
     <string name="memory_access_title">الوصول</string>
@@ -875,7 +878,7 @@
     <string name="onboarding_ollama_desc">أدخل عنوان URL لخادم Ollama الخاص بك.</string>
     <string name="onboarding_api_key_for">أدخل مفتاح API الخاص بك لـ %1$s.</string>
     <string name="onboarding_custom_title">مزود مخصص</string>
-    <string name="onboarding_custom_desc">اتصل بنقطة نهاية متوافقة مع OpenAI أو Gemini أو Anthropic. اختر البروتوكول، ثم أدخل عنوان URL الأساسي ومفتاح API.</string>
+    <string name="onboarding_custom_desc">اتصل بنقطة نهاية مخصصة.</string>
     <string name="onboarding_custom_base_url_hint">عنوان URL الأساسي (مثل https://api.example.com/v1)</string>
     <string name="onboarding_skip">تخطٍّ</string>
     <string name="onboarding_continue">متابعة</string>

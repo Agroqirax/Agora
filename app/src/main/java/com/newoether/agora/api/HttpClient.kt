@@ -389,13 +389,25 @@ object HttpClient {
         url: String,
         headers: Map<String, String> = emptyMap(),
         callTimeoutMillis: Long? = null,
-    ): String? {
+    ): String? = fetchModelsResponse(url, headers, callTimeoutMillis)
+        .takeIf(TextResponse::isSuccessful)
+        ?.body
+
+    fun fetchModelsResponse(
+        url: String,
+        headers: Map<String, String> = emptyMap(),
+        callTimeoutMillis: Long? = null,
+    ): TextResponse {
         guardCleartextCredentials(url, headers)
         val requestBuilder = Request.Builder().url(url).get()
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
         val response = newCall(requestBuilder.build(), callTimeoutMillis).execute()
         return response.use {
-            if (it.isSuccessful) it.body?.string() else null
+            TextResponse(
+                code = it.code,
+                body = it.body.string(),
+                isSuccessful = it.isSuccessful,
+            )
         }
     }
 
