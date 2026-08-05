@@ -46,6 +46,7 @@ import com.newoether.agora.model.RunUiProjection
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.ui.chat.message.GroupedSegmentAutoExpansionController
 import com.newoether.agora.ui.chat.message.MessageItem
 import com.newoether.agora.ui.chat.message.REGENERATION_ABORT_RESTORE_DURATION_MS
 import com.newoether.agora.ui.chat.message.REGENERATION_EXIT_DURATION_MS
@@ -366,6 +367,7 @@ internal fun MessageList(
     onRegenerationFadeOutFinished: (Long) -> Unit = {},
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
+    autoExpandActiveGroup: Boolean = true,
     maxContextWindow: Int = 20,
     modelAliases: StableModelAliases = StableModelAliases(),
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
@@ -393,6 +395,9 @@ internal fun MessageList(
         remember { SegmentAppearanceRegistry() },
     lifecycleEntranceTargetMessageId: String? = null,
 ) {
+    val groupedSegmentAutoExpansionController = remember(conversationId) {
+        GroupedSegmentAutoExpansionController()
+    }
     var editingMessageId by remember { mutableStateOf<String?>(null) }
     var pendingEditMessageId by remember { mutableStateOf<String?>(null) }
     var pendingEditVisualReplacement by remember(conversationId) {
@@ -946,6 +951,9 @@ internal fun MessageList(
             modelAliases = modelAliases,
             visualizeContextRollout = visualizeContextRollout,
             toolCallDisplayMode = toolCallDisplayMode,
+            autoExpandActiveGroup = autoExpandActiveGroup,
+            groupedSegmentAutoExpansionController =
+                groupedSegmentAutoExpansionController,
             onStartEdit = {
                 if (!isRetainedRegenerationExit) editingMessageId = message.id
             },

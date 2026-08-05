@@ -310,6 +310,36 @@ class MessageListLayoutTest {
     }
 
     @Test
+    fun imeRiseCannotAnchorWithoutComposerFocusAuthorization() {
+        var state = ImeBottomAnchorState(
+            observedInsetPx = 0,
+            bottomEligibleBeforeInsetChange = true,
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 120,
+                bottomEligibleNow = true,
+                anchorAllowed = false,
+            ),
+        )
+
+        assertEquals(120, state.observedInsetPx)
+        assertFalse(state.bottomEligibleBeforeInsetChange)
+        assertFalse(state.active)
+
+        state = reduceImeBottomAnchor(
+            state.copy(active = true),
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 160,
+                bottomEligibleNow = true,
+                anchorAllowed = false,
+            ),
+        )
+        assertFalse(state.active)
+    }
+
+    @Test
     fun userDragSuppressesImeReattachmentUntilTheInsetFalls() {
         var state = ImeBottomAnchorState(
             observedInsetPx = 80,

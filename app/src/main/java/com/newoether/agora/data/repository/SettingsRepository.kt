@@ -153,6 +153,8 @@ class SettingsRepository(
     val blurEffectsEnabled: StateFlow<Boolean> = hot(settingsManager.blurEffectsEnabled, true)
     val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
+    val autoExpandActiveGroup: StateFlow<Boolean> =
+        hot(settingsManager.autoExpandActiveGroup, true)
     val schemeStyle: StateFlow<String> = hot(settingsManager.schemeStyle, "TONAL_SPOT")
     val fontPreference: StateFlow<String> = hot(settingsManager.fontPreference, "app_default")
     val customFontPath: StateFlow<String> = hot(settingsManager.customFontPath, "")
@@ -412,6 +414,8 @@ class SettingsRepository(
     fun setBlurEffectsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveBlurEffectsEnabled(enabled) }
     fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
+    fun setAutoExpandActiveGroup(enabled: Boolean) =
+        scope.launch { settingsManager.saveAutoExpandActiveGroup(enabled) }
     fun setSchemeStyle(style: String) = scope.launch { settingsManager.saveSchemeStyle(style) }
     fun setFontPreference(value: String) = scope.launch { settingsManager.saveFontPreference(value) }
     fun setCustomFontPath(value: String) = scope.launch { settingsManager.saveCustomFontPath(value) }

@@ -196,6 +196,7 @@ class SettingsManager(private val context: Context) {
         val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
+        val AUTO_EXPAND_ACTIVE_GROUP = booleanPreferencesKey("auto_expand_active_group")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
         val FONT_PREFERENCE = stringPreferencesKey("font_preference")
         val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
@@ -387,6 +388,8 @@ class SettingsManager(private val context: Context) {
     val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
+    val autoExpandActiveGroup: Flow<Boolean> =
+        context.dataStore.data.map { it[AUTO_EXPAND_ACTIVE_GROUP] ?: true }
     val schemeStyle: Flow<String> = context.dataStore.data.map { it[SCHEME_STYLE] ?: "TONAL_SPOT" }
     val fontPreference: Flow<String> = context.dataStore.data.map { it[FONT_PREFERENCE] ?: "app_default" }
     val customFontPath: Flow<String> = context.dataStore.data.map { it[CUSTOM_FONT_PATH] ?: "" }
@@ -838,6 +841,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveToolCallDisplayMode(mode: String) {
         context.dataStore.edit { it[TOOL_CALL_DISPLAY_MODE] = ToolCallDisplayModes.normalize(mode) }
+    }
+
+    suspend fun saveAutoExpandActiveGroup(enabled: Boolean) {
+        context.dataStore.edit { it[AUTO_EXPAND_ACTIVE_GROUP] = enabled }
     }
 
     suspend fun saveFontPreference(value: String) {

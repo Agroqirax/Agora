@@ -132,6 +132,8 @@ internal fun AssistantMessageContent(
     actionCopyText: String?,
     showBranchSelector: Boolean,
     toolCallDisplayMode: String,
+    autoExpandActiveGroup: Boolean,
+    groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
     branchIndex: Int,
@@ -257,9 +259,16 @@ internal fun AssistantMessageContent(
                     mergeAdjacentSegments(segmentsOrNull.orEmpty())
                 }
                 val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
-                val useTimelineSegments = normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
-                    mergedSegments.any { it.type == "answer" }
                 val groupAdjacentTimelineTools = normalizedToolCallDisplayMode == ToolCallDisplayModes.GROUPED_TIMELINE
+                val useTimelineSegments =
+                    normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
+                        (
+                            mergedSegments.any { it.type == "answer" } ||
+                                (
+                                    groupAdjacentTimelineTools &&
+                                        mergedSegments.any { it.isInfoSegment() }
+                                )
+                        )
                 val detailSegments = remember(mergedSegments) {
                     mergedSegments.filter { it.type != "answer" }
                 }
@@ -284,6 +293,9 @@ internal fun AssistantMessageContent(
                         message = message,
                         isStreaming = isStreaming,
                         groupAdjacentBlocks = groupAdjacentTimelineTools,
+                        autoExpandActiveGroup =
+                            groupAdjacentTimelineTools && autoExpandActiveGroup,
+                        autoExpansionController = groupedSegmentAutoExpansionController,
                         expandedStates = thoughtExpandedStates,
                         renderContext = renderContext,
                         segmentAppearanceRegistry = segmentAppearanceRegistry,

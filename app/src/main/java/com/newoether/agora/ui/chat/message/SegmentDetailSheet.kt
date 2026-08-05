@@ -421,10 +421,7 @@ internal fun SegmentDetailSheet(
                                         if (detailSeg.type == "tool") {
                                             ToolDetailContent(
                                                 segment = detailSeg,
-                                                onMediaClick = { paths, mediaIndex ->
-                                                    onDismiss()
-                                                    onMediaClick(paths, mediaIndex)
-                                                },
+                                                onMediaClick = onMediaClick,
                                             )
                                         } else if (
                                             detailSeg.type == "transcription" &&
@@ -457,10 +454,7 @@ internal fun SegmentDetailSheet(
                                 } else if (seg.type == "tool") {
                                     ToolDetailContent(
                                         segment = seg,
-                                        onMediaClick = { paths, mediaIndex ->
-                                            onDismiss()
-                                            onMediaClick(paths, mediaIndex)
-                                        },
+                                        onMediaClick = onMediaClick,
                                     )
                                 } else if (
                                     seg.type == "transcription" &&

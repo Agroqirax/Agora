@@ -48,6 +48,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
+    val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
     val fontPreference by viewModel.settings.fontPreference.collectAsState()
     val customFontPath by viewModel.settings.customFontPath.collectAsState()
     val customFontName by viewModel.settings.customFontName.collectAsState()
@@ -55,6 +56,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     val invalidFontMessage = stringResource(R.string.font_invalid_file)
+    val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
 
     // Clear custom font when switching away from custom
     LaunchedEffect(fontPreference) {
@@ -219,7 +221,6 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         }
                         add {
                             var expanded by remember { mutableStateOf(false) }
-                            val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
                             val selectedLabel = when (normalizedToolCallDisplayMode) {
                                 ToolCallDisplayModes.GROUPED_TIMELINE -> stringResource(R.string.tool_call_display_mode_grouped_timeline)
                                 ToolCallDisplayModes.COMPACT -> stringResource(R.string.tool_call_display_mode_compact)
@@ -275,6 +276,38 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 },
                                 modifier = Modifier.clickable { expanded = true }
                             )
+                        }
+                        if (
+                            normalizedToolCallDisplayMode ==
+                            ToolCallDisplayModes.GROUPED_TIMELINE
+                        ) {
+                            add {
+                                SettingsItem(
+                                    headlineContent = {
+                                        Text(stringResource(R.string.auto_expand_active_group))
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            stringResource(
+                                                R.string.auto_expand_active_group_desc
+                                            )
+                                        )
+                                    },
+                                    trailingContent = {
+                                        Switch(
+                                            checked = autoExpandActiveGroup,
+                                            onCheckedChange = {
+                                                viewModel.settings.setAutoExpandActiveGroup(it)
+                                            },
+                                        )
+                                    },
+                                    modifier = Modifier.clickable {
+                                        viewModel.settings.setAutoExpandActiveGroup(
+                                            !autoExpandActiveGroup
+                                        )
+                                    },
+                                )
+                            }
                         }
                         add {
                             SettingsItem(

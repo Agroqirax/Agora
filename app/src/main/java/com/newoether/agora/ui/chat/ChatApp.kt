@@ -313,6 +313,7 @@ private fun AnsweringHapticEffect(
 fun ChatApp(
     viewModel: ChatViewModel,
     onNavigateBack: (() -> Unit)? = null,
+    drawerEnabled: Boolean = true,
     onOpenSettings: () -> Unit,
     onOpenTasks: (String?) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit,
@@ -355,15 +356,20 @@ fun ChatApp(
         }
     }
 
+    val latestDrawerEnabled by rememberUpdatedState(drawerEnabled)
     val drawerState = rememberDrawerState(
         initialValue = DrawerValue.Closed,
         confirmStateChange = { newValue ->
-            if (newValue != DrawerValue.Closed) {
+            val allowed = newValue == DrawerValue.Closed || latestDrawerEnabled
+            if (allowed && newValue != DrawerValue.Closed) {
                 focusManager.clearFocus()
             }
-            true
+            allowed
         }
     )
+    LaunchedEffect(drawerEnabled) {
+        if (!drawerEnabled) drawerState.close()
+    }
 
     val conversations by viewModel.conversations.collectAsState()
     // Defer value reads to the narrow composition regions that actually render messages. The
@@ -402,6 +408,7 @@ fun ChatApp(
     val globalShell by viewModel.settings.shellEnabled.collectAsState()
     val shellDevices by viewModel.settings.shellDevices.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
+    val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
     val conversationSettings by viewModel.settings.conversationSettings.collectAsState()
     val pendingSettings by viewModel.pendingConversationSettings.collectAsState()
     // Resolved per-conversation values: override → global default
@@ -486,6 +493,7 @@ fun ChatApp(
     var isWithinAbsoluteBottomAttachThreshold by remember(currentConversationId) {
         mutableStateOf(false)
     }
+    var composerInputFocused by remember { mutableStateOf(false) }
     val imeBottomPx = with(density) { imeBottom.roundToPx() }
     var imeBottomAnchorState by remember(currentConversationId) {
         mutableStateOf(
@@ -498,6 +506,7 @@ fun ChatApp(
     val imeBottomEligibleNow =
         currentConversationId != null &&
             loadedMessagesConversationId == currentConversationId &&
+            composerInputFocused &&
             isWithinAbsoluteBottomAttachThreshold
     SideEffect {
         val next = reduceImeBottomAnchor(
@@ -505,6 +514,7 @@ fun ChatApp(
             event = ImeBottomAnchorEvent.InsetsObserved(
                 insetPx = imeBottomPx,
                 bottomEligibleNow = imeBottomEligibleNow,
+                anchorAllowed = composerInputFocused,
             ),
         )
         if (next != imeBottomAnchorState) imeBottomAnchorState = next
@@ -1369,7 +1379,7 @@ fun ChatApp(
     CompositionLocalProvider(LocalAgoraHaptics provides haptics) {
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = true,
+        gesturesEnabled = drawerEnabled,
         scrimColor = DrawerDefaults.scrimColor,
         drawerContent = {
             ChatDrawerContent(
@@ -1430,7 +1440,13 @@ fun ChatApp(
                             !isNewChatMode && currentConversationId != null && !isLoading &&
                                 !shareSelectionActive,
                         onNavigateBack = onNavigateBack,
-                        onOpenDrawer = { haptics.tap(); focusManager.clearFocus(); scope.launch { drawerState.open() } },
+                        onOpenDrawer = {
+                            if (drawerEnabled) {
+                                haptics.tap()
+                                focusManager.clearFocus()
+                                scope.launch { drawerState.open() }
+                            }
+                        },
                         onSearchQueryChange = { query ->
                             conversationSearchMatchIndex = -1
                             conversationSearchMatchDistances.clear()
@@ -1575,6 +1591,7 @@ fun ChatApp(
                                     viewModel::acknowledgeRegenerationFade,
                                 visualizeContextRollout = visualizeContextRollout,
                                 toolCallDisplayMode = toolCallDisplayMode,
+                                autoExpandActiveGroup = autoExpandActiveGroup,
                                 maxContextWindow = contextWindow,
                                 modelAliases = StableModelAliases(modelAliases),
                                 bottomBarHeight = bottomBarHeight + shareSelectionBarSpace,
@@ -1916,6 +1933,11 @@ fun ChatApp(
                         textFieldState = textFieldState,
                         composerState = composer,
                         focusRequester = inputFocusRequester,
+                        onInputFocusChanged = { focused ->
+                            if (composerInputFocused != focused) {
+                                composerInputFocused = focused
+                            }
+                        },
                         isExpanded = isExpanded,
                         isExpandAnimating = isExpandAnimating,
                         // No haptic here: onCollapse also fires on back gesture and — the reason

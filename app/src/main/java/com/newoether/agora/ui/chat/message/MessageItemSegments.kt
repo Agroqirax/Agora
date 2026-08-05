@@ -162,6 +162,64 @@ internal class SegmentAppearanceRegistry {
     }
 }
 
+internal enum class GroupedSegmentAutoExpansionAction {
+    NONE,
+    EXPAND,
+    COLLAPSE,
+}
+
+/**
+ * Session-scoped lifecycle memory for Grouped cards.
+ *
+ * This lives above LazyColumn items so recomposition and off-screen disposal cannot replay an
+ * automatic expansion. A completed group is terminal: append-only message segments may create a
+ * new group with a new key, but an old group never becomes active again.
+ */
+@Stable
+internal class GroupedSegmentAutoExpansionController {
+    private enum class State {
+        ACTIVE,
+        FINISHED,
+    }
+
+    private val states = HashMap<String, State>()
+
+    fun update(
+        key: String,
+        isActive: Boolean,
+        enabled: Boolean,
+    ): GroupedSegmentAutoExpansionAction {
+        if (!enabled) {
+            if (isActive) {
+                states.remove(key)
+            } else {
+                states[key] = State.FINISHED
+            }
+            return GroupedSegmentAutoExpansionAction.NONE
+        }
+
+        return when (states[key]) {
+            null -> {
+                states[key] = if (isActive) State.ACTIVE else State.FINISHED
+                if (isActive) {
+                    GroupedSegmentAutoExpansionAction.EXPAND
+                } else {
+                    GroupedSegmentAutoExpansionAction.NONE
+                }
+            }
+            State.ACTIVE -> {
+                if (isActive) {
+                    GroupedSegmentAutoExpansionAction.NONE
+                } else {
+                    states[key] = State.FINISHED
+                    GroupedSegmentAutoExpansionAction.COLLAPSE
+                }
+            }
+            State.FINISHED -> GroupedSegmentAutoExpansionAction.NONE
+        }
+    }
+}
+
 @Composable
 internal fun AnimatedTimelineBlockAppearance(
     animationKey: String,

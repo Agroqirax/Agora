@@ -20,6 +20,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.material3.Icon
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.*
 import androidx.compose.material.icons.Icons
@@ -109,6 +110,7 @@ fun ChatBottomBar(
     textFieldState: TextFieldState = rememberSaveable(saver = TextFieldState.Saver) { TextFieldState() },
     composerState: ChatComposerState = rememberChatComposerState(),
     focusRequester: FocusRequester = FocusRequester(),
+    onInputFocusChanged: (Boolean) -> Unit = {},
     isExpanded: Boolean = false,
     isExpandAnimating: Boolean = false,
     onCollapse: () -> Unit = {},
@@ -243,6 +245,9 @@ fun ChatBottomBar(
                     .fillMaxWidth()
                     .then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)
                     .focusRequester(focusRequester)
+                    .onFocusChanged { focusState ->
+                        onInputFocusChanged(focusState.isFocused)
+                    }
                     .verticalScrollbar(scrollState, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
                 placeholder = {
                     Text(

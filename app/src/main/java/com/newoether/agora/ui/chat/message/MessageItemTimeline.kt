@@ -155,6 +155,12 @@ import org.intellij.markdown.parser.MarkdownParser
 // Pure code-motion. Entry points used by MessageItem.kt are `internal`; the rest
 // stay file-private. Behavior unchanged.
 
+private enum class CompactSegmentIcon {
+    THINKING,
+    TOOL,
+    IMAGE,
+}
+
 @Composable
 internal fun segmentDetailTitle(
     seg: MessageSegment,
@@ -224,6 +230,9 @@ internal fun CompactSegmentBlock(
     expansionKey: String,
     cardAppearanceKey: String = "$expansionKey:card",
     segmentAppearanceRegistry: SegmentAppearanceRegistry,
+    autoExpansionController: GroupedSegmentAutoExpansionController? = null,
+    autoExpansionEnabled: Boolean = false,
+    autoExpansionActive: Boolean = false,
     modifier: Modifier = Modifier,
     topPaddingExtra: Dp = 0.dp,
     bottomPaddingExtra: Dp = 6.dp,
@@ -248,6 +257,33 @@ internal fun CompactSegmentBlock(
     val isExpanded by remember(expansionKey) {
         derivedStateOf { expandedStates[expansionKey] ?: false }
     }
+    val currentOnExpansionStarted by rememberUpdatedState(onExpansionStarted)
+    val currentOnExpansionSettled by rememberUpdatedState(onExpansionSettled)
+    LaunchedEffect(
+        autoExpansionController,
+        expansionKey,
+        autoExpansionEnabled,
+        autoExpansionActive,
+    ) {
+        val targetExpanded = when (
+            autoExpansionController?.update(
+                key = expansionKey,
+                isActive = autoExpansionActive,
+                enabled = autoExpansionEnabled,
+            )
+        ) {
+            GroupedSegmentAutoExpansionAction.EXPAND -> true
+            GroupedSegmentAutoExpansionAction.COLLAPSE -> false
+            GroupedSegmentAutoExpansionAction.NONE, null -> null
+        }
+        if (
+            targetExpanded != null &&
+            (expandedStates[expansionKey] ?: false) != targetExpanded
+        ) {
+            currentOnExpansionStarted(expansionKey)
+            expandedStates[expansionKey] = targetExpanded
+        }
+    }
     val lastSeg = segs.last()
     val isLastTool = lastSeg.type == "tool"
     val isToolInProgress = isLastTool &&
@@ -259,6 +295,12 @@ internal fun CompactSegmentBlock(
     val thoughtMs = thoughtDurationMs(segs)
     val hasThought = thoughtMs != null && thoughtMs > 0
     val collapsedTitle = compactSegmentTitle(segs, message, useLiveStatus)
+    val collapsedIcon = when {
+        isToolCalling || isToolInProgress -> CompactSegmentIcon.TOOL
+        !isThinking && !hasThought && toolCount > 0 -> CompactSegmentIcon.TOOL
+        isTranscribing || collapsedTitle == "Image Transcription" -> CompactSegmentIcon.IMAGE
+        else -> CompactSegmentIcon.THINKING
+    }
     val expansionTransition = updateTransition(
         targetState = isExpanded,
         label = "compactSegmentExpansion",
@@ -269,7 +311,6 @@ internal fun CompactSegmentBlock(
     ) { expanded ->
         if (expanded) 12.dp else 4.dp
     }
-    val currentOnExpansionSettled by rememberUpdatedState(onExpansionSettled)
     LaunchedEffect(expansionTransition, expansionKey) {
         var observedRunning = false
         snapshotFlow { expansionTransition.isRunning }.collect { running ->
@@ -303,19 +344,42 @@ internal fun CompactSegmentBlock(
                     .clip(RoundedCornerShape(18.dp))
                     .clickable {
                         haptics.selection()
-                        onExpansionStarted(expansionKey)
+                        currentOnExpansionStarted(expansionKey)
                         expandedStates[expansionKey] = !isExpanded
                     }
                     .padding(10.dp)
             ) {
-                if (isToolCalling || isToolInProgress) {
-                    Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                } else if (!isThinking && !hasThought && toolCount > 0) {
-                    Icon(Icons.Default.Build, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                } else if (isTranscribing || collapsedTitle == "Image Transcription") {
-                    Icon(Icons.Filled.Image, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
-                } else {
-                    Icon(androidx.compose.ui.res.painterResource(id = com.newoether.agora.R.drawable.neurology_24), null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
+                Crossfade(
+                    targetState = collapsedIcon,
+                    animationSpec = tween(
+                        durationMillis = STATUS_CROSSFADE_DURATION_MS,
+                        easing = LinearEasing,
+                    ),
+                    label = "compactSegmentIcon:$expansionKey",
+                    modifier = Modifier.size(16.dp),
+                ) { icon ->
+                    when (icon) {
+                        CompactSegmentIcon.TOOL -> Icon(
+                            Icons.Default.Build,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
+                        CompactSegmentIcon.IMAGE -> Icon(
+                            Icons.Filled.Image,
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
+                        CompactSegmentIcon.THINKING -> Icon(
+                            androidx.compose.ui.res.painterResource(
+                                id = com.newoether.agora.R.drawable.neurology_24,
+                            ),
+                            null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
+                    }
                 }
                 Spacer(modifier = Modifier.width(8.dp))
                 Crossfade(
@@ -453,6 +517,8 @@ internal fun TimelineSegmentsContent(
     message: ChatMessage,
     isStreaming: Boolean,
     groupAdjacentBlocks: Boolean,
+    autoExpandActiveGroup: Boolean,
+    autoExpansionController: GroupedSegmentAutoExpansionController,
     expandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
     segmentAppearanceRegistry: SegmentAppearanceRegistry,
@@ -532,6 +598,10 @@ internal fun TimelineSegmentsContent(
                                 expansionKey = expansionKey,
                                 cardAppearanceKey = "$expansionKey:card",
                                 segmentAppearanceRegistry = segmentAppearanceRegistry,
+                                autoExpansionController = autoExpansionController,
+                                autoExpansionEnabled = autoExpandActiveGroup,
+                                autoExpansionActive =
+                                    isStreaming && blockEnd == segments.size,
                                 topPaddingExtra = blockTopPaddingExtra,
                                 bottomPaddingExtra = 0.dp,
                                 onExpansionStarted = onLayoutMutationStarted,

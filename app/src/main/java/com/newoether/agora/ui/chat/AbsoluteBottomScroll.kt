@@ -47,6 +47,7 @@ internal sealed interface ImeBottomAnchorEvent {
     data class InsetsObserved(
         val insetPx: Int,
         val bottomEligibleNow: Boolean,
+        val anchorAllowed: Boolean = true,
     ) : ImeBottomAnchorEvent
 
     data object CorrectionSettled : ImeBottomAnchorEvent
@@ -60,6 +61,15 @@ internal fun reduceImeBottomAnchor(
     event: ImeBottomAnchorEvent,
 ): ImeBottomAnchorState = when (event) {
     is ImeBottomAnchorEvent.InsetsObserved -> when {
+        !event.anchorAllowed -> current.copy(
+            observedInsetPx = event.insetPx,
+            bottomEligibleBeforeInsetChange = false,
+            active = false,
+            suppressedUntilInsetFalls =
+                current.suppressedUntilInsetFalls &&
+                    event.insetPx >= current.observedInsetPx,
+        )
+
         event.insetPx > current.observedInsetPx -> current.copy(
             observedInsetPx = event.insetPx,
             active =

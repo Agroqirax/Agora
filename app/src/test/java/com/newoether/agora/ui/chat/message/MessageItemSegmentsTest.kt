@@ -103,4 +103,66 @@ class MessageItemSegmentsTest {
             groupedSegmentBlockAppearanceKey("message", 1),
         )
     }
+
+    @Test
+    fun activeGroupedSegmentExpandsOnlyOnce() {
+        val controller = GroupedSegmentAutoExpansionController()
+        val key = "message:group:0"
+
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.EXPAND,
+            controller.update(key, isActive = true, enabled = true),
+        )
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.NONE,
+            controller.update(key, isActive = true, enabled = true),
+        )
+    }
+
+    @Test
+    fun groupedSegmentCollapsesOnceWhenItStopsBeingActive() {
+        val controller = GroupedSegmentAutoExpansionController()
+        val key = "message:group:0"
+
+        controller.update(key, isActive = true, enabled = true)
+
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.COLLAPSE,
+            controller.update(key, isActive = false, enabled = true),
+        )
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.NONE,
+            controller.update(key, isActive = false, enabled = true),
+        )
+    }
+
+    @Test
+    fun historicalGroupedSegmentNeverAutoExpands() {
+        val controller = GroupedSegmentAutoExpansionController()
+        val key = "message:group:0"
+
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.NONE,
+            controller.update(key, isActive = false, enabled = true),
+        )
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.NONE,
+            controller.update(key, isActive = true, enabled = true),
+        )
+    }
+
+    @Test
+    fun enablingAutomationWhileAGroupIsActiveCanExpandIt() {
+        val controller = GroupedSegmentAutoExpansionController()
+        val key = "message:group:0"
+
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.NONE,
+            controller.update(key, isActive = true, enabled = false),
+        )
+        assertEquals(
+            GroupedSegmentAutoExpansionAction.EXPAND,
+            controller.update(key, isActive = true, enabled = true),
+        )
+    }
 }

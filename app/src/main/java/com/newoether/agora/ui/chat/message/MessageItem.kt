@@ -46,6 +46,9 @@ internal fun MessageItem(
     modelAliases: StableModelAliases = StableModelAliases(),
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
+    autoExpandActiveGroup: Boolean = true,
+    groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController =
+        remember { GroupedSegmentAutoExpansionController() },
     onStartEdit: () -> Unit = {},
     onCancelEdit: () -> Unit = {},
     showActions: Boolean = true,
@@ -216,6 +219,9 @@ internal fun MessageItem(
                         actionCopyText = actionCopyText,
                         showBranchSelector = showBranchSelector,
                         toolCallDisplayMode = toolCallDisplayMode,
+                        autoExpandActiveGroup = autoExpandActiveGroup,
+                        groupedSegmentAutoExpansionController =
+                            groupedSegmentAutoExpansionController,
                         thoughtExpandedStates = thoughtExpandedStates,
                         renderContext = markdownRenderContext,
                         branchIndex = branchIndex,

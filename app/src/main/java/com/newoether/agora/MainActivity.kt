@@ -71,6 +71,9 @@ import com.newoether.agora.ui.chat.FullScreenMediaViewer
 import com.newoether.agora.ui.chat.message.ChatMarkdownCodeBlock
 import com.newoether.agora.ui.onboarding.WelcomeScreen
 import com.newoether.agora.ui.settings.SettingsScreen
+import com.newoether.agora.ui.tasks.TaskHistoryPreviewPhase
+import com.newoether.agora.ui.tasks.TaskHistoryPreviewState
+import com.newoether.agora.ui.tasks.TaskHistoryPreviewStateSaver
 import com.newoether.agora.ui.theme.AgoraTheme
 import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -300,6 +303,7 @@ private const val SettingsOverlaySpringVisibilityThreshold = 0.001f
 private fun SettingsOverlayHost(
     visible: Boolean,
     onDismiss: () -> Unit,
+    onEnterFinished: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
     val scrimAlpha = remember { Animatable(0f) }
@@ -307,6 +311,7 @@ private fun SettingsOverlayHost(
     val pageAlpha = remember { Animatable(1f) }
     val pageScale = remember { Animatable(1f) }
     var renderOverlay by remember { mutableStateOf(visible) }
+    val latestOnEnterFinished by rememberUpdatedState(onEnterFinished)
 
     LaunchedEffect(visible) {
         if (visible) {
@@ -344,6 +349,7 @@ private fun SettingsOverlayHost(
                     )
                 }
             ).joinAll()
+            latestOnEnterFinished()
         } else if (renderOverlay) {
             listOf(
                 launch {
@@ -442,7 +448,13 @@ fun MainNavigation(
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showTasks by rememberSaveable { mutableStateOf(false) }
     var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
-    var taskHistoryReturnId by rememberSaveable { mutableStateOf<String?>(null) }
+    var taskHistoryPreview by rememberSaveable(
+        stateSaver = TaskHistoryPreviewStateSaver,
+    ) {
+        mutableStateOf(TaskHistoryPreviewState.Idle)
+    }
+    val currentConversationId by viewModel.currentConversationId.collectAsState()
+    val isNewChatMode by viewModel.isNewChatMode.collectAsState()
     val notificationTarget by notificationConversationId.collectAsState()
     LaunchedEffect(notificationTarget) {
         val id = notificationTarget ?: return@LaunchedEffect
@@ -455,7 +467,7 @@ fun MainNavigation(
                 showSettings = false
                 showTasks = false
                 taskToOpen = null
-                taskHistoryReturnId = null
+                taskHistoryPreview = TaskHistoryPreviewState.Idle
                 viewModel.selectConversation(id)
             }
         } finally {
@@ -836,13 +848,16 @@ fun MainNavigation(
         Box(modifier = Modifier.fillMaxSize()) {
             ChatApp(
                 viewModel = viewModel,
-                onNavigateBack = taskHistoryReturnId?.let { taskId ->
-                    {
-                        taskToOpen = taskId
-                        taskHistoryReturnId = null
-                        showTasks = true
-                    }
-                },
+                onNavigateBack = taskHistoryPreview.taskId
+                    ?.takeIf { taskHistoryPreview.active }
+                    ?.let { taskId ->
+                        {
+                            taskToOpen = taskId
+                            taskHistoryPreview = taskHistoryPreview.requestReturn()
+                            showTasks = true
+                        }
+                    },
+                drawerEnabled = !taskHistoryPreview.active,
                 onOpenSettings = {
                     showSettings = true
                 },
@@ -894,7 +909,18 @@ fun MainNavigation(
 
             SettingsOverlayHost(
                 visible = showTasks,
-                onDismiss = { showTasks = false }
+                onDismiss = { showTasks = false },
+                onEnterFinished = {
+                    val preview = taskHistoryPreview
+                    if (preview.phase == TaskHistoryPreviewPhase.RETURNING) {
+                        if (preview.originWasNewChat) {
+                            viewModel.createNewChat()
+                        } else {
+                            preview.originConversationId?.let(viewModel::selectConversation)
+                        }
+                        taskHistoryPreview = TaskHistoryPreviewState.Idle
+                    }
+                },
             ) {
                 com.newoether.agora.ui.tasks.TasksScreen(
                     viewModel = viewModel,
@@ -902,7 +928,11 @@ fun MainNavigation(
                     onInitialTaskHandled = { taskToOpen = null },
                     onBack = { showTasks = false },
                     onOpenConversation = { taskId, conversationId ->
-                        taskHistoryReturnId = taskId
+                        taskHistoryPreview = taskHistoryPreview.open(
+                            taskId = taskId,
+                            currentConversationId = currentConversationId,
+                            isNewChatMode = isNewChatMode,
+                        )
                         showTasks = false
                         viewModel.selectConversation(conversationId)
                     }
