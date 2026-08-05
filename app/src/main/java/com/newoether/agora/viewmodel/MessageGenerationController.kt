@@ -14,7 +14,6 @@ import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
@@ -36,7 +35,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -234,7 +232,7 @@ internal class MessageGenerationController(
             runCatching {
                 convRepo.getMessagesForConversationSnapshot(conversationId)
                     .firstOrNull { it.id == id }
-                    ?.toChatMessage()
+                    ?.toUiChatMessage(appContext)
                     ?.copy(text = errorText, status = MessageStatus.ERROR)
             }.getOrNull()
         }
@@ -277,7 +275,8 @@ internal class MessageGenerationController(
 
                         val runs = convRepo.getRunsForConversationSnapshot(currentId)
                         val allMsgs = convRepo.getMessagesForConversationSnapshot(currentId)
-                        val allChatMessages = allMsgs.map { it.toChatMessage() }
+                        val allChatMessages =
+                            allMsgs.map { it.toUiChatMessage(appContext) }
                         val previousSelected = convRepo.restoreBranchSelections(currentId)
                         val previousRunSelections =
                             convRepo.restoreRunBranchSelections(currentId)
@@ -304,7 +303,8 @@ internal class MessageGenerationController(
 
                         // Files are external to Room, so remove them only after graph commit.
                         convRepo.deleteMessageFiles(staleList)
-                        val remainingChatMessages = remainingMsgs.map { it.toChatMessage() }
+                        val remainingChatMessages =
+                            remainingMsgs.map { it.toUiChatMessage(appContext) }
                         val remainingPath = ConversationUiState.resolvePath(
                             allMessages = remainingChatMessages,
                             streamingMsg = null,
@@ -455,7 +455,7 @@ internal class MessageGenerationController(
                     listOf(modelEntity),
                     messageSelectionUpdates = mapOf(sourceInput.id to modelEntity.id),
                 )
-                val placeholder = modelEntity.toChatMessage()
+                val placeholder = modelEntity.toUiChatMessage(appContext)
                 val selectedAfterRegenerate = graphCommit.messageSelections
                 // The overlay is installed before the graph projection. An intermediate combine
                 // frame can therefore only retain the old path; it can never expose an empty
@@ -700,7 +700,8 @@ internal class MessageGenerationController(
             state.streamUpdate(myUiToken, placeholder)
             ifOpenOn(genId) {
                 renderStore.commitGraph(
-                    committedMessages = listOf(newUser.toChatMessage(), placeholder),
+                    committedMessages =
+                        listOf(newUser.toUiChatMessage(appContext), placeholder),
                     selectedChildren = selectedAfterModelEdit,
                     streamingMessage = placeholder,
                 )
@@ -895,7 +896,7 @@ internal class MessageGenerationController(
                     ) {
                         "Queued intervention batch did not advance Run $runId"
                     }
-                    val placeholder = passCommit.placeholder.toChatMessage()
+                    val placeholder = passCommit.placeholder.toUiChatMessage(appContext)
                     val newChildren = passCommit.messageSelections
                     state.streamUpdate(myUiToken, placeholder)
                     ifOpenOn(genId) {
@@ -1040,7 +1041,8 @@ internal class MessageGenerationController(
                 val snapshotEntities = convRepo.getMessagesForConversationSnapshot(genId)
                 val selectedBeforeSend = convRepo.restoreBranchSelections(genId)
                 val path = ConversationUiState.resolvePath(
-                    allMessages = snapshotEntities.map { it.toChatMessage() },
+                    allMessages =
+                        snapshotEntities.map { it.toUiChatMessage(appContext) },
                     streamingMsg = null,
                     selectedChildren = selectedBeforeSend,
                 )
@@ -1095,7 +1097,7 @@ internal class MessageGenerationController(
                 )
                 if (text.isNotBlank()) onUserMessagePersisted(userMessageId, text)
                 settings.incrementMessagesSent()
-                val placeholder = modelEntity.toChatMessage()
+                val placeholder = modelEntity.toUiChatMessage(appContext)
                 // Publish the one explicit scroll owner before loading/stream state can activate
                 // the tail follower. The request waits for the target commit below.
                 ifOpenOn(genId) {
@@ -1105,7 +1107,8 @@ internal class MessageGenerationController(
                 state.streamUpdate(myUiToken, placeholder)
                 ifOpenOn(genId) {
                     renderStore.commitGraph(
-                        committedMessages = listOf(userEntity.toChatMessage(), placeholder),
+                        committedMessages =
+                            listOf(userEntity.toUiChatMessage(appContext), placeholder),
                         selectedChildren = graphCommit.messageSelections,
                         streamingMessage = placeholder,
                     )
@@ -1255,27 +1258,6 @@ internal class MessageGenerationController(
             )
         }
     }
-
-    private fun MessageEntity.toChatMessage() = ChatMessage(
-        id = id,
-        parentId = parentId,
-        text = text,
-        images = images,
-        thoughts = thoughts,
-        thoughtTitle = thoughtTitle,
-        tokenCount = tokenCount,
-        status = status,
-        participant = participant,
-        timestamp = timestamp,
-        thoughtTimeMs = thoughtTimeMs,
-        modelName = modelName,
-        attachmentMeta = attachmentMeta?.let { raw ->
-            runCatching { Json.decodeFromString<AttachmentMeta>(raw) }.getOrNull()
-        },
-        runId = runId,
-        runSequence = runSequence,
-        consumedAtPass = consumedAtPass,
-    )
 
     fun generateTitle(conversationId: String) {
         viewModelScope.launch {

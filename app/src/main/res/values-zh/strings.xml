@@ -97,6 +97,9 @@
     <string name="task_schedule">排程</string>
     <string name="task_schedule_manual">仅手动</string>
     <string name="task_schedule_custom">自定义（cron）</string>
+    <string name="task_select_month_day">选择月份和日期</string>
+    <string name="task_switch_to_date_input">切换到日期输入</string>
+    <string name="task_switch_to_calendar">切换到日历</string>
     <string name="task_repeat">重复</string>
     <string name="task_repeat_once">仅一次</string>
     <string name="task_repeat_daily">每天</string>
@@ -1013,7 +1016,7 @@
     <string name="onboarding_ollama_desc">输入 Ollama 服务器地址。</string>
     <string name="onboarding_api_key_for">输入 %1$s 的 API 密钥。</string>
     <string name="onboarding_custom_title">自定义服务商</string>
-    <string name="onboarding_custom_desc">接入任意 OpenAI 兼容接口，填写 Base URL 和 API Key。</string>
+    <string name="onboarding_custom_desc">接入兼容 OpenAI、Gemini 或 Anthropic 协议的服务。选择协议，然后填写 Base URL 和 API Key。</string>
     <string name="onboarding_custom_base_url_hint">Base URL（如 https://api.example.com/v1）</string>
     <string name="onboarding_skip">跳过</string>
     <string name="onboarding_continue">继续</string>

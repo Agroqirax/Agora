@@ -15,6 +15,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -52,11 +53,21 @@ data class ShellDeviceConfig(
 )
 
 @Serializable
+enum class McpTransportType {
+    @SerialName("streamable_http")
+    STREAMABLE_HTTP,
+
+    @SerialName("sse")
+    SSE,
+}
+
+@Serializable
 data class McpServerConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "",
     val enabled: Boolean = true,
     val url: String = "",
+    val transport: McpTransportType = McpTransportType.STREAMABLE_HTTP,
     val headers: Map<String, String> = emptyMap(),
     /** Raw MCP tool names disabled for this server. New tools stay enabled by default. */
     val disabledTools: Set<String> = emptySet(),

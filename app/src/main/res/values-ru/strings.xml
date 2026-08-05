@@ -875,7 +875,7 @@
     <string name="onboarding_ollama_desc">Введите URL вашего сервера Ollama.</string>
     <string name="onboarding_api_key_for">Введите API-ключ для %1$s.</string>
     <string name="onboarding_custom_title">Свой провайдер</string>
-    <string name="onboarding_custom_desc">Подключите любой OpenAI-совместимый API. Укажите его базовый URL и ключ.</string>
+    <string name="onboarding_custom_desc">Подключите конечную точку, совместимую с OpenAI, Gemini или Anthropic. Выберите протокол, затем укажите базовый URL и ключ API.</string>
     <string name="onboarding_custom_base_url_hint">Базовый URL (например, https://api.example.com/v1)</string>
     <string name="onboarding_skip">Пропустить</string>
     <string name="onboarding_continue">Продолжить</string>

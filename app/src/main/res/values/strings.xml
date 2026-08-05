@@ -917,7 +917,7 @@
     <string name="onboarding_ollama_desc">Enter your Ollama server URL.</string>
     <string name="onboarding_api_key_for">Enter your API key for %1$s.</string>
     <string name="onboarding_custom_title">Custom Provider</string>
-    <string name="onboarding_custom_desc">Connect any OpenAI-compatible API. Enter its base URL and key.</string>
+    <string name="onboarding_custom_desc">Connect an OpenAI-, Gemini-, or Anthropic-compatible endpoint. Choose a protocol, then enter its base URL and API key.</string>
     <string name="onboarding_custom_base_url_hint">Base URL (e.g. https://api.example.com/v1)</string>
     <string name="onboarding_skip">Skip</string>
     <string name="onboarding_continue">Continue</string>

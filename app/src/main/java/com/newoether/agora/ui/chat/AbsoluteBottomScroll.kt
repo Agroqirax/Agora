@@ -88,7 +88,10 @@ internal fun reduceImeBottomAnchor(
     ImeBottomAnchorEvent.UserDragStarted -> current.copy(
         bottomEligibleBeforeInsetChange = false,
         active = false,
-        suppressedUntilInsetFalls = true,
+        // A drag only suppresses reacquisition for an IME cycle that is already in progress.
+        // When the IME is closed there is no future inset fall to clear the latch; suppressing
+        // here would make an explicit bottom-button click the only way to re-arm anchoring.
+        suppressedUntilInsetFalls = current.observedInsetPx > 0,
     )
 
     ImeBottomAnchorEvent.ExplicitBottomReached -> current.copy(

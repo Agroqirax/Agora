@@ -33,6 +33,9 @@
     <string name="task_schedule">Lịch</string>
     <string name="task_schedule_manual">Chỉ thủ công</string>
     <string name="task_schedule_custom">Tùy chỉnh (cron)</string>
+    <string name="task_select_month_day">Chọn tháng và ngày</string>
+    <string name="task_switch_to_date_input">Chuyển sang nhập ngày</string>
+    <string name="task_switch_to_calendar">Chuyển sang lịch</string>
     <string name="task_repeat">Lặp lại</string>
     <string name="task_repeat_once">Một lần</string>
     <string name="task_repeat_daily">Hằng ngày</string>

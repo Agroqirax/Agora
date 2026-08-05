@@ -48,7 +48,13 @@ class McpRegistry(
         val config: McpServerConfig,
         val client: McpProtocolClient,
         var connectionJob: Job? = null,
-    )
+    ) {
+        fun close() {
+            connectionJob?.cancel()
+            connectionJob = null
+            client.close()
+        }
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
     private val imageStore = ToolImageStore(context)
@@ -155,14 +161,13 @@ class McpRegistry(
         synchronized(lock) {
             val desiredIds = configs.mapTo(mutableSetOf(), McpServerConfig::id)
             runtimes.keys.filter { it !in desiredIds }.forEach { id ->
-                runtimes.remove(id)?.connectionJob?.cancel()
+                runtimes.remove(id)?.close()
             }
             configs.forEach { config ->
                 val existing = runtimes[config.id]
                 when {
                     !config.enabled || config.url.isBlank() -> {
-                        existing?.connectionJob?.cancel()
-                        runtimes.remove(config.id)
+                        runtimes.remove(config.id)?.close()
                         putSnapshot(
                             McpServerSnapshot(
                                 serverId = config.id,
@@ -180,13 +185,14 @@ class McpRegistry(
     }
 
     private fun replaceRuntimeLocked(config: McpServerConfig) {
-        runtimes.remove(config.id)?.connectionJob?.cancel()
+        runtimes.remove(config.id)?.close()
         val runtime = try {
             Runtime(
                 config = config,
                 client = McpProtocolClient(
                     endpoint = normalizeEndpoint(config.url),
                     customHeaders = config.headers,
+                    transportType = config.transport,
                 ),
             )
         } catch (e: IllegalArgumentException) {

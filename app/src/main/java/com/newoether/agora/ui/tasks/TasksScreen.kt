@@ -2,27 +2,34 @@ package com.newoether.agora.ui.tasks
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.MoreVert
@@ -38,6 +45,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DisplayMode
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +53,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Surface
@@ -58,6 +67,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -68,6 +78,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,6 +103,7 @@ import com.newoether.agora.ui.settings.SettingsIconContent
 import com.newoether.agora.ui.settings.SettingsItem
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
+import java.text.DateFormatSymbols
 import java.util.Locale
 import java.util.TimeZone
 import java.util.UUID
@@ -457,6 +469,65 @@ internal fun formatTaskCountdown(remainingMs: Long): String {
     }
 }
 
+/**
+ * The schedule editor mode is explicit UI state. In particular, CUSTOM must not be inferred from
+ * whether the current text parses: a partially typed cron is expected to be invalid for a moment,
+ * but that must not make the editor jump back to Daily.
+ */
+internal enum class ScheduleEditorMode {
+    ONCE,
+    DAILY,
+    WEEKLY,
+    MONTHLY,
+    YEARLY,
+    CUSTOM,
+}
+
+internal fun initialScheduleEditorMode(cronExpr: String, runAt: Long?): ScheduleEditorMode {
+    val parsed = TaskSchedule.parse(cronExpr, runAt)
+    return parsed?.type?.toEditorMode()
+        ?: if (cronExpr.isNotBlank()) ScheduleEditorMode.CUSTOM else ScheduleEditorMode.DAILY
+}
+
+internal fun isScheduleDraftValid(mode: ScheduleEditorMode, cronExpr: String): Boolean =
+    if (mode == ScheduleEditorMode.CUSTOM) {
+        cronExpr.isNotBlank() && CronExpression.isValid(cronExpr)
+    } else {
+        cronExpr.isBlank() || CronExpression.isValid(cronExpr)
+    }
+
+private fun ScheduleType.toEditorMode(): ScheduleEditorMode = when (this) {
+    ScheduleType.ONCE -> ScheduleEditorMode.ONCE
+    ScheduleType.DAILY -> ScheduleEditorMode.DAILY
+    ScheduleType.WEEKLY -> ScheduleEditorMode.WEEKLY
+    ScheduleType.MONTHLY -> ScheduleEditorMode.MONTHLY
+    ScheduleType.YEARLY -> ScheduleEditorMode.YEARLY
+}
+
+private fun ScheduleEditorMode.toScheduleType(): ScheduleType? = when (this) {
+    ScheduleEditorMode.ONCE -> ScheduleType.ONCE
+    ScheduleEditorMode.DAILY -> ScheduleType.DAILY
+    ScheduleEditorMode.WEEKLY -> ScheduleType.WEEKLY
+    ScheduleEditorMode.MONTHLY -> ScheduleType.MONTHLY
+    ScheduleEditorMode.YEARLY -> ScheduleType.YEARLY
+    ScheduleEditorMode.CUSTOM -> null
+}
+
+/**
+ * Preserve a literal time when leaving a custom expression. The rest of a custom cron may be too
+ * rich for the structured editor, but its `minute hour` prefix is still useful and lossless.
+ */
+private fun scheduleSeedFromCron(cronExpr: String): TaskSchedule {
+    val fields = cronExpr.trim().split(Regex("\\s+"))
+    val minute = fields.getOrNull(0)?.toIntOrNull()?.takeIf { it in 0..59 }
+    val hour = fields.getOrNull(1)?.toIntOrNull()?.takeIf { it in 0..23 }
+    val default = TaskSchedule.default()
+    return default.copy(
+        hour = hour ?: default.hour,
+        minute = minute ?: default.minute,
+    )
+}
+
 // ── Detail ──────────────────────────────────────────────────────────────────
 
 /**
@@ -481,6 +552,9 @@ private fun TaskDetailPage(
     var modelId by rememberSaveable(task.id) { mutableStateOf(task.modelId) }
     var cronExpr by rememberSaveable(task.id) { mutableStateOf(task.cronExpr) }
     var runAt by rememberSaveable(task.id) { mutableStateOf(task.runAt) }
+    var scheduleEditorModeName by rememberSaveable(task.id) {
+        mutableStateOf(initialScheduleEditorMode(task.cronExpr, task.runAt).name)
+    }
     var enabled by rememberSaveable(task.id) { mutableStateOf(task.enabled) }
     var showModelPicker by remember { mutableStateOf(false) }
     var executionToDelete by remember { mutableStateOf<com.newoether.agora.automation.TaskManager.ExecutionSummary?>(null) }
@@ -490,7 +564,8 @@ private fun TaskDetailPage(
     val isRunning = task.id in running
     val executions by viewModel.executionSummariesForTask(task.id).collectAsState(initial = emptyList())
 
-    val cronValid = cronExpr.isBlank() || CronExpression.isValid(cronExpr)
+    val scheduleEditorMode = ScheduleEditorMode.valueOf(scheduleEditorModeName)
+    val cronValid = isScheduleDraftValid(scheduleEditorMode, cronExpr)
     val isComplete = name.isNotBlank() && prompt.isNotBlank() && cronValid
 
     fun current() = task.copy(
@@ -580,6 +655,8 @@ private fun TaskDetailPage(
                 cronExpr = cronExpr,
                 runAt = runAt,
                 onScheduleChange = { newCron, newRunAt -> cronExpr = newCron; runAt = newRunAt },
+                editorMode = scheduleEditorMode,
+                onEditorModeChange = { scheduleEditorModeName = it.name },
                 enabled = enabled,
                 onEnabledChange = { enabled = it },
             )
@@ -743,6 +820,14 @@ private fun repeatLabel(type: ScheduleType): String = stringResource(
     }
 )
 
+@Composable
+private fun repeatLabel(mode: ScheduleEditorMode): String =
+    if (mode == ScheduleEditorMode.CUSTOM) {
+        stringResource(R.string.task_schedule_custom)
+    } else {
+        repeatLabel(checkNotNull(mode.toScheduleType()))
+    }
+
 /** Short weekday names in the user's locale, indexed 0=Sunday..6=Saturday to match cron. */
 @Composable
 private fun weekdayNames(): List<String> {
@@ -775,28 +860,42 @@ private fun ScheduleGroup(
     cronExpr: String,
     runAt: Long?,
     onScheduleChange: (cron: String, runAt: Long?) -> Unit,
+    editorMode: ScheduleEditorMode,
+    onEditorModeChange: (ScheduleEditorMode) -> Unit,
     enabled: Boolean,
     onEnabledChange: (Boolean) -> Unit,
 ) {
     val context = LocalContext.current
     val parsedSchedule = remember(cronExpr, runAt) { TaskSchedule.parse(cronExpr, runAt) }
-    val cronOnlyValid = cronExpr.isNotBlank() && CronExpression.isValid(cronExpr)
-    // Unmappable but valid cron: keep it, don't rewrite it behind the user's back.
-    val isCustomCron = parsedSchedule == null && cronOnlyValid
-    val schedule = parsedSchedule ?: TaskSchedule.default()
+    val isCustomCron = editorMode == ScheduleEditorMode.CUSTOM
+    val schedule = parsedSchedule ?: remember(cronExpr) { scheduleSeedFromCron(cronExpr) }
 
     var showRepeatMenu by remember { mutableStateOf(false) }
     var showWeekdayDialog by remember { mutableStateOf(false) }
     var showDayOfMonthDialog by remember { mutableStateOf(false) }
+    var showMonthDayDialog by remember { mutableStateOf(false) }
     var showDateDialog by remember { mutableStateOf(false) }
     var showTimeDialog by remember { mutableStateOf(false) }
 
     fun apply(next: TaskSchedule) = onScheduleChange(next.toCron(), next.toRunAt())
+    fun selectMode(nextMode: ScheduleEditorMode) {
+        onEditorModeChange(nextMode)
+        if (nextMode == ScheduleEditorMode.CUSTOM) {
+            // ONCE has no cron to preserve. Seed Custom with the same time-of-day as a daily cron.
+            val seedCron = cronExpr.ifBlank {
+                schedule.copy(type = ScheduleType.DAILY, onceAtMillis = 0L).toCron()
+            }
+            onScheduleChange(seedCron, null)
+        } else {
+            apply(schedule.switchedTo(checkNotNull(nextMode.toScheduleType())))
+        }
+    }
 
     val armable = cronExpr.isNotBlank() || (runAt != null && runAt > 0L)
+    val scheduleDraftValid = isScheduleDraftValid(editorMode, cronExpr)
     val oncePast = schedule.type == ScheduleType.ONCE &&
         (runAt ?: 0L) in 1 until System.currentTimeMillis()
-    val canToggleSchedule = armable && (!oncePast || enabled)
+    val canToggleSchedule = armable && scheduleDraftValid && (!oncePast || enabled)
 
     SettingsGroup(
         title = stringResource(R.string.task_schedule),
@@ -808,10 +907,7 @@ private fun ScheduleGroup(
                         modifier = Modifier.clickable { showRepeatMenu = true },
                         headlineContent = { Text(stringResource(R.string.task_repeat)) },
                         supportingContent = {
-                            Text(
-                                if (isCustomCron) stringResource(R.string.task_schedule_custom)
-                                else repeatLabel(schedule.type)
-                            )
+                            Text(repeatLabel(editorMode))
                         },
                         leadingContent = {
                             Icon(Icons.Default.Repeat, null, tint = MaterialTheme.colorScheme.primary)
@@ -823,17 +919,17 @@ private fun ScheduleGroup(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer,
                         shape = RoundedCornerShape(16.dp),
                     ) {
-                        ScheduleType.entries.forEach { type ->
+                        ScheduleEditorMode.entries.forEach { mode ->
                             DropdownMenuItem(
-                                text = { Text(repeatLabel(type)) },
+                                text = { Text(repeatLabel(mode)) },
                                 leadingIcon = {
-                                    if (!isCustomCron && schedule.type == type) {
+                                    if (editorMode == mode) {
                                         Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.primary)
                                     }
                                 },
                                 onClick = {
                                     showRepeatMenu = false
-                                    apply(schedule.switchedTo(type))
+                                    selectMode(mode)
                                 },
                             )
                         }
@@ -858,7 +954,8 @@ private fun ScheduleGroup(
                             when (schedule.type) {
                                 ScheduleType.WEEKLY -> showWeekdayDialog = true
                                 ScheduleType.MONTHLY -> showDayOfMonthDialog = true
-                                ScheduleType.YEARLY, ScheduleType.ONCE -> showDateDialog = true
+                                ScheduleType.YEARLY -> showMonthDayDialog = true
+                                ScheduleType.ONCE -> showDateDialog = true
                                 ScheduleType.DAILY -> Unit
                             }
                         },
@@ -903,6 +1000,13 @@ private fun ScheduleGroup(
                         onValueChange = { onScheduleChange(it, null) },
                         placeholder = stringResource(R.string.task_cron_hint),
                         singleLine = true,
+                        isError = cronExpr.isBlank() || !CronExpression.isValid(cronExpr),
+                        supporting = if (cronExpr.isBlank() || !CronExpression.isValid(cronExpr)) {
+                            stringResource(R.string.task_cron_invalid)
+                        } else {
+                            null
+                        },
+                        supportingIsError = true,
                     )
                 }
             }
@@ -967,6 +1071,16 @@ private fun ScheduleGroup(
             onDismiss = { showDayOfMonthDialog = false },
         )
     }
+    if (showMonthDayDialog) {
+        TaskMonthDayPickerDialog(
+            schedule = schedule,
+            onConfirm = {
+                apply(it)
+                showMonthDayDialog = false
+            },
+            onDismiss = { showMonthDayDialog = false },
+        )
+    }
     if (showDateDialog) {
         TaskDatePickerDialog(
             schedule = schedule,
@@ -990,8 +1104,142 @@ private fun ScheduleGroup(
     }
 }
 
-/** Material 3 date picker. YEARLY ignores the picked year; ONCE stores the absolute date. */
-@OptIn(ExperimentalMaterial3Api::class)
+internal fun daysInYearlyMonth(month: Int): Int = when (month) {
+    2 -> 29 // A yearly cron may intentionally target leap day.
+    4, 6, 9, 11 -> 30
+    else -> 31
+}
+
+/** A yearless picker for YEARLY schedules: month plus day are the entire persisted date. */
+@Composable
+private fun TaskMonthDayPickerDialog(
+    schedule: TaskSchedule,
+    onConfirm: (TaskSchedule) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val locale = LocalConfiguration.current.locales[0]
+    val monthNames = remember(locale) { DateFormatSymbols(locale).months.take(12) }
+    var selectedMonth by rememberSaveable { mutableIntStateOf(schedule.month.coerceIn(1, 12)) }
+    var selectedDay by rememberSaveable {
+        mutableIntStateOf(schedule.dayOfMonth.coerceIn(1, daysInYearlyMonth(selectedMonth)))
+    }
+    var showMonthMenu by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        title = {
+            Text(
+                stringResource(R.string.task_select_month_day),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    TextButton(onClick = { showMonthMenu = true }) {
+                        Text(
+                            monthNames[selectedMonth - 1],
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                    }
+                    DropdownMenu(
+                        expanded = showMonthMenu,
+                        onDismissRequest = { showMonthMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        monthNames.forEachIndexed { index, monthName ->
+                            val month = index + 1
+                            DropdownMenuItem(
+                                text = { Text(monthName) },
+                                leadingIcon = {
+                                    if (month == selectedMonth) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedMonth = month
+                                    selectedDay = selectedDay.coerceAtMost(daysInYearlyMonth(month))
+                                    showMonthMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                (1..daysInYearlyMonth(selectedMonth)).chunked(7).forEach { rowDays ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                    ) {
+                        repeat(7) { column ->
+                            val day = rowDays.getOrNull(column)
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (day != null) {
+                                    val selected = day == selectedDay
+                                    Surface(
+                                        onClick = { selectedDay = day },
+                                        modifier = Modifier.size(40.dp),
+                                        shape = CircleShape,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceContainer
+                                        },
+                                        contentColor = if (selected) {
+                                            MaterialTheme.colorScheme.onPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Text(day.toString())
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onConfirm(
+                        schedule.copy(
+                            month = selectedMonth,
+                            dayOfMonth = selectedDay,
+                            onceAtMillis = 0L,
+                        )
+                    )
+                }
+            ) {
+                Text(stringResource(R.string.ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+/** Full date picker for ONCE. IME exit and calendar expansion are serialized to avoid remeasure. */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun TaskDatePickerDialog(
     schedule: TaskSchedule,
@@ -1036,6 +1284,18 @@ private fun TaskDatePickerDialog(
     val pickerColors = DatePickerDefaults.colors(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
     )
+    val dateFormatter = remember { DatePickerDefaults.dateFormatter() }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val imeVisible = WindowInsets.isImeVisible
+    var pendingCalendarMode by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingCalendarMode, imeVisible) {
+        if (pendingCalendarMode && !imeVisible) {
+            pickerState.displayMode = DisplayMode.Picker
+            pendingCalendarMode = false
+        }
+    }
 
     DatePickerDialog(
         onDismissRequest = onDismiss,
@@ -1070,7 +1330,65 @@ private fun TaskDatePickerDialog(
     ) {
         DatePicker(
             state = pickerState,
+            dateFormatter = dateFormatter,
             colors = pickerColors,
+            title = {
+                ProvideTextStyle(
+                    MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                ) {
+                    DatePickerDefaults.DatePickerTitle(
+                        displayMode = pickerState.displayMode,
+                        modifier = Modifier.padding(start = 24.dp, end = 12.dp, top = 20.dp),
+                        contentColor = pickerColors.titleContentColor,
+                    )
+                }
+            },
+            headline = {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    DatePickerDefaults.DatePickerHeadline(
+                        selectedDateMillis = pickerState.selectedDateMillis,
+                        displayMode = pickerState.displayMode,
+                        dateFormatter = dateFormatter,
+                        modifier = Modifier.weight(1f),
+                        contentColor = pickerColors.headlineContentColor,
+                    )
+                    IconButton(
+                        enabled = !pendingCalendarMode,
+                        onClick = {
+                            if (pickerState.displayMode == DisplayMode.Picker) {
+                                pickerState.displayMode = DisplayMode.Input
+                            } else {
+                                focusManager.clearFocus(force = true)
+                                keyboardController?.hide()
+                                if (imeVisible) {
+                                    pendingCalendarMode = true
+                                } else {
+                                    pickerState.displayMode = DisplayMode.Picker
+                                }
+                            }
+                        },
+                    ) {
+                        Icon(
+                            imageVector = if (pickerState.displayMode == DisplayMode.Picker) {
+                                Icons.Default.Edit
+                            } else {
+                                Icons.Default.CalendarMonth
+                            },
+                            contentDescription = stringResource(
+                                if (pickerState.displayMode == DisplayMode.Picker) {
+                                    R.string.task_switch_to_date_input
+                                } else {
+                                    R.string.task_switch_to_calendar
+                                }
+                            ),
+                        )
+                    }
+                }
+            },
+            showModeToggle = false,
         )
     }
 }

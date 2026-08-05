@@ -33,6 +33,9 @@
     <string name="task_schedule">排程</string>
     <string name="task_schedule_manual">僅手動</string>
     <string name="task_schedule_custom">自訂（cron）</string>
+    <string name="task_select_month_day">選擇月份和日期</string>
+    <string name="task_switch_to_date_input">切換到日期輸入</string>
+    <string name="task_switch_to_calendar">切換到日曆</string>
     <string name="task_repeat">重複</string>
     <string name="task_repeat_once">僅一次</string>
     <string name="task_repeat_daily">每天</string>

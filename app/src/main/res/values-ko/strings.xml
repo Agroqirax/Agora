@@ -875,7 +875,7 @@
     <string name="onboarding_ollama_desc">Ollama 서버 URL을 입력하세요.</string>
     <string name="onboarding_api_key_for">%1$s의 API 키를 입력하세요.</string>
     <string name="onboarding_custom_title">사용자 지정 제공자</string>
-    <string name="onboarding_custom_desc">OpenAI 호환 API에 연결합니다. 기본 URL과 키를 입력하세요.</string>
+    <string name="onboarding_custom_desc">OpenAI, Gemini 또는 Anthropic 호환 엔드포인트에 연결합니다. 프로토콜을 선택한 다음 기본 URL과 API 키를 입력하세요.</string>
     <string name="onboarding_custom_base_url_hint">기본 URL (예: https://api.example.com/v1)</string>
     <string name="onboarding_skip">건너뛰기</string>
     <string name="onboarding_continue">계속</string>

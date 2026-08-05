@@ -32,6 +32,9 @@
     <string name="task_schedule">Schedule</string>
     <string name="task_schedule_manual">Manual only</string>
     <string name="task_schedule_custom">Custom (cron)</string>
+    <string name="task_select_month_day">Select month and day</string>
+    <string name="task_switch_to_date_input">Switch to date input</string>
+    <string name="task_switch_to_calendar">Switch to calendar</string>
     <string name="task_repeat">Repeat</string>
     <string name="task_repeat_once">Once</string>
     <string name="task_repeat_daily">Daily</string>

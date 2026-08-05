@@ -342,6 +342,40 @@ class MessageListLayoutTest {
     }
 
     @Test
+    fun userDragWhileImeIsClosedCanRearmAtTheBottomThreshold() {
+        var state = ImeBottomAnchorState(
+            observedInsetPx = 0,
+            bottomEligibleBeforeInsetChange = true,
+        )
+
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.UserDragStarted,
+        )
+        assertFalse(state.active)
+        assertFalse(state.suppressedUntilInsetFalls)
+
+        // Once the drag settles inside the threshold, the normal proximity observation arms
+        // anchoring without requiring an explicit scroll-to-bottom button click.
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 0,
+                bottomEligibleNow = true,
+            ),
+        )
+        state = reduceImeBottomAnchor(
+            state,
+            ImeBottomAnchorEvent.InsetsObserved(
+                insetPx = 120,
+                bottomEligibleNow = false,
+            ),
+        )
+
+        assertTrue(state.active)
+    }
+
+    @Test
     fun absoluteBottomDistanceIncludesAfterContentPadding() {
         val snapshot = AbsoluteBottomLayoutSnapshot(
             totalItemsCount = 4,

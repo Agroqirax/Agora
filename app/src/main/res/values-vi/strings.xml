@@ -880,7 +880,7 @@
     <string name="onboarding_ollama_desc">Nhập URL máy chủ Ollama của bạn.</string>
     <string name="onboarding_api_key_for">Nhập khóa API của bạn cho %1$s.</string>
     <string name="onboarding_custom_title">Nhà cung cấp tùy chỉnh</string>
-    <string name="onboarding_custom_desc">Kết nối với bất kỳ API nào tương thích với OpenAI. Nhập URL gốc và khóa của nó.</string>
+    <string name="onboarding_custom_desc">Kết nối với điểm cuối tương thích OpenAI, Gemini hoặc Anthropic. Chọn giao thức, rồi nhập URL gốc và khóa API.</string>
     <string name="onboarding_custom_base_url_hint">URL gốc (ví dụ: https://api.example.com/v1)</string>
     <string name="onboarding_skip">Bỏ qua</string>
     <string name="onboarding_continue">Tiếp tục</string>

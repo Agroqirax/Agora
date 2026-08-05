@@ -33,6 +33,9 @@
     <string name="task_schedule">Zeitplan</string>
     <string name="task_schedule_manual">Nur manuell</string>
     <string name="task_schedule_custom">Benutzerdefiniert (cron)</string>
+    <string name="task_select_month_day">Monat und Tag auswählen</string>
+    <string name="task_switch_to_date_input">Zur Datumseingabe wechseln</string>
+    <string name="task_switch_to_calendar">Zum Kalender wechseln</string>
     <string name="task_repeat">Wiederholen</string>
     <string name="task_repeat_once">Einmal</string>
     <string name="task_repeat_daily">Täglich</string>

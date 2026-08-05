@@ -912,7 +912,7 @@
     <string name="onboarding_ollama_desc">輸入 Ollama 伺服器位址。</string>
     <string name="onboarding_api_key_for">輸入 %1$s 的 API 金鑰。</string>
     <string name="onboarding_custom_title">自訂服務商</string>
-    <string name="onboarding_custom_desc">接入任意 OpenAI 相容介面，填寫 Base URL 和 API Key。</string>
+    <string name="onboarding_custom_desc">接入相容 OpenAI、Gemini 或 Anthropic 協定的服務。選擇協定，然後填寫 Base URL 和 API Key。</string>
     <string name="onboarding_custom_base_url_hint">Base URL（如 https://api.example.com/v1）</string>
     <string name="onboarding_skip">略過</string>
     <string name="onboarding_continue">繼續</string>

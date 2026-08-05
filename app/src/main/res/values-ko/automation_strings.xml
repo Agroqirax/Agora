@@ -33,6 +33,9 @@
     <string name="task_schedule">일정</string>
     <string name="task_schedule_manual">수동 전용</string>
     <string name="task_schedule_custom">사용자 지정(cron)</string>
+    <string name="task_select_month_day">월과 날짜 선택</string>
+    <string name="task_switch_to_date_input">날짜 입력으로 전환</string>
+    <string name="task_switch_to_calendar">달력으로 전환</string>
     <string name="task_repeat">반복</string>
     <string name="task_repeat_once">한 번</string>
     <string name="task_repeat_daily">매일</string>

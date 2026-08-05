@@ -33,6 +33,9 @@
     <string name="task_schedule">Расписание</string>
     <string name="task_schedule_manual">Только вручную</string>
     <string name="task_schedule_custom">Пользовательское (cron)</string>
+    <string name="task_select_month_day">Выбрать месяц и день</string>
+    <string name="task_switch_to_date_input">Переключиться на ввод даты</string>
+    <string name="task_switch_to_calendar">Переключиться на календарь</string>
     <string name="task_repeat">Повтор</string>
     <string name="task_repeat_once">Один раз</string>
     <string name="task_repeat_daily">Ежедневно</string>

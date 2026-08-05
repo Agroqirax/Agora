@@ -128,10 +128,15 @@ data class TaskSchedule(
     /** "On" row value for the date-bearing types. ONCE shows the full date; YEARLY omits the
      *  year, which cron cannot store anyway. */
     fun formatOnDate(): String {
-        val cal = Calendar.getInstance().apply {
-            if (type == ScheduleType.ONCE && onceAtMillis > 0L) {
-                timeInMillis = onceAtMillis
-            } else {
+        val cal = Calendar.getInstance()
+        if (type == ScheduleType.ONCE && onceAtMillis > 0L) {
+            cal.timeInMillis = onceAtMillis
+        } else {
+            // Use a fixed leap year for a yearless display. Formatting February 29 against the
+            // current year would normalize it to March 1 whenever the current year is not leap.
+            cal.apply {
+                clear()
+                set(Calendar.YEAR, 2000)
                 set(Calendar.MONTH, month - 1)
                 set(Calendar.DAY_OF_MONTH, dayOfMonth)
             }

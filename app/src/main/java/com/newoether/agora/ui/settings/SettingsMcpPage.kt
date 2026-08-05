@@ -2,8 +2,8 @@ package com.newoether.agora.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
@@ -25,6 +26,8 @@ import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,20 +45,38 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.McpServerConfig
+import com.newoether.agora.data.McpTransportType
 import com.newoether.agora.mcp.McpConnectionStatus
 import com.newoether.agora.mcp.McpServerSnapshot
+import com.newoether.agora.mcp.isReservedMcpHeaderName
+import com.newoether.agora.mcp.isValidMcpHeaderName
+import com.newoether.agora.mcp.isValidMcpHeaderValue
+import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
+import java.util.Locale
+import java.util.UUID
 
 private data class McpEditorRoute(
     val initial: McpServerConfig,
     val isNew: Boolean,
+)
+
+private data class McpHeaderDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
+    val value: String = "",
+    val revealValue: Boolean = false,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -248,10 +269,14 @@ private fun McpServerEditor(
     onDelete: () -> Unit,
 ) {
     var draft by remember(initial.id) { mutableStateOf(initial) }
-    var headersText by remember(initial.id) {
-        mutableStateOf(initial.headers.entries.joinToString("\n") { "${it.key}: ${it.value}" })
+    var headerRows by remember(initial.id) {
+        mutableStateOf(
+            initial.headers.map { (name, value) ->
+                McpHeaderDraft(name = name, value = value)
+            },
+        )
     }
-    val parsedHeaders = remember(headersText) { parseHeaders(headersText) }
+    val parsedHeaders = remember(headerRows) { buildMcpHeaders(headerRows) }
     val validUrl = remember(draft.url) { isValidMcpUrl(draft.url) }
     val canSave = draft.name.isNotBlank() && validUrl && parsedHeaders != null
     val scrollState = rememberScrollState()
@@ -282,59 +307,193 @@ private fun McpServerEditor(
         SettingsGroupColumn {
             SettingsGroup(
                 title = stringResource(R.string.mcp_connection),
-                items = listOf {
-                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                        OutlinedTextField(
-                            value = draft.name,
-                            onValueChange = { draft = draft.copy(name = it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.mcp_name)) },
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            leadingIcon = { Icon(Icons.Default.Hub, null) },
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = draft.url,
-                            onValueChange = { draft = draft.copy(url = it) },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.mcp_url)) },
-                            supportingText = {
-                                if (draft.url.isNotBlank() && !validUrl) {
-                                    Text(stringResource(R.string.mcp_url_error))
-                                }
-                            },
-                            isError = draft.url.isNotBlank() && !validUrl,
-                            singleLine = true,
-                            shape = RoundedCornerShape(16.dp),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                            leadingIcon = { Icon(Icons.Default.Http, null) },
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedTextField(
-                            value = headersText,
-                            onValueChange = { headersText = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            label = { Text(stringResource(R.string.mcp_headers)) },
-                            placeholder = { Text("Authorization: Bearer …") },
-                            supportingText = {
-                                Text(
-                                    stringResource(
-                                        if (parsedHeaders == null) {
-                                            R.string.mcp_headers_error
-                                        } else {
-                                            R.string.mcp_headers_desc
+                items = listOf(
+                    {
+                        SettingsIconContent(icon = Icons.Default.Http) {
+                            Text(
+                                stringResource(R.string.mcp_transport),
+                                style = MaterialTheme.typography.bodyLarge.copy(
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            val transports = McpTransportType.entries
+                            PillTabSwitcher(
+                                tabs = listOf(
+                                    stringResource(R.string.mcp_transport_streamable_http),
+                                    stringResource(R.string.mcp_transport_sse),
+                                ),
+                                selectedIndex = transports.indexOf(draft.transport).coerceAtLeast(0),
+                                onSelect = { index ->
+                                    transports.getOrNull(index)?.let { selected ->
+                                        draft = draft.copy(transport = selected)
+                                    }
+                                },
+                                allowLabelOverflow = true,
+                            )
+                        }
+                    },
+                    {
+                        SettingsIconContent(icon = Icons.Default.Hub) {
+                            McpLabeledField(
+                                label = stringResource(R.string.mcp_name),
+                                value = draft.name,
+                                onValueChange = { draft = draft.copy(name = it) },
+                            )
+                        }
+                    },
+                    {
+                        SettingsIconContent(icon = Icons.Default.Http) {
+                            McpLabeledField(
+                                label = stringResource(R.string.mcp_url),
+                                value = draft.url,
+                                onValueChange = { draft = draft.copy(url = it) },
+                                isError = draft.url.isNotBlank() && !validUrl,
+                                supportingText = if (draft.url.isNotBlank() && !validUrl) {
+                                    stringResource(R.string.mcp_url_error)
+                                } else {
+                                    null
+                                },
+                                keyboardType = KeyboardType.Uri,
+                            )
+                        }
+                    },
+                ),
+            )
+            SettingsGroup(
+                title = stringResource(R.string.mcp_headers),
+                items = buildList {
+                    headerRows.forEach { header ->
+                        add {
+                            key(header.id) {
+                                val nameError = headerNameHasError(header, headerRows)
+                                val valueError = !isValidMcpHeaderValue(header.value)
+                                SettingsIconContent(icon = Icons.Default.Key) {
+                                    McpLabeledField(
+                                        label = stringResource(R.string.mcp_header_name),
+                                        value = header.name,
+                                        onValueChange = { updated ->
+                                            headerRows = headerRows.map {
+                                                if (it.id == header.id) {
+                                                    it.copy(name = updated)
+                                                } else {
+                                                    it
+                                                }
+                                            }
                                         },
-                                    ),
-                                )
-                            },
-                            isError = parsedHeaders == null,
-                            minLines = 2,
-                            shape = RoundedCornerShape(16.dp),
-                            leadingIcon = { Icon(Icons.Default.Key, null) },
-                        )
+                                        isError = nameError,
+                                        supportingText = if (nameError) {
+                                            stringResource(R.string.mcp_header_name_error)
+                                        } else {
+                                            null
+                                        },
+                                        trailingContent = {
+                                            IconButton(
+                                                onClick = {
+                                                    headerRows = headerRows.filterNot {
+                                                        it.id == header.id
+                                                    }
+                                                },
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    stringResource(R.string.mcp_delete_header),
+                                                )
+                                            }
+                                        },
+                                    )
+                                    Spacer(Modifier.height(16.dp))
+                                    McpLabeledField(
+                                        label = stringResource(R.string.mcp_header_value),
+                                        value = header.value,
+                                        onValueChange = { updated ->
+                                            headerRows = headerRows.map {
+                                                if (it.id == header.id) {
+                                                    it.copy(value = updated)
+                                                } else {
+                                                    it
+                                                }
+                                            }
+                                        },
+                                        isError = valueError,
+                                        supportingText = if (valueError) {
+                                            stringResource(R.string.mcp_header_value_error)
+                                        } else {
+                                            null
+                                        },
+                                        password = !header.revealValue,
+                                        trailingContent = {
+                                            IconButton(
+                                                onClick = {
+                                                    headerRows = headerRows.map {
+                                                        if (it.id == header.id) {
+                                                            it.copy(revealValue = !it.revealValue)
+                                                        } else {
+                                                            it
+                                                        }
+                                                    }
+                                                },
+                                            ) {
+                                                Icon(
+                                                    if (header.revealValue) {
+                                                        Icons.Default.VisibilityOff
+                                                    } else {
+                                                        Icons.Default.Visibility
+                                                    },
+                                                    stringResource(
+                                                        if (header.revealValue) {
+                                                            R.string.mcp_hide_header_value
+                                                        } else {
+                                                            R.string.mcp_show_header_value
+                                                        },
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                    )
+                                }
+                            }
+                        }
                     }
-                })
+                    add {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                stringResource(R.string.mcp_headers_desc),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        headerRows = headerRows + McpHeaderDraft()
+                                    }
+                                    .padding(vertical = 10.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Default.Add,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    stringResource(R.string.mcp_add_header),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        }
+                    }
+                },
+            )
             SettingsGroup(
                 title = stringResource(R.string.mcp_status),
                 items = listOf {
@@ -450,19 +609,67 @@ private fun McpStatusIcon(status: McpConnectionStatus) {
     }
 }
 
-private fun parseHeaders(text: String): Map<String, String>? {
-    val entries = linkedMapOf<String, String>()
-    for (raw in text.lineSequence()) {
-        val line = raw.trim()
-        if (line.isEmpty()) continue
-        val separator = line.indexOf(':')
-        if (separator <= 0) return null
-        val name = line.substring(0, separator).trim()
-        val value = line.substring(separator + 1).trim()
-        if (name.isEmpty() || value.isEmpty() || name.any { it <= ' ' || it == ':' }) return null
-        entries[name] = value
+@Composable
+private fun McpLabeledField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    isError: Boolean = false,
+    supportingText: String? = null,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    password: Boolean = false,
+    trailingContent: (@Composable () -> Unit)? = null,
+) {
+    Column(modifier) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Box(modifier = Modifier.noOpBringIntoView().padding(top = 8.dp)) {
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                isError = isError,
+                supportingText = supportingText?.let { text -> { Text(text) } },
+                keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+                visualTransformation = if (password) {
+                    PasswordVisualTransformation()
+                } else {
+                    VisualTransformation.None
+                },
+                trailingIcon = trailingContent,
+                shape = RoundedCornerShape(16.dp),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ),
+            )
+        }
     }
-    return entries
+}
+
+private fun headerNameHasError(
+    header: McpHeaderDraft,
+    allHeaders: List<McpHeaderDraft>,
+): Boolean {
+    val name = header.name.trim()
+    if (!isValidMcpHeaderName(name) || isReservedMcpHeaderName(name)) return true
+    val normalized = name.lowercase(Locale.ROOT)
+    return allHeaders.count { it.name.trim().lowercase(Locale.ROOT) == normalized } != 1
+}
+
+private fun buildMcpHeaders(headers: List<McpHeaderDraft>): Map<String, String>? {
+    if (headers.any { headerNameHasError(it, headers) || !isValidMcpHeaderValue(it.value) }) {
+        return null
+    }
+    return buildMap {
+        headers.forEach { header ->
+            put(header.name.trim(), header.value.trim())
+        }
+    }
 }
 
 private fun isValidMcpUrl(value: String): Boolean {

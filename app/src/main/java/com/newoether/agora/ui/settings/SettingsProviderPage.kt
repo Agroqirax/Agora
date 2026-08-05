@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
@@ -240,6 +242,14 @@ private fun CustomProviderDialogContent(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        val protocolLabel = stringResource(R.string.custom_provider_protocol_label)
+        CustomEndpointProtocolSelector(
+            selected = protocol,
+            onSelected = onProtocolChange,
+            modifier = Modifier.semantics {
+                contentDescription = protocolLabel
+            },
+        )
         OutlinedTextField(
             value = name,
             onValueChange = onNameChange,
@@ -268,17 +278,5 @@ private fun CustomProviderDialogContent(
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
         )
-        Column {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                stringResource(R.string.custom_provider_protocol_label),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Spacer(Modifier.height(8.dp))
-            CustomEndpointProtocolSelector(
-                selected = protocol,
-                onSelected = onProtocolChange,
-            )
-        }
     }
 }

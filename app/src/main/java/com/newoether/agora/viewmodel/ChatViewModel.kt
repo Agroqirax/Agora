@@ -34,13 +34,11 @@ import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
-import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.AgoraForegroundService
@@ -49,7 +47,6 @@ import com.newoether.agora.ui.settings.ImportStrategy
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.PdfPageRenderer
-import com.newoether.agora.util.SearchResultFormatter
 import com.newoether.agora.util.SnackbarEvent
 import com.newoether.agora.util.SshClient
 import com.newoether.agora.util.UpdateChecker
@@ -102,68 +99,6 @@ private data class PersistedComposerDraft(
     val attachments: List<SelectedAttachment>,
     val revision: Long,
 )
-
-private fun MessageEntity.toUiChatMessage(context: Context): ChatMessage {
-    val isSynthetic =
-        id.startsWith(Constants.TOOL_MSG_PREFIX) ||
-            id.startsWith(Constants.RESULT_MSG_PREFIX)
-    // Protocol rows only participate in the branch walk. Provider history is built from
-    // MessageEntity snapshots, so copying their potentially huge results into UI state only
-    // increases allocation and GC pressure.
-    val decodedSegments = if (isSynthetic) {
-        null
-    } else {
-        toolCallJson?.let { raw ->
-            runCatching {
-                Json.decodeFromString<List<MessageSegment>>(raw)
-            }.getOrNull()
-        }
-    }
-    return ChatMessage(
-        id = id,
-        parentId = parentId,
-        text = if (isSynthetic) "" else SearchResultFormatter.format(text, context),
-        images = if (isSynthetic) emptyList() else images,
-        thoughts = if (isSynthetic) null else thoughts,
-        thoughtTitle = if (isSynthetic) null else thoughtTitle,
-        tokenCount = if (isSynthetic) 0 else tokenCount,
-        status = status,
-        participant = participant,
-        timestamp = timestamp,
-        thoughtTimeMs = if (isSynthetic) null else thoughtTimeMs,
-        modelName = modelName,
-        segments = decodedSegments
-            ?: thoughts
-                ?.takeIf { thought -> !isSynthetic && thought.isNotBlank() }
-                ?.let { thought ->
-                    listOf(
-                        MessageSegment(
-                            type = "thought",
-                            content = thought,
-                        )
-                    )
-                },
-        toolCall = decodedSegments
-            ?.lastOrNull { segment -> segment.type == "tool" }
-            ?.let { segment ->
-                ToolCallData(
-                    segment.toolName.orEmpty(),
-                    segment.toolArgs ?: "{}",
-                    SearchResultFormatter.format(segment.toolResult.orEmpty(), context),
-                )
-            },
-        attachmentMeta = if (isSynthetic) {
-            null
-        } else {
-            attachmentMeta?.let { raw ->
-                runCatching { Json.decodeFromString<AttachmentMeta>(raw) }.getOrNull()
-            }
-        },
-        runId = runId,
-        runSequence = runSequence,
-        consumedAtPass = consumedAtPass,
-    )
-}
 
 class ChatViewModel(
     application: Application,

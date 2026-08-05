@@ -875,7 +875,7 @@
     <string name="onboarding_ollama_desc">Insira a URL do seu servidor Ollama.</string>
     <string name="onboarding_api_key_for">Insira sua chave de API para %1$s.</string>
     <string name="onboarding_custom_title">Provedor personalizado</string>
-    <string name="onboarding_custom_desc">Conecte qualquer API compatível com OpenAI. Insira sua URL base e a chave.</string>
+    <string name="onboarding_custom_desc">Conecte um endpoint compatível com OpenAI, Gemini ou Anthropic. Escolha um protocolo e informe a URL base e a chave de API.</string>
     <string name="onboarding_custom_base_url_hint">URL base (ex.: https://api.example.com/v1)</string>
     <string name="onboarding_skip">Pular</string>
     <string name="onboarding_continue">Continuar</string>

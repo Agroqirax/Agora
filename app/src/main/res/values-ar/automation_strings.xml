@@ -33,6 +33,9 @@
     <string name="task_schedule">الجدول</string>
     <string name="task_schedule_manual">يدوي فقط</string>
     <string name="task_schedule_custom">مخصص (cron)</string>
+    <string name="task_select_month_day">اختر الشهر واليوم</string>
+    <string name="task_switch_to_date_input">التبديل إلى إدخال التاريخ</string>
+    <string name="task_switch_to_calendar">التبديل إلى التقويم</string>
     <string name="task_repeat">التكرار</string>
     <string name="task_repeat_once">مرة واحدة</string>
     <string name="task_repeat_daily">يوميًا</string>

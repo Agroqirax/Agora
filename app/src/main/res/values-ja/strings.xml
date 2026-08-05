@@ -875,7 +875,7 @@
     <string name="onboarding_ollama_desc">Ollama サーバーの URL を入力してください。</string>
     <string name="onboarding_api_key_for">%1$s の API キーを入力してください。</string>
     <string name="onboarding_custom_title">カスタムプロバイダー</string>
-    <string name="onboarding_custom_desc">OpenAI 互換の API に接続できます。ベース URL とキーを入力してください。</string>
+    <string name="onboarding_custom_desc">OpenAI、Gemini、または Anthropic 互換のエンドポイントに接続します。プロトコルを選択し、ベース URL と API キーを入力してください。</string>
     <string name="onboarding_custom_base_url_hint">ベース URL（例: https://api.example.com/v1）</string>
     <string name="onboarding_skip">スキップ</string>
     <string name="onboarding_continue">続行</string>

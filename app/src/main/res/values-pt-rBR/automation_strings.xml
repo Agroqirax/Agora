@@ -33,6 +33,9 @@
     <string name="task_schedule">Programação</string>
     <string name="task_schedule_manual">Somente manual</string>
     <string name="task_schedule_custom">Personalizada (cron)</string>
+    <string name="task_select_month_day">Selecionar mês e dia</string>
+    <string name="task_switch_to_date_input">Alternar para entrada de data</string>
+    <string name="task_switch_to_calendar">Alternar para calendário</string>
     <string name="task_repeat">Repetir</string>
     <string name="task_repeat_once">Uma vez</string>
     <string name="task_repeat_daily">Diariamente</string>

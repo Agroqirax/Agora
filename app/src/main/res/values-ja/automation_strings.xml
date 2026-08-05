@@ -33,6 +33,9 @@
     <string name="task_schedule">スケジュール</string>
     <string name="task_schedule_manual">手動のみ</string>
     <string name="task_schedule_custom">カスタム（cron）</string>
+    <string name="task_select_month_day">月と日を選択</string>
+    <string name="task_switch_to_date_input">日付入力に切り替え</string>
+    <string name="task_switch_to_calendar">カレンダーに切り替え</string>
     <string name="task_repeat">繰り返し</string>
     <string name="task_repeat_once">1回</string>
     <string name="task_repeat_daily">毎日</string>
