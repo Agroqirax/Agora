@@ -28,11 +28,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.newoether.agora.R
+import com.newoether.agora.ui.chat.message.LiteralHtmlMarkdownBlock
+import com.newoether.agora.ui.chat.message.literalHtmlMarkdownAnnotator
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.util.NoAutoScrollSelectionContainer
+import com.mikepenz.markdown.compose.MarkdownElement
+import com.mikepenz.markdown.compose.components.MarkdownComponents
+import com.mikepenz.markdown.compose.components.markdownComponents
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownTypography
 import com.mikepenz.markdown.model.markdownPadding
+import org.intellij.markdown.MarkdownElementTypes
 
 private fun isMarkdownFile(fileName: String): Boolean =
     fileName.endsWith(".md", true) || fileName.endsWith(".markdown", true)
@@ -69,6 +75,25 @@ fun TextFileViewer(
             inlineCode = t.bodyMedium.copy(fontFamily = MonoFamily, fontSize = 13.sp),
         )
         val viewerPadding = markdownPadding(block = 7.dp)
+        val literalHtmlComponents = remember {
+            lateinit var components: MarkdownComponents
+            components = markdownComponents(
+                custom = { type, model ->
+                    if (type == MarkdownElementTypes.HTML_BLOCK) {
+                        LiteralHtmlMarkdownBlock(model)
+                    } else {
+                        model.node.children.forEach { child ->
+                            MarkdownElement(
+                                node = child,
+                                components = components,
+                                content = model.content,
+                            )
+                        }
+                    }
+                }
+            )
+            components
+        }
 
         // Content
         if (isMarkdown) {
@@ -79,7 +104,14 @@ fun TextFileViewer(
                         .verticalScroll(rememberScrollState())
                         .padding(start = 16.dp, end = 16.dp, top = 96.dp, bottom = 56.dp)
                 ) {
-                    Markdown(content = content, modifier = Modifier.fillMaxWidth(), typography = viewerTypography, padding = viewerPadding)
+                    Markdown(
+                        content = content,
+                        modifier = Modifier.fillMaxWidth(),
+                        typography = viewerTypography,
+                        padding = viewerPadding,
+                        annotator = literalHtmlMarkdownAnnotator,
+                        components = literalHtmlComponents,
+                    )
                                     }
             }
         } else {

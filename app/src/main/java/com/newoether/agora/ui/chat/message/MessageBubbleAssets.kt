@@ -48,6 +48,7 @@ import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.model.MarkdownColors
 import com.mikepenz.markdown.model.MarkdownPadding
 import com.mikepenz.markdown.model.MarkdownTypography
+import com.mikepenz.markdown.compose.MarkdownElement
 import com.mikepenz.markdown.compose.components.MarkdownComponents
 import com.mikepenz.markdown.compose.components.MarkdownComponentModel
 import com.mikepenz.markdown.compose.components.markdownComponents
@@ -64,6 +65,7 @@ import org.intellij.markdown.flavours.MarkdownFlavourDescriptor
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import com.mikepenz.markdown.annotator.annotatorSettings
 import com.mikepenz.markdown.annotator.buildMarkdownAnnotatedString
+import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
@@ -157,7 +159,8 @@ internal fun rememberChatMarkdownAssets(
         searchHighlightColor,
         activeSearchHighlightColor,
     ) {
-        markdownComponents(
+        lateinit var components: MarkdownComponents
+        components = markdownComponents(
             text = { model ->
                 SearchHighlightedMarkdownText(
                     model = model,
@@ -281,7 +284,32 @@ internal fun rememberChatMarkdownAssets(
                     activeHighlightColor = activeSearchHighlightColor,
                 )
             },
+            custom = { type, model ->
+                if (type == MarkdownElementTypes.HTML_BLOCK) {
+                    SearchHighlightedMarkdownText(
+                        model = model,
+                        style = model.typography.paragraph,
+                        literalText = requireNotNull(
+                            literalHtmlBlockText(model.content, model.node)
+                        ),
+                        spec = searchHighlight,
+                        highlightColor = searchHighlightColor,
+                        activeHighlightColor = activeSearchHighlightColor,
+                    )
+                } else {
+                    // Installing a custom component makes the dependency consider every unknown
+                    // node handled. Preserve its normal recursive fallback for non-HTML nodes.
+                    model.node.children.forEach { child ->
+                        MarkdownElement(
+                            node = child,
+                            components = components,
+                            content = model.content,
+                        )
+                    }
+                }
+            },
         )
+        components
     }
     // Text/code/table components derive typography from each model, so the same component graph
     // serves answer and thought renderers. This keeps glyph-alpha behavior and Markdown spacing
@@ -308,6 +336,7 @@ internal fun rememberChatMarkdownAssets(
             typography = customTypography,
             padding = customMarkdownPadding,
             components = customMarkdownComponents,
+            annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
             plainTextStyle = ChatType.body,
@@ -326,6 +355,7 @@ internal fun rememberChatMarkdownAssets(
             typography = thoughtTypography,
             padding = thoughtMarkdownPadding,
             components = thoughtMarkdownComponents,
+            annotator = literalHtmlMarkdownAnnotator,
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
             plainTextStyle = ChatType.thoughtBody,
@@ -515,17 +545,22 @@ private fun SearchHighlightedMarkdownText(
     style: TextStyle = model.typography.text,
     textNode: ASTNode = model.node,
     modifier: Modifier = Modifier,
+    literalText: String? = null,
     spec: SearchHighlightSpec?,
     highlightColor: Color,
     activeHighlightColor: Color,
 ) {
     val settings = annotatorSettings()
-    val base = remember(model.content, textNode, style, settings) {
-        model.content.buildMarkdownAnnotatedString(
-            textNode = textNode,
-            style = style,
-            annotatorSettings = settings,
-        )
+    val base = remember(model.content, textNode, style, literalText, settings) {
+        if (literalText != null) {
+            AnnotatedString(literalText)
+        } else {
+            model.content.buildMarkdownAnnotatedString(
+                textNode = textNode,
+                style = style,
+                annotatorSettings = settings,
+            )
+        }
     }
     val streamingFadeSpec = LocalStreamingGlyphFadeSpec.current
     val fadeTargetOffset = streamingFadeSpec?.lastVisibleSourceOffset

@@ -528,6 +528,7 @@ private fun ParsedMarkdownBlockContent(
         typography = renderContext.typography,
         padding = renderContext.padding,
         components = renderContext.components,
+        annotator = renderContext.annotator,
         imageTransformer = renderContext.imageTransformer,
         animations = markdownAnimations { this },
         success = { successState, components, successModifier ->

@@ -128,6 +128,7 @@ import com.mikepenz.markdown.model.markdownAnimations
 import com.mikepenz.markdown.model.markdownPadding
 import com.mikepenz.markdown.model.ImageTransformer
 import com.mikepenz.markdown.model.MarkdownColors
+import com.mikepenz.markdown.model.MarkdownAnnotator
 import com.mikepenz.markdown.model.MarkdownPadding
 import com.mikepenz.markdown.model.MarkdownTypography
 import com.mikepenz.markdown.model.ReferenceLinkHandlerImpl
@@ -154,6 +155,7 @@ internal class ChatMarkdownRenderContext(
     val typography: MarkdownTypography,
     val padding: MarkdownPadding,
     val components: MarkdownComponents,
+    val annotator: MarkdownAnnotator,
     val imageTransformer: ImageTransformer,
     val flavour: MarkdownFlavourDescriptor,
     val plainTextStyle: TextStyle,
@@ -244,6 +246,7 @@ private fun MarkdownPreparedTextContent(
         typography = renderContext.typography,
         padding = renderContext.padding,
         components = renderContext.components,
+        annotator = renderContext.annotator,
         imageTransformer = renderContext.imageTransformer,
         animations = markdownAnimations { this },
         success = { successState, components, modifier ->
@@ -330,114 +333,4 @@ internal fun String.toRenderableMarkdownText(): String {
     return markdown.escapeForMarkdown()
 }
 
-internal fun String.escapeForMarkdown(): String =
-    protectLiteralAngleBracketTags().escapeDollarForMarkdown()
-
-private sealed interface MarkdownCodeContext {
-    data object None : MarkdownCodeContext
-    data class Inline(val ticks: Int) : MarkdownCodeContext
-    data class Fence(val character: Char, val length: Int) : MarkdownCodeContext
-}
-
-/**
- * The renderer intentionally omits raw HTML nodes. Model output such as `<widget>` is normally
- * meant as literal text, so protect HTML-looking angle-bracket text outside Markdown code without
- * changing the persisted/copied message. Fenced and inline code are already literal by CommonMark
- * definition and remain byte-for-byte unchanged.
- */
-internal fun String.protectLiteralAngleBracketTags(): String {
-    if ('<' !in this) return this
-    val output = StringBuilder(length)
-    var index = 0
-    var linePrefix = true
-    var lineIndent = 0
-    var code: MarkdownCodeContext = MarkdownCodeContext.None
-
-    fun updateLineState(character: Char) {
-        if (character == '\n') {
-            linePrefix = true
-            lineIndent = 0
-        } else if (linePrefix && character == ' ' && lineIndent < 4) {
-            lineIndent++
-        } else {
-            linePrefix = false
-        }
-    }
-
-    fun appendRaw(value: String) {
-        output.append(value)
-        value.forEach(::updateLineState)
-    }
-
-    fun runLength(start: Int, character: Char): Int {
-        var end = start
-        while (end < length && this[end] == character) end++
-        return end - start
-    }
-
-    while (index < length) {
-        val character = this[index]
-        when (val state = code) {
-            MarkdownCodeContext.None -> {
-                if (character == '`' || character == '~') {
-                    val run = runLength(index, character)
-                    when {
-                        linePrefix && lineIndent <= 3 && run >= 3 -> {
-                            appendRaw(substring(index, index + run))
-                            code = MarkdownCodeContext.Fence(character, run)
-                            index += run
-                            continue
-                        }
-                        character == '`' -> {
-                            appendRaw(substring(index, index + run))
-                            code = MarkdownCodeContext.Inline(run)
-                            index += run
-                            continue
-                        }
-                    }
-                }
-                if (character == '<') {
-                    val close = indexOf('>', startIndex = index + 1)
-                    if (close > index) {
-                        val inner = substring(index + 1, close)
-                        if (inner.shouldProtectAngleBracketContent()) {
-                            if (inner.startsWith('/')) {
-                                appendRaw("</\u200B${inner.drop(1)}>")
-                            } else {
-                                appendRaw("<\u200B$inner>")
-                            }
-                            index = close + 1
-                            continue
-                        }
-                    }
-                }
-            }
-            is MarkdownCodeContext.Inline -> {
-                if (character == '`') {
-                    val run = runLength(index, character)
-                    appendRaw(substring(index, index + run))
-                    if (run == state.ticks) code = MarkdownCodeContext.None
-                    index += run
-                    continue
-                }
-            }
-            is MarkdownCodeContext.Fence -> {
-                if (linePrefix && lineIndent <= 3 && character == state.character) {
-                    val run = runLength(index, character)
-                    appendRaw(substring(index, index + run))
-                    if (run >= state.length) code = MarkdownCodeContext.None
-                    index += run
-                    continue
-                }
-            }
-        }
-        appendRaw(character.toString())
-        index++
-    }
-    return output.toString()
-}
-
-private val markdownAutolink = Regex("""(?i)(?:https?://|mailto:).+|[^<>\s]+@[^<>\s]+""")
-
-private fun String.shouldProtectAngleBracketContent(): Boolean =
-    isNotEmpty() && !matches(markdownAutolink)
+internal fun String.escapeForMarkdown(): String = escapeDollarForMarkdown()
