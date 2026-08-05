@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">已連線</string>
     <string name="mcp_tools_enabled">已啟用 %1$d 個工具</string>
     <string name="mcp_status_error">連線錯誤</string>
-    <string name="mcp_refresh">重新連線並同步工具</string>
+    <string name="mcp_refresh">重新連線</string>
     <string name="mcp_tools_count">工具（%1$d）</string>
     <string name="mcp_tool_no_description">無說明</string>
 </resources>

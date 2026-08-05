@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">Đã kết nối</string>
     <string name="mcp_tools_enabled">Đã bật %1$d công cụ</string>
     <string name="mcp_status_error">Lỗi kết nối</string>
-    <string name="mcp_refresh">Kết nối lại và đồng bộ công cụ</string>
+    <string name="mcp_refresh">Kết nối lại</string>
     <string name="mcp_tools_count">Công cụ (%1$d)</string>
     <string name="mcp_tool_no_description">Không có mô tả</string>
 </resources>

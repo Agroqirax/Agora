@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">Connecté</string>
     <string name="mcp_tools_enabled">%1$d outils activés</string>
     <string name="mcp_status_error">Erreur de connexion</string>
-    <string name="mcp_refresh">Reconnecter et synchroniser les outils</string>
+    <string name="mcp_refresh">Reconnecter</string>
     <string name="mcp_tools_count">Outils (%1$d)</string>
     <string name="mcp_tool_no_description">Aucune description</string>
 </resources>

@@ -23,9 +23,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Http
 import androidx.compose.material.icons.filled.Label
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -233,6 +233,21 @@ fun SettingsMcpPage(
                                                             tonalElevation = 16.dp,
                                                             shape = RoundedCornerShape(12.dp),
                                                         ) {
+                                                            DropdownMenuItem(
+                                                                text = {
+                                                                    Text(stringResource(R.string.mcp_refresh))
+                                                                },
+                                                                leadingIcon = {
+                                                                    Icon(
+                                                                        Icons.Default.Refresh,
+                                                                        null,
+                                                                    )
+                                                                },
+                                                                onClick = {
+                                                                    menuExpanded = false
+                                                                    viewModel.refreshMcpServer(server.id)
+                                                                },
+                                                            )
                                                             DropdownMenuItem(
                                                                 text = {
                                                                     Text(
@@ -455,7 +470,7 @@ private fun McpServerEditor(
                                 },
                                 leadingContent = {
                                     Icon(
-                                        Icons.Default.Http,
+                                        Icons.Default.Code,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

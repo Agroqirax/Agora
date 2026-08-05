@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">متصل</string>
     <string name="mcp_tools_enabled">تم تمكين %1$d من الأدوات</string>
     <string name="mcp_status_error">خطأ في الاتصال</string>
-    <string name="mcp_refresh">إعادة الاتصال ومزامنة الأدوات</string>
+    <string name="mcp_refresh">إعادة الاتصال</string>
     <string name="mcp_tools_count">الأدوات (%1$d)</string>
     <string name="mcp_tool_no_description">لا يوجد وصف</string>
 </resources>

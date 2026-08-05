@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">연결됨</string>
     <string name="mcp_tools_enabled">도구 %1$d개 활성화</string>
     <string name="mcp_status_error">연결 오류</string>
-    <string name="mcp_refresh">다시 연결하고 도구 동기화</string>
+    <string name="mcp_refresh">다시 연결</string>
     <string name="mcp_tools_count">도구(%1$d)</string>
     <string name="mcp_tool_no_description">설명 없음</string>
 </resources>

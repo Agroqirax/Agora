@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">Подключено</string>
     <string name="mcp_tools_enabled">Включено инструментов: %1$d</string>
     <string name="mcp_status_error">Ошибка подключения</string>
-    <string name="mcp_refresh">Переподключиться и синхронизировать инструменты</string>
+    <string name="mcp_refresh">Переподключиться</string>
     <string name="mcp_tools_count">Инструменты (%1$d)</string>
     <string name="mcp_tool_no_description">Нет описания</string>
 </resources>

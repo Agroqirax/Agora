@@ -36,7 +36,7 @@
     <string name="mcp_status_connected">接続済み</string>
     <string name="mcp_tools_enabled">%1$d 個のツールが有効</string>
     <string name="mcp_status_error">接続エラー</string>
-    <string name="mcp_refresh">再接続してツールを同期</string>
+    <string name="mcp_refresh">再接続</string>
     <string name="mcp_tools_count">ツール（%1$d）</string>
     <string name="mcp_tool_no_description">説明なし</string>
 </resources>
