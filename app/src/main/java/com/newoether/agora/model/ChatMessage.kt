@@ -12,6 +12,12 @@ data class ToolCallData(
     val signature: String? = null,
     val toolCallId: String? = null,
     val resultImages: List<ToolImageAttachment> = emptyList(),
+    /** Stable provider-supplied title. Internal protocol names remain in [toolName]. */
+    val displayName: String? = null,
+    /** Human-readable result content kept separate from the protocol-facing [result]. */
+    val resultText: String? = null,
+    /** Provider-declared structured result JSON, never inferred from arbitrary text. */
+    val structuredResult: String? = null,
 )
 
 @Serializable
@@ -46,6 +52,12 @@ data class MessageSegment(
     val toolProgress: String? = null,
     /** Resolved execution target for tool UI. Kept separate from lifecycle and output text. */
     val toolTarget: String? = null,
+    /** Stable provider-supplied title. Internal protocol names remain in [toolName]. */
+    val toolDisplayName: String? = null,
+    /** Human-readable result content kept separate from the protocol-facing [toolResult]. */
+    val toolResultText: String? = null,
+    /** Provider-declared structured result JSON, never inferred from arbitrary text. */
+    val toolStructuredResult: String? = null,
     /** Private-file metadata for image content returned by a tool. */
     val toolImages: List<ToolImageAttachment> = emptyList(),
 )

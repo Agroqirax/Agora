@@ -40,6 +40,7 @@ internal enum class ToolKind {
     TASK_DELETE,
     LOOP_START,
     LOOP_STOP,
+    MCP,
     UNKNOWN,
 }
 
@@ -61,6 +62,8 @@ internal data class ToolPresentation(
     val result: JsonElement?,
     val rawArguments: String?,
     val rawResult: String?,
+    val rawTextResult: String?,
+    val rawStructuredResult: String?,
     val liveOutput: String?,
     val subject: String?,
     val device: String?,
@@ -84,7 +87,9 @@ internal object ToolPresentationResolver {
     fun resolve(segment: MessageSegment): ToolPresentation {
         val toolName = segment.toolName.orEmpty()
         val kind = kindFor(toolName)
-        val resultElement = parseElement(segment.toolResult)
+        val resultElement = parseElement(
+            segment.toolStructuredResult ?: segment.toolResult,
+        )
         val resultObject = resultElement as? JsonObject
         val errorCode = resultObject.string("error")
         val exitCode = resultObject.int("exit_code")
@@ -93,7 +98,8 @@ internal object ToolPresentationResolver {
         // large file payload. Never strictly parse that growing buffer on the UI thread. The
         // bounded prefix resolver below extracts only live summary hints; final semantic parsing
         // remains available once the call has produced a result.
-        val argumentsAwaitingResult = segment.toolResult == null
+        val argumentsAwaitingResult =
+            segment.toolResult == null && segment.toolStructuredResult == null
         val args = if (argumentsAwaitingResult) null else parseObject(segment.toolArgs)
         val streamingHints = StreamingToolArgumentHintResolver.resolve(kind, segment.toolArgs)
         val background = resultObject.boolean("background") == true ||
@@ -138,6 +144,8 @@ internal object ToolPresentationResolver {
             result = resultElement,
             rawArguments = segment.toolArgs,
             rawResult = segment.toolResult,
+            rawTextResult = segment.toolResultText,
+            rawStructuredResult = segment.toolStructuredResult,
             liveOutput = segment.toolProgress,
             subject = normalizeToolSummarySubject(
                 subject(kind, args, resultObject) ?: streamingHints.subject,
@@ -183,7 +191,7 @@ internal object ToolPresentationResolver {
         "delete_task" -> ToolKind.TASK_DELETE
         "start_loop" -> ToolKind.LOOP_START
         "stop_loop" -> ToolKind.LOOP_STOP
-        else -> ToolKind.UNKNOWN
+        else -> if (name.startsWith("mcp_")) ToolKind.MCP else ToolKind.UNKNOWN
     }
 
     private fun stateFromWire(value: String?): ToolPresentationState? = when (value) {

@@ -572,7 +572,6 @@ private fun TaskDetailPage(
         name = name.trim(), prompt = prompt, modelId = modelId,
         cronExpr = cronExpr, runAt = runAt, enabled = enabled,
     )
-    val saved = current() == task
     fun save() { if (isComplete) viewModel.saveTask(current()) }
     // Back still saves — an editor that silently discards work on the system back gesture is a
     // trap. The explicit Save button exists to make the commit point visible, not to gate it.
@@ -590,7 +589,7 @@ private fun TaskDetailPage(
         modifier = Modifier.clearFocusOnTap(),
         listState = listState,
         actions = {
-            IconButton(enabled = isComplete && !saved, onClick = { leave() }) {
+            IconButton(enabled = isComplete, onClick = { leave() }) {
                 Icon(Icons.Default.Save, contentDescription = stringResource(R.string.task_save))
             }
         },

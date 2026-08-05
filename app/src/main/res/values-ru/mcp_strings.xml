@@ -5,7 +5,7 @@
     <string name="mcp_servers">Серверы MCP</string>
     <string name="mcp_no_servers">Нет серверов MCP</string>
     <string name="mcp_no_servers_desc">Добавьте конечную точку Streamable HTTP или SSE, чтобы использовать её инструменты в диалогах.</string>
-    <string name="mcp_add_server">Добавить сервер</string>
+    <string name="mcp_add_server">Добавить MCP-сервер</string>
     <string name="mcp_edit_server">Изменить сервер MCP</string>
     <string name="mcp_delete_title">Удалить сервер MCP?</string>
     <string name="mcp_delete_message">Удалить %1$s и его инструменты?</string>
@@ -18,9 +18,10 @@
     <string name="mcp_url_error">Введите корректный URL http:// или https://</string>
     <string name="mcp_headers">Пользовательские заголовки</string>
     <string name="mcp_headers_desc">Добавляйте только необходимые серверу заголовки. Значения хранятся в зашифрованном виде.</string>
+    <string name="mcp_no_headers">Нет пользовательских заголовков</string>
     <string name="mcp_headers_error">Каждая строка должна иметь формат Имя: Значение</string>
     <string name="mcp_header_name">Имя заголовка</string>
-    <string name="mcp_header_value">Значение</string>
+    <string name="mcp_header_value">Значение заголовка</string>
     <string name="mcp_header_name_error">Используйте уникальное незарезервированное имя HTTP-заголовка</string>
     <string name="mcp_header_value_error">Введите значение без управляющих символов</string>
     <string name="mcp_add_header">Добавить заголовок</string>
@@ -32,7 +33,8 @@
     <string name="mcp_status">Состояние</string>
     <string name="mcp_status_idle">Ожидание</string>
     <string name="mcp_status_connecting">Подключение…</string>
-    <string name="mcp_status_connected">Подключено · включено инструментов: %1$d</string>
+    <string name="mcp_status_connected">Подключено</string>
+    <string name="mcp_tools_enabled">Включено инструментов: %1$d</string>
     <string name="mcp_status_error">Ошибка подключения</string>
     <string name="mcp_refresh">Переподключиться и синхронизировать инструменты</string>
     <string name="mcp_tools_count">Инструменты (%1$d)</string>

@@ -236,7 +236,7 @@
     <string name="image_gen_enable_desc">Let the model create images via a tool call</string>
     <string name="image_gen_model">Image Model</string>
     <string name="image_gen_no_model">No model selected</string>
-    <string name="image_gen_select_model">Select image model</string>
+    <string name="image_gen_select_model">Select Image Model</string>
     <string name="image_gen_size">Default Size</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Show all models</string>
@@ -259,7 +259,7 @@
     <string name="custom_provider_name_label">Provider Name</string>
     <string name="custom_provider_name_error">Name already exists or is invalid</string>
     <string name="custom_provider_url_error">Base URL is required</string>
-    <string name="custom_provider_delete_title">Delete Provider</string>
+    <string name="custom_provider_delete_title">Delete Provider?</string>
     <string name="custom_provider_delete_text">Delete provider \"%1$s\" and all its data? This action cannot be undone.</string>
     <string name="custom_provider_rename">Save</string>
     <string name="custom_provider_rename_title">Rename Provider</string>
@@ -374,7 +374,7 @@
     <string name="tool_call_display_mode_compact">Compact</string>
     <string name="tool_call_display_mode_timeline_desc">Show answer, thinking, and tool blocks in chronological order</string>
     <string name="tool_call_display_mode_grouped_timeline_desc">Keep timeline order but merge consecutive thinking, tool, and image blocks</string>
-    <string name="auto_expand_active_group">Auto-expand active group</string>
+    <string name="auto_expand_active_group">Auto-Expand Active Group</string>
     <string name="auto_expand_active_group_desc">Automatically expand the current thinking and tool group, then collapse it when the model moves on.</string>
     <string name="tool_call_display_mode_compact_desc">Group thinking and tool blocks above the answer</string>
 
@@ -426,7 +426,7 @@
     <string name="shell_add_device">Add Device</string>
     <string name="shell_remove_device">Remove</string>
     <string name="shell_no_devices">No devices configured</string>
-    <string name="shell_delete_confirm_title">Delete Shell Device</string>
+    <string name="shell_delete_confirm_title">Delete Shell Device?</string>
     <string name="shell_delete_confirm_message">Are you sure you want to delete \"%1$s\"?</string>
     <string name="shell_result_command">Command: %1$s</string>
     <string name="shell_result_error">Error: %1$s</string>
@@ -458,6 +458,7 @@
     <string name="sandbox_no_packages">No packages installed. Alpine base only.</string>
     <string name="sandbox_danger_zone">Danger Zone</string>
     <string name="sandbox_reset">Reset Environment</string>
+    <string name="sandbox_reset_title">Reset Environment?</string>
     <string name="sandbox_reset_desc">Remove Alpine rootfs and all packages</string>
     <string name="sandbox_reset_confirm">This will delete the Alpine Linux rootfs and all installed packages. This action cannot be undone.</string>
     <string name="sandbox_not_supported">Local Sandbox Not Supported</string>
@@ -481,7 +482,7 @@
     <string name="sandbox_dashboard_summary">%d packages installed · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">Remove %s</string>
+    <string name="sandbox_remove_pkg_title">Remove %s?</string>
     <string name="sandbox_remove_pkg_desc">Remove %s from the sandbox? Packages that are no longer needed will also be removed.</string>
     <string name="sandbox_remove_content_desc">Remove package</string>
     <string name="sandbox_manage">Manage Local Sandbox</string>
@@ -494,7 +495,7 @@
     <!-- Settings - Title Generation -->
     <string name="title_gen_auto">Auto-Generate Title</string>
     <string name="title_gen_auto_desc">Generate a title after the first response</string>
-    <string name="title_gen_notifications">Show title-generation notifications</string>
+    <string name="title_gen_notifications">Show Title Generation Notifications</string>
     <string name="title_gen_notifications_desc">Show progress and result messages while generating titles</string>
     <string name="title_gen_model">Title Model</string>
     <string name="title_gen_current_model">Use Current Model</string>
@@ -634,7 +635,7 @@
     <string name="embedding_custom_model_desc">Enter any model name supported by the provider</string>
     <string name="embedding_batch_size">Batch Size</string>
     <string name="embedding_batch_size_desc">Messages to cache per request (1-100)</string>
-    <string name="local_model_ready">Model imported.</string>
+    <string name="local_model_ready">Model imported</string>
     <string name="import_model">Import Model (.gguf)</string>
     <string name="importing_model">Importing...</string>
     <string name="no_embedding_models">No embedding models configured</string>
@@ -649,7 +650,7 @@
     <string name="search_match_desc">%1$d hits</string>
     <string name="rag_threshold_label">Similarity Threshold</string>
     <string name="auto_cache_title">Caching</string>
-    <string name="auto_cache">Auto-cache new messages</string>
+    <string name="auto_cache">Auto-Cache New Messages</string>
     <string name="auto_cache_desc">Automatically index new messages with the selected embedding model. When off, messages are never cached until manually triggered.</string>
     <string name="cache_action">Cache</string>
     <string name="recache_action">Re-cache</string>
@@ -659,7 +660,7 @@
     <string name="add_local_model">Add Local Model</string>
     <string name="model_name_label">Name</string>
     <string name="add">Add</string>
-    <string name="delete_model_title">Delete Embedding Model</string>
+    <string name="delete_model_title">Delete Embedding Model?</string>
     <string name="delete_model_confirm">This will also delete all cached embeddings for this model.</string>
 
     <!-- Errors -->
@@ -771,7 +772,7 @@
     <string name="about_updates">Updates</string>
     <string name="about_check_updates">Check for Updates</string>
     <string name="about_check_updates_desc">Check GitHub for the latest release</string>
-    <string name="about_auto_update">Auto-check for updates</string>
+    <string name="about_auto_update">Auto-Check for Updates</string>
     <string name="about_auto_update_desc">Check on app launch (at most once per day)</string>
     <string name="about_update_available">Update available: v%1$s</string>
     <string name="about_up_to_date">You\'re up to date (v%1$s)</string>
@@ -822,10 +823,10 @@
     <string name="import_no_data">This export file contains no importable data.</string>
 
     <!-- Claude Chat Import -->
-    <string name="third_party_import">Third Party</string>
+    <string name="third_party_import">Third-Party Import</string>
     <string name="claude_import_title">Import from Claude</string>
     <string name="claude_import_subtitle">Import conversations from a Claude export .zip file.</string>
-    <string name="claude_import_select_file">Select Claude export file</string>
+    <string name="claude_import_select_file">Select Claude Export File</string>
     <string name="claude_import_no_file">No file selected</string>
     <string name="claude_import_conversations">Conversations</string>
     <string name="claude_import_messages">Messages</string>
@@ -941,20 +942,20 @@
     <!-- ── Auto Backup ── -->
     <string name="auto_backup_title">Auto Backup</string>
     <string name="auto_backup_subtitle">Automatically export data on a schedule</string>
-    <string name="auto_backup_period_label">Backup every</string>
+    <string name="auto_backup_period_label">Backup Frequency</string>
     <string name="auto_backup_period_1d">1 day</string>
     <string name="auto_backup_period_3d">3 days</string>
     <string name="auto_backup_period_5d">5 days</string>
     <string name="auto_backup_period_1w">1 week</string>
     <string name="auto_backup_period_1mo">1 month</string>
-    <string name="auto_backup_categories_label">Export content</string>
+    <string name="auto_backup_categories_label">Backup Content</string>
     <string name="auto_backup_categories_desc">Choose what to back up</string>
-    <string name="auto_backup_categories_dialog_title">Auto backup content</string>
+    <string name="auto_backup_categories_dialog_title">Choose Backup Content</string>
     <string name="auto_backup_api_key_warning">API keys will be stored unencrypted in the backup file</string>
-    <string name="auto_backup_directory_label">Backup location</string>
-    <string name="auto_delete_title">Auto delete old backups</string>
+    <string name="auto_backup_directory_label">Backup Location</string>
+    <string name="auto_delete_title">Auto-Delete Old Backups</string>
     <string name="auto_delete_subtitle">Remove backups older than the specified period</string>
-    <string name="auto_delete_period_label">Delete older than</string>
+    <string name="auto_delete_period_label">Delete Backups Older Than</string>
     <string name="auto_delete_period_1w">1 week</string>
     <string name="auto_delete_period_1mo">1 month</string>
     <string name="auto_delete_period_1y">1 year</string>
@@ -970,18 +971,18 @@
     <string name="shell_ssh_verify_host_key">Verify &amp; pin host key</string>
     <string name="shell_ssh_host_key_pinned">Host key pinned</string>
     <string name="shell_ssh_host_key_not_pinned">Host key not pinned — vulnerable to interception</string>
-    <string name="shell_ssh_verify_title">Verify SSH host key</string>
+    <string name="shell_ssh_verify_title">Verify SSH Host Key</string>
     <string name="shell_ssh_verify_message">Confirm this fingerprint matches your server before trusting it. Pinning protects against man-in-the-middle attacks.</string>
-    <string name="shell_ssh_trust">Trust &amp; pin</string>
+    <string name="shell_ssh_trust">Trust &amp; Pin</string>
     <string name="shell_ssh_verify_failed">Could not reach host: %1$s</string>
     <string name="shell_ssh_verifying">Connecting…</string>
-    <string name="shell_ssh_unpin">Remove pinned key</string>
+    <string name="shell_ssh_unpin">Remove Pinned Key</string>
     <!-- Remote shell confirmation gate -->
     <string name="shell_confirm_title">Allow action on \"%1$s\"?</string>
     <string name="shell_confirm_allow">Allow once</string>
     <string name="shell_confirm_always">Always allow this server</string>
     <string name="shell_confirm_deny">Deny</string>
-    <string name="shell_confirm_setting">Confirm remote shell actions</string>
+    <string name="shell_confirm_setting">Confirm Remote Shell Actions</string>
     <string name="shell_confirm_setting_desc">Ask before the assistant runs commands or writes files on remote SSH/Conch servers</string>
 
     <!-- Crash reporting -->
@@ -994,13 +995,13 @@
     <string name="settings_group_network">Network</string>
     <string name="settings_proxy">Proxy</string>
     <string name="settings_proxy_desc">Route network traffic through an HTTP or SOCKS proxy</string>
-    <string name="proxy_enable">Enable proxy</string>
+    <string name="proxy_enable">Enable Proxy</string>
     <string name="proxy_enable_desc">Route all app network traffic through the proxy</string>
     <string name="proxy_type">Type</string>
     <string name="proxy_host">Host</string>
     <string name="proxy_port">Port</string>
     <string name="proxy_username">Username (optional)</string>
     <string name="proxy_password">Password (optional)</string>
-    <string name="proxy_bypass">Bypass list</string>
+    <string name="proxy_bypass">Bypass List</string>
     <string name="proxy_bypass_desc">Hosts and CIDR ranges that connect directly, one per line</string>
 </resources>

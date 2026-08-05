@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,6 +32,22 @@ private data class JsonRenderSnapshot(
     val source: String,
     val document: StreamingJsonDocument,
 )
+
+/**
+ * MCP and other protocols may emit the same structured value both as compatibility text and as
+ * structured output. Collapse only adjacent, complete, structurally equal top-level documents;
+ * distinct values and any value still streaming are always retained.
+ */
+internal fun visibleJsonRoots(
+    roots: List<StreamingJsonNode>,
+): List<StreamingJsonNode> = buildList {
+    roots.forEach { root ->
+        val duplicate = root.complete &&
+            lastOrNull()?.complete == true &&
+            lastOrNull() == root
+        if (!duplicate) add(root)
+    }
+}
 
 // A long or multi-line string value (e.g. a grep match's `content`, or a deep
 // file `path`) would, when squeezed to the right of its key chip through several
@@ -202,10 +219,22 @@ internal fun JsonOrPlainView(text: String) {
     val document = snapshot
         ?.takeIf { it.source == text || canRetainPreviousTree }
         ?.document
+    val visibleRoots = remember(document) {
+        visibleJsonRoots(document?.roots.orEmpty())
+    }
     when {
-        document?.status != StreamingJsonStatus.INVALID && document?.root != null -> {
+        document?.status != StreamingJsonStatus.INVALID && visibleRoots.isNotEmpty() -> {
             NoAutoScrollSelectionContainer {
-                JsonNodeView(document.root)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    visibleRoots.forEachIndexed { index, root ->
+                        key("json-root:$index") {
+                            JsonNodeView(root)
+                        }
+                    }
+                }
             }
         }
         document?.status == StreamingJsonStatus.INVALID -> {

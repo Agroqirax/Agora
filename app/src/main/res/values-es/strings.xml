@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">Nombre del proveedor</string>
     <string name="custom_provider_name_error">El nombre ya existe o no es válido</string>
     <string name="custom_provider_url_error">La URL base es obligatoria</string>
-    <string name="custom_provider_delete_title">Eliminar proveedor</string>
+    <string name="custom_provider_delete_title">¿Eliminar proveedor?</string>
     <string name="custom_provider_delete_text">¿Eliminar el proveedor \"%1$s\" y todos sus datos? Esta acción no se puede deshacer.</string>
     <string name="custom_provider_rename">Guardar</string>
     <string name="custom_provider_rename_title">Renombrar proveedor</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">Añadir dispositivo</string>
     <string name="shell_remove_device">Quitar</string>
     <string name="shell_no_devices">No hay dispositivos configurados</string>
-    <string name="shell_delete_confirm_title">Eliminar dispositivo de shell</string>
+    <string name="shell_delete_confirm_title">¿Eliminar dispositivo de shell?</string>
     <string name="shell_delete_confirm_message">¿Seguro que quieres eliminar \"%1$s\"?</string>
     <string name="shell_result_command">Comando: %1$s</string>
     <string name="shell_result_error">Error: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">No hay paquetes instalados. Solo la base de Alpine.</string>
     <string name="sandbox_danger_zone">Zona de peligro</string>
     <string name="sandbox_reset">Restablecer entorno</string>
+    <string name="sandbox_reset_title">¿Restablecer entorno?</string>
     <string name="sandbox_reset_desc">Eliminar el rootfs de Alpine y todos los paquetes</string>
     <string name="sandbox_reset_confirm">Esto eliminará el rootfs de Alpine Linux y todos los paquetes instalados. Esta acción no se puede deshacer.</string>
     <string name="sandbox_not_supported">Entorno aislado local no compatible</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d paquetes instalados · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">Eliminar %s</string>
+    <string name="sandbox_remove_pkg_title">¿Eliminar %s?</string>
     <string name="sandbox_remove_pkg_desc">¿Eliminar %s del entorno aislado? Esto liberará su espacio en disco.</string>
     <string name="sandbox_remove_content_desc">Eliminar paquete</string>
     <string name="sandbox_manage">Gestionar entorno aislado local</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">Añadir modelo local</string>
     <string name="model_name_label">Nombre</string>
     <string name="add">Añadir</string>
-    <string name="delete_model_title">Eliminar modelo de embedding</string>
+    <string name="delete_model_title">¿Eliminar modelo de embedding?</string>
     <string name="delete_model_confirm">Esto también eliminará todos los embeddings en caché de este modelo.</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5 días</string>
     <string name="auto_backup_period_1w">1 semana</string>
     <string name="auto_backup_period_1mo">1 mes</string>
-    <string name="auto_backup_categories_label">Contenido a exportar</string>
+    <string name="auto_backup_categories_label">Contenido de la copia de seguridad</string>
     <string name="auto_backup_categories_desc">Elige qué respaldar</string>
-    <string name="auto_backup_categories_dialog_title">Contenido de la copia automática</string>
+    <string name="auto_backup_categories_dialog_title">Seleccionar contenido de la copia de seguridad</string>
     <string name="auto_backup_api_key_warning">Las claves de API se guardarán sin cifrar en el archivo de copia de seguridad</string>
     <string name="auto_backup_directory_label">Ubicación de la copia de seguridad</string>
     <string name="auto_delete_title">Eliminar copias antiguas automáticamente</string>

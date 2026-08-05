@@ -64,7 +64,7 @@
     <string name="loop_stop">루프 중지</string>
     <string name="automation_notification_channel_desc">Agora 자동화가 실행되는 동안 표시되는 지속 알림</string>
     <string name="settings_automation">자동화</string>
-    <string name="settings_automation_desc">AI 도구, 루프 및 일정 정밀도</string>
+    <string name="settings_automation_desc">작업, 루프 및 일정 정밀도</string>
     <string name="automation_ai_tools">작업 및 루프에 접근</string>
     <string name="automation_ai_tools_desc">모델이 작업을 만들고 관리하거나 대화 루프를 시작하고 중지하도록 허용합니다. 기본적으로 꺼져 있습니다.</string>
     <string name="automation_scheduling">일정</string>

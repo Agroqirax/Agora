@@ -66,11 +66,11 @@
     <string name="automation_notification_channel_desc">Ongoing notification while an Agora automation is running</string>
 
     <string name="settings_automation">Automation</string>
-    <string name="settings_automation_desc">AI tools, loops, and scheduling precision</string>
-    <string name="automation_ai_tools">Access tasks and loops</string>
+    <string name="settings_automation_desc">Tasks, loops, and scheduling precision</string>
+    <string name="automation_ai_tools">Access Tasks and Loops</string>
     <string name="automation_ai_tools_desc">Let the model create and manage tasks or start and stop conversation loops. Disabled by default.</string>
     <string name="automation_scheduling">Scheduling</string>
-    <string name="automation_exact_execution">Exact execution</string>
+    <string name="automation_exact_execution">Exact Execution</string>
     <string name="automation_exact_execution_on_desc">Use exact alarms for Tasks and Loops. Android may still apply system limits.</string>
     <string name="automation_exact_execution_off_desc">Use battery-friendly inexact alarms. Enable to request Alarms &amp; reminders access.</string>
     <string name="automation_exact_execution_off_legacy_desc">Use battery-friendly inexact alarms. You can enable exact execution without additional access on this Android version.</string>

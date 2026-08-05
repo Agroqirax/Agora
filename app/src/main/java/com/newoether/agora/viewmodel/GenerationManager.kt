@@ -32,6 +32,7 @@ import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.ToolExecutionEvent
 import com.newoether.agora.tool.ToolExecutionResult
 import com.newoether.agora.tool.ToolImageStore
+import com.newoether.agora.tool.ToolPresentationMetadata
 import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -278,6 +279,14 @@ class GenerationManager(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider
     )
     private val toolProviders: List<ToolProvider> = builtInToolProviders + additionalToolProviders
+
+    private fun resolveToolPresentationMetadata(name: String): ToolPresentationMetadata? {
+        if (name.isBlank()) return null
+        for (provider in toolProviders) {
+            provider.presentationMetadata(name)?.let { return it }
+        }
+        return null
+    }
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         imageGenToolProvider.definitions(ctx)
@@ -545,6 +554,10 @@ class GenerationManager(
                     result = s.toolResult ?: "",
                     signature = s.signature,
                     toolCallId = s.toolCallId,
+                    resultImages = s.toolImages,
+                    displayName = s.toolDisplayName,
+                    resultText = s.toolResultText,
+                    structuredResult = s.toolStructuredResult,
                 )
             }
             val meta = it.attachmentMeta?.let { json -> try { Json.decodeFromString<com.newoether.agora.model.AttachmentMeta>(json) } catch (_: Exception) { null } }
@@ -879,8 +892,10 @@ class GenerationManager(
                 val existingIndex = liveToolSegmentIndices[streamKey]
                 if (existingIndex != null) {
                     val existing = segments[existingIndex]
+                    val resolvedName = name.ifBlank { existing.toolName.orEmpty() }
+                    val metadata = resolveToolPresentationMetadata(resolvedName)
                     segments[existingIndex] = existing.copy(
-                        toolName = name.ifBlank { existing.toolName },
+                        toolName = resolvedName.ifBlank { existing.toolName },
                         toolArgs = arguments,
                         toolCallId = toolCallId ?: existing.toolCallId ?: streamKey,
                         signature = signature ?: existing.signature,
@@ -888,6 +903,8 @@ class GenerationManager(
                             signature != null || existing.signature != null
                         },
                         toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
+                        toolTarget = metadata?.target ?: existing.toolTarget,
+                        toolDisplayName = metadata?.displayName ?: existing.toolDisplayName,
                     )
                     return existingIndex to false
                 }
@@ -895,6 +912,7 @@ class GenerationManager(
                 flushAnswerSegment()
                 flushThoughtSegment()
                 val index = segments.size
+                val metadata = resolveToolPresentationMetadata(name)
                 segments += MessageSegment(
                     type = "tool",
                     toolName = name.ifBlank { null },
@@ -904,6 +922,8 @@ class GenerationManager(
                     signature = signature,
                     signatureProvider = provider.name.takeIf { signature != null },
                     toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
+                    toolTarget = metadata?.target,
+                    toolDisplayName = metadata?.displayName,
                 )
                 liveToolSegmentIndices[streamKey] = index
                 return index to true
@@ -966,6 +986,7 @@ class GenerationManager(
                     val index = checkNotNull(liveToolSegmentIndices[call.streamKey]) {
                         "Missing live segment for tool call ${call.streamKey}"
                     }
+                    val metadata = resolveToolPresentationMetadata(call.name)
                     segments[index] = segments[index].copy(
                         toolName = call.name,
                         toolArgs = call.arguments,
@@ -973,6 +994,8 @@ class GenerationManager(
                         signature = call.signature,
                         signatureProvider = provider.name.takeIf { call.signature != null },
                         toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
+                        toolTarget = metadata?.target ?: segments[index].toolTarget,
+                        toolDisplayName = metadata?.displayName ?: segments[index].toolDisplayName,
                     )
                     currentStatus = MessageStatus.TOOL_CALLING
                     publishStreamUpdate(forceCheckpoint = true)
@@ -985,8 +1008,14 @@ class GenerationManager(
                     )
                     generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                     val clipped = result.text.take(Constants.MAX_TOOL_RESULT_LENGTH)
+                    val clippedDisplayText = result.displayText
+                        ?.take(Constants.MAX_TOOL_RESULT_LENGTH)
+                    val clippedStructuredResult = result.structuredContent
+                        ?.take(Constants.MAX_TOOL_RESULT_LENGTH)
                     segments[index] = segments[index].copy(
                         toolResult = clipped,
+                        toolResultText = clippedDisplayText,
+                        toolStructuredResult = clippedStructuredResult,
                         toolState = if (result.isError) {
                             com.newoether.agora.model.ToolExecutionStates.FAILED
                         } else {
@@ -1002,6 +1031,9 @@ class GenerationManager(
                         signature = call.signature,
                         toolCallId = call.id,
                         resultImages = result.images,
+                        displayName = segments[index].toolDisplayName,
+                        resultText = clippedDisplayText,
+                        structuredResult = clippedStructuredResult,
                     )
                     publishStreamUpdate()
                     lastEmitMs = System.currentTimeMillis()
@@ -1191,6 +1223,10 @@ class GenerationManager(
                         signature = tc.signature,
                         signatureProvider = provider.name.takeIf { tc.signature != null },
                         toolCallId = tc.toolCallId,
+                        toolDisplayName = tc.displayName,
+                        toolResultText = tc.resultText,
+                        toolStructuredResult = tc.structuredResult,
+                        toolImages = tc.resultImages,
                     )
                 }
                 // Bound the aggregate: a model message row crams every tool round into one
@@ -1247,6 +1283,9 @@ class GenerationManager(
                                     signature = tcds[index].signature,
                                     signatureProvider = provider.name.takeIf { tcds[index].signature != null },
                                     toolCallId = tcds[index].toolCallId,
+                                    toolDisplayName = tcds[index].displayName,
+                                    toolResultText = tcds[index].resultText,
+                                    toolStructuredResult = tcds[index].structuredResult,
                                     toolImages = tcds[index].resultImages,
                                 )
                             ))

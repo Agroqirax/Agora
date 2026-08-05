@@ -66,9 +66,15 @@ internal fun MessageEntity.toUiChatMessage(
             ?.lastOrNull { segment -> segment.type == "tool" }
             ?.let { segment ->
                 ToolCallData(
-                    segment.toolName.orEmpty(),
-                    segment.toolArgs ?: "{}",
-                    formatText(segment.toolResult.orEmpty()),
+                    toolName = segment.toolName.orEmpty(),
+                    arguments = segment.toolArgs ?: "{}",
+                    result = formatText(segment.toolResult.orEmpty()),
+                    signature = segment.signature,
+                    toolCallId = segment.toolCallId,
+                    resultImages = segment.toolImages,
+                    displayName = segment.toolDisplayName,
+                    resultText = segment.toolResultText,
+                    structuredResult = segment.toolStructuredResult,
                 )
             },
         attachmentMeta = if (isSynthetic) {

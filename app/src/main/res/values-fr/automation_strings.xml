@@ -64,7 +64,7 @@
     <string name="loop_stop">Arrêter la boucle</string>
     <string name="automation_notification_channel_desc">Notification permanente pendant l’exécution d’une automatisation Agora</string>
     <string name="settings_automation">Automatisation</string>
-    <string name="settings_automation_desc">Outils d’IA, boucles et précision de planification</string>
+    <string name="settings_automation_desc">Tâches, boucles et précision de planification</string>
     <string name="automation_ai_tools">Accéder aux tâches et aux boucles</string>
     <string name="automation_ai_tools_desc">Autoriser le modèle à créer et gérer des tâches, ou à démarrer et arrêter des boucles de conversation. Désactivé par défaut.</string>
     <string name="automation_scheduling">Planification</string>

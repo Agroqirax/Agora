@@ -225,7 +225,7 @@
     <string name="custom_provider_name_label">Tên nhà cung cấp</string>
     <string name="custom_provider_name_error">Tên đã tồn tại hoặc không hợp lệ</string>
     <string name="custom_provider_url_error">Yêu cầu phải có URL gốc</string>
-    <string name="custom_provider_delete_title">Xóa nhà cung cấp</string>
+    <string name="custom_provider_delete_title">Xóa nhà cung cấp?</string>
     <string name="custom_provider_delete_text">Xóa nhà cung cấp \"%1$s\" và toàn bộ dữ liệu liên quan? Hành động này không thể hoàn tác.</string>
     <string name="custom_provider_rename">Lưu</string>
     <string name="custom_provider_rename_title">Đổi tên nhà cung cấp</string>
@@ -392,7 +392,7 @@
     <string name="shell_add_device">Thêm thiết bị</string>
     <string name="shell_remove_device">Gỡ bỏ</string>
     <string name="shell_no_devices">Chưa cấu hình thiết bị nào</string>
-    <string name="shell_delete_confirm_title">Xóa thiết bị Shell</string>
+    <string name="shell_delete_confirm_title">Xóa thiết bị Shell?</string>
     <string name="shell_delete_confirm_message">Bạn có chắc muốn xóa \"%1$s\"?</string>
     <string name="shell_result_command">Lệnh: %1$s</string>
     <string name="shell_result_error">Lỗi: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">Không có gói nào được cài đặt. Chỉ có nền tảng Alpine.</string>
     <string name="sandbox_danger_zone">Vùng nguy hiểm</string>
     <string name="sandbox_reset">Đặt lại môi trường</string>
+    <string name="sandbox_reset_title">Đặt lại môi trường?</string>
     <string name="sandbox_reset_desc">Xóa Alpine rootfs và tất cả các gói</string>
     <string name="sandbox_reset_confirm">Thao tác này sẽ xóa rootfs Alpine Linux và tất cả các gói đã cài đặt. Hành động này không thể hoàn tác.</string>
     <string name="sandbox_not_supported">Không hỗ trợ hộp cát cục bộ</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">Đã cài đặt %d gói · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">Xóa %s</string>
+    <string name="sandbox_remove_pkg_title">Xóa %s?</string>
     <string name="sandbox_remove_pkg_desc">Xóa %s khỏi hộp cát? Các gói không còn cần thiết cũng sẽ bị xóa bỏ.</string>
     <string name="sandbox_remove_content_desc">Xóa gói</string>
     <string name="sandbox_manage">Quản lý hộp cát cục bộ</string>
@@ -625,7 +626,7 @@
     <string name="add_local_model">Thêm mô hình cục bộ</string>
     <string name="model_name_label">Tên</string>
     <string name="add">Thêm</string>
-    <string name="delete_model_title">Xóa mô hình nhúng</string>
+    <string name="delete_model_title">Xóa mô hình nhúng?</string>
     <string name="delete_model_confirm">Thao tác này cũng sẽ xóa tất cả các vector nhúng đã lưu bộ đệm cho mô hình này.</string>
 
     <!-- Errors -->
@@ -911,9 +912,9 @@
     <string name="auto_backup_period_5d">5 ngày</string>
     <string name="auto_backup_period_1w">1 tuần</string>
     <string name="auto_backup_period_1mo">1 tháng</string>
-    <string name="auto_backup_categories_label">Xuất nội dung</string>
+    <string name="auto_backup_categories_label">Nội dung sao lưu</string>
     <string name="auto_backup_categories_desc">Chọn những gì cần sao lưu</string>
-    <string name="auto_backup_categories_dialog_title">Nội dung sao lưu tự động</string>
+    <string name="auto_backup_categories_dialog_title">Chọn nội dung sao lưu</string>
     <string name="auto_backup_api_key_warning">Các khóa API sẽ được lưu trữ mà không mã hóa trong tệp sao lưu</string>
     <string name="auto_backup_directory_label">Vị trí sao lưu</string>
     <string name="auto_delete_title">Tự động xóa các bản sao lưu cũ</string>

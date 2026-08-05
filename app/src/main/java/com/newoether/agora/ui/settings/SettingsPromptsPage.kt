@@ -243,20 +243,10 @@ private fun PromptList(
                 }
 
                 add {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 56.dp)
-                            .clickable { onAdd() }
-                            .padding(horizontal = 16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.prompts_add), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                        }
-                    }
+                    SettingsAddItem(
+                        label = stringResource(R.string.prompts_add),
+                        onClick = onAdd,
+                    )
                 }
             }
             SettingsGroupColumn {

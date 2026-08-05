@@ -43,6 +43,8 @@ internal data class StreamingJsonDocument(
     val root: StreamingJsonNode?,
     val status: StreamingJsonStatus,
     val errorOffset: Int? = null,
+    /** One or more top-level values separated strictly by JSON whitespace. */
+    val roots: List<StreamingJsonNode> = root?.let(::listOf).orEmpty(),
 )
 
 /**
@@ -73,20 +75,40 @@ internal object StreamingJsonParser {
                 )
             }
 
-            val root = parseValue()
-            if (errorOffset == null && root.complete) {
-                skipWhitespace()
-                if (!atEnd()) fail()
+            val roots = mutableListOf<StreamingJsonNode>()
+            var status = StreamingJsonStatus.INCOMPLETE
+            while (!atEnd() && errorOffset == null) {
+                val parsed = parseValue()
+                parsed.node?.let(roots::add)
+                if (errorOffset != null) {
+                    status = StreamingJsonStatus.INVALID
+                    break
+                }
+                if (!parsed.complete) {
+                    status = StreamingJsonStatus.INCOMPLETE
+                    break
+                }
+
+                val separatorLength = skipWhitespace()
+                if (atEnd()) {
+                    status = StreamingJsonStatus.COMPLETE
+                    break
+                }
+                // Concatenated values without an actual JSON-whitespace boundary remain invalid.
+                if (separatorLength == 0) {
+                    fail()
+                    status = StreamingJsonStatus.INVALID
+                    break
+                }
             }
-            val status = when {
-                errorOffset != null -> StreamingJsonStatus.INVALID
-                root.complete -> StreamingJsonStatus.COMPLETE
-                else -> StreamingJsonStatus.INCOMPLETE
+            if (errorOffset != null) {
+                status = StreamingJsonStatus.INVALID
             }
             return StreamingJsonDocument(
-                root = root.node,
+                root = roots.firstOrNull(),
                 status = status,
                 errorOffset = errorOffset,
+                roots = roots.toList(),
             )
         }
 
@@ -377,8 +399,10 @@ internal object StreamingJsonParser {
             complete = complete,
         )
 
-        private fun skipWhitespace() {
+        private fun skipWhitespace(): Int {
+            val start = cursor
             while (!atEnd() && source[cursor].isJsonWhitespace()) cursor++
+            return cursor - start
         }
 
         private fun fail(offset: Int = cursor) {

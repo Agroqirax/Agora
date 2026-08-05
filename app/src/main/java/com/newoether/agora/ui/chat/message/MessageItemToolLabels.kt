@@ -13,10 +13,47 @@ import com.newoether.agora.model.MessageSegment
 @Composable
 internal fun toolDisplayName(segment: MessageSegment): String {
     val toolName = segment.toolName.orEmpty()
+    val kind = ToolPresentationResolver.kindForToolName(toolName)
+    if (kind == ToolKind.MCP) {
+        return mcpToolDisplayName(
+            publicName = toolName,
+            resolvedName = segment.toolDisplayName,
+        ) ?: "MCP"
+    }
     return toolBaseDisplayName(
-        kind = ToolPresentationResolver.kindForToolName(toolName),
+        kind = kind,
         toolName = toolName,
     )
+}
+
+private val MCP_PUBLIC_TOOL_NAME =
+    Regex("""^mcp_[A-Za-z0-9]+_(.+)_[0-9a-fA-F]{6}$""")
+private val TOOL_NAME_SEPARATOR = Regex("""[\s._-]+""")
+
+/**
+ * New calls use [resolvedName]. The public-name decoder is intentionally fallback-only for
+ * history written before provider presentation metadata was persisted.
+ */
+internal fun mcpToolDisplayName(
+    publicName: String?,
+    resolvedName: String?,
+): String? {
+    val remoteName = resolvedName
+        ?.takeIf { it.isNotBlank() }
+        ?: publicName
+            ?.let(MCP_PUBLIC_TOOL_NAME::matchEntire)
+            ?.groupValues
+            ?.getOrNull(1)
+    return remoteName
+        ?.trim()
+        ?.split(TOOL_NAME_SEPARATOR)
+        ?.filter(String::isNotBlank)
+        ?.joinToString(" ") { word ->
+            word.replaceFirstChar { char ->
+                if (char.isLowerCase()) char.uppercaseChar() else char
+            }
+        }
+        ?.takeIf(String::isNotBlank)
 }
 
 @Composable
@@ -52,6 +89,7 @@ private fun toolBaseDisplayName(
     ToolKind.TASK_DELETE -> stringResource(R.string.tool_delete_task)
     ToolKind.LOOP_START -> stringResource(R.string.tool_start_loop)
     ToolKind.LOOP_STOP -> stringResource(R.string.tool_stop_loop)
+    ToolKind.MCP -> "MCP"
     ToolKind.UNKNOWN -> toolName
         .ifBlank { stringResource(R.string.tool_context) }
         .split("_")
@@ -208,6 +246,7 @@ private fun runningSummary(
     )
     ToolKind.LOOP_START -> stringResource(R.string.tool_progress_starting)
     ToolKind.LOOP_STOP -> stringResource(R.string.tool_progress_stopping)
+    ToolKind.MCP,
     ToolKind.UNKNOWN -> stringResource(R.string.tool_calling_ellipsis)
 }
 
@@ -373,5 +412,6 @@ private fun completedSummary(
     ToolKind.TASK_DELETE -> stringResource(R.string.tool_deleted_task)
     ToolKind.LOOP_START -> stringResource(R.string.tool_started_loop)
     ToolKind.LOOP_STOP -> stringResource(R.string.tool_stopped_loop)
+    ToolKind.MCP,
     ToolKind.UNKNOWN -> stringResource(R.string.tool_done)
 }

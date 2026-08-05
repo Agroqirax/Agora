@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">제공자 이름</string>
     <string name="custom_provider_name_error">이름이 이미 존재하거나 유효하지 않습니다</string>
     <string name="custom_provider_url_error">기본 URL이 필요합니다</string>
-    <string name="custom_provider_delete_title">제공자 삭제</string>
+    <string name="custom_provider_delete_title">제공자를 삭제할까요?</string>
     <string name="custom_provider_delete_text">제공자 \"%1$s\"과(와) 모든 데이터를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</string>
     <string name="custom_provider_rename">저장</string>
     <string name="custom_provider_rename_title">제공자 이름 변경</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">기기 추가</string>
     <string name="shell_remove_device">제거</string>
     <string name="shell_no_devices">구성된 기기가 없습니다</string>
-    <string name="shell_delete_confirm_title">셸 기기 삭제</string>
+    <string name="shell_delete_confirm_title">셸 기기를 삭제할까요?</string>
     <string name="shell_delete_confirm_message">\"%1$s\"을(를) 삭제하시겠습니까?</string>
     <string name="shell_result_command">명령: %1$s</string>
     <string name="shell_result_error">오류: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">설치된 패키지가 없습니다. Alpine 기본만 있습니다.</string>
     <string name="sandbox_danger_zone">위험 구역</string>
     <string name="sandbox_reset">환경 재설정</string>
+    <string name="sandbox_reset_title">환경을 재설정할까요?</string>
     <string name="sandbox_reset_desc">Alpine rootfs 및 모든 패키지 제거</string>
     <string name="sandbox_reset_confirm">Alpine Linux rootfs와 설치된 모든 패키지가 삭제됩니다. 이 작업은 되돌릴 수 없습니다.</string>
     <string name="sandbox_not_supported">로컬 샌드박스가 지원되지 않습니다</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d개의 패키지 설치됨 · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">%s 제거</string>
+    <string name="sandbox_remove_pkg_title">%s을(를) 제거할까요?</string>
     <string name="sandbox_remove_pkg_desc">샌드박스에서 %s을(를) 제거하시겠습니까? 디스크 공간이 확보됩니다.</string>
     <string name="sandbox_remove_content_desc">패키지 제거</string>
     <string name="sandbox_manage">로컬 샌드박스 관리</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">로컬 모델 추가</string>
     <string name="model_name_label">이름</string>
     <string name="add">추가</string>
-    <string name="delete_model_title">임베딩 모델 삭제</string>
+    <string name="delete_model_title">임베딩 모델을 삭제할까요?</string>
     <string name="delete_model_confirm">이 모델의 캐시된 모든 임베딩도 삭제됩니다.</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5일</string>
     <string name="auto_backup_period_1w">1주</string>
     <string name="auto_backup_period_1mo">1개월</string>
-    <string name="auto_backup_categories_label">내보낼 콘텐츠</string>
+    <string name="auto_backup_categories_label">백업 콘텐츠</string>
     <string name="auto_backup_categories_desc">백업할 항목 선택</string>
-    <string name="auto_backup_categories_dialog_title">자동 백업 콘텐츠</string>
+    <string name="auto_backup_categories_dialog_title">백업 콘텐츠 선택</string>
     <string name="auto_backup_api_key_warning">API 키는 백업 파일에 암호화되지 않은 상태로 저장됩니다</string>
     <string name="auto_backup_directory_label">백업 위치</string>
     <string name="auto_delete_title">오래된 백업 자동 삭제</string>

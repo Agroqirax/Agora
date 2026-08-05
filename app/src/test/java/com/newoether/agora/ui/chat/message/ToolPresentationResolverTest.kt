@@ -2,7 +2,11 @@ package com.newoether.agora.ui.chat.message
 
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ToolExecutionStates
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.int
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -284,5 +288,57 @@ class ToolPresentationResolverTest {
         )
 
         assertEquals(null, shellOutputText(presentation))
+    }
+
+    @Test
+    fun mcpTitleUsesResolvedNameAndLegacyFallbackNeverLeaksRoutingParts() {
+        assertEquals(
+            "Read Image",
+            mcpToolDisplayName(
+                publicName = "mcp_server123_read_image_a1b2c3",
+                resolvedName = "read_image",
+            ),
+        )
+        assertEquals(
+            "Read Image",
+            mcpToolDisplayName(
+                publicName = "mcp_server123_read_image_a1b2c3",
+                resolvedName = null,
+            ),
+        )
+        assertNull(
+            mcpToolDisplayName(
+                publicName = "mcp_server123_read_image",
+                resolvedName = null,
+            ),
+        )
+    }
+
+    @Test
+    fun mcpStructuredResultIsParsedIndependentlyFromProtocolText() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "mcp_server123_inspect_a1b2c3",
+                toolResult = """Human summary
+
+                    {"value":7}
+                """.trimIndent(),
+                toolResultText = "Human summary",
+                toolStructuredResult = """{"value":7}""",
+                toolTarget = "Filesystem",
+                toolState = ToolExecutionStates.SUCCEEDED,
+            ),
+        )
+
+        assertEquals(ToolKind.MCP, presentation.kind)
+        assertEquals(
+            7,
+            ((presentation.result as JsonObject)["value"] as JsonPrimitive).int,
+        )
+        assertEquals("Human summary", presentation.rawTextResult)
+        assertEquals("""{"value":7}""", presentation.rawStructuredResult)
+        assertEquals("Filesystem", presentation.device)
+        assertEquals(ToolPresentationState.SUCCEEDED, presentation.state)
     }
 }

@@ -97,7 +97,7 @@ fun SettingsAutomationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     ) {
         SettingsGroupColumn(modifier = Modifier.fillMaxWidth()) {
             SettingsGroup(
-                title = stringResource(R.string.automation_ai_tools),
+                title = stringResource(R.string.settings_group_tools),
                 items = listOf({
                     SettingsItem(
                         headlineContent = { Text(stringResource(R.string.automation_ai_tools)) },

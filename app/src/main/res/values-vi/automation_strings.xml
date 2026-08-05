@@ -64,7 +64,7 @@
     <string name="loop_stop">Dừng vòng lặp</string>
     <string name="automation_notification_channel_desc">Thông báo liên tục khi một tự động hóa Agora đang chạy</string>
     <string name="settings_automation">Tự động hóa</string>
-    <string name="settings_automation_desc">Công cụ AI, vòng lặp và độ chính xác của lịch</string>
+    <string name="settings_automation_desc">Tác vụ, vòng lặp và độ chính xác của lịch</string>
     <string name="automation_ai_tools">Truy cập tác vụ và vòng lặp</string>
     <string name="automation_ai_tools_desc">Cho phép mô hình tạo và quản lý tác vụ hoặc bắt đầu và dừng vòng lặp cuộc trò chuyện. Mặc định tắt.</string>
     <string name="automation_scheduling">Lập lịch</string>

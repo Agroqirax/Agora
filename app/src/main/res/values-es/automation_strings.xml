@@ -64,7 +64,7 @@
     <string name="loop_stop">Detener bucle</string>
     <string name="automation_notification_channel_desc">Notificación permanente mientras se ejecuta una automatización de Agora</string>
     <string name="settings_automation">Automatización</string>
-    <string name="settings_automation_desc">Herramientas de IA, bucles y precisión de programación</string>
+    <string name="settings_automation_desc">Tareas, bucles y precisión de programación</string>
     <string name="automation_ai_tools">Acceder a tareas y bucles</string>
     <string name="automation_ai_tools_desc">Permite que el modelo cree y administre tareas o inicie y detenga bucles de conversación. Desactivado de forma predeterminada.</string>
     <string name="automation_scheduling">Programación</string>

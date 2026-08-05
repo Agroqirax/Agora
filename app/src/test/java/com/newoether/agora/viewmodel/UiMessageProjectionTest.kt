@@ -24,6 +24,9 @@ class UiMessageProjectionTest {
                 toolName = "shell",
                 toolArgs = """{"command":"pwd"}""",
                 toolResult = "workspace",
+                toolDisplayName = "Run shell",
+                toolResultText = "workspace",
+                toolStructuredResult = """{"path":"workspace"}""",
             ),
         )
         val entity = messageEntity(
@@ -39,6 +42,9 @@ class UiMessageProjectionTest {
         assertEquals("shell", projected.toolCall?.toolName)
         assertEquals("""{"command":"pwd"}""", projected.toolCall?.arguments)
         assertEquals("formatted:workspace", projected.toolCall?.result)
+        assertEquals("Run shell", projected.toolCall?.displayName)
+        assertEquals("workspace", projected.toolCall?.resultText)
+        assertEquals("""{"path":"workspace"}""", projected.toolCall?.structuredResult)
     }
 
     @Test

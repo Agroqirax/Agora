@@ -14,6 +14,14 @@ class McpToolProvider(
 
     override fun handles(name: String): Boolean = registry.descriptor(name) != null
 
+    override fun presentationMetadata(name: String): ToolPresentationMetadata? =
+        registry.descriptor(name)?.let { descriptor ->
+            ToolPresentationMetadata(
+                displayName = descriptor.remote.name,
+                target = descriptor.serverName,
+            )
+        }
+
     override suspend fun execute(
         name: String,
         arguments: String,
@@ -25,8 +33,8 @@ class McpToolProvider(
         arguments: String,
         ctx: GenerationContext,
     ): Flow<ToolExecutionEvent> = flow {
-        registry.descriptor(name)?.let {
-            emit(ToolExecutionEvent.TargetResolved(it.serverName))
+        presentationMetadata(name)?.target?.let { target ->
+            emit(ToolExecutionEvent.TargetResolved(target))
         }
         emit(ToolExecutionEvent.Progress("Calling MCP tool"))
         emit(ToolExecutionEvent.Completed(registry.execute(name, arguments)))

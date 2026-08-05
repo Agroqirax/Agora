@@ -64,7 +64,7 @@
     <string name="loop_stop">إيقاف الحلقة</string>
     <string name="automation_notification_channel_desc">إشعار مستمر أثناء تشغيل أتمتة Agora</string>
     <string name="settings_automation">الأتمتة</string>
-    <string name="settings_automation_desc">أدوات الذكاء الاصطناعي والحلقات ودقة الجدولة</string>
+    <string name="settings_automation_desc">المهام والحلقات ودقة الجدولة</string>
     <string name="automation_ai_tools">الوصول إلى المهام والحلقات</string>
     <string name="automation_ai_tools_desc">السماح للنموذج بإنشاء المهام وإدارتها أو بدء حلقات المحادثة وإيقافها. معطّل افتراضيًا.</string>
     <string name="automation_scheduling">الجدولة</string>

@@ -91,4 +91,52 @@ class StreamingJsonDocumentTest {
         assertEquals(StreamingJsonStatus.COMPLETE, document.status)
         assertTrue(checkNotNull(document.root).complete)
     }
+
+    @Test
+    fun whitespaceSeparatedTopLevelValues_formACompleteJsonSequence() {
+        val document = StreamingJsonParser.parse(
+            """{"first":1}
+
+                {"second":2}
+            """.trimIndent(),
+        )
+
+        assertEquals(StreamingJsonStatus.COMPLETE, document.status)
+        assertEquals(2, document.roots.size)
+        assertTrue(document.roots.all(StreamingJsonNode::complete))
+    }
+
+    @Test
+    fun secondTopLevelValue_canRemainIncompleteWhileStreaming() {
+        val document = StreamingJsonParser.parse(
+            """{"first":1}
+                {"second":""".trimIndent(),
+        )
+
+        assertEquals(StreamingJsonStatus.INCOMPLETE, document.status)
+        assertEquals(2, document.roots.size)
+        assertTrue(document.roots.first().complete)
+        assertFalse(document.roots.last().complete)
+    }
+
+    @Test
+    fun topLevelValuesWithoutWhitespaceRemainInvalid() {
+        val document = StreamingJsonParser.parse("""{"first":1}{"second":2}""")
+
+        assertEquals(StreamingJsonStatus.INVALID, document.status)
+        assertEquals(11, document.errorOffset)
+    }
+
+    @Test
+    fun adjacentIdenticalCompleteRootsAreDisplayedOnce() {
+        val document = StreamingJsonParser.parse(
+            """{"ok":true}
+                {"ok":true}
+            """.trimIndent(),
+        )
+
+        val visible = visibleJsonRoots(document.roots)
+
+        assertEquals(1, visible.size)
+    }
 }

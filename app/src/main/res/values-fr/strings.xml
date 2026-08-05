@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">Nom du fournisseur</string>
     <string name="custom_provider_name_error">Le nom existe déjà ou est invalide</string>
     <string name="custom_provider_url_error">L\'URL de base est obligatoire</string>
-    <string name="custom_provider_delete_title">Supprimer le fournisseur</string>
+    <string name="custom_provider_delete_title">Supprimer le fournisseur ?</string>
     <string name="custom_provider_delete_text">Supprimer le fournisseur \"%1$s\" et toutes ses données ? Cette action est irréversible.</string>
     <string name="custom_provider_rename">Enregistrer</string>
     <string name="custom_provider_rename_title">Renommer le fournisseur</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">Ajouter un appareil</string>
     <string name="shell_remove_device">Retirer</string>
     <string name="shell_no_devices">Aucun appareil configuré</string>
-    <string name="shell_delete_confirm_title">Supprimer l\'appareil shell</string>
+    <string name="shell_delete_confirm_title">Supprimer l\'appareil shell ?</string>
     <string name="shell_delete_confirm_message">Voulez-vous vraiment supprimer \"%1$s\" ?</string>
     <string name="shell_result_command">Commande : %1$s</string>
     <string name="shell_result_error">Erreur : %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">Aucun paquet installé. Base Alpine uniquement.</string>
     <string name="sandbox_danger_zone">Zone de danger</string>
     <string name="sandbox_reset">Réinitialiser l\'environnement</string>
+    <string name="sandbox_reset_title">Réinitialiser l\'environnement ?</string>
     <string name="sandbox_reset_desc">Supprimer le rootfs Alpine et tous les paquets</string>
     <string name="sandbox_reset_confirm">Cela supprimera le rootfs Alpine Linux et tous les paquets installés. Cette action est irréversible.</string>
     <string name="sandbox_not_supported">Bac à sable local non pris en charge</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d paquets installés · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d Mo / 2 Go</string>
     <string name="sandbox_disk_usage_gb">~%.1f Go / 2 Go</string>
-    <string name="sandbox_remove_pkg_title">Supprimer %s</string>
+    <string name="sandbox_remove_pkg_title">Supprimer %s ?</string>
     <string name="sandbox_remove_pkg_desc">Supprimer %s du bac à sable ? Cela libérera son espace disque.</string>
     <string name="sandbox_remove_content_desc">Supprimer le paquet</string>
     <string name="sandbox_manage">Gérer le bac à sable local</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">Ajouter un modèle local</string>
     <string name="model_name_label">Nom</string>
     <string name="add">Ajouter</string>
-    <string name="delete_model_title">Supprimer le modèle d\'embedding</string>
+    <string name="delete_model_title">Supprimer le modèle d\'embedding ?</string>
     <string name="delete_model_confirm">Cela supprimera également tous les embeddings en cache pour ce modèle.</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5 jours</string>
     <string name="auto_backup_period_1w">1 semaine</string>
     <string name="auto_backup_period_1mo">1 mois</string>
-    <string name="auto_backup_categories_label">Contenu à exporter</string>
+    <string name="auto_backup_categories_label">Contenu de la sauvegarde</string>
     <string name="auto_backup_categories_desc">Choisissez quoi sauvegarder</string>
-    <string name="auto_backup_categories_dialog_title">Contenu de la sauvegarde automatique</string>
+    <string name="auto_backup_categories_dialog_title">Choisir le contenu de la sauvegarde</string>
     <string name="auto_backup_api_key_warning">Les clés d\'API seront enregistrées non chiffrées dans le fichier de sauvegarde</string>
     <string name="auto_backup_directory_label">Emplacement de la sauvegarde</string>
     <string name="auto_delete_title">Supprimer automatiquement les anciennes sauvegardes</string>

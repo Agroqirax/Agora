@@ -117,11 +117,21 @@ class McpRegistry(
                 }
             }
             val structured = payload.structuredContent?.toString()
-            val resultText = buildString {
-                payload.textParts.filter(String::isNotBlank).forEachIndexed { index, part ->
-                    if (index > 0) append("\n\n")
-                    append(part)
+            val contentText = payload.textParts
+                .filter(String::isNotBlank)
+                .joinToString("\n\n")
+            // MCP servers commonly repeat structuredContent as a text block for older clients.
+            // Compare the actual JSON trees, not spelling, so the detail UI never shows the same
+            // payload twice while still preserving distinct explanatory text.
+            val displayText = contentText
+                .takeIf(String::isNotBlank)
+                ?.takeUnless { text ->
+                    payload.structuredContent != null &&
+                        runCatching { json.parseToJsonElement(text) }.getOrNull() ==
+                        payload.structuredContent
                 }
+            val resultText = buildString {
+                append(contentText)
                 if (!structured.isNullOrBlank()) {
                     if (isNotEmpty()) append("\n\n")
                     append(structured)
@@ -143,6 +153,7 @@ class McpRegistry(
                 text = resultText,
                 images = attachments,
                 structuredContent = structured,
+                displayText = displayText,
                 isError = payload.isError,
             )
         } catch (e: CancellationException) {

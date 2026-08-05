@@ -64,7 +64,7 @@
     <string name="loop_stop">停止迴圈</string>
     <string name="automation_notification_channel_desc">Agora 自動化執行時顯示的常駐通知</string>
     <string name="settings_automation">自動化</string>
-    <string name="settings_automation_desc">AI 工具、對話迴圈與排程精度</string>
+    <string name="settings_automation_desc">任務、對話迴圈與排程精度</string>
     <string name="automation_ai_tools">存取任務與迴圈</string>
     <string name="automation_ai_tools_desc">允許模型建立和管理任務，或啟動、停止對話迴圈。預設關閉。</string>
     <string name="automation_scheduling">排程</string>

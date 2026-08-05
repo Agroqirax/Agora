@@ -28,11 +28,13 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import com.newoether.agora.R
 import com.newoether.agora.ui.settings.datacontrol.SettingsDataControlPage
@@ -129,12 +131,18 @@ fun SettingsItem(
     leadingContent: (@Composable () -> Unit)? = null,
     trailingContent: (@Composable () -> Unit)? = null,
     leadingSpacing: Dp = 16.dp,
+    endPadding: Dp = 16.dp,
 ) {
     val verticalPadding = if (supportingContent == null) 12.dp else 16.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = verticalPadding),
+            .padding(
+                start = 16.dp,
+                end = endPadding,
+                top = verticalPadding,
+                bottom = verticalPadding,
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (leadingContent != null) {
@@ -169,11 +177,55 @@ fun SettingsItem(
     }
 }
 
+/**
+ * Canonical centered add action for settings groups.
+ *
+ * Keep this aligned with the settings row contract instead of recreating its
+ * dimensions in individual pages.
+ */
+@Composable
+fun SettingsAddItem(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val contentColor = if (enabled) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+                tint = contentColor,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                color = contentColor,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}
+
 private data class SettingsCategory(
     val key: String,
     @StringRes val titleRes: Int,
     @StringRes val descriptionRes: Int,
-    val icon: ImageVector
+    val icon: ImageVector? = null,
+    @DrawableRes val iconRes: Int? = null,
 )
 
 private data class SettingsGroupData(
@@ -199,7 +251,12 @@ private val settingsGroups = listOf(
         SettingsCategory("websearch", R.string.settings_web_search, R.string.settings_web_search_desc, Icons.Default.Language),
         SettingsCategory("search", R.string.search_title, R.string.search_desc, Icons.Default.Search),
         SettingsCategory("shell", R.string.shell_title, R.string.shell_desc, Icons.Default.Terminal),
-        SettingsCategory("mcp", R.string.mcp_title, R.string.mcp_desc, Icons.Default.Hub),
+        SettingsCategory(
+            "mcp",
+            R.string.mcp_title,
+            R.string.mcp_desc,
+            iconRes = R.drawable.ic_mcp,
+        ),
         SettingsCategory("automation", R.string.settings_automation, R.string.settings_automation_desc, Icons.Default.Repeat),
     )),
     SettingsGroupData(titleRes = R.string.settings_group_network, items = listOf(
@@ -310,12 +367,21 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                 .padding(horizontal = 16.dp, vertical = 16.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Icon(
-                                                cat.icon,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(24.dp)
-                                            )
+                                            if (cat.iconRes != null) {
+                                                Icon(
+                                                    painter = painterResource(cat.iconRes),
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = checkNotNull(cat.icon),
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(24.dp),
+                                                )
+                                            }
                                             Spacer(modifier = Modifier.width(16.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(

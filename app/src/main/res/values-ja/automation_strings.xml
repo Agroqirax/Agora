@@ -64,7 +64,7 @@
     <string name="loop_stop">ループを停止</string>
     <string name="automation_notification_channel_desc">Agoraの自動化を実行中に表示する常駐通知</string>
     <string name="settings_automation">自動化</string>
-    <string name="settings_automation_desc">AIツール、ループ、スケジュール精度</string>
+    <string name="settings_automation_desc">タスク、ループ、スケジュール精度</string>
     <string name="automation_ai_tools">タスクとループへのアクセス</string>
     <string name="automation_ai_tools_desc">モデルによるタスクの作成と管理、会話ループの開始と停止を許可します。デフォルトではオフです。</string>
     <string name="automation_scheduling">スケジュール</string>

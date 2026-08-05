@@ -5,7 +5,7 @@
     <string name="mcp_servers">MCP-Server</string>
     <string name="mcp_no_servers">Keine MCP-Server</string>
     <string name="mcp_no_servers_desc">Füge einen Streamable-HTTP- oder SSE-Endpunkt hinzu, um dessen Tools in Unterhaltungen zu verwenden.</string>
-    <string name="mcp_add_server">Server hinzufügen</string>
+    <string name="mcp_add_server">MCP-Server hinzufügen</string>
     <string name="mcp_edit_server">MCP-Server bearbeiten</string>
     <string name="mcp_delete_title">MCP-Server löschen?</string>
     <string name="mcp_delete_message">%1$s löschen und seine Tools entfernen?</string>
@@ -18,9 +18,10 @@
     <string name="mcp_url_error">Gib eine gültige http://- oder https://-URL ein</string>
     <string name="mcp_headers">Benutzerdefinierte Header</string>
     <string name="mcp_headers_desc">Füge nur die vom Server benötigten Header hinzu. Werte werden verschlüsselt gespeichert.</string>
+    <string name="mcp_no_headers">Keine benutzerdefinierten Header</string>
     <string name="mcp_headers_error">Jede Zeile muss „Name: Wert“ verwenden</string>
     <string name="mcp_header_name">Headername</string>
-    <string name="mcp_header_value">Wert</string>
+    <string name="mcp_header_value">Header-Wert</string>
     <string name="mcp_header_name_error">Verwende einen eindeutigen, nicht reservierten HTTP-Headernamen</string>
     <string name="mcp_header_value_error">Gib einen Wert ohne Steuerzeichen ein</string>
     <string name="mcp_add_header">Header hinzufügen</string>
@@ -32,7 +33,8 @@
     <string name="mcp_status">Status</string>
     <string name="mcp_status_idle">Inaktiv</string>
     <string name="mcp_status_connecting">Verbindung wird hergestellt…</string>
-    <string name="mcp_status_connected">Verbunden · %1$d Tools aktiviert</string>
+    <string name="mcp_status_connected">Verbunden</string>
+    <string name="mcp_tools_enabled">%1$d Tools aktiviert</string>
     <string name="mcp_status_error">Verbindungsfehler</string>
     <string name="mcp_refresh">Neu verbinden und Tools synchronisieren</string>
     <string name="mcp_tools_count">Tools (%1$d)</string>

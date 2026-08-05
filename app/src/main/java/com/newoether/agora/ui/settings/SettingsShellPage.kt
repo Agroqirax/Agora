@@ -121,20 +121,14 @@ fun SettingsShellPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         shellDevices.forEach { device -> add { DeviceEditor(viewModel, device, scrollState, density, newlyAddedDeviceId, onNewDeviceId = { newlyAddedDeviceId = it }, onDeleteConfirm = { deleteConfirmDeviceId = it }) } }
                     }
                     add {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable {
+                        SettingsAddItem(
+                            label = stringResource(R.string.shell_add_device),
+                            onClick = {
                                 val newId = UUID.randomUUID().toString()
                                 newlyAddedDeviceId = newId
                                 viewModel.addShellDevice(ShellDeviceConfig(id = newId, name = "", description = ""))
-                            }.padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
-                                Text(stringResource(R.string.shell_add_device), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
+                            },
+                        )
                     }
                 })
             }
@@ -185,7 +179,11 @@ private fun SandboxSection(viewModel: ChatViewModel, sandboxEnabled: Boolean, on
                     supportingContent = { Text(stringResource(R.string.sandbox_manage_desc)) },
                     leadingContent = { Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.primary) },
                     trailingContent = {
-                        Icon(Icons.Default.ChevronRight, stringResource(R.string.edit), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            stringResource(R.string.edit),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
                     },
                     modifier = Modifier.clickable { onManage() }
                 )

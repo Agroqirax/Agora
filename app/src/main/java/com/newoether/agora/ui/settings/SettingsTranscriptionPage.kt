@@ -148,16 +148,10 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                     if (availableToAdd.isNotEmpty()) {
                         add {
-                            Box(
-                                modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable { showAddDialog = true }.padding(horizontal = 16.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(stringResource(R.string.transcription_add_model), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                                }
-                            }
+                            SettingsAddItem(
+                                label = stringResource(R.string.transcription_add_model),
+                                onClick = { showAddDialog = true },
+                            )
                         }
                     }
                 }

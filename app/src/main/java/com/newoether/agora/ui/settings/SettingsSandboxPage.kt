@@ -39,6 +39,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -206,10 +207,9 @@ fun SettingsSandboxPage(
                                 },
                                 leadingContent = {
                                     Icon(
-                                        if (installingRootfs) Icons.Default.HourglassTop else Icons.Default.Warning,
-                                        null,
-                                        tint = if (installingRootfs) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.error
+                                        painter = painterResource(R.drawable.ic_alpine_linux),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
                                     )
                                 },
                                 trailingContent = {
@@ -257,9 +257,9 @@ fun SettingsSandboxPage(
                                 },
                                 leadingContent = {
                                     Icon(
-                                        Icons.Default.CheckCircle,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.primary
+                                        painter = painterResource(R.drawable.ic_alpine_linux),
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
                                     )
                                 },
                                 trailingContent = {
@@ -665,7 +665,7 @@ fun SettingsSandboxPage(
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { resetConfirm = false },
-            title = { Text(stringResource(R.string.sandbox_reset), fontWeight = FontWeight.Bold) },
+            title = { Text(stringResource(R.string.sandbox_reset_title), fontWeight = FontWeight.Bold) },
             text = { Text(stringResource(R.string.sandbox_reset_confirm)) },
             confirmButton = {
                 TextButton(

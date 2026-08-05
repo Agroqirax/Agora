@@ -62,6 +62,16 @@ internal fun ToolDetailContent(
         Spacer(Modifier.height(18.dp))
     }
 
+    if (presentation.kind == ToolKind.MCP) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MetaPill(text = "MCP", emphasized = true)
+            presentation.device
+                ?.takeIf(String::isNotBlank)
+                ?.let { MetaPill(it) }
+        }
+        Spacer(Modifier.height(18.dp))
+    }
+
     ToolSectionLabel(stringResource(R.string.result_label))
     Spacer(Modifier.height(6.dp))
     if (segment.toolImages.isNotEmpty()) {
@@ -91,6 +101,16 @@ internal fun ToolDetailContent(
             ToolErrorContent(
                 presentation.errorMessage ?: stringResource(R.string.tool_call_failed),
             )
+            if (
+                presentation.kind == ToolKind.MCP &&
+                (
+                    !presentation.rawTextResult.isNullOrBlank() ||
+                        !presentation.rawStructuredResult.isNullOrBlank()
+                    )
+            ) {
+                Spacer(Modifier.height(10.dp))
+                McpResultContent(presentation)
+            }
             if (!presentation.liveOutput.isNullOrBlank()) {
                 Spacer(Modifier.height(8.dp))
                 TerminalOutput(presentation.liveOutput)
@@ -259,6 +279,7 @@ private fun ToolCompletedContent(
     presentation: ToolPresentation,
 ) {
     when (presentation.kind) {
+        ToolKind.MCP -> McpResultContent(presentation)
         ToolKind.FILE_GLOB -> FileGlobResult(presentation)
         ToolKind.FILE_GREP -> FileGrepResult(presentation)
         ToolKind.FILE_READ -> FileReadResult(presentation)
@@ -270,6 +291,30 @@ private fun ToolCompletedContent(
             } else {
                 JsonOrPlainView(result)
             }
+        }
+    }
+}
+
+@Composable
+private fun McpResultContent(
+    presentation: ToolPresentation,
+) {
+    val text = presentation.rawTextResult?.takeIf(String::isNotBlank)
+    val structured = presentation.rawStructuredResult?.takeIf(String::isNotBlank)
+
+    if (text != null) {
+        JsonOrPlainView(text)
+    }
+    if (structured != null) {
+        if (text != null) Spacer(Modifier.height(12.dp))
+        JsonOrPlainView(structured)
+    }
+    if (text == null && structured == null) {
+        val legacyResult = presentation.rawResult
+        if (legacyResult.isNullOrEmpty()) {
+            ToolMutedContent(toolSummary(presentation))
+        } else {
+            JsonOrPlainView(legacyResult)
         }
     }
 }

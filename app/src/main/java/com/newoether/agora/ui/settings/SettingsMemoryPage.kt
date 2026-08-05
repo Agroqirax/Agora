@@ -7,7 +7,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -175,7 +174,11 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     trailingContent = {
                                         Box {
                                             IconButton(onClick = { showFileMenu = true }) {
-                                                Icon(Icons.Default.MoreVert, stringResource(R.string.menu), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f))
+                                                Icon(
+                                                    Icons.Default.MoreVert,
+                                                    stringResource(R.string.menu),
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                )
                                             }
                                             DropdownMenu(
                                                 containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -230,22 +233,11 @@ fun SettingsMemoryPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         }
                     }
                     add {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 56.dp)
-                                .clickable(
-                                    enabled = memoryLoaded && !memoryOperationInFlight,
-                                ) { showNewFileDialog = true }
-                                .padding(horizontal = 16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Add, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(stringResource(R.string.memory_add), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                            }
-                        }
+                        SettingsAddItem(
+                            label = stringResource(R.string.memory_add),
+                            enabled = memoryLoaded && !memoryOperationInFlight,
+                            onClick = { showNewFileDialog = true },
+                        )
                     }
                 }
             )

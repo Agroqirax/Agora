@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">プロバイダー名</string>
     <string name="custom_provider_name_error">名前が既に存在するか、無効です</string>
     <string name="custom_provider_url_error">ベース URL は必須です</string>
-    <string name="custom_provider_delete_title">プロバイダーを削除</string>
+    <string name="custom_provider_delete_title">プロバイダーを削除しますか？</string>
     <string name="custom_provider_delete_text">プロバイダー \"%1$s\" とそのすべてのデータを削除しますか? この操作は取り消せません。</string>
     <string name="custom_provider_rename">保存</string>
     <string name="custom_provider_rename_title">プロバイダーの名前を変更</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">デバイスを追加</string>
     <string name="shell_remove_device">削除</string>
     <string name="shell_no_devices">設定済みのデバイスがありません</string>
-    <string name="shell_delete_confirm_title">シェルデバイスを削除</string>
+    <string name="shell_delete_confirm_title">シェルデバイスを削除しますか？</string>
     <string name="shell_delete_confirm_message">\"%1$s\" を削除してもよろしいですか?</string>
     <string name="shell_result_command">コマンド: %1$s</string>
     <string name="shell_result_error">エラー: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">パッケージがインストールされていません。Alpine ベースのみ。</string>
     <string name="sandbox_danger_zone">危険ゾーン</string>
     <string name="sandbox_reset">環境をリセット</string>
+    <string name="sandbox_reset_title">環境をリセットしますか？</string>
     <string name="sandbox_reset_desc">Alpine rootfs とすべてのパッケージを削除</string>
     <string name="sandbox_reset_confirm">これにより Alpine Linux の rootfs とインストール済みのすべてのパッケージが削除されます。この操作は取り消せません。</string>
     <string name="sandbox_not_supported">ローカルサンドボックスは未対応です</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d 個のパッケージをインストール済み · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">%s を削除</string>
+    <string name="sandbox_remove_pkg_title">%s を削除しますか？</string>
     <string name="sandbox_remove_pkg_desc">%s をサンドボックスから削除しますか? ディスク領域が解放されます。</string>
     <string name="sandbox_remove_content_desc">パッケージを削除</string>
     <string name="sandbox_manage">ローカルサンドボックスを管理</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">ローカルモデルを追加</string>
     <string name="model_name_label">名前</string>
     <string name="add">追加</string>
-    <string name="delete_model_title">埋め込みモデルを削除</string>
+    <string name="delete_model_title">埋め込みモデルを削除しますか？</string>
     <string name="delete_model_confirm">これにより、このモデルのキャッシュされたすべての埋め込みも削除されます。</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5 日</string>
     <string name="auto_backup_period_1w">1 週間</string>
     <string name="auto_backup_period_1mo">1 か月</string>
-    <string name="auto_backup_categories_label">エクスポートする内容</string>
+    <string name="auto_backup_categories_label">バックアップ内容</string>
     <string name="auto_backup_categories_desc">バックアップする内容を選択</string>
-    <string name="auto_backup_categories_dialog_title">自動バックアップの内容</string>
+    <string name="auto_backup_categories_dialog_title">バックアップ内容を選択</string>
     <string name="auto_backup_api_key_warning">API キーはバックアップファイルに暗号化されずに保存されます</string>
     <string name="auto_backup_directory_label">バックアップ場所</string>
     <string name="auto_delete_title">古いバックアップを自動削除</string>

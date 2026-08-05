@@ -3,6 +3,8 @@ package com.newoether.agora.ui.settings
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -11,7 +13,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -77,18 +78,42 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             // -- Updates --
             SettingsGroup(title = stringResource(R.string.about_updates), items = buildList {
                 add {
+                    val updateLabel = if (isChecking) {
+                        stringResource(R.string.about_checking)
+                    } else {
+                        updateStatus ?: stringResource(R.string.about_check_updates)
+                    }
                     SettingsItem(
                         headlineContent = {
-                            Text(
-                                if (isChecking) stringResource(R.string.about_checking)
-                                else updateStatus ?: stringResource(R.string.about_check_updates)
-                            )
+                            Crossfade(
+                                targetState = updateLabel,
+                                animationSpec = tween(durationMillis = 250),
+                                label = "aboutUpdateLabel",
+                            ) { label ->
+                                Text(label)
+                            }
                         },
                         supportingContent = { Text(stringResource(R.string.about_check_updates_desc)) },
-                        leadingContent = { Icon(Icons.Default.Download, null, tint = MaterialTheme.colorScheme.primary) },
-                        trailingContent = {
-                            if (isChecking) {
-                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        leadingContent = {
+                            Crossfade(
+                                targetState = isChecking,
+                                animationSpec = tween(durationMillis = 250),
+                                label = "aboutUpdateIcon",
+                            ) { checking ->
+                                if (checking) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.5.dp,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Download,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                }
                             }
                         },
                         modifier = Modifier.clickable(enabled = !isChecking) {
@@ -137,28 +162,52 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_github), modifier = Modifier.padding(vertical = 6.dp)) },
                     leadingContent = { Icon(Icons.Default.Code, contentDescription = null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                    trailingContent = {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                     modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora") }
                 )
             }, {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_issue_tracker), modifier = Modifier.padding(vertical = 6.dp)) },
                     leadingContent = { Icon(Icons.Default.BugReport, contentDescription = null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                    trailingContent = {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                     modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora/issues") }
                 )
             }, {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_contribute), modifier = Modifier.padding(vertical = 6.dp)) },
                     leadingContent = { Icon(Icons.Default.VolunteerActivism, contentDescription = null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                    trailingContent = {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                     modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora/pulls") }
                 )
             }, {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_privacy_policy), modifier = Modifier.padding(vertical = 6.dp)) },
                     leadingContent = { Icon(Icons.Default.VerifiedUser, contentDescription = null) },
-                    trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null) },
+                    trailingContent = {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    },
                     modifier = Modifier.clickable { openUrl("https://github.com/newo-ether/Agora/blob/master/PRIVACY.md") }
                 )
             }))

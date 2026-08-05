@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">اسم المزوّد</string>
     <string name="custom_provider_name_error">الاسم موجود بالفعل أو غير صالح</string>
     <string name="custom_provider_url_error">عنوان URL الأساسي مطلوب</string>
-    <string name="custom_provider_delete_title">حذف المزوّد</string>
+    <string name="custom_provider_delete_title">حذف المزوّد؟</string>
     <string name="custom_provider_delete_text">حذف المزوّد \"%1$s\" وجميع بياناته؟ لا يمكن التراجع عن هذا الإجراء.</string>
     <string name="custom_provider_rename">حفظ</string>
     <string name="custom_provider_rename_title">إعادة تسمية المزوّد</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">إضافة جهاز</string>
     <string name="shell_remove_device">إزالة</string>
     <string name="shell_no_devices">لا توجد أجهزة مهيأة</string>
-    <string name="shell_delete_confirm_title">حذف جهاز الصدفة</string>
+    <string name="shell_delete_confirm_title">حذف جهاز الصدفة؟</string>
     <string name="shell_delete_confirm_message">هل أنت متأكد أنك تريد حذف \"%1$s\"؟</string>
     <string name="shell_result_command">الأمر: %1$s</string>
     <string name="shell_result_error">خطأ: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">لا توجد حزم مثبتة. قاعدة Alpine فقط.</string>
     <string name="sandbox_danger_zone">منطقة الخطر</string>
     <string name="sandbox_reset">إعادة تعيين البيئة</string>
+    <string name="sandbox_reset_title">إعادة تعيين البيئة؟</string>
     <string name="sandbox_reset_desc">إزالة نظام ملفات Alpine الجذري وجميع الحزم</string>
     <string name="sandbox_reset_confirm">سيؤدي هذا إلى حذف نظام ملفات Alpine Linux الجذري وجميع الحزم المثبتة. لا يمكن التراجع عن هذا الإجراء.</string>
     <string name="sandbox_not_supported">الصندوق الرملي المحلي غير مدعوم</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d حزمة مثبتة · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d ميجابايت / 2 جيجابايت</string>
     <string name="sandbox_disk_usage_gb">~%.1f جيجابايت / 2 جيجابايت</string>
-    <string name="sandbox_remove_pkg_title">إزالة %s</string>
+    <string name="sandbox_remove_pkg_title">إزالة %s؟</string>
     <string name="sandbox_remove_pkg_desc">إزالة %s من الصندوق الرملي؟ سيؤدي ذلك إلى تحرير مساحة القرص الخاصة به.</string>
     <string name="sandbox_remove_content_desc">إزالة الحزمة</string>
     <string name="sandbox_manage">إدارة الصندوق الرملي المحلي</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">إضافة نموذج محلي</string>
     <string name="model_name_label">الاسم</string>
     <string name="add">إضافة</string>
-    <string name="delete_model_title">حذف نموذج التضمين</string>
+    <string name="delete_model_title">حذف نموذج التضمين؟</string>
     <string name="delete_model_confirm">سيؤدي هذا أيضًا إلى حذف جميع التضمينات المخزّنة مؤقتًا لهذا النموذج.</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5 أيام</string>
     <string name="auto_backup_period_1w">أسبوع واحد</string>
     <string name="auto_backup_period_1mo">شهر واحد</string>
-    <string name="auto_backup_categories_label">المحتوى المراد تصديره</string>
+    <string name="auto_backup_categories_label">محتوى النسخ الاحتياطي</string>
     <string name="auto_backup_categories_desc">اختر ما تريد نسخه احتياطيًا</string>
-    <string name="auto_backup_categories_dialog_title">محتوى النسخ الاحتياطي التلقائي</string>
+    <string name="auto_backup_categories_dialog_title">اختيار محتوى النسخ الاحتياطي</string>
     <string name="auto_backup_api_key_warning">سيتم تخزين مفاتيح API بدون تشفير في ملف النسخ الاحتياطي</string>
     <string name="auto_backup_directory_label">موقع النسخ الاحتياطي</string>
     <string name="auto_delete_title">حذف النسخ الاحتياطية القديمة تلقائيًا</string>

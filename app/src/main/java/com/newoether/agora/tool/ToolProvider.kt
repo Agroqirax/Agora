@@ -31,7 +31,15 @@ data class ToolExecutionResult(
     val text: String,
     val images: List<ToolImageAttachment> = emptyList(),
     val structuredContent: String? = null,
+    /** Human-readable content for UI display when [text] also carries protocol JSON/attachments. */
+    val displayText: String? = null,
     val isError: Boolean = false,
+)
+
+/** Provider-owned presentation metadata resolved without exposing protocol routing IDs to the UI. */
+data class ToolPresentationMetadata(
+    val displayName: String,
+    val target: String? = null,
 )
 
 /**
@@ -62,4 +70,10 @@ interface ToolProvider {
 
     /** Whether this provider can execute the given tool name. */
     fun handles(name: String): Boolean
+
+    /**
+     * Resolve stable UI metadata as soon as a streamed tool name is complete. The default keeps
+     * built-in tools on their localized presentation path.
+     */
+    fun presentationMetadata(name: String): ToolPresentationMetadata? = null
 }

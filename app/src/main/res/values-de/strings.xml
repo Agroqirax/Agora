@@ -222,7 +222,7 @@
     <string name="custom_provider_name_label">Anbietername</string>
     <string name="custom_provider_name_error">Der Name existiert bereits oder ist ungültig</string>
     <string name="custom_provider_url_error">Basis-URL ist erforderlich</string>
-    <string name="custom_provider_delete_title">Anbieter löschen</string>
+    <string name="custom_provider_delete_title">Anbieter löschen?</string>
     <string name="custom_provider_delete_text">Anbieter \"%1$s\" und alle zugehörigen Daten löschen? Diese Aktion kann nicht rückgängig gemacht werden.</string>
     <string name="custom_provider_rename">Speichern</string>
     <string name="custom_provider_rename_title">Anbieter umbenennen</string>
@@ -393,7 +393,7 @@
     <string name="shell_add_device">Gerät hinzufügen</string>
     <string name="shell_remove_device">Entfernen</string>
     <string name="shell_no_devices">Keine Geräte konfiguriert</string>
-    <string name="shell_delete_confirm_title">Shell-Gerät löschen</string>
+    <string name="shell_delete_confirm_title">Shell-Gerät löschen?</string>
     <string name="shell_delete_confirm_message">Möchtest du \"%1$s\" wirklich löschen?</string>
     <string name="shell_result_command">Befehl: %1$s</string>
     <string name="shell_result_error">Fehler: %1$s</string>
@@ -424,6 +424,7 @@
     <string name="sandbox_no_packages">Keine Pakete installiert. Nur Alpine-Basis.</string>
     <string name="sandbox_danger_zone">Gefahrenzone</string>
     <string name="sandbox_reset">Umgebung zurücksetzen</string>
+    <string name="sandbox_reset_title">Umgebung zurücksetzen?</string>
     <string name="sandbox_reset_desc">Alpine-rootfs und alle Pakete entfernen</string>
     <string name="sandbox_reset_confirm">Dadurch werden das Alpine-Linux-rootfs und alle installierten Pakete gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.</string>
     <string name="sandbox_not_supported">Lokale Sandbox nicht unterstützt</string>
@@ -447,7 +448,7 @@
     <string name="sandbox_dashboard_summary">%d Pakete installiert · aarch64</string>
     <string name="sandbox_disk_usage_mb">~%d MB / 2 GB</string>
     <string name="sandbox_disk_usage_gb">~%.1f GB / 2 GB</string>
-    <string name="sandbox_remove_pkg_title">%s entfernen</string>
+    <string name="sandbox_remove_pkg_title">%s entfernen?</string>
     <string name="sandbox_remove_pkg_desc">%s aus der Sandbox entfernen? Dadurch wird der Speicherplatz freigegeben.</string>
     <string name="sandbox_remove_content_desc">Paket entfernen</string>
     <string name="sandbox_manage">Lokale Sandbox verwalten</string>
@@ -622,7 +623,7 @@
     <string name="add_local_model">Lokales Modell hinzufügen</string>
     <string name="model_name_label">Name</string>
     <string name="add">Hinzufügen</string>
-    <string name="delete_model_title">Embedding-Modell löschen</string>
+    <string name="delete_model_title">Embedding-Modell löschen?</string>
     <string name="delete_model_confirm">Dadurch werden auch alle zwischengespeicherten Embeddings für dieses Modell gelöscht.</string>
 
     <!-- Errors -->
@@ -905,9 +906,9 @@
     <string name="auto_backup_period_5d">5 Tage</string>
     <string name="auto_backup_period_1w">1 Woche</string>
     <string name="auto_backup_period_1mo">1 Monat</string>
-    <string name="auto_backup_categories_label">Zu exportierender Inhalt</string>
+    <string name="auto_backup_categories_label">Sicherungsinhalte</string>
     <string name="auto_backup_categories_desc">Wähle, was gesichert werden soll</string>
-    <string name="auto_backup_categories_dialog_title">Inhalt der automatischen Sicherung</string>
+    <string name="auto_backup_categories_dialog_title">Sicherungsinhalte auswählen</string>
     <string name="auto_backup_api_key_warning">API-Schlüssel werden unverschlüsselt in der Sicherungsdatei gespeichert</string>
     <string name="auto_backup_directory_label">Speicherort der Sicherung</string>
     <string name="auto_delete_title">Alte Sicherungen automatisch löschen</string>

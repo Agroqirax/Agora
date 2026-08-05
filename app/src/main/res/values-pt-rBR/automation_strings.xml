@@ -64,7 +64,7 @@
     <string name="loop_stop">Parar loop</string>
     <string name="automation_notification_channel_desc">Notificação contínua enquanto uma automação do Agora está em execução</string>
     <string name="settings_automation">Automação</string>
-    <string name="settings_automation_desc">Ferramentas de IA, loops e precisão de agendamento</string>
+    <string name="settings_automation_desc">Tarefas, loops e precisão de agendamento</string>
     <string name="automation_ai_tools">Acessar tarefas e loops</string>
     <string name="automation_ai_tools_desc">Permitir que o modelo crie e gerencie tarefas ou inicie e pare loops de conversa. Desativado por padrão.</string>
     <string name="automation_scheduling">Agendamento</string>

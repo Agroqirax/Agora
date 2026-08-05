@@ -64,7 +64,7 @@
     <string name="loop_stop">Schleife stoppen</string>
     <string name="automation_notification_channel_desc">Dauerhafte Benachrichtigung, während eine Agora-Automatisierung ausgeführt wird</string>
     <string name="settings_automation">Automatisierung</string>
-    <string name="settings_automation_desc">KI-Werkzeuge, Schleifen und Zeitplangenauigkeit</string>
+    <string name="settings_automation_desc">Aufgaben, Schleifen und Zeitplangenauigkeit</string>
     <string name="automation_ai_tools">Auf Aufgaben und Schleifen zugreifen</string>
     <string name="automation_ai_tools_desc">Dem Modell erlauben, Aufgaben zu erstellen und zu verwalten oder Unterhaltungsschleifen zu starten und zu stoppen. Standardmäßig deaktiviert.</string>
     <string name="automation_scheduling">Zeitplanung</string>

@@ -16,11 +16,12 @@ import kotlinx.serialization.json.Json
  * list while progressively trimming the largest stored fields until the encoded row fits the
  * budget.
  *
- * When trimming is needed, the largest tool-result (then, if still over, the largest content)
- * is halved with a truncation marker. Losing fidelity in the oldest/largest tool results is the
- * correct trade-off: they are already far back in the conversation (likely falling out of the
- * context window) and the alternative is a crash. The algorithm strictly reduces the largest
- * field each iteration and gives up once every field is at the floor, so it always terminates.
+ * When trimming is needed, the largest tool-result field (including independently persisted
+ * structured/display content, then live output and non-tool content) is halved with a truncation
+ * marker. Losing fidelity in the oldest/largest tool results is the correct trade-off: they are
+ * already far back in the conversation (likely falling out of the context window) and the
+ * alternative is a crash. The algorithm strictly reduces the largest field each iteration and
+ * gives up once every field is at the floor, so it always terminates.
  */
 object MessagePersistenceGuard {
 
@@ -61,28 +62,57 @@ object MessagePersistenceGuard {
     /** Size of the field that trimming would shrink — drives "largest first" selection. */
     private fun trimmableSize(s: MessageSegment): Int {
         val result = s.toolResult?.length ?: 0
+        val resultText = s.toolResultText?.length ?: 0
+        val structuredResult = s.toolStructuredResult?.length ?: 0
         val progress = s.toolProgress?.length ?: 0
         val content = if (s.type == "tool") 0 else s.content.length
-        return maxOf(result, progress, content)
+        return maxOf(result, resultText, structuredResult, progress, content)
     }
 
     private fun canTrim(s: MessageSegment): Boolean =
         (s.toolResult != null && s.toolResult.length > TRIM_FLOOR_CHARS) ||
+            (s.toolResultText != null && s.toolResultText.length > TRIM_FLOOR_CHARS) ||
+            (
+                s.toolStructuredResult != null &&
+                    s.toolStructuredResult.length > TRIM_FLOOR_CHARS
+                ) ||
             (s.toolProgress != null && s.toolProgress.length > TRIM_FLOOR_CHARS) ||
             (s.type != "tool" && s.content.length > TRIM_FLOOR_CHARS)
 
     /** Halve the largest trimmable field of [s], preferring the tool result on ties. */
     private fun trimLargest(s: MessageSegment): MessageSegment {
         val result = s.toolResult
+        val resultText = s.toolResultText
+        val structuredResult = s.toolStructuredResult
         val progress = s.toolProgress
         val contentSize = if (s.type == "tool") 0 else s.content.length
-        val largest = maxOf(result?.length ?: 0, progress?.length ?: 0, contentSize)
+        val largest = maxOf(
+            result?.length ?: 0,
+            resultText?.length ?: 0,
+            structuredResult?.length ?: 0,
+            progress?.length ?: 0,
+            contentSize,
+        )
         if (
             result != null &&
             result.length == largest &&
             result.length > TRIM_FLOOR_CHARS
         ) {
             return s.copy(toolResult = halveWithMarker(result))
+        }
+        if (
+            resultText != null &&
+            resultText.length == largest &&
+            resultText.length > TRIM_FLOOR_CHARS
+        ) {
+            return s.copy(toolResultText = halveWithMarker(resultText))
+        }
+        if (
+            structuredResult != null &&
+            structuredResult.length == largest &&
+            structuredResult.length > TRIM_FLOOR_CHARS
+        ) {
+            return s.copy(toolStructuredResult = halveWithMarker(structuredResult))
         }
         if (
             progress != null &&
