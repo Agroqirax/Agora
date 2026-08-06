@@ -70,7 +70,8 @@ class ConversationRepository(
 
     private fun ChatEntity.toConversation() = ChatConversation(
         id = id, title = title, systemPromptId = systemPromptId, modelId = modelId,
-        taskId = taskId, origin = origin, graduated = graduated
+        taskId = taskId, origin = origin, graduated = graduated,
+        hasUnreadGeneration = hasUnreadGeneration,
     )
 
     fun getAllConversations(): Flow<List<ChatConversation>> =
@@ -100,6 +101,16 @@ class ConversationRepository(
 
     suspend fun updateConversationTitle(id: String, title: String): Boolean =
         chatDao.updateConversationTitle(id, title) == 1
+
+    suspend fun setConversationUnreadGeneration(
+        id: String,
+        unread: Boolean,
+    ): Boolean = chatDao.setConversationUnreadGeneration(id, unread) == 1
+
+    suspend fun replaceConfiguredModelReferences(
+        oldModelId: String,
+        newModelId: String?,
+    ) = chatDao.replaceConfiguredModelReferences(oldModelId, newModelId)
 
     suspend fun updateConversationTitleIfUnchanged(
         id: String,
@@ -281,16 +292,20 @@ class ConversationRepository(
     /** Atomically persists a terminal model snapshot and terminalizes its Run. */
     suspend fun finishGeneration(
         message: ChatMessage,
+        conversationId: String,
         runId: String,
         status: RunStatus,
         reason: RunEndReason,
+        markConversationUnread: Boolean = false,
         at: Long = System.currentTimeMillis(),
     ): Boolean = chatDao.finishGeneration(
         checkpoint = message.toStreamCheckpoint(),
+        conversationId = conversationId,
         runId = runId,
         status = status,
         reason = reason,
         at = at,
+        markConversationUnread = markConversationUnread,
     )
 
     /** Atomically persists the final stopped snapshot(s) and terminalizes their Run. */

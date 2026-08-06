@@ -22,6 +22,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -493,6 +494,7 @@ fun MainNavigation(
     val motionPolicy = LocalAgoraMotionPolicy.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showTasks by rememberSaveable { mutableStateOf(false) }
+    val tasksListState = rememberLazyListState()
     var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var taskHistoryPreview by rememberSaveable(
         stateSaver = TaskHistoryPreviewStateSaver,
@@ -979,6 +981,7 @@ fun MainNavigation(
             ) {
                 com.newoether.agora.ui.tasks.TasksScreen(
                     viewModel = viewModel,
+                    taskListState = tasksListState,
                     initialTaskId = taskToOpen,
                     onInitialTaskHandled = { taskToOpen = null },
                     onBack = { showTasks = false },

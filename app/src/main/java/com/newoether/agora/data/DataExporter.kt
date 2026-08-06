@@ -7,7 +7,9 @@ import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.data.local.MessageToolMediaReference
 import com.newoether.agora.model.AttachmentMeta
+import com.newoether.agora.model.SelectedAttachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -18,7 +20,11 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.encodeToStream
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
+import java.time.Instant
+import java.time.format.DateTimeFormatter
+import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -67,6 +73,9 @@ class DataExporter(
         val origin: String = "user",
         val graduated: Boolean = false,
         val selectedRunBranchesJson: String? = null,
+        val draftText: String = "",
+        val draftAttachments: String? = null,
+        val conversationSettings: ConversationSettings? = null,
     )
 
     @Serializable
@@ -94,9 +103,6 @@ class DataExporter(
         val cronExpr: String,
         /** One-shot fire instant; null for a recurring (cron) task. */
         val runAt: Long? = null,
-        /** Informational snapshot; importers recompute this device-local derived value. */
-        val nextRunAt: Long,
-        val enabled: Boolean = true,
         val createdAt: Long,
         val lastRunAt: Long? = null
     )
@@ -106,12 +112,9 @@ class DataExporter(
         val conversationId: String,
         val intervalMs: Long,
         val prompt: String? = null,
-        val nextFireAt: Long,
         val cycleCount: Int = 0,
         /** New v2 archives always emit the bounded default for legacy null values. */
         val maxCycles: Int? = LoopPolicy.DEFAULT_MAX_CYCLES,
-        val active: Boolean = true,
-        val revision: Long = 0L
     )
 
     @Serializable
@@ -141,58 +144,16 @@ class DataExporter(
         val consumedAtPass: Int? = null,
     )
 
-    @Serializable
-    private data class ExportSettings(
-        val selectedModel: String,
-        val availableModels: Map<String, List<String>>,
-        val enabledModels: Set<String>,
-        val modelAliases: Map<String, String>,
-        val maxContextWindow: Int,
-        val visualizeContextRollout: Boolean,
-        val codeExecutionEnabled: Boolean,
-        val googleSearchEnabled: Boolean,
-        val thinkingEnabled: Boolean,
-        val thinkingLevel: String,
-        val thinkingBudgetEnabled: Boolean,
-        val thinkingBudgetTokens: Int,
-        val autoCacheEnabled: Boolean,
-        val openAiServiceTierEnabled: Boolean,
-        val openAiServiceTier: String,
-        val providerBaseUrls: Map<String, String>,
-        val titleGenerationEnabled: Boolean,
-        val titleGenerationModel: String?,
-        val titleGenerationPrompt: String? = null,
-        val titleGenerationNotificationsEnabled: Boolean = true,
-        val accessPastConversations: Boolean,
-        val accessSavedMemories: Boolean,
-        val accessActiveMemory: Boolean,
-        val ragSearchEnabled: Boolean,
-        val modelSearchMethod: String,
-        val manualSearchMethod: String,
-        val embeddingModels: List<EmbeddingModelConfig>,
-        val activeEmbeddingModelId: String,
-        val appLanguage: String,
-        val webSearchEnabled: Boolean,
-        val webSearchProvider: String,
-        val webSearchBaseUrl: String,
-        val ragThreshold: Float,
-        val shellEnabled: Boolean = false,
-        val shellDevices: List<ShellDeviceConfig> = emptyList(),
-        val customProviders: List<CustomProviderConfig> = emptyList(),
-        val localChatModels: List<LocalChatModelConfig>,
-        @SerialName("active_system_prompt_id") val activeSystemPromptId: String?
-    )
-
-    @Serializable
-    private data class ExportApiKeys(
-        val apiKeys: List<ApiKeyEntry>,
-        val activeApiKeyIds: Map<String, String>,
-        val webSearchApiKeys: Map<String, String>,
-        val shellApiKeys: Map<String, String> = emptyMap()
-    )
-
     data class ExportResult(
         val imagesExported: Int = 0
+    )
+
+    private data class MediaExportPlan(
+        val messageImages: Map<String, List<String>>,
+        val messageAttachmentMeta: Map<String, String?>,
+        val draftAttachments: Map<String, String?>,
+        val sourceToArchiveEntry: Map<String, String>,
+        val copiedImageCount: Int,
     )
 
     private fun openImageStream(imgUri: String): java.io.InputStream? {
@@ -205,6 +166,33 @@ class DataExporter(
         val file = java.io.File(imgUri)
         if (file.exists()) return try { file.inputStream() } catch (_: Exception) { null }
         return null
+    }
+
+    private fun mediaSourceKey(source: String): String {
+        val raw = source.removePrefix("file://")
+        return when {
+            source.startsWith("content://") -> source
+            source.startsWith("file://") || File(raw).exists() ->
+                runCatching { File(raw).canonicalPath }.getOrElse { File(raw).absolutePath }
+            else -> source
+        }
+    }
+
+    private fun archiveMediaEntry(prefix: String, source: String): String {
+        val extension = runCatching {
+            val withoutQuery = source.substringBefore('?').substringBefore('#')
+            withoutQuery.substringAfterLast('.', "")
+                .lowercase()
+                .takeIf { it.length in 1..10 && it.all(Char::isLetterOrDigit) }
+        }.getOrNull()
+        return buildString {
+            append(prefix)
+            append(UUID.randomUUID())
+            if (extension != null) {
+                append('.')
+                append(extension)
+            }
+        }
     }
 
     private suspend fun forEachMessagePage(
@@ -233,6 +221,19 @@ class DataExporter(
         }
     }
 
+    private suspend fun forEachToolMediaReferencePage(
+        block: suspend (List<MessageToolMediaReference>) -> Unit,
+    ) {
+        var afterId: String? = null
+        while (true) {
+            val page = chatDao.getMessageToolMediaReferencesPage(afterId, MESSAGE_PAGE_SIZE)
+            if (page.isEmpty()) break
+            block(page)
+            afterId = page.last().id
+            if (page.size < MESSAGE_PAGE_SIZE) break
+        }
+    }
+
     /** Copies one media stream directly into the archive without a heap-sized byte array. */
     private fun copyStreamToZipEntry(
         zip: ZipOutputStream,
@@ -254,6 +255,116 @@ class DataExporter(
         write(value.toByteArray(Charsets.UTF_8))
     }
 
+    private suspend fun buildMediaExportPlan(
+        zip: ZipOutputStream,
+        conversations: List<ChatEntity>,
+    ): MediaExportPlan {
+        val messageImages = mutableMapOf<String, List<String>>()
+        val messageAttachmentMeta = mutableMapOf<String, String?>()
+        val draftAttachments = mutableMapOf<String, String?>()
+        val sourceToArchiveEntry = mutableMapOf<String, String>()
+        var copiedImageCount = 0
+
+        fun copySource(source: String, prefix: String): String? {
+            if (source.isBlank()) return null
+            val sourceKey = mediaSourceKey(source)
+            sourceToArchiveEntry[sourceKey]?.let { return it }
+            val entry = archiveMediaEntry(prefix, source)
+            val copied = try {
+                copyStreamToZipEntry(
+                    zip = zip,
+                    entryName = entry,
+                    input = openImageStream(source),
+                )
+            } catch (_: Exception) {
+                false
+            }
+            return entry.takeIf { copied }?.also { sourceToArchiveEntry[sourceKey] = it }
+        }
+
+        forEachAttachmentReferencePage { page ->
+            page.forEach { message ->
+                val oldToNewImageIndex = mutableMapOf<Int, Int>()
+                val archivedImages = buildList {
+                    message.images.forEachIndexed { oldIndex, source ->
+                        copySource(source, NativeBackupFormat.IMAGE_MEDIA_PREFIX)?.let { entry ->
+                            oldToNewImageIndex[oldIndex] = size
+                            add(entry)
+                            copiedImageCount++
+                        }
+                    }
+                }
+                messageImages[message.id] = archivedImages
+
+                val meta = message.attachmentMeta?.let {
+                    runCatching { Json.decodeFromString<AttachmentMeta>(it) }.getOrNull()
+                }
+                meta?.items
+                    ?.asSequence()
+                    ?.filter { it.type == "video" }
+                    ?.mapNotNull { it.originalUri }
+                    ?.forEach { source ->
+                        copySource(source, NativeBackupFormat.VIDEO_MEDIA_PREFIX)
+                    }
+                messageAttachmentMeta[message.id] =
+                    NativeBackupMediaPolicy.rewriteAttachmentMetaForExport(
+                    raw = message.attachmentMeta,
+                    oldToNewImageIndex = oldToNewImageIndex,
+                    archiveEntryForSource = { source ->
+                        sourceToArchiveEntry[mediaSourceKey(source)]
+                    },
+                )
+            }
+        }
+
+        forEachToolMediaReferencePage { page ->
+            page.forEach { message ->
+                NativeBackupMediaPolicy.toolImagePaths(message.toolCallJson).forEach { source ->
+                    if (copySource(source, NativeBackupFormat.IMAGE_MEDIA_PREFIX) != null) {
+                        copiedImageCount++
+                    }
+                }
+            }
+        }
+
+        conversations.forEach { conversation ->
+            val attachments = conversation.draftAttachments?.let { raw ->
+                runCatching { Json.decodeFromString<List<SelectedAttachment>>(raw) }.getOrNull()
+            } ?: return@forEach
+            val archived = attachments.mapNotNull { attachment ->
+                val primarySource = listOfNotNull(
+                    attachment.localPath,
+                    attachment.uri.takeIf(String::isNotBlank),
+                ).firstNotNullOfOrNull { source ->
+                    copySource(source, NativeBackupFormat.DRAFT_MEDIA_PREFIX)
+                } ?: return@mapNotNull null
+                val processedFrames = attachment.processedFrames
+                    ?.mapNotNull { copySource(it, NativeBackupFormat.DRAFT_MEDIA_PREFIX) }
+                    ?.takeIf(List<String>::isNotEmpty)
+                val preRenderedPaths = attachment.preRenderedPaths
+                    ?.mapNotNull { copySource(it, NativeBackupFormat.DRAFT_MEDIA_PREFIX) }
+                    ?.takeIf(List<String>::isNotEmpty)
+                attachment.copy(
+                    uri = primarySource,
+                    localPath = primarySource,
+                    processedFrames = processedFrames,
+                    preRenderedPaths = preRenderedPaths,
+                )
+            }
+            draftAttachments[conversation.id] = archived
+                .takeIf(List<SelectedAttachment>::isNotEmpty)
+                ?.let { Json.encodeToString(it) }
+        }
+
+        return MediaExportPlan(
+            messageImages = messageImages,
+            messageAttachmentMeta = messageAttachmentMeta,
+            draftAttachments = draftAttachments,
+            sourceToArchiveEntry = sourceToArchiveEntry,
+            copiedImageCount = copiedImageCount,
+        )
+    }
+
     /**
      * Writes the existing conversations.json shape one entity at a time. The archive format stays
      * compatible, but message bodies are never duplicated into an all-messages DTO list.
@@ -261,13 +372,15 @@ class DataExporter(
     @OptIn(ExperimentalSerializationApi::class)
     private suspend fun writeConversationArchive(
         zip: ZipOutputStream,
-        exportedImagesByMessage: Map<String, List<String>>,
+        conversations: List<ChatEntity>,
+        mediaPlan: MediaExportPlan,
+        conversationSettings: Map<String, ConversationSettings>,
     ) {
-        zip.putNextEntry(ZipEntry("conversations.json"))
+        zip.putNextEntry(ZipEntry(NativeBackupFormat.CONVERSATIONS_ENTRY))
         try {
             zip.writeJsonToken("{\"conversations\":[")
             var first = true
-            chatDao.getAllConversationsList().forEach { conversation ->
+            conversations.forEach { conversation ->
                 if (!first) zip.write(','.code)
                 first = false
                 Json.encodeToStream(
@@ -282,6 +395,9 @@ class DataExporter(
                         origin = conversation.origin,
                         graduated = conversation.graduated,
                         selectedRunBranchesJson = conversation.selectedRunBranchesJson,
+                        draftText = conversation.draftText,
+                        draftAttachments = mediaPlan.draftAttachments[conversation.id],
+                        conversationSettings = conversationSettings[conversation.id],
                     ),
                     zip,
                 )
@@ -289,7 +405,7 @@ class DataExporter(
 
             zip.writeJsonToken("],\"runs\":[")
             first = true
-            for (conversation in chatDao.getAllConversationsList()) {
+            for (conversation in conversations) {
                 for (run in chatDao.getRunsForConversation(conversation.id).first()) {
                     if (!first) zip.write(','.code)
                     first = false
@@ -324,7 +440,7 @@ class DataExporter(
                             conversationId = message.conversationId,
                             parentId = message.parentId,
                             text = message.text,
-                            images = exportedImagesByMessage[message.id] ?: emptyList(),
+                            images = mediaPlan.messageImages[message.id] ?: emptyList(),
                             thoughts = message.thoughts,
                             thoughtTitle = message.thoughtTitle,
                             tokenCount = message.tokenCount,
@@ -338,8 +454,13 @@ class DataExporter(
                             timestamp = message.timestamp,
                             thoughtTimeMs = message.thoughtTimeMs,
                             modelName = message.modelName,
-                            toolCallJson = message.toolCallJson,
-                            attachmentMeta = message.attachmentMeta,
+                            toolCallJson = NativeBackupMediaPolicy.rewriteToolImagePathsForExport(
+                                raw = message.toolCallJson,
+                                archiveEntryForSource = { source ->
+                                    mediaPlan.sourceToArchiveEntry[mediaSourceKey(source)]
+                                },
+                            ),
+                            attachmentMeta = mediaPlan.messageAttachmentMeta[message.id],
                             runId = message.runId,
                             runSequence = message.runSequence,
                             consumedAtPass = message.consumedAtPass,
@@ -363,8 +484,6 @@ class DataExporter(
                         modelId = task.modelId,
                         cronExpr = task.cronExpr,
                         runAt = task.runAt,
-                        nextRunAt = task.nextRunAt,
-                        enabled = task.enabled,
                         createdAt = task.createdAt,
                         lastRunAt = task.lastRunAt,
                     ),
@@ -383,11 +502,8 @@ class DataExporter(
                         conversationId = sanitized.conversationId,
                         intervalMs = sanitized.intervalMs,
                         prompt = sanitized.prompt,
-                        nextFireAt = sanitized.nextFireAt,
                         cycleCount = sanitized.cycleCount,
                         maxCycles = sanitized.maxCycles,
-                        active = sanitized.active,
-                        revision = sanitized.revision,
                     ),
                     zip,
                 )
@@ -407,11 +523,10 @@ class DataExporter(
     ): ExportResult = withContext(Dispatchers.IO) {
         val appInfo = context.packageManager.getPackageInfo(context.packageName, 0)
         val appVersion = appInfo.versionName ?: "unknown"
-        val exportedAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US)
-            .format(java.util.Date())
+        val exportedAt = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
 
         val manifest = ExportManifest(
-            version = 3,
+            version = NativeBackupFormat.CURRENT_VERSION,
             appVersion = appVersion,
             exportedAt = exportedAt,
             categories = categories.map { it.manifestKey },
@@ -423,73 +538,28 @@ class DataExporter(
         var completed = 0
         fun step() { completed++; onProgress(completed.toFloat() / totalSteps) }
 
-        context.contentResolver.openOutputStream(uri)?.use { raw ->
+        val rawOutput = context.contentResolver.openOutputStream(uri)
+            ?: throw IOException("Could not open the selected backup destination")
+        rawOutput.use { raw ->
             val zip = ZipOutputStream(BufferedOutputStream(raw))
 
             // Manifest
-            zip.putNextEntry(ZipEntry("manifest.json"))
+            zip.putNextEntry(ZipEntry(NativeBackupFormat.MANIFEST_ENTRY))
             Json.encodeToStream(manifest, zip)
             zip.closeEntry()
             step()
 
             // Conversations
             if (ExportCategory.CONVERSATIONS in categories) {
-                val imageMap = mutableMapOf<String, List<String>>() // messageId -> list of image URIs to keep
-
-                // Export media from attachment-only pages. Message bodies/thoughts/tool payloads
-                // are deliberately absent from this pass.
-                forEachAttachmentReferencePage { page ->
-                    page.forEach { message ->
-                        if (message.images.isNotEmpty()) {
-                            val surviving = mutableListOf<String>()
-                            message.images.forEachIndexed { index, imageUri ->
-                                val copied = try {
-                                    copyStreamToZipEntry(
-                                        zip = zip,
-                                        entryName = "images/${message.id}/$index",
-                                        input = openImageStream(imageUri),
-                                    )
-                                } catch (_: Exception) {
-                                    false
-                                }
-                                if (copied) {
-                                    surviving.add(imageUri)
-                                }
-                            }
-                            imagesExportedTotal += surviving.size
-                            if (surviving.isNotEmpty()) {
-                                imageMap[message.id] = surviving
-                            }
-                        }
-
-                        val meta = try {
-                            message.attachmentMeta?.let { Json.decodeFromString<AttachmentMeta>(it) }
-                        } catch (_: Exception) {
-                            null
-                        }
-                        meta?.items?.forEach { item ->
-                            val videoUri = item.originalUri
-                            if (item.type == "video" && !videoUri.isNullOrBlank() &&
-                                videoUri.startsWith("file://")
-                            ) {
-                                val file = File(videoUri.removePrefix("file://"))
-                                if (file.isFile) {
-                                    try {
-                                        copyStreamToZipEntry(
-                                            zip = zip,
-                                            entryName = "videos/${message.id}/${item.imageIndex ?: 0}",
-                                            input = file.inputStream(),
-                                        )
-                                    } catch (_: Exception) {
-                                        // Inaccessible media is omitted; the message still exports.
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                writeConversationArchive(zip, imageMap)
+                val conversations = chatDao.getAllConversationsList()
+                val mediaPlan = buildMediaExportPlan(zip, conversations)
+                imagesExportedTotal += mediaPlan.copiedImageCount
+                writeConversationArchive(
+                    zip = zip,
+                    conversations = conversations,
+                    mediaPlan = mediaPlan,
+                    conversationSettings = settingsManager.conversationSettings.first(),
+                )
                 step()
             }
 
@@ -519,7 +589,7 @@ class DataExporter(
             // System Prompts
             if (ExportCategory.SYSTEM_PROMPTS in categories) {
                 val prompts = settingsManager.systemPrompts.first()
-                zip.putNextEntry(ZipEntry("system_prompts.json"))
+                zip.putNextEntry(ZipEntry(NativeBackupFormat.SYSTEM_PROMPTS_ENTRY))
                 Json.encodeToStream(prompts, zip)
                 zip.closeEntry()
                 step()
@@ -527,86 +597,32 @@ class DataExporter(
 
             // Settings
             if (ExportCategory.SETTINGS in categories) {
-                val settings = ExportSettings(
-                    selectedModel = settingsManager.selectedModel.first(),
-                    availableModels = settingsManager.availableModels.first(),
-                    enabledModels = settingsManager.enabledModels.first(),
-                    modelAliases = settingsManager.modelAliases.first(),
-                    maxContextWindow = settingsManager.maxContextWindow.first(),
-                    visualizeContextRollout = settingsManager.visualizeContextRollout.first(),
-                    codeExecutionEnabled = settingsManager.codeExecutionEnabled.first(),
-                    googleSearchEnabled = settingsManager.googleSearchEnabled.first(),
-                    thinkingEnabled = settingsManager.thinkingEnabled.first(),
-                    thinkingLevel = settingsManager.thinkingLevel.first(),
-                    thinkingBudgetEnabled = settingsManager.thinkingBudgetEnabled.first(),
-                    thinkingBudgetTokens = settingsManager.thinkingBudgetTokens.first(),
-                    autoCacheEnabled = settingsManager.autoCacheEnabled.first(),
-                    openAiServiceTierEnabled = settingsManager.openAiServiceTierEnabled.first(),
-                    openAiServiceTier = settingsManager.openAiServiceTier.first(),
-                    providerBaseUrls = settingsManager.providerBaseUrls.first(),
-                    titleGenerationEnabled = settingsManager.titleGenerationEnabled.first(),
-                    titleGenerationModel = settingsManager.titleGenerationModel.first(),
-                    titleGenerationPrompt = settingsManager.titleGenerationPrompt.first(),
-                    titleGenerationNotificationsEnabled =
-                        settingsManager.titleGenerationNotificationsEnabled.first(),
-                    accessPastConversations = settingsManager.accessPastConversations.first(),
-                    accessSavedMemories = settingsManager.accessSavedMemories.first(),
-                    accessActiveMemory = settingsManager.accessActiveMemory.first(),
-                    ragSearchEnabled = settingsManager.ragSearchEnabled.first(),
-                    modelSearchMethod = settingsManager.modelSearchMethod.first(),
-                    manualSearchMethod = settingsManager.manualSearchMethod.first(),
-                    embeddingModels = settingsManager.embeddingModels.first().map { it.copy(localFilePath = "") },
-                    activeEmbeddingModelId = "", // cleared — embedding models are local GGUF, don't transfer
-                    appLanguage = settingsManager.appLanguage.first(),
-                    webSearchEnabled = settingsManager.webSearchEnabled.first(),
-                    webSearchProvider = settingsManager.webSearchProvider.first(),
-                    webSearchBaseUrl = settingsManager.webSearchBaseUrl.first(),
-                    ragThreshold = settingsManager.ragThreshold.first(),
-                    shellEnabled = settingsManager.shellEnabled.first(),
-                    shellDevices = settingsManager.shellDevices.first().map { d ->
-                        if (includeApiKeys) d else d.copy(apiKey = "")
-                    },
-                    customProviders = settingsManager.customProviders.first(),
-                    localChatModels = settingsManager.localChatModels.first().map { it.copy(localFilePath = "") },
-                    activeSystemPromptId = settingsManager.activeSystemPromptId.first()
+                val fontFile = settingsManager.customFontPath.first()
+                    .takeIf(String::isNotBlank)
+                    ?.let(::File)
+                    ?.takeIf(File::isFile)
+                if (fontFile != null) {
+                    zip.putNextEntry(ZipEntry(NativeBackupFormat.CUSTOM_FONT_ENTRY))
+                    fontFile.inputStream().use { it.copyTo(zip) }
+                    zip.closeEntry()
+                }
+                val settings = PortableSettingsArchive.toJsonObject(
+                    sm = settingsManager,
+                    customFontIncluded = fontFile != null,
                 )
-                zip.putNextEntry(ZipEntry("settings.json"))
+                zip.putNextEntry(ZipEntry(NativeBackupFormat.SETTINGS_ENTRY))
                 Json.encodeToStream(settings, zip)
                 zip.closeEntry()
                 step()
-
-                // Extra settings (separate file to keep data class size manageable)
-                val extra = ExportExtraSettings.toJsonObject(settingsManager, includeApiKeys)
-                zip.putNextEntry(ZipEntry("extra_settings.json"))
-                Json.encodeToStream(extra, zip)
-                zip.closeEntry()
             }
 
             // API Keys (opt-in)
             if (includeApiKeys && ExportCategory.API_KEYS in categories) {
-                val keys = ExportApiKeys(
-                    apiKeys = settingsManager.apiKeys.first(),
-                    activeApiKeyIds = settingsManager.activeApiKeyIds.first(),
-                    webSearchApiKeys = settingsManager.webSearchApiKeys.first(),
-                    shellApiKeys = settingsManager.shellDevices.first()
-                        .filter { it.apiKey.isNotBlank() }
-                        .associate { it.name to it.apiKey }
-                )
-                zip.putNextEntry(ZipEntry("api_keys.json"))
+                val keys = NativeBackupSecretsPolicy.capture(settingsManager)
+                zip.putNextEntry(ZipEntry(NativeBackupFormat.SECRETS_ENTRY))
                 Json.encodeToStream(keys, zip)
                 zip.closeEntry()
                 step()
-            }
-
-            // ── Custom font file ──
-            val fontPath = settingsManager.customFontPath.first()
-            if (fontPath.isNotBlank()) {
-                val fontFile = File(fontPath)
-                if (fontFile.exists()) {
-                    zip.putNextEntry(ZipEntry("custom_font/${fontFile.name}"))
-                    fontFile.inputStream().use { it.copyTo(zip) }
-                    zip.closeEntry()
-                }
             }
 
             zip.finish()

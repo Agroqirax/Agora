@@ -129,7 +129,8 @@ data class ChatConversation(
     /** Set when this conversation is a task execution; drives the "from task" banner. */
     val taskId: String? = null,
     val origin: String = "user",
-    val graduated: Boolean = false
+    val graduated: Boolean = false,
+    val hasUnreadGeneration: Boolean = false,
 )
 
 @Immutable

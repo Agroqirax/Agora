@@ -108,6 +108,8 @@ class SettingsRepository(
     val titleGenerationPrompt: StateFlow<String> = hot(settingsManager.titleGenerationPrompt, BuiltInPrompts.TITLE_GENERATION_SYSTEM)
     val titleGenerationNotificationsEnabled: StateFlow<Boolean> =
         hot(settingsManager.titleGenerationNotificationsEnabled, true)
+    val imageTranscriptionEnabled: StateFlow<Boolean> =
+        hot(settingsManager.imageTranscriptionEnabled, true)
     val imageTranscriptionEnabledModels: StateFlow<Set<String>> = hot(settingsManager.imageTranscriptionEnabledModels, emptySet())
     val imageTranscriptionModel: StateFlow<String?> = hot(settingsManager.imageTranscriptionModel, null)
     val imageTranscriptionBatchSize: StateFlow<Int> = hot(settingsManager.imageTranscriptionBatchSize, 3)
@@ -161,6 +163,8 @@ class SettingsRepository(
     val blurEffectsEnabled: StateFlow<Boolean> = hot(settingsManager.blurEffectsEnabled, true)
     val reduceMotion: StateFlow<Boolean> = hot(settingsManager.reduceMotion, false)
     val hapticsEnabled: StateFlow<Boolean> = hot(settingsManager.hapticsEnabled, true)
+    val detailedTokenUsage: StateFlow<Boolean> =
+        hot(settingsManager.detailedTokenUsage, false)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
     val autoExpandActiveGroup: StateFlow<Boolean> =
         hot(settingsManager.autoExpandActiveGroup, true)
@@ -211,33 +215,28 @@ class SettingsRepository(
         }
     }
 
-    fun addCustomModel(provider: String, modelName: String) {
+    fun addCustomModel(provider: String, modelName: String, alias: String = "") {
         val normalizedProvider = provider.trim()
         val normalizedName = modelName.trim()
         if (normalizedProvider.isEmpty() || normalizedName.isEmpty()) return
         val modelId = ModelId(normalizedProvider, normalizedName).prefixed
         scope.launch {
-            settingsManager.saveCustomModels(customModels.value + modelId)
-            val updatedEnabled = enabledModels.value + modelId
-            settingsManager.saveEnabledModels(updatedEnabled)
-            if (selectedModel.value.isBlank()) {
-                settingsManager.saveSelectedModel(modelId)
-            }
+            settingsManager.addCustomModel(modelId, alias)
         }
     }
 
     fun removeCustomModel(modelId: String) {
         if (modelId !in customModels.value) return
         scope.launch {
-            settingsManager.saveCustomModels(customModels.value - modelId)
-            val updatedEnabled = enabledModels.value - modelId
-            settingsManager.saveEnabledModels(updatedEnabled)
-            settingsManager.saveModelAliases(modelAliases.value - modelId)
-            if (selectedModel.value == modelId) {
-                settingsManager.saveSelectedModel(updatedEnabled.firstOrNull().orEmpty())
-            }
+            settingsManager.replaceCustomModel(modelId, null, "")
         }
     }
+
+    suspend fun replaceCustomModel(
+        oldModelId: String,
+        newModelId: String?,
+        alias: String,
+    ) = settingsManager.replaceCustomModel(oldModelId, newModelId, alias)
 
     // API keys
     fun addApiKey(name: String, key: String, provider: String) {
@@ -432,6 +431,8 @@ class SettingsRepository(
         scope.launch { settingsManager.saveTitleGenerationNotificationsEnabled(enabled) }
     fun setTitleGenerationModel(model: String?) = scope.launch { settingsManager.saveTitleGenerationModel(model) }
     fun setTitleGenerationPrompt(prompt: String) = scope.launch { settingsManager.saveTitleGenerationPrompt(prompt) }
+    fun setImageTranscriptionEnabled(enabled: Boolean) =
+        scope.launch { settingsManager.saveImageTranscriptionEnabled(enabled) }
     fun setImageTranscriptionModel(model: String?) = scope.launch { settingsManager.saveImageTranscriptionModel(model) }
     fun setImageTranscriptionBatchSize(size: Int) = scope.launch { settingsManager.saveImageTranscriptionBatchSize(size) }
     fun setImageTranscriptionPrompt(prompt: String) = scope.launch { settingsManager.saveImageTranscriptionPrompt(prompt) }
@@ -486,6 +487,8 @@ class SettingsRepository(
     fun setBlurEffectsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveBlurEffectsEnabled(enabled) }
     fun setReduceMotion(enabled: Boolean) = scope.launch { settingsManager.saveReduceMotion(enabled) }
     fun setHapticsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveHapticsEnabled(enabled) }
+    fun setDetailedTokenUsage(enabled: Boolean) =
+        scope.launch { settingsManager.saveDetailedTokenUsage(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
     fun setAutoExpandActiveGroup(enabled: Boolean) =
         scope.launch { settingsManager.saveAutoExpandActiveGroup(enabled) }

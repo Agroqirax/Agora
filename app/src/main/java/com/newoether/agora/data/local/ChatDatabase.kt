@@ -17,6 +17,7 @@ import com.newoether.agora.data.local.migration.MIGRATION_17_18
 import com.newoether.agora.data.local.migration.MIGRATION_18_19
 import com.newoether.agora.data.local.migration.MIGRATION_19_20
 import com.newoether.agora.data.local.migration.MIGRATION_20_21
+import com.newoether.agora.data.local.migration.MIGRATION_21_22
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -80,6 +81,8 @@ data class ChatEntity(
     val draftAttachments: String? = null,
     /** Run-level branch selections. Message-level selections remain for legacy compatibility. */
     val selectedRunBranchesJson: String? = null,
+    /** True after a completed model generation until this conversation becomes the open target. */
+    val hasUnreadGeneration: Boolean = false,
 )
 
 /** A saved automation: a prompt + schedule that fans out a fresh conversation on each run. */
@@ -246,6 +249,12 @@ data class MessageAttachmentReference(
     val id: String,
     val images: List<String>,
     val attachmentMeta: String? = null,
+)
+
+/** Tool-payload-only projection used to archive generated image files without loading messages. */
+data class MessageToolMediaReference(
+    val id: String,
+    val toolCallJson: String,
 )
 
 /** Draft-only projection used by the orphaned attachment sweep. */
@@ -422,6 +431,24 @@ interface ChatDao {
 
     @Query("UPDATE conversations SET title = :title WHERE id = :conversationId")
     suspend fun updateConversationTitle(conversationId: String, title: String): Int
+
+    @Query(
+        """
+        UPDATE conversations
+        SET hasUnreadGeneration = :unread
+        WHERE id = :conversationId AND hasUnreadGeneration != :unread
+        """
+    )
+    suspend fun setConversationUnreadGeneration(
+        conversationId: String,
+        unread: Boolean,
+    ): Int
+
+    @Query("UPDATE conversations SET modelId = :newModelId WHERE modelId = :oldModelId")
+    suspend fun replaceConversationModelReferences(
+        oldModelId: String,
+        newModelId: String?,
+    ): Int
 
     @Query(
         """
@@ -761,15 +788,21 @@ interface ChatDao {
     @Transaction
     suspend fun finishGeneration(
         checkpoint: MessageStreamCheckpoint,
+        conversationId: String,
         runId: String,
         status: RunStatus,
         reason: RunEndReason,
         at: Long,
+        markConversationUnread: Boolean,
     ): Boolean {
         require(status.isTerminal)
         val messageUpdated = updateMessageCheckpoint(checkpoint) == 1
         val runUpdated = terminalizeLiveRun(runId, status, reason, at) == 1
-        return messageUpdated && runUpdated
+        val completed = messageUpdated && runUpdated
+        if (completed && markConversationUnread) {
+            setConversationUnreadGeneration(conversationId, true)
+        }
+        return completed
     }
 
     /**
@@ -1180,6 +1213,22 @@ interface ChatDao {
 
     @Query(
         """
+        SELECT id, toolCallJson
+        FROM messages
+        WHERE (:afterId IS NULL OR id > :afterId)
+          AND toolCallJson IS NOT NULL
+          AND toolCallJson != ''
+        ORDER BY id
+        LIMIT :limit
+        """
+    )
+    suspend fun getMessageToolMediaReferencesPage(
+        afterId: String?,
+        limit: Int,
+    ): List<MessageToolMediaReference>
+
+    @Query(
+        """
         SELECT id, draftAttachments
         FROM conversations
         WHERE (:afterId IS NULL OR id > :afterId)
@@ -1212,6 +1261,21 @@ interface ChatDao {
 
     @Upsert
     suspend fun upsertTask(task: TaskEntity)
+
+    @Query("UPDATE tasks SET modelId = :newModelId WHERE modelId = :oldModelId")
+    suspend fun replaceTaskModelReferences(
+        oldModelId: String,
+        newModelId: String?,
+    ): Int
+
+    @Transaction
+    suspend fun replaceConfiguredModelReferences(
+        oldModelId: String,
+        newModelId: String?,
+    ) {
+        replaceConversationModelReferences(oldModelId, newModelId)
+        replaceTaskModelReferences(oldModelId, newModelId)
+    }
 
     /** Clock-change CAS: never overwrite a concurrent edit/disable/execution advancement. */
     @Query(
@@ -1315,7 +1379,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 21
+        const val CURRENT_VERSION = 22
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -1449,6 +1513,7 @@ abstract class ChatDatabase : RoomDatabase() {
             MIGRATION_18_19,
             MIGRATION_19_20,
             MIGRATION_20_21,
+            MIGRATION_21_22,
         )
 
         fun getStoredVersion(context: Context): Int {

@@ -148,6 +148,8 @@ class SettingsManager(private val context: Context) {
         val TITLE_GENERATION_PROMPT = stringPreferencesKey("title_generation_prompt")
         val TITLE_GENERATION_NOTIFICATIONS_ENABLED =
             booleanPreferencesKey("title_generation_notifications_enabled")
+        val IMAGE_TRANSCRIPTION_ENABLED =
+            booleanPreferencesKey("image_transcription_enabled")
         val IMAGE_TRANSCRIPTION_ENABLED_MODELS = stringSetPreferencesKey("image_transcription_enabled_models")
         val IMAGE_TRANSCRIPTION_MODEL = stringPreferencesKey("image_transcription_model")
         val IMAGE_TRANSCRIPTION_BATCH_SIZE = intPreferencesKey("image_transcription_batch_size")
@@ -203,6 +205,7 @@ class SettingsManager(private val context: Context) {
         val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
         val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+        val DETAILED_TOKEN_USAGE = booleanPreferencesKey("detailed_token_usage")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
         val AUTO_EXPAND_ACTIVE_GROUP = booleanPreferencesKey("auto_expand_active_group")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
@@ -307,6 +310,9 @@ class SettingsManager(private val context: Context) {
     }
     val titleGenerationNotificationsEnabled: Flow<Boolean> = context.dataStore.data.map {
         it[TITLE_GENERATION_NOTIFICATIONS_ENABLED] ?: true
+    }
+    val imageTranscriptionEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[IMAGE_TRANSCRIPTION_ENABLED] ?: true
     }
     val imageTranscriptionEnabledModels: Flow<Set<String>> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet() }
     val imageTranscriptionModel: Flow<String?> = context.dataStore.data.map { it[IMAGE_TRANSCRIPTION_MODEL] }
@@ -417,6 +423,8 @@ class SettingsManager(private val context: Context) {
     val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
     val reduceMotion: Flow<Boolean> = context.dataStore.data.map { it[REDUCE_MOTION] ?: false }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
+    val detailedTokenUsage: Flow<Boolean> =
+        context.dataStore.data.map { it[DETAILED_TOKEN_USAGE] ?: false }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
     val autoExpandActiveGroup: Flow<Boolean> =
         context.dataStore.data.map { it[AUTO_EXPAND_ACTIVE_GROUP] ?: true }
@@ -458,6 +466,19 @@ class SettingsManager(private val context: Context) {
             val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { mutableMapOf() }
             map[provider] = url
             prefs[PROVIDER_BASE_URLS] = json.encodeToString(map)
+        }
+    }
+
+    suspend fun saveProviderBaseUrls(urls: Map<String, String>) {
+        val normalized = urls
+            .mapValues { (_, value) -> value.trim() }
+            .filterValues { it.isNotBlank() }
+        context.dataStore.edit { prefs ->
+            if (normalized.isEmpty()) {
+                prefs.remove(PROVIDER_BASE_URLS)
+            } else {
+                prefs[PROVIDER_BASE_URLS] = json.encodeToString(normalized)
+            }
         }
     }
 
@@ -516,6 +537,99 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[CUSTOM_MODELS] = models }
     }
 
+    suspend fun addCustomModel(modelId: String, alias: String) {
+        context.dataStore.edit { prefs ->
+            prefs[CUSTOM_MODELS] = (prefs[CUSTOM_MODELS] ?: emptySet()) + modelId
+            val enabledModels = (prefs[ENABLED_MODELS] ?: emptySet()) + modelId
+            prefs[ENABLED_MODELS] = enabledModels
+            if (prefs[SELECTED_MODEL].isNullOrBlank()) {
+                prefs[SELECTED_MODEL] = modelId
+            }
+
+            val aliases = try {
+                json.decodeFromString<Map<String, String>>(
+                    prefs[MODEL_ALIASES_JSON] ?: "{}",
+                )
+            } catch (_: Exception) {
+                emptyMap()
+            }.toMutableMap()
+            if (alias.isBlank()) {
+                aliases.remove(modelId)
+            } else {
+                aliases[modelId] = alias.trim()
+            }
+            prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+        }
+    }
+
+    suspend fun replaceCustomModel(
+        oldModelId: String,
+        newModelId: String?,
+        alias: String,
+    ) {
+        if (oldModelId == newModelId) {
+            context.dataStore.edit { prefs ->
+                val aliases = try {
+                    json.decodeFromString<Map<String, String>>(
+                        prefs[MODEL_ALIASES_JSON] ?: "{}",
+                    )
+                } catch (_: Exception) {
+                    emptyMap()
+                }.replaceCustomModelAlias(oldModelId, newModelId, alias)
+                prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+            }
+            return
+        }
+
+        context.dataStore.edit { prefs ->
+            val customModels = prefs[CUSTOM_MODELS] ?: emptySet()
+            if (oldModelId !in customModels) return@edit
+
+            prefs[CUSTOM_MODELS] =
+                customModels.replaceModelReference(oldModelId, newModelId)
+
+            val updatedEnabled =
+                (prefs[ENABLED_MODELS] ?: emptySet())
+                    .replaceModelReference(oldModelId, newModelId)
+            prefs[ENABLED_MODELS] = updatedEnabled
+
+            val aliases = try {
+                json.decodeFromString<Map<String, String>>(
+                    prefs[MODEL_ALIASES_JSON] ?: "{}",
+                )
+            } catch (_: Exception) {
+                emptyMap()
+            }.replaceCustomModelAlias(oldModelId, newModelId, alias)
+            prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+
+            if (prefs[SELECTED_MODEL] == oldModelId) {
+                prefs[SELECTED_MODEL] =
+                    newModelId ?: updatedEnabled.firstOrNull().orEmpty()
+            }
+
+            val updatedTranscriptionTargets =
+                (prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet())
+                    .replaceModelReference(oldModelId, newModelId)
+            prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = updatedTranscriptionTargets
+
+            fun replaceNullableReference(key: androidx.datastore.preferences.core.Preferences.Key<String>) {
+                when (
+                    val updated = prefs[key].replaceModelReference(
+                        oldModelId,
+                        newModelId,
+                    )
+                ) {
+                    null -> prefs.remove(key)
+                    else -> prefs[key] = updated
+                }
+            }
+
+            replaceNullableReference(TITLE_GENERATION_MODEL)
+            replaceNullableReference(IMAGE_TRANSCRIPTION_MODEL)
+            replaceNullableReference(IMAGE_GEN_MODEL)
+        }
+    }
+
     suspend fun saveEnabledModels(models: Set<String>) {
         context.dataStore.edit { it[ENABLED_MODELS] = models }
     }
@@ -526,6 +640,16 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveApiKeys(keys: List<ApiKeyEntry>) {
         context.dataStore.edit { it[API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(keys)) }
+    }
+
+    suspend fun saveActiveApiKeyIds(ids: Map<String, String>) {
+        context.dataStore.edit { prefs ->
+            if (ids.isEmpty()) {
+                prefs.remove(ACTIVE_API_KEY_IDS_JSON)
+            } else {
+                prefs[ACTIVE_API_KEY_IDS_JSON] = json.encodeToString(ids)
+            }
+        }
     }
 
     suspend fun setActiveApiKeyId(provider: String, id: String?) {
@@ -714,6 +838,18 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun saveWebSearchApiKeys(keys: Map<String, String>) {
+        val nonBlank = keys.filterValues { it.isNotBlank() }
+        context.dataStore.edit { prefs ->
+            if (nonBlank.isEmpty()) {
+                prefs.remove(WEB_SEARCH_API_KEYS_JSON)
+            } else {
+                prefs[WEB_SEARCH_API_KEYS_JSON] =
+                    com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(nonBlank))
+            }
+        }
+    }
+
     suspend fun saveWebSearchNumResults(n: Int) {
         context.dataStore.edit { it[WEB_SEARCH_NUM_RESULTS] = n.coerceIn(1, 10) }
     }
@@ -776,6 +912,17 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun saveConversationSettingsMap(settings: Map<String, ConversationSettings>) {
+        val nonEmpty = settings.filterValues { !it.isAllNull() }
+        context.dataStore.edit { prefs ->
+            if (nonEmpty.isEmpty()) {
+                prefs.remove(CONVERSATION_SETTINGS_JSON)
+            } else {
+                prefs[CONVERSATION_SETTINGS_JSON] = json.encodeToString(nonEmpty)
+            }
+        }
+    }
+
     suspend fun saveLocalChatModels(models: List<LocalChatModelConfig>) {
         context.dataStore.edit { it[LOCAL_CHAT_MODELS_JSON] = json.encodeToString(models) }
     }
@@ -802,6 +949,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveImageTranscriptionEnabledModels(models: Set<String>) {
         context.dataStore.edit { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = models }
+    }
+
+    suspend fun saveImageTranscriptionEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[IMAGE_TRANSCRIPTION_ENABLED] = enabled }
     }
 
     suspend fun saveImageTranscriptionModel(model: String?) {
@@ -890,6 +1041,10 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[HAPTICS_ENABLED] = enabled }
     }
 
+    suspend fun saveDetailedTokenUsage(enabled: Boolean) {
+        context.dataStore.edit { it[DETAILED_TOKEN_USAGE] = enabled }
+    }
+
     suspend fun saveToolCallDisplayMode(mode: String) {
         context.dataStore.edit { it[TOOL_CALL_DISPLAY_MODE] = ToolCallDisplayModes.normalize(mode) }
     }
@@ -957,5 +1112,105 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveLastModelsFetchFingerprint(fingerprint: String) {
         context.dataStore.edit { it[LAST_MODELS_FETCH_FINGERPRINT] = fingerprint }
+    }
+
+    /**
+     * Clears only settings that are portable across devices. Secrets, conversation-scoped
+     * overrides, local model files, sandbox state, onboarding/rating metadata, and auto-backup
+     * configuration are deliberately outside this reset boundary.
+     *
+     * Composite portable records (remote embedding models, shell devices, MCP servers, and the
+     * custom font) are rebuilt separately by the importer so device-local records and credentials
+     * can be retained or cleared according to their own import category.
+     */
+    suspend fun resetPortableSettingsForImport() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(SELECTED_MODEL)
+            prefs.remove(CUSTOM_MODELS)
+            prefs.remove(ENABLED_MODELS)
+            prefs.remove(ACTIVE_SYSTEM_PROMPT_ID)
+            prefs.remove(MODEL_ALIASES_JSON)
+            prefs.remove(MAX_CONTEXT_WINDOW)
+            prefs.remove(VISUALIZE_CONTEXT_ROLLOUT)
+            prefs.remove(CODE_EXECUTION_ENABLED)
+            prefs.remove(GOOGLE_SEARCH_ENABLED)
+            prefs.remove(THINKING_ENABLED)
+            prefs.remove(THINKING_LEVEL)
+            prefs.remove(THINKING_BUDGET_ENABLED)
+            prefs.remove(THINKING_BUDGET_TOKENS)
+            prefs.remove(OPENAI_SERVICE_TIER_ENABLED)
+            prefs.remove(OPENAI_SERVICE_TIER)
+            prefs.remove(PROVIDER_BASE_URLS)
+            prefs.remove(TITLE_GENERATION_ENABLED)
+            prefs.remove(TITLE_GENERATION_MODEL)
+            prefs.remove(TITLE_GENERATION_PROMPT)
+            prefs.remove(TITLE_GENERATION_NOTIFICATIONS_ENABLED)
+            prefs.remove(IMAGE_TRANSCRIPTION_ENABLED)
+            prefs.remove(IMAGE_TRANSCRIPTION_ENABLED_MODELS)
+            prefs.remove(IMAGE_TRANSCRIPTION_MODEL)
+            prefs.remove(IMAGE_TRANSCRIPTION_BATCH_SIZE)
+            prefs.remove(IMAGE_TRANSCRIPTION_PROMPT)
+            prefs.remove(ACCESS_PAST_CONVERSATIONS)
+            prefs.remove(ACCESS_SAVED_MEMORIES)
+            prefs.remove(ACCESS_ACTIVE_MEMORY)
+            prefs.remove(RAG_SEARCH_ENABLED)
+            prefs.remove(MODEL_SEARCH_METHOD)
+            prefs.remove(MANUAL_SEARCH_METHOD)
+            prefs.remove(APP_LANGUAGE)
+            prefs.remove(WEB_SEARCH_ENABLED)
+            prefs.remove(WEB_SEARCH_PROVIDER)
+            prefs.remove(WEB_SEARCH_NUM_RESULTS)
+            prefs.remove(WEB_SEARCH_BASE_URL)
+            prefs.remove(IMAGE_GEN_ENABLED)
+            prefs.remove(IMAGE_GEN_MODEL)
+            prefs.remove(IMAGE_GEN_SIZE)
+            prefs.remove(SEARCH_CONTEXT_WINDOW)
+            prefs.remove(SEARCH_MATCH_LIMIT)
+            prefs.remove(RAG_THRESHOLD)
+            prefs.remove(AUTO_CACHE_ENABLED)
+            prefs.remove(AUTO_UPDATE_CHECK)
+            prefs.remove(CUSTOM_PROVIDERS_JSON)
+            prefs.remove(SHELL_ENABLED)
+            prefs.remove(AUTOMATION_TOOLS_ENABLED)
+            prefs.remove(EXACT_EXECUTION_ENABLED)
+            prefs.remove(PROXY_ENABLED)
+            prefs.remove(PROXY_TYPE)
+            prefs.remove(PROXY_HOST)
+            prefs.remove(PROXY_PORT)
+            prefs.remove(PROXY_USERNAME)
+            prefs.remove(PROXY_BYPASS)
+            prefs.remove(SHELL_CONFIRM_ENABLED)
+            prefs.remove(THEME_MODE)
+            prefs.remove(COLOR_SCHEME)
+            prefs.remove(DYNAMIC_COLOR)
+            prefs.remove(BLUR_EFFECTS_ENABLED)
+            prefs.remove(REDUCE_MOTION)
+            prefs.remove(HAPTICS_ENABLED)
+            prefs.remove(DETAILED_TOKEN_USAGE)
+            prefs.remove(TOOL_CALL_DISPLAY_MODE)
+            prefs.remove(AUTO_EXPAND_ACTIVE_GROUP)
+            prefs.remove(SCHEME_STYLE)
+            prefs.remove(FONT_PREFERENCE)
+            prefs.remove(SHOW_DOCUMENTATION_FAB)
+            prefs.remove(DEFAULT_TEMPERATURE)
+            prefs.remove(DEFAULT_MAX_TOKENS)
+            prefs.remove(DEFAULT_TOP_P)
+            prefs.remove(DEFAULT_FREQUENCY_PENALTY)
+            prefs.remove(DEFAULT_PRESENCE_PENALTY)
+
+            // Derived fetch state is never restored. Invalidate it when portable provider/model
+            // configuration is replaced so stale results cannot masquerade as imported data.
+            prefs.remove(AVAILABLE_MODELS_JSON)
+            prefs.remove(CUSTOM_ENDPOINT_RESOLUTIONS_JSON)
+            prefs.remove(LAST_MODELS_FETCH_FINGERPRINT)
+        }
+    }
+
+    suspend fun invalidatePortableModelCaches() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(AVAILABLE_MODELS_JSON)
+            prefs.remove(CUSTOM_ENDPOINT_RESOLUTIONS_JSON)
+            prefs.remove(LAST_MODELS_FETCH_FINGERPRINT)
+        }
     }
 }
