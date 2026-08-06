@@ -144,6 +144,45 @@ class AnthropicStreamEventRouterTest {
         assertEquals(40, event.usage.outputTokenCount)
     }
 
+    @Test
+    fun usageFromTerminalDeltaWhenStartCarriesPlaceholderZeros() {
+        // Relay endpoints report all-zero placeholders in message_start and the real input/
+        // cache counts only in the terminal message_delta. The router must adopt the delta's
+        // values so a cache hit is never silently reported as zero.
+        val router = AnthropicStreamEventRouter()
+        router.route(
+            AnthropicStreamEvent(
+                type = "message_start",
+                message = AnthropicMessageInfo(
+                    usage = AnthropicUsage(
+                        inputTokens = 2,
+                        cacheCreationInputTokens = 0,
+                        cacheReadInputTokens = 0,
+                        outputTokens = 1,
+                    )
+                ),
+            )
+        )
+
+        val event = router.route(
+            AnthropicStreamEvent(
+                type = "message_delta",
+                usage = AnthropicUsage(
+                    inputTokens = 1,
+                    cacheCreationInputTokens = 370,
+                    cacheReadInputTokens = 3740,
+                    outputTokens = 8,
+                ),
+            )
+        ).single() as StreamEvent.UsageUpdate
+
+        assertEquals(3740, event.usage.cachedInputTokenCount)
+        assertEquals(371, event.usage.uncachedInputTokenCount)
+        assertEquals(4111, event.usage.inputTokenCount)
+        assertEquals(8, event.usage.outputTokenCount)
+        assertEquals(4119, event.usage.totalTokenCount)
+    }
+
     private fun toolStart(index: Int, id: String, name: String) = AnthropicStreamEvent(
         type = "content_block_start",
         index = index,

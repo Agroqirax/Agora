@@ -50,7 +50,12 @@ class OpenRouterProvider : BaseOpenAiProvider() {
                 }
             }
         }
-        delta.reasoningContent?.let {
+        // Fall back to the bare `reasoning` string only when the structured reasoning_details
+        // array is absent; OpenRouter flattens the same text into both, so an unconditional read
+        // would emit the thinking twice.
+        (delta.reasoningContent ?: delta.reasoning)
+            ?.takeIf { delta.reasoningDetails.isNullOrEmpty() }
+            ?.let {
             if (it.isNotEmpty()) {
                 emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it)))
             }

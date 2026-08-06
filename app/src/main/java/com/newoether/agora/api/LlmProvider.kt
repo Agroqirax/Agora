@@ -211,6 +211,10 @@ data class OpenAiDelta(
     val role: String? = null,
     val content: String? = null,
     @SerialName("reasoning_content") val reasoningContent: String? = null,
+    // Bare `reasoning` string: OpenRouter and many Claude/DeepSeek-in-OpenAI relays emit this
+    // instead of (or duplicated alongside) reasoning_content. Read as a fallback so a
+    // non-standard endpoint's thinking is never silently dropped.
+    val reasoning: String? = null,
     @SerialName("reasoning_details") val reasoningDetails: List<OpenAiReasoningDetail>? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiToolCall>? = null
 )

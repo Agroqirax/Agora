@@ -63,7 +63,9 @@ abstract class BaseOpenAiProvider : LlmProvider {
         thinkParser: StreamingThinkTagParser,
         emit: suspend (StreamEvent) -> Unit
     ) {
-        delta.reasoningContent?.let { reasoning ->
+        // reasoning_content is the vLLM/DeepSeek-compatible field; `reasoning` is the bare-string
+        // form many relays emit instead. Take whichever the endpoint actually populated.
+        (delta.reasoningContent ?: delta.reasoning)?.let { reasoning ->
             if (reasoning.isNotEmpty() && config.thinkingEnabled) {
                 emit(StreamEvent.ThoughtChunk(reasoning))
             }

@@ -252,6 +252,13 @@ internal class AnthropicStreamEventRouter {
             }
 
             "message_delta" -> event.usage?.let { usage ->
+                // Relay/non-standard endpoints report the real input & cache counts only in
+                // this terminal event (message_start carries all-zero placeholders); standard
+                // Anthropic reports them in message_start and omits them here. Adopt any value
+                // the delta actually carries, else keep the message_start value — correct for both.
+                usage.inputTokens?.coerceAtLeast(0)?.let { inputTokens = it }
+                usage.cacheCreationInputTokens?.coerceAtLeast(0)?.let { cacheCreationInputTokens = it }
+                usage.cacheReadInputTokens?.coerceAtLeast(0)?.let { cacheReadInputTokens = it }
                 val uncachedInput = inputTokens?.let { input ->
                     TokenUsage.addCounts(input, cacheCreationInputTokens)
                 }
