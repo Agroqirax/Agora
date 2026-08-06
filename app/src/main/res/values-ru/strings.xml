@@ -128,13 +128,14 @@
     <string name="result_label">Результат:</string>
     <string name="cost_tokens">Стоимость %1$d токенов</string>
     <string name="token_usage_with_label">Использование токенов: %1$d</string>
-    <string name="input_tokens_with_label">Входные токены: %1$s</string>
-    <string name="output_tokens_with_label">Выходные токены: %1$s</string>
+    <string name="input_tokens_with_label">Ввод: %1$s</string>
+    <string name="output_tokens_with_label">Вывод: %1$s</string>
     <string name="token_count">%1$d токенов</string>
     <string name="token_count_with_cached">%1$d токенов (из них %2$d из кэша)</string>
     <string name="detailed_token_usage">Подробное использование токенов</string>
     <string name="detailed_token_usage_desc">Показывать количество входных и выходных токенов завершённых ответов</string>
     <string name="token_usage_detail">Ввод %1$s · Вывод %2$s</string>
+    <string name="token_usage_detail_cached">Ввод %1$s (из них %2$s из кэша) · Вывод %3$s</string>
     <string name="thinking_ellipsis">Размышление...</string>
     <string name="answering_ellipsis">Ответ...</string>
     <string name="sending_ellipsis">Отправка...</string>

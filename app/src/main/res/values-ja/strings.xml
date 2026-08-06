@@ -128,13 +128,14 @@
     <string name="result_label">結果:</string>
     <string name="cost_tokens">コスト %1$d トークン</string>
     <string name="token_usage_with_label">トークン使用量: %1$d トークン</string>
-    <string name="input_tokens_with_label">入力トークン: %1$s</string>
-    <string name="output_tokens_with_label">出力トークン: %1$s</string>
+    <string name="input_tokens_with_label">入力: %1$s</string>
+    <string name="output_tokens_with_label">出力: %1$s</string>
     <string name="token_count">%1$d トークン</string>
     <string name="token_count_with_cached">%1$d トークン（%2$d キャッシュ済み）</string>
     <string name="detailed_token_usage">トークン使用量の詳細</string>
     <string name="detailed_token_usage_desc">完了した返信に入力と出力のトークン数を表示します</string>
     <string name="token_usage_detail">入力 %1$s · 出力 %2$s</string>
+    <string name="token_usage_detail_cached">入力 %1$s（%2$s キャッシュ済み）· 出力 %3$s</string>
     <string name="thinking_ellipsis">思考中...</string>
     <string name="answering_ellipsis">回答中...</string>
     <string name="sending_ellipsis">送信中...</string>

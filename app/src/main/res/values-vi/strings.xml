@@ -131,13 +131,14 @@
     <string name="result_label">Kết quả:</string>
     <string name="cost_tokens">Tiêu tốn %1$d token</string>
     <string name="token_usage_with_label">Mức sử dụng token: %1$d token</string>
-    <string name="input_tokens_with_label">Token đầu vào: %1$s</string>
-    <string name="output_tokens_with_label">Token đầu ra: %1$s</string>
+    <string name="input_tokens_with_label">Đầu vào: %1$s</string>
+    <string name="output_tokens_with_label">Đầu ra: %1$s</string>
     <string name="token_count">%1$d token</string>
     <string name="token_count_with_cached">%1$d token (%2$d đã lưu đệm)</string>
     <string name="detailed_token_usage">Mức sử dụng token chi tiết</string>
     <string name="detailed_token_usage_desc">Hiển thị số token đầu vào và đầu ra cho câu trả lời đã hoàn tất</string>
     <string name="token_usage_detail">Đầu vào %1$s · Đầu ra %2$s</string>
+    <string name="token_usage_detail_cached">Đầu vào %1$s (%2$s đã lưu đệm) · Đầu ra %3$s</string>
     <string name="thinking_ellipsis">Đang suy nghĩ...</string>
     <string name="answering_ellipsis">Đang trả lời...</string>
     <string name="sending_ellipsis">Đang gửi...</string>

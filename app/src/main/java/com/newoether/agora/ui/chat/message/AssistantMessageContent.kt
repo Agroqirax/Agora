@@ -244,11 +244,22 @@ internal fun AssistantMessageContent(
                     null
                 }
                 val completedUsageText = detailedUsage?.let { usage ->
-                    stringResource(
-                        R.string.token_usage_detail,
-                        usage.input?.toString() ?: "—",
-                        usage.output?.toString() ?: "—",
-                    )
+                    val input = usage.input?.toString() ?: "—"
+                    val output = usage.output?.toString() ?: "—"
+                    if (usage.cachedInput != null) {
+                        stringResource(
+                            R.string.token_usage_detail_cached,
+                            input,
+                            usage.cachedInput.toString(),
+                            output,
+                        )
+                    } else {
+                        stringResource(
+                            R.string.token_usage_detail,
+                            input,
+                            output,
+                        )
+                    }
                 } ?: stringResource(
                     R.string.cost_tokens,
                     message.tokenCount.coerceAtLeast(0),

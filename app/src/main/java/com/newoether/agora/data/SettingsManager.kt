@@ -681,17 +681,37 @@ class SettingsManager(private val context: Context) {
                 emptyList()
             }
             val migratedPrompts = migrateLegacyDefaultPromptTitle(currentPrompts, locale)
-            if (migratedPrompts != currentPrompts) {
-                prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(migratedPrompts)
+            val runtimeMigrated = migrateOldRuntimeContext(migratedPrompts, locale)
+            if (runtimeMigrated != currentPrompts) {
+                prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(runtimeMigrated)
             }
             if (looksLikeFreshInstall) {
-                if (migratedPrompts.isEmpty()) {
+                if (runtimeMigrated.isEmpty()) {
                     val defaultPrompt = DefaultSystemPrompt.create(locale)
                     prefs[SYSTEM_PROMPTS_JSON] = json.encodeToString(listOf(defaultPrompt))
                     if (prefs[ACTIVE_SYSTEM_PROMPT_ID] == null) {
                         prefs[ACTIVE_SYSTEM_PROMPT_ID] = defaultPrompt.id
                     }
                 }
+            }
+        }
+    }
+
+    private fun migrateOldRuntimeContext(
+        prompts: List<SystemPromptEntry>,
+        locale: Locale
+    ): List<SystemPromptEntry> {
+        if (prompts.isEmpty()) return prompts
+        val newDefault = DefaultSystemPrompt.create(locale)
+        return prompts.map { entry ->
+            if (DefaultSystemPrompt.hasOldRuntimeContext(entry)) {
+                entry.copy(
+                    systemItems = newDefault.systemItems,
+                    userPrependItems = newDefault.userPrependItems,
+                    userPostpendItems = newDefault.userPostpendItems,
+                )
+            } else {
+                entry
             }
         }
     }

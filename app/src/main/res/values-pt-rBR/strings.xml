@@ -128,13 +128,14 @@
     <string name="result_label">Resultado:</string>
     <string name="cost_tokens">Custo %1$d tokens</string>
     <string name="token_usage_with_label">Uso de tokens: %1$d tokens</string>
-    <string name="input_tokens_with_label">Tokens de entrada: %1$s</string>
-    <string name="output_tokens_with_label">Tokens de saída: %1$s</string>
+    <string name="input_tokens_with_label">Entrada: %1$s</string>
+    <string name="output_tokens_with_label">Saída: %1$s</string>
     <string name="token_count">%1$d tokens</string>
     <string name="token_count_with_cached">%1$d tokens (%2$d em cache)</string>
     <string name="detailed_token_usage">Uso detalhado de tokens</string>
     <string name="detailed_token_usage_desc">Mostra as quantidades de tokens de entrada e saída em respostas concluídas</string>
     <string name="token_usage_detail">Entrada %1$s · Saída %2$s</string>
+    <string name="token_usage_detail_cached">Entrada %1$s (%2$s em cache) · Saída %3$s</string>
     <string name="thinking_ellipsis">Raciocinando...</string>
     <string name="answering_ellipsis">Respondendo...</string>
     <string name="sending_ellipsis">Enviando...</string>

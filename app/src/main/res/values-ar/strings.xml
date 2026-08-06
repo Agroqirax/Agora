@@ -128,13 +128,14 @@
     <string name="result_label">النتيجة:</string>
     <string name="cost_tokens">التكلفة %1$d رمز</string>
     <string name="token_usage_with_label">استخدام الرموز: %1$d رمزًا</string>
-    <string name="input_tokens_with_label">رموز الإدخال: %1$s</string>
-    <string name="output_tokens_with_label">رموز الإخراج: %1$s</string>
+    <string name="input_tokens_with_label">إدخال: %1$s</string>
+    <string name="output_tokens_with_label">إخراج: %1$s</string>
     <string name="token_count">%1$d رمزًا</string>
     <string name="token_count_with_cached">%1$d رمزًا (%2$d مخزنة مؤقتًا)</string>
     <string name="detailed_token_usage">استخدام الرموز بالتفصيل</string>
     <string name="detailed_token_usage_desc">عرض عدد رموز الإدخال والإخراج للردود المكتملة</string>
     <string name="token_usage_detail">إدخال %1$s · إخراج %2$s</string>
+    <string name="token_usage_detail_cached">إدخال %1$s (%2$s مخزنة مؤقتًا) · إخراج %3$s</string>
     <string name="thinking_ellipsis">جارٍ التفكير...</string>
     <string name="answering_ellipsis">جارٍ الإجابة...</string>
     <string name="sending_ellipsis">جارٍ الإرسال...</string>

@@ -128,13 +128,14 @@
     <string name="result_label">결과:</string>
     <string name="cost_tokens">비용 %1$d 토큰</string>
     <string name="token_usage_with_label">토큰 사용량: %1$d 토큰</string>
-    <string name="input_tokens_with_label">입력 토큰: %1$s</string>
-    <string name="output_tokens_with_label">출력 토큰: %1$s</string>
+    <string name="input_tokens_with_label">입력: %1$s</string>
+    <string name="output_tokens_with_label">출력: %1$s</string>
     <string name="token_count">%1$d 토큰</string>
     <string name="token_count_with_cached">%1$d 토큰 (캐시 %2$d)</string>
     <string name="detailed_token_usage">상세 토큰 사용량</string>
     <string name="detailed_token_usage_desc">완료된 답변에 입력 및 출력 토큰 수를 표시합니다</string>
     <string name="token_usage_detail">입력 %1$s · 출력 %2$s</string>
+    <string name="token_usage_detail_cached">입력 %1$s (캐시 %2$s) · 출력 %3$s</string>
     <string name="thinking_ellipsis">사고 중...</string>
     <string name="answering_ellipsis">답변 중...</string>
     <string name="sending_ellipsis">보내는 중...</string>

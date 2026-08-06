@@ -17,23 +17,34 @@ class DefaultSystemPromptTest {
     }
 
     @Test
-    fun create_includesRuntimeContextActiveMemoryAndToolPolicy() {
+    fun create_includesActiveMemoryAndToolPolicy_omitsRuntimeContext() {
         val entry = DefaultSystemPrompt.create(Locale.ENGLISH)
         val systemPrompt = PredefinedVariables.compile(
             entry.systemItems,
             mapOf(
-                PredefinedVariables.DATE to "2026-06-17",
-                PredefinedVariables.TIME to "21:35:10",
                 PredefinedVariables.ACTIVE_MEMORY to "User prefers concise answers."
             )
         )
 
-        assertTrue(systemPrompt.contains("<current_date>2026-06-17</current_date>"))
-        assertTrue(systemPrompt.contains("<current_time>21:35:10</current_time>"))
+        assertFalse(systemPrompt.contains("<agora_runtime_context>"))
+        assertFalse(systemPrompt.contains("<current_date>"))
+        assertFalse(systemPrompt.contains("<current_time>"))
         assertTrue(systemPrompt.contains("<active_memory_context>\nUser prefers concise answers.\n</active_memory_context>"))
         assertTrue(systemPrompt.contains("Shell and device files:"))
         assertTrue(systemPrompt.contains("configured shell server or the Local Sandbox"))
         assertFalse(systemPrompt.contains("generate_image"))
+    }
+
+    @Test
+    fun hasOldRuntimeContext_detectsOldEntries() {
+        val entry = DefaultSystemPrompt.create(Locale.ENGLISH)
+        assertFalse(DefaultSystemPrompt.hasOldRuntimeContext(entry))
+
+        // Simulate an old entry by injecting a custom item with the legacy tag
+        val oldItems = entry.systemItems.toMutableList()
+        oldItems.add(0, PromptTemplateItem(type = PromptItemType.CUSTOM, value = "prefix <agora_runtime_context> old content"))
+        val oldEntry = entry.copy(systemItems = oldItems)
+        assertTrue(DefaultSystemPrompt.hasOldRuntimeContext(oldEntry))
     }
 
     @Test

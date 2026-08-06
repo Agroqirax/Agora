@@ -74,6 +74,7 @@ internal fun MessageInfoDialog(
                             lineHeight = 20.sp,
                         ),
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         stringResource(
                             R.string.output_tokens_with_label,
