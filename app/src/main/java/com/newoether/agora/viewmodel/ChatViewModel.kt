@@ -188,6 +188,7 @@ class ChatViewModel(
 
     /** Local (on-device) chat-model configuration CRUD. */
     val modelManager = ModelManager(settings, viewModelScope)
+    private val customModelMutationMutex = Mutex()
 
     // [providerRegistry] and [localProvider] are now constructor-injected, process-scoped
     // singletons (see AppContainer) so background task execution shares the same instances.
@@ -830,6 +831,20 @@ class ChatViewModel(
 
     init {
         startInitJobs()
+        viewModelScope.launch(Dispatchers.IO) {
+            // A completed generation marks its conversation unread in the same transaction as
+            // the terminal message. Selecting that conversation is the read boundary: observing
+            // its row here also covers completion while the conversation is already open.
+            currentConversation
+                .filterNotNull()
+                .filter { it.hasUnreadGeneration }
+                .collect { conversation ->
+                    convRepo.setConversationUnreadGeneration(
+                        id = conversation.id,
+                        unread = false,
+                    )
+                }
+        }
         viewModelScope.launch {
             _currentConversationId.collectLatest { id ->
                 _loadedMessagesConversationId.value = null
@@ -939,6 +954,46 @@ class ChatViewModel(
         protocol: com.newoether.agora.data.CustomEndpointProtocol,
     ) = providerRegistry.updateCustomProtocol(name, protocol)
     fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
+
+    fun updateCustomModel(
+        oldModelId: String,
+        provider: String,
+        modelId: String,
+        alias: String,
+    ) {
+        val normalizedProvider = provider.trim()
+        val normalizedModelId = modelId.trim()
+        if (normalizedProvider.isEmpty() || normalizedModelId.isEmpty()) return
+        val newModelId = ModelId(normalizedProvider, normalizedModelId).prefixed
+
+        viewModelScope.launch(Dispatchers.IO) {
+            customModelMutationMutex.withLock {
+                val customModels = settings.customModels.value
+                if (oldModelId !in customModels) return@withLock
+                if (newModelId != oldModelId && newModelId in customModels) return@withLock
+
+                settings.replaceCustomModel(oldModelId, newModelId, alias)
+                convRepo.replaceConfiguredModelReferences(oldModelId, newModelId)
+                if (_currentActiveModel.value == oldModelId) {
+                    _currentActiveModel.value = newModelId
+                }
+            }
+        }
+    }
+
+    fun deleteCustomModel(modelId: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            customModelMutationMutex.withLock {
+                if (modelId !in settings.customModels.value) return@withLock
+
+                settings.replaceCustomModel(modelId, null, "")
+                convRepo.replaceConfiguredModelReferences(modelId, null)
+                if (_currentActiveModel.value == modelId) {
+                    _currentActiveModel.value = null
+                }
+            }
+        }
+    }
 
     fun getCurrentVersion(): String {
         return try { appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName ?: "?" } catch (_: Exception) { "?" }

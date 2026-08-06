@@ -1452,6 +1452,7 @@ class GenerationManager(
                                 currentStatus == MessageStatus.STOPPED ->
                                     conversations.finishGeneration(
                                         finalMessage,
+                                        conversationId,
                                         runId,
                                         RunStatus.STOPPED,
                                         RunEndReason.USER_STOPPED,
@@ -1463,6 +1464,7 @@ class GenerationManager(
                                 currentStatus == MessageStatus.ERROR ->
                                     conversations.finishGeneration(
                                         finalMessage,
+                                        conversationId,
                                         runId,
                                         RunStatus.FAILED,
                                         RunEndReason.PROVIDER_ERROR,
@@ -1470,9 +1472,11 @@ class GenerationManager(
                                 else ->
                                     conversations.finishGeneration(
                                         finalMessage,
+                                        conversationId,
                                         runId,
                                         RunStatus.COMPLETED,
                                         RunEndReason.MODEL_COMPLETED,
+                                        markConversationUnread = true,
                                     )
                             }
                             if (!terminalPersisted) {
@@ -1510,7 +1514,7 @@ class GenerationManager(
             // The generating flag + active-set are released by the controller's endGeneration()
             // in its finally (which also drains the queue), so the slot lifecycle has a single owner.
             if (foregroundLeaseAcquired) {
-                AgoraForegroundService.release(app, modelMessageId)
+                AgoraForegroundService.release(modelMessageId)
             }
             if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
                 AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
