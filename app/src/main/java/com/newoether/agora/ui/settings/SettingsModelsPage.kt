@@ -31,6 +31,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -136,9 +137,12 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val selectedModel by viewModel.settings.selectedModel.collectAsState()
     var showActiveModelDialog by remember { mutableStateOf(false) }
     var showModelAliasDialog by remember { mutableStateOf<String?>(null) }
-    var showAddCustomModelDialog by remember { mutableStateOf(false) }
+    var showCustomModelDialog by remember { mutableStateOf(false) }
+    var editingCustomModel by remember { mutableStateOf<String?>(null) }
+    var deletingCustomModel by remember { mutableStateOf<String?>(null) }
     var customModelProvider by rememberSaveable { mutableStateOf("") }
-    var customModelName by rememberSaveable { mutableStateOf("") }
+    var customModelId by rememberSaveable { mutableStateOf("") }
+    var customModelAlias by rememberSaveable { mutableStateOf("") }
     var customModelProviderMenuExpanded by remember { mutableStateOf(false) }
     var modelSearchQuery by rememberSaveable { mutableStateOf("") }
     val expandedProviders = remember { mutableStateMapOf<String, MutableTransitionState<Boolean>>() }
@@ -166,10 +170,39 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         )
     }
     val normalizedSearchQuery = modelSearchQuery.trim()
+    val searchActive = normalizedSearchQuery.isNotEmpty()
+    val autoProviderStateKeys = remember(availableModels) {
+        availableModels.keys.mapTo(linkedSetOf()) { providerName -> "auto:$providerName" }
+    }
 
     LaunchedEffect(providerChoices) {
         if (customModelProvider !in providerChoices) {
             customModelProvider = providerChoices.firstOrNull().orEmpty()
+        }
+    }
+
+    // Search-driven bulk changes are intentional jump cuts. Replacing the transition-state
+    // identity lets the content start at its destination, while header taps keep mutating the
+    // same state object and therefore retain their normal expand/collapse animation.
+    LaunchedEffect(searchActive) {
+        val knownAutoProviders = expandedProviders.keys
+            .filterTo(linkedSetOf()) { it.startsWith("auto:") }
+            .apply { addAll(autoProviderStateKeys) }
+        knownAutoProviders.forEach { providerStateKey ->
+            expandedProviders[providerStateKey] = MutableTransitionState(searchActive)
+            if (!searchActive) modelBlockHeights[providerStateKey] = 0f
+        }
+    }
+
+    // A provider fetched during an active search joins expanded without replaying the bulk
+    // transition or reopening a provider that the user manually collapsed.
+    LaunchedEffect(searchActive, autoProviderStateKeys) {
+        if (searchActive) {
+            autoProviderStateKeys.forEach { providerStateKey ->
+                if (providerStateKey !in expandedProviders) {
+                    expandedProviders[providerStateKey] = MutableTransitionState(true)
+                }
+            }
         }
     }
 
@@ -249,7 +282,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             },
                             leadingContent = {
                                 Icon(
-                                    Icons.Default.Add,
+                                    Icons.Default.Chat,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 )
@@ -264,13 +297,21 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     groups = manualModelGroups,
                     firstHeaderStartsSection = true,
                     lastGroupClosesSection = false,
-                    forceExpanded = false,
                     allowSpatialTransitions = allowSpatialTransitions,
+                    searchActive = false,
                     enabledModels = enabledModels,
                     modelAliases = modelAliases,
                     expandedProviders = expandedProviders,
                     modelBlockHeights = modelBlockHeights,
-                    onAliasClick = { showModelAliasDialog = it },
+                    onAliasClick = null,
+                    onDetailsClick = { model ->
+                        val parsed = ModelId.parse(model)
+                        editingCustomModel = model
+                        customModelProvider = parsed.providerName
+                        customModelId = parsed.modelName
+                        customModelAlias = modelAliases[model].orEmpty()
+                        showCustomModelDialog = true
+                    },
                     onEnabledChange = { model, enabled ->
                         viewModel.settings.setEnabledModels(
                             if (enabled) enabledModels + model else enabledModels - model
@@ -284,11 +325,13 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     SettingsAddItem(
                         label = stringResource(R.string.models_add_custom),
                         onClick = {
-                            customModelName = ""
+                            editingCustomModel = null
+                            customModelId = ""
+                            customModelAlias = ""
                             if (customModelProvider !in providerChoices) {
                                 customModelProvider = providerChoices.firstOrNull().orEmpty()
                             }
-                            showAddCustomModelDialog = true
+                            showCustomModelDialog = true
                         },
                     )
                 }
@@ -337,6 +380,11 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             } else {
                                 null
                             },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color.Transparent,
+                                unfocusedBorderColor = Color.Transparent,
+                                disabledBorderColor = Color.Transparent,
+                            ),
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -377,13 +425,14 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     groups = autoFetchedModelGroups,
                     firstHeaderStartsSection = false,
                     lastGroupClosesSection = true,
-                    forceExpanded = normalizedSearchQuery.isNotEmpty(),
                     allowSpatialTransitions = allowSpatialTransitions,
+                    searchActive = searchActive,
                     enabledModels = enabledModels,
                     modelAliases = modelAliases,
                     expandedProviders = expandedProviders,
                     modelBlockHeights = modelBlockHeights,
                     onAliasClick = { showModelAliasDialog = it },
+                    onDetailsClick = null,
                     onEnabledChange = { model, enabled ->
                         viewModel.settings.setEnabledModels(
                             if (enabled) enabledModels + model else enabledModels - model
@@ -439,28 +488,40 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         )
     }
 
-    // ── Add Custom Model Dialog ──
-    if (showAddCustomModelDialog) {
+    // ── Add / edit Custom Model Dialog ──
+    if (showCustomModelDialog) {
+        val originalModelId = editingCustomModel
         val normalizedProvider = customModelProvider.trim()
-        val normalizedName = customModelName.trim()
-        val pendingModelId = if (normalizedProvider.isNotEmpty() && normalizedName.isNotEmpty()) {
-            ModelId(normalizedProvider, normalizedName).prefixed
+        val normalizedModelId = customModelId.trim()
+        val normalizedAlias = customModelAlias.trim()
+        val pendingModelId = if (
+            normalizedProvider.isNotEmpty() &&
+            normalizedModelId.isNotEmpty()
+        ) {
+            ModelId(normalizedProvider, normalizedModelId).prefixed
         } else {
             ""
         }
-        val modelAlreadyExists = pendingModelId in customModels
-        val canAddModel = pendingModelId.isNotEmpty() && !modelAlreadyExists
+        val modelAlreadyExists =
+            pendingModelId in customModels && pendingModelId != originalModelId
+        val canSaveModel = pendingModelId.isNotEmpty() && !modelAlreadyExists
 
         AlertDialog(
             modifier = Modifier.clearFocusOnTap(),
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 customModelProviderMenuExpanded = false
-                showAddCustomModelDialog = false
+                showCustomModelDialog = false
             },
             title = {
                 Text(
-                    stringResource(R.string.models_add_custom),
+                    stringResource(
+                        if (originalModelId == null) {
+                            R.string.models_add_custom
+                        } else {
+                            R.string.models_edit_custom
+                        }
+                    ),
                     fontWeight = FontWeight.Bold,
                 )
             },
@@ -506,6 +567,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             onDismissRequest = {
                                 customModelProviderMenuExpanded = false
                             },
+                            matchTextFieldWidth = false,
                             shape = RoundedCornerShape(16.dp),
                         ) {
                             providerChoices.forEach { providerName ->
@@ -539,10 +601,10 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
                     Box(modifier = Modifier.noOpBringIntoView()) {
                         OutlinedTextField(
-                            value = customModelName,
-                            onValueChange = { customModelName = it },
+                            value = customModelId,
+                            onValueChange = { customModelId = it },
                             singleLine = true,
-                            label = { Text(stringResource(R.string.model_name_label)) },
+                            label = { Text(stringResource(R.string.model_id_label)) },
                             isError = modelAlreadyExists,
                             supportingText = if (modelAlreadyExists) {
                                 { Text(stringResource(R.string.models_custom_exists)) }
@@ -553,30 +615,124 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Box(modifier = Modifier.noOpBringIntoView()) {
+                        OutlinedTextField(
+                            value = customModelAlias,
+                            onValueChange = { customModelAlias = it },
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.models_alias_hint)) },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(
-                    enabled = canAddModel,
-                    onClick = {
-                        viewModel.settings.addCustomModel(
-                            provider = normalizedProvider,
-                            modelName = normalizedName,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (originalModelId != null) {
+                        TextButton(
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error,
+                            ),
+                            onClick = {
+                                customModelProviderMenuExpanded = false
+                                showCustomModelDialog = false
+                                deletingCustomModel = originalModelId
+                            },
+                        ) {
+                            Text(stringResource(R.string.delete))
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    TextButton(
+                        onClick = {
+                            customModelProviderMenuExpanded = false
+                            showCustomModelDialog = false
+                        }
+                    ) {
+                        Text(stringResource(R.string.provider_cancel))
+                    }
+
+                    TextButton(
+                        enabled = canSaveModel,
+                        onClick = {
+                            if (originalModelId == null) {
+                                viewModel.settings.addCustomModel(
+                                    provider = normalizedProvider,
+                                    modelName = normalizedModelId,
+                                    alias = normalizedAlias,
+                                )
+                            } else {
+                                viewModel.updateCustomModel(
+                                    oldModelId = originalModelId,
+                                    provider = normalizedProvider,
+                                    modelId = normalizedModelId,
+                                    alias = normalizedAlias,
+                                )
+                            }
+                            customModelProviderMenuExpanded = false
+                            showCustomModelDialog = false
+                        },
+                    ) {
+                        Text(
+                            stringResource(
+                                if (originalModelId == null) {
+                                    R.string.add
+                                } else {
+                                    R.string.save
+                                }
+                            )
                         )
-                        showAddCustomModelDialog = false
+                    }
+                }
+            },
+        )
+    }
+
+    deletingCustomModel?.let { model ->
+        val parsed = ModelId.parse(model)
+        val displayName = modelAliases[model] ?: parsed.apiModelName
+        AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { deletingCustomModel = null },
+            title = {
+                Text(
+                    stringResource(R.string.models_delete_custom_title),
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.models_delete_custom_text,
+                        displayName,
+                    )
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                    onClick = {
+                        viewModel.deleteCustomModel(model)
+                        deletingCustomModel = null
                     },
                 ) {
-                    Text(stringResource(R.string.add))
+                    Text(stringResource(R.string.delete))
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        customModelProviderMenuExpanded = false
-                        showAddCustomModelDialog = false
-                    }
-                ) {
-                    Text(stringResource(R.string.provider_cancel))
+                TextButton(onClick = { deletingCustomModel = null }) {
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -623,13 +779,14 @@ private fun LazyListScope.modelProviderGroups(
     groups: List<ModelProviderGroup>,
     firstHeaderStartsSection: Boolean,
     lastGroupClosesSection: Boolean,
-    forceExpanded: Boolean,
     allowSpatialTransitions: Boolean,
+    searchActive: Boolean,
     enabledModels: Set<String>,
     modelAliases: Map<String, String>,
     expandedProviders: MutableMap<String, MutableTransitionState<Boolean>>,
     modelBlockHeights: MutableMap<String, Float>,
-    onAliasClick: (String) -> Unit,
+    onAliasClick: ((String) -> Unit)?,
+    onDetailsClick: ((String) -> Unit)?,
     onEnabledChange: (String, Boolean) -> Unit,
 ) {
     groups.forEachIndexed { providerIndex, group ->
@@ -646,7 +803,7 @@ private fun LazyListScope.modelProviderGroups(
             if (isLastProvider && lastGroupClosesSection) 24f else 5f
 
         item(key = "${keyPrefix}_header_$providerName") {
-            val isExpanded = forceExpanded || transitionState.targetState
+            val isExpanded = transitionState.targetState
             val currentHeight = modelBlockHeights[providerStateKey] ?: 0f
             val collapsedRatio =
                 (1f - currentHeight / collapsedBottomRadius).coerceIn(0f, 1f)
@@ -668,7 +825,18 @@ private fun LazyListScope.modelProviderGroups(
                 SettingsItem(
                     headlineContent = { Text(providerName) },
                     supportingContent = {
-                        Text(stringResource(R.string.models_count, models.size))
+                        val enabledCount = models.count { it in enabledModels }
+                        Text(
+                            stringResource(
+                                if (searchActive) {
+                                    R.string.models_search_count_status
+                                } else {
+                                    R.string.models_count_status
+                                },
+                                enabledCount,
+                                models.size,
+                            )
+                        )
                     },
                     leadingContent = {
                         when {
@@ -702,7 +870,7 @@ private fun LazyListScope.modelProviderGroups(
                             contentDescription = null,
                         )
                     },
-                    modifier = Modifier.clickable(enabled = !forceExpanded) {
+                    modifier = Modifier.clickable {
                         transitionState.targetState = !transitionState.targetState
                     },
                 )
@@ -711,66 +879,87 @@ private fun LazyListScope.modelProviderGroups(
 
         item(key = "${keyPrefix}_models_$providerName") {
             val density = LocalDensity.current
-            val isExpanded = forceExpanded || transitionState.targetState
-            AnimatedVisibility(
-                visible = isExpanded,
-                enter = if (allowSpatialTransitions) {
-                    expandVertically()
-                } else {
-                    fadeIn()
-                },
-                exit = if (allowSpatialTransitions) {
-                    shrinkVertically()
-                } else {
-                    fadeOut()
-                },
-                modifier = Modifier.onGloballyPositioned { coordinates ->
-                    modelBlockHeights[providerStateKey] =
-                        coordinates.size.height / density.density
-                },
-            ) {
-                Column {
-                    models.forEachIndexed { modelIndex, model ->
-                        val isLastModel = modelIndex == models.lastIndex
-                        val modelShape = when {
-                            isLastModel && isLastProvider && lastGroupClosesSection ->
-                                FlatToBottom
-                            isLastModel -> FiveBottom
-                            else -> FlatShape
-                        }
-                        CardSurface(shape = modelShape) {
-                            val isEnabled = model in enabledModels
-                            val alias = modelAliases[model]
-                            val parsed = ModelId.parse(model)
-                            val displayName = alias ?: parsed.apiModelName
-                            SettingsItem(
-                                headlineContent = { Text(displayName) },
-                                supportingContent = if (alias != null) {
-                                    { Text(parsed.apiModelName) }
-                                } else {
-                                    null
-                                },
-                                trailingContent = {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        IconButton(onClick = { onAliasClick(model) }) {
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription =
-                                                    stringResource(R.string.models_rename),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(20.dp),
+            key(transitionState) {
+                AnimatedVisibility(
+                    visibleState = transitionState,
+                    enter = if (allowSpatialTransitions) {
+                        expandVertically()
+                    } else {
+                        fadeIn()
+                    },
+                    exit = if (allowSpatialTransitions) {
+                        shrinkVertically()
+                    } else {
+                        fadeOut()
+                    },
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        modelBlockHeights[providerStateKey] =
+                            coordinates.size.height / density.density
+                    },
+                ) {
+                    Column {
+                        models.forEachIndexed { modelIndex, model ->
+                            val isLastModel = modelIndex == models.lastIndex
+                            val modelShape = when {
+                                isLastModel && isLastProvider && lastGroupClosesSection ->
+                                    FlatToBottom
+                                isLastModel -> FiveBottom
+                                else -> FlatShape
+                            }
+                            CardSurface(shape = modelShape) {
+                                val isEnabled = model in enabledModels
+                                val alias = modelAliases[model]
+                                val parsed = ModelId.parse(model)
+                                val displayName = alias ?: parsed.apiModelName
+                                SettingsItem(
+                                    headlineContent = { Text(displayName) },
+                                    supportingContent = if (alias != null) {
+                                        { Text(parsed.apiModelName) }
+                                    } else {
+                                        null
+                                    },
+                                    trailingContent = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (onDetailsClick != null) {
+                                                IconButton(
+                                                    onClick = { onDetailsClick(model) },
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Edit,
+                                                        contentDescription =
+                                                            stringResource(
+                                                                R.string.models_custom_details
+                                                            ),
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(20.dp),
+                                                    )
+                                                }
+                                            } else if (onAliasClick != null) {
+                                                IconButton(
+                                                    onClick = { onAliasClick(model) },
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Edit,
+                                                        contentDescription =
+                                                            stringResource(
+                                                                R.string.models_rename
+                                                            ),
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(20.dp),
+                                                    )
+                                                }
+                                            }
+                                            Checkbox(
+                                                checked = isEnabled,
+                                                onCheckedChange = {
+                                                    onEnabledChange(model, it)
+                                                },
                                             )
                                         }
-                                        Checkbox(
-                                            checked = isEnabled,
-                                            onCheckedChange = {
-                                                onEnabledChange(model, it)
-                                            },
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.padding(start = 16.dp),
-                            )
+                                    },
+                                    modifier = Modifier.padding(start = 16.dp),
+                                )
+                            }
                         }
                     }
                 }

@@ -30,6 +30,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
+    val imageTranscriptionEnabled by viewModel.settings.imageTranscriptionEnabled.collectAsState()
     val transcriptionEnabledModels by viewModel.settings.imageTranscriptionEnabledModels.collectAsState()
     val transcriptionModel by viewModel.settings.imageTranscriptionModel.collectAsState()
     val batchSize by viewModel.settings.imageTranscriptionBatchSize.collectAsState()
@@ -52,6 +53,40 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         floatingActionButton = { if (showDocFab) DocumentationFab("transcription.md") }
     ) {
             SettingsGroupColumn {
+                SettingsGroup(
+                    title = stringResource(R.string.settings_transcription),
+                    items = listOf({
+                        SettingsItem(
+                            headlineContent = {
+                                Text(stringResource(R.string.transcription_enable))
+                            },
+                            supportingContent = {
+                                Text(stringResource(R.string.settings_transcription_desc))
+                            },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.Image,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                            trailingContent = {
+                                Switch(
+                                    checked = imageTranscriptionEnabled,
+                                    onCheckedChange =
+                                        viewModel.settings::setImageTranscriptionEnabled,
+                                )
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setImageTranscriptionEnabled(
+                                    !imageTranscriptionEnabled
+                                )
+                            },
+                        )
+                    }),
+                )
+
+                if (imageTranscriptionEnabled) {
                 SettingsGroup(
                     title = stringResource(R.string.transcription_model),
                     items = listOf({
@@ -220,6 +255,7 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                 }
             )
+                }
             }
             if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
     }
@@ -232,6 +268,33 @@ fun SettingsTranscriptionPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             title = { Text(stringResource(R.string.transcription_select_model), fontWeight = FontWeight.Bold) },
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                    item(key = "transcription-model-none") {
+                        SettingsItem(
+                            headlineContent = {
+                                Text(
+                                    stringResource(R.string.transcription_no_model),
+                                    fontWeight = if (transcriptionModel == null) {
+                                        FontWeight.Bold
+                                    } else {
+                                        FontWeight.Normal
+                                    },
+                                )
+                            },
+                            leadingContent = {
+                                RadioButton(
+                                    selected = transcriptionModel == null,
+                                    onClick = {
+                                        viewModel.settings.setImageTranscriptionModel(null)
+                                        showModelDialog = false
+                                    },
+                                )
+                            },
+                            modifier = Modifier.clickable {
+                                viewModel.settings.setImageTranscriptionModel(null)
+                                showModelDialog = false
+                            },
+                        )
+                    }
                     items(enabledModelsList, key = { it }) { model ->
                         val alias = modelAliases[model]
                         val dialogParsed = com.newoether.agora.model.ModelId.parse(model)

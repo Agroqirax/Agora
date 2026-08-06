@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -120,6 +121,7 @@ import java.util.UUID
 @Composable
 fun TasksScreen(
     viewModel: ChatViewModel,
+    taskListState: LazyListState,
     initialTaskId: String? = null,
     onInitialTaskHandled: () -> Unit = {},
     onBack: () -> Unit,
@@ -166,6 +168,7 @@ fun TasksScreen(
             TasksListPage(
                 viewModel = viewModel,
                 tasks = tasks,
+                listState = taskListState,
                 onBack = onBack,
                 onNewTask = {
                     val newTask = TaskEntity(
@@ -210,6 +213,7 @@ fun TasksScreen(
 private fun TasksListPage(
     viewModel: ChatViewModel,
     tasks: List<TaskEntity>,
+    listState: LazyListState,
     onBack: () -> Unit,
     onNewTask: () -> Unit,
     onOpenTask: (TaskEntity) -> Unit,
@@ -222,6 +226,7 @@ private fun TasksListPage(
     CollapsingSettingsLazyScaffold(
         title = stringResource(R.string.tasks),
         onBack = onBack,
+        listState = listState,
     ) {
         val totalRows = tasks.size + 1
         if (tasks.isEmpty()) {

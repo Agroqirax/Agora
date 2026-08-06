@@ -48,6 +48,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val reduceMotion by viewModel.settings.reduceMotion.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
+    val detailedTokenUsage by viewModel.settings.detailedTokenUsage.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
     val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
     val fontPreference by viewModel.settings.fontPreference.collectAsState()
@@ -324,6 +325,29 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     },
                                 )
                             }
+                        }
+                        add {
+                            SettingsItem(
+                                headlineContent = {
+                                    Text(stringResource(R.string.detailed_token_usage))
+                                },
+                                supportingContent = {
+                                    Text(stringResource(R.string.detailed_token_usage_desc))
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = detailedTokenUsage,
+                                        onCheckedChange = {
+                                            viewModel.settings.setDetailedTokenUsage(it)
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    viewModel.settings.setDetailedTokenUsage(
+                                        !detailedTokenUsage
+                                    )
+                                },
+                            )
                         }
                         add {
                             SettingsItem(

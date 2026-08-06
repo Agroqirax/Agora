@@ -34,6 +34,7 @@ import com.newoether.agora.ui.settings.SettingsGroupColumn
 import com.newoether.agora.ui.settings.SettingsItem
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
+import com.newoether.agora.data.NativeBackupFormat
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.ui.settings.ImportStrategy
 
@@ -704,6 +705,18 @@ private fun ImportPreviewDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (!preview.isSupportedVersion) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(
+                            R.string.import_unsupported_backup_version,
+                            manifest.version,
+                            NativeBackupFormat.CURRENT_VERSION,
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Spacer(Modifier.height(24.dp))
 
                 if (preview.hasConversationGraph) {
@@ -754,7 +767,8 @@ private fun ImportPreviewDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            TextButton(
+                onClick = {
                 val decisions = mutableMapOf<DataExporter.ExportCategory, DataImporter.ImportStrategy>()
                 if (preview.hasConversationGraph) {
                     decisions[DataExporter.ExportCategory.CONVERSATIONS] = convStrategy
@@ -764,7 +778,9 @@ private fun ImportPreviewDialog(
                 if (preview.settingsPresent) decisions[DataExporter.ExportCategory.SETTINGS] = settingsStrategy
                 if (preview.apiKeysPresent) decisions[DataExporter.ExportCategory.API_KEYS] = keysStrategy
                 onImport(decisions)
-            }) { Text(stringResource(R.string.import_button)) }
+                },
+                enabled = preview.isSupportedVersion,
+            ) { Text(stringResource(R.string.import_button)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
