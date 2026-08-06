@@ -7,48 +7,131 @@ import org.junit.Test
 
 class AgoraForegroundServiceLeaseTest {
     @Test
-    fun distinctOwners_startOnceAndOnlyLastReleaseStops() {
+    fun distinctOwners_startOnceAndOnlyLastReleaseStopsRunningService() {
         val leases = ForegroundOwnerLeases()
-        var starts = 0
-        var stops = 0
 
-        assertTrue(leases.acquire("message-a") { starts++; true })
-        assertTrue(leases.acquire("message-b") { starts++; true })
-        assertEquals(1, starts)
+        val firstAcquire = leases.acquire("message-a")
+        assertTrue(firstAcquire.accepted)
+        assertEquals(ForegroundServiceLeaseAction.Start, firstAcquire.action)
+        assertEquals(
+            ForegroundServiceLeaseAction.None,
+            leases.serviceCommandReceived(startId = 11),
+        )
+        assertEquals(ForegroundServiceLifecycleState.RUNNING, leases.lifecycleState())
+
+        val secondAcquire = leases.acquire("message-b")
+        assertTrue(secondAcquire.accepted)
+        assertEquals(ForegroundServiceLeaseAction.None, secondAcquire.action)
         assertEquals(2, leases.size())
 
-        assertTrue(leases.release("message-a") { stops++ })
-        assertEquals(0, stops)
+        val firstRelease = leases.release("message-a")
+        assertTrue(firstRelease.accepted)
+        assertEquals(ForegroundServiceLeaseAction.None, firstRelease.action)
         assertEquals(1, leases.size())
 
-        assertTrue(leases.release("message-b") { stops++ })
-        assertEquals(1, stops)
+        val lastRelease = leases.release("message-b")
+        assertTrue(lastRelease.accepted)
+        assertEquals(ForegroundServiceLeaseAction.Stop(startId = 11), lastRelease.action)
+        assertEquals(ForegroundServiceLifecycleState.STOPPING, leases.lifecycleState())
         assertEquals(0, leases.size())
     }
 
     @Test
     fun duplicateAcquireAndRelease_areIdempotent() {
         val leases = ForegroundOwnerLeases()
-        var starts = 0
-        var stops = 0
 
-        assertTrue(leases.acquire("message") { starts++; true })
-        assertFalse(leases.acquire("message") { starts++; true })
-        assertEquals(1, starts)
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message").action)
+        assertEquals(
+            ForegroundServiceLeaseAction.None,
+            leases.serviceCommandReceived(startId = 4),
+        )
+        assertFalse(leases.acquire("message").accepted)
 
-        assertTrue(leases.release("message") { stops++ })
-        assertFalse(leases.release("message") { stops++ })
-        assertEquals(1, stops)
+        assertEquals(
+            ForegroundServiceLeaseAction.Stop(startId = 4),
+            leases.release("message").action,
+        )
+        assertFalse(leases.release("message").accepted)
     }
 
     @Test
     fun failedFirstStart_rollsBackOwnerSoAcquireCanRetry() {
         val leases = ForegroundOwnerLeases()
 
-        assertFalse(leases.acquire("message") { false })
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message").action)
+        leases.startRequestFailed(ownerToRollback = "message")
+
         assertEquals(0, leases.size())
-        assertTrue(leases.acquire("message") { true })
+        assertEquals(ForegroundServiceLifecycleState.STOPPED, leases.lifecycleState())
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message").action)
         assertEquals(1, leases.size())
+    }
+
+    @Test
+    fun lastReleaseWhileStarting_waitsForPromotionThenStopsWithStartId() {
+        val leases = ForegroundOwnerLeases()
+
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message").action)
+        val release = leases.release("message")
+
+        assertTrue(release.accepted)
+        assertEquals(ForegroundServiceLeaseAction.None, release.action)
+        assertEquals(ForegroundServiceLifecycleState.STARTING, leases.lifecycleState())
+        assertEquals(
+            ForegroundServiceLeaseAction.Stop(startId = 27),
+            leases.serviceCommandReceived(startId = 27),
+        )
+        assertEquals(ForegroundServiceLifecycleState.STOPPING, leases.lifecycleState())
+    }
+
+    @Test
+    fun acquireWhileStopping_waitsForDestroyThenStartsReplacement() {
+        val leases = ForegroundOwnerLeases()
+
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message-a").action)
+        assertEquals(
+            ForegroundServiceLeaseAction.None,
+            leases.serviceCommandReceived(startId = 31),
+        )
+        assertEquals(
+            ForegroundServiceLeaseAction.Stop(startId = 31),
+            leases.release("message-a").action,
+        )
+
+        val acquireDuringStop = leases.acquire("message-b")
+        assertTrue(acquireDuringStop.accepted)
+        assertEquals(ForegroundServiceLeaseAction.None, acquireDuringStop.action)
+        assertEquals(ForegroundServiceLifecycleState.STOPPING, leases.lifecycleState())
+
+        leases.serviceDestroyed()
+        assertEquals(ForegroundServiceLifecycleState.DESTROYING, leases.lifecycleState())
+        assertEquals(
+            ForegroundServiceLeaseAction.Start,
+            leases.completeServiceDestroyed(),
+        )
+        assertEquals(ForegroundServiceLifecycleState.STARTING, leases.lifecycleState())
+    }
+
+    @Test
+    fun ownerReleasedDuringDestroy_preventsReplacementStart() {
+        val leases = ForegroundOwnerLeases()
+
+        assertEquals(ForegroundServiceLeaseAction.Start, leases.acquire("message-a").action)
+        leases.serviceCommandReceived(startId = 42)
+        assertEquals(
+            ForegroundServiceLeaseAction.Stop(startId = 42),
+            leases.release("message-a").action,
+        )
+        assertTrue(leases.acquire("message-b").accepted)
+
+        leases.serviceDestroyed()
+        assertTrue(leases.release("message-b").accepted)
+        assertEquals(
+            ForegroundServiceLeaseAction.None,
+            leases.completeServiceDestroyed(),
+        )
+        assertEquals(ForegroundServiceLifecycleState.STOPPED, leases.lifecycleState())
+        assertEquals(0, leases.size())
     }
 
     @Test

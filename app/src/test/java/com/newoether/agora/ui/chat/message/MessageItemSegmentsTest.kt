@@ -10,6 +10,32 @@ import org.junit.Test
 class MessageItemSegmentsTest {
 
     @Test
+    fun reducedMotionRetainsExpandedLayoutUntilCollapseFadeSettles() {
+        assertTrue(
+            retainExpandedLayoutDuringFade(
+                currentExpanded = true,
+                targetExpanded = false,
+            )
+        )
+        assertFalse(
+            retainExpandedLayoutDuringFade(
+                currentExpanded = false,
+                targetExpanded = false,
+            )
+        )
+    }
+
+    @Test
+    fun reducedMotionReservesExpandedLayoutAsExpansionFadeStarts() {
+        assertTrue(
+            retainExpandedLayoutDuringFade(
+                currentExpanded = false,
+                targetExpanded = true,
+            )
+        )
+    }
+
+    @Test
     fun streamingSegmentAnimatesOnlyOnItsFirstSessionAppearance() {
         val registry = SegmentAppearanceRegistry()
         val key = "message:timeline:0"
