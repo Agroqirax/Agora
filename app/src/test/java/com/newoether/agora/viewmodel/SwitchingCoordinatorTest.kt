@@ -26,6 +26,22 @@ class SwitchingCoordinatorTest {
     }
 
     @Test
+    fun conversationCompletionHaptic_isScopedToItsOwnedRequest() {
+        val coordinator = SwitchingCoordinator()
+
+        val silentReturn = coordinator.beginConversation(
+            conversationId = "task-origin",
+            hapticOnCompletion = false,
+        )
+        assertFalse(silentReturn.hapticOnCompletion)
+
+        val manualSelection = coordinator.beginConversation("manual")
+        assertTrue(manualSelection.hapticOnCompletion)
+        assertFalse(coordinator.complete(silentReturn.id))
+        assertTrue(coordinator.request.value?.hapticOnCompletion == true)
+    }
+
+    @Test
     fun staleCompletion_cannotUncoverNewerTransition() {
         val coordinator = SwitchingCoordinator()
         val old = coordinator.beginConversation("old")

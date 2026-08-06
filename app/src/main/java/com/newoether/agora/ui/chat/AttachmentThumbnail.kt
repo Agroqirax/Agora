@@ -201,7 +201,8 @@ fun AttachmentThumbnailItem(
                         .clip(RoundedCornerShape(8.dp))
                         .combinedClickable(
                             onClick = { handlers.onMediaClick?.invoke(allMediaUrls, mediaIndex) },
-                            onLongClick = { haptics.longPress() }
+                            onLongClick = { haptics.longPress() },
+                            hapticFeedbackEnabled = false,
                         )
                 ) {
                     coil.compose.AsyncImage(

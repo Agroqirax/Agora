@@ -4,7 +4,13 @@ import android.annotation.SuppressLint
 import android.view.Surface
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -44,6 +50,8 @@ import com.newoether.agora.data.PredefinedVariables
 import com.newoether.agora.data.PromptItemType
 import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SystemPromptEntry
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.MotionAwareModalBottomSheet as ModalBottomSheet
 
 private fun variableDisplayName(key: String): String = when (key) {
     PredefinedVariables.TIME -> "Current Time"
@@ -80,6 +88,7 @@ fun SystemPromptEditorPage(
     onBack: () -> Unit,
     showDocFab: Boolean = true
 ) {
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val isEdit = entry != null
     var title by remember { mutableStateOf(entry?.title ?: "") }
     var selectedTab by remember { mutableIntStateOf(0) }
@@ -179,7 +188,39 @@ fun SystemPromptEditorPage(
 
             // Tab content
             AnimatedContent(
-                targetState = selectedTab
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (allowSpatialTransitions) {
+                        (
+                            fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 220,
+                                    delayMillis = 90,
+                                ),
+                            ) +
+                                scaleIn(
+                                    initialScale = 0.92f,
+                                    animationSpec = tween(
+                                        durationMillis = 220,
+                                        delayMillis = 90,
+                                    ),
+                                )
+                            ).togetherWith(
+                            fadeOut(animationSpec = tween(durationMillis = 90)),
+                        )
+                    } else {
+                        fadeIn(animationSpec = tween(durationMillis = 220))
+                            .togetherWith(
+                                fadeOut(animationSpec = tween(durationMillis = 90)),
+                            )
+                            .using(
+                                SizeTransform(
+                                    clip = false,
+                                    sizeAnimationSpec = { _, _ -> snap() },
+                                ),
+                            )
+                    }
+                },
             ) {
                 Column {
                     if (currentItems.isEmpty()) {
@@ -268,7 +309,15 @@ fun SystemPromptEditorPage(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surfaceContainer,
                 tonalElevation = 8.dp,
-                modifier = Modifier.fillMaxWidth().animateContentSize(tween(200))
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (allowSpatialTransitions) {
+                            Modifier.animateContentSize(tween(200))
+                        } else {
+                            Modifier
+                        },
+                    )
             ) {
                 val previewText = PredefinedVariables.compile(
                     items = currentItems.toList(),

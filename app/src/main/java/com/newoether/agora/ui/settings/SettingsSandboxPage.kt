@@ -27,6 +27,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareLinearProgressIndicator
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
@@ -61,6 +64,7 @@ fun SettingsSandboxPage(
     sharedStorageEnabled: Boolean = false,
     onSharedStorageEnabledChange: (Boolean) -> Unit = {},
 ) {
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val scope = rememberCoroutineScope()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -179,7 +183,9 @@ fun SettingsSandboxPage(
                                             if (p != null) {
                                                 LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().height(4.dp))
                                             } else {
-                                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp))
+                                                MotionAwareLinearProgressIndicator(
+                                                    modifier = Modifier.fillMaxWidth().height(4.dp),
+                                                )
                                             }
                                             Spacer(Modifier.height(4.dp))
                                             Text(
@@ -461,11 +467,28 @@ fun SettingsSandboxPage(
                                 // Terminal output (fixed-height, terminal theme, auto-scroll)
                                 AnimatedVisibility(
                                     visible = showTerminal && terminalOutput.isNotBlank(),
-                                    enter = expandVertically() + fadeIn(),
-                                    exit = shrinkVertically() + fadeOut()
+                                    enter = if (motionPolicy.allowSpatialTransitions) {
+                                        expandVertically() + fadeIn()
+                                    } else {
+                                        fadeIn()
+                                    },
+                                    exit = if (motionPolicy.allowSpatialTransitions) {
+                                        shrinkVertically() + fadeOut()
+                                    } else {
+                                        fadeOut()
+                                    },
                                 ) {
                                     val termScroll = rememberScrollState()
-                                    LaunchedEffect(terminalOutput) { termScroll.animateScrollTo(termScroll.maxValue) }
+                                    LaunchedEffect(
+                                        terminalOutput,
+                                        motionPolicy.allowProgrammaticScrollMotion,
+                                    ) {
+                                        if (motionPolicy.allowProgrammaticScrollMotion) {
+                                            termScroll.animateScrollTo(termScroll.maxValue)
+                                        } else {
+                                            termScroll.scrollTo(termScroll.maxValue)
+                                        }
+                                    }
                                     val terminalFg = MaterialTheme.colorScheme.onSurface
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),

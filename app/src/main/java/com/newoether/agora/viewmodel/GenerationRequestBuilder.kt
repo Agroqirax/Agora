@@ -5,9 +5,11 @@ import com.newoether.agora.R
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
+import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
+import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +99,11 @@ class GenerationRequestBuilder(
             thinkingLevel = overrides.thinkingLevel ?: settings.thinkingLevel.value,
             thinkingBudgetEnabled = overrides.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
             thinkingBudgetTokens = overrides.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
+            openAiServiceTierEnabled =
+                overrides.openAiServiceTierEnabled ?: settings.openAiServiceTierEnabled.value,
+            openAiServiceTier = OpenAiServiceTiers.normalize(
+                overrides.openAiServiceTier ?: settings.openAiServiceTier.value,
+            ),
             webSearchEnabled = if (settings.webSearchEnabled.value) (overrides.webSearchEnabled ?: true) else false,
             shellEnabled = if (settings.shellEnabled.value) (overrides.shellEnabled ?: true) else false
         )
@@ -124,6 +131,11 @@ class GenerationRequestBuilder(
             thinkingLevel = effectiveSettings.thinkingLevel ?: settings.thinkingLevel.value,
             thinkingBudgetEnabled = effectiveSettings.thinkingBudgetEnabled ?: settings.thinkingBudgetEnabled.value,
             thinkingBudgetTokens = effectiveSettings.thinkingBudgetTokens ?: settings.thinkingBudgetTokens.value,
+            openAiServiceTier = OpenAiServiceTiers.requestValue(
+                enabled = effectiveSettings.openAiServiceTierEnabled == true &&
+                    isOpenAiProtocolProvider(providerName, settings.customProviders.value),
+                value = effectiveSettings.openAiServiceTier,
+            ),
             baseUrl = providerRegistry.getEffectiveBaseUrl(providerName),
             userPrepend = resolvedUserPrepend,
             userPostpend = resolvedUserPostpend,

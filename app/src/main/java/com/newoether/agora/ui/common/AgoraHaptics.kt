@@ -18,32 +18,25 @@ import com.newoether.agora.service.AppForegroundTracker
 
 @Stable
 interface AgoraHaptics {
-    fun tap()
     fun selection()
+    fun toggle(isOn: Boolean)
     fun longPress()
     fun confirm()
     fun reject()
-    fun destructive()
+    fun interrupt()
+    fun destructiveConfirmed()
     fun startAnsweringTexture()
     fun stopAnsweringTexture()
-
-    @Deprecated("Use tap()")
-    fun action() = tap()
-
-    @Deprecated("Use confirm()")
-    fun success() = confirm()
-
-    @Deprecated("Use destructive()")
-    fun generationStopped() = destructive()
 }
 
 object NoOpAgoraHaptics : AgoraHaptics {
-    override fun tap() = Unit
     override fun selection() = Unit
+    override fun toggle(isOn: Boolean) = Unit
     override fun longPress() = Unit
     override fun confirm() = Unit
     override fun reject() = Unit
-    override fun destructive() = Unit
+    override fun interrupt() = Unit
+    override fun destructiveConfirmed() = Unit
     override fun startAnsweringTexture() = Unit
     override fun stopAnsweringTexture() = Unit
 }
@@ -83,17 +76,29 @@ private class PlatformAgoraHaptics(
     }
     private var textureResumeScheduled = false
 
-    override fun tap() = performDiscrete(HapticFeedbackConstants.VIRTUAL_KEY)
+    override fun selection() =
+        performDiscrete(selectionFeedbackForSdk(Build.VERSION.SDK_INT))
 
-    override fun selection() = performDiscrete(HapticFeedbackConstants.CLOCK_TICK)
+    override fun toggle(isOn: Boolean) =
+        performDiscrete(toggleFeedbackForSdk(Build.VERSION.SDK_INT, isOn))
 
     override fun longPress() = performDiscrete(HapticFeedbackConstants.LONG_PRESS)
 
-    override fun confirm() = performDiscrete(confirmFeedback())
+    override fun confirm() =
+        performDiscrete(confirmFeedbackForSdk(Build.VERSION.SDK_INT))
 
-    override fun reject() = performDiscrete(rejectFeedback())
+    override fun reject() =
+        performDiscrete(rejectFeedbackForSdk(Build.VERSION.SDK_INT))
 
-    override fun destructive() {
+    override fun interrupt() {
+        performTerminalFeedback()
+    }
+
+    override fun destructiveConfirmed() {
+        performTerminalFeedback()
+    }
+
+    private fun performTerminalFeedback() {
         stopAnsweringTexture()
         performDiscrete(HapticFeedbackConstants.CONTEXT_CLICK, resumeTexture = false)
     }
@@ -152,24 +157,38 @@ private class PlatformAgoraHaptics(
 
     private fun isAllowed(): Boolean = enabled() && AppForegroundTracker.isInForeground
 
-    private fun confirmFeedback(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            HapticFeedbackConstants.CONFIRM
-        } else {
-            HapticFeedbackConstants.VIRTUAL_KEY
-        }
-
-    private fun rejectFeedback(): Int =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            HapticFeedbackConstants.REJECT
-        } else {
-            HapticFeedbackConstants.LONG_PRESS
-        }
-
     private companion object {
         const val TEXTURE_RESUME_DELAY_MS = 160L
     }
 }
+
+internal fun selectionFeedbackForSdk(sdkInt: Int): Int =
+    if (sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        HapticFeedbackConstants.SEGMENT_TICK
+    } else {
+        HapticFeedbackConstants.CLOCK_TICK
+    }
+
+internal fun toggleFeedbackForSdk(sdkInt: Int, isOn: Boolean): Int =
+    if (sdkInt >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        if (isOn) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.TOGGLE_OFF
+    } else {
+        HapticFeedbackConstants.CLOCK_TICK
+    }
+
+internal fun confirmFeedbackForSdk(sdkInt: Int): Int =
+    if (sdkInt >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.CONFIRM
+    } else {
+        HapticFeedbackConstants.VIRTUAL_KEY
+    }
+
+internal fun rejectFeedbackForSdk(sdkInt: Int): Int =
+    if (sdkInt >= Build.VERSION_CODES.R) {
+        HapticFeedbackConstants.REJECT
+    } else {
+        HapticFeedbackConstants.LONG_PRESS
+    }
 
 private fun Context.findVibrator(): Vibrator? =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

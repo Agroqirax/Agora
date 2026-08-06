@@ -11,6 +11,7 @@ import com.newoether.agora.api.util.adaptToolRoundsForProvider
 import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -180,9 +181,44 @@ internal data class ApiCandidate(val content: ApiResponseContent? = null)
 
 @Serializable
 internal data class ApiUsageMetadata(
+    val promptTokenCount: Int? = null,
+    val cachedContentTokenCount: Int? = null,
+    val candidatesTokenCount: Int? = null,
     val totalTokenCount: Int? = null,
     val thoughtsTokenCount: Int? = null
 )
+
+internal fun ApiUsageMetadata.toTokenUsage(): TokenUsage {
+    val input = promptTokenCount?.coerceAtLeast(0)
+    val cached = cachedContentTokenCount?.coerceAtLeast(0)
+    val uncached = if (input != null && cached != null) {
+        (input - cached).coerceAtLeast(0)
+    } else {
+        null
+    }
+    val visibleOutput = candidatesTokenCount?.coerceAtLeast(0)
+    val reasoning = thoughtsTokenCount?.coerceAtLeast(0)
+    val output = when {
+        visibleOutput != null && reasoning != null ->
+            TokenUsage.addCounts(visibleOutput, reasoning)
+        visibleOutput != null -> visibleOutput
+        reasoning != null -> reasoning
+        else -> null
+    }
+    val derivedTotal = when {
+        input != null && output != null -> TokenUsage.addCounts(input, output)
+        input != null -> input
+        else -> output ?: 0
+    }
+    return TokenUsage(
+        totalTokenCount = (totalTokenCount ?: derivedTotal).coerceAtLeast(0),
+        inputTokenCount = input,
+        cachedInputTokenCount = cached,
+        uncachedInputTokenCount = uncached,
+        outputTokenCount = output,
+        reasoningTokenCount = reasoning,
+    )
+}
 
 @Serializable
 internal data class ApiErrorResponse(val error: ApiError)
@@ -541,7 +577,7 @@ class GeminiProvider(
                                         }
                                     }
                                     response.usageMetadata?.let { metadata ->
-                                        emit(StreamEvent.UsageUpdate(metadata.totalTokenCount ?: 0, metadata.thoughtsTokenCount ?: 0))
+                                        emit(StreamEvent.UsageUpdate(metadata.toTokenUsage()))
                                     }
                                 } catch (e: Exception) {
                                     DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)

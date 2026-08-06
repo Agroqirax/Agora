@@ -124,10 +124,9 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallDisplayModes
-import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.ui.theme.ChatType
-import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
@@ -242,7 +241,7 @@ internal fun CompactSegmentBlock(
     onBlockHeightChanged: (Int) -> Unit = {}
 ) {
     if (segs.isEmpty()) return
-    val haptics = LocalAgoraHaptics.current
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val animateCardAppearance = rememberSegmentAppearance(
         registry = segmentAppearanceRegistry,
         animationKey = cardAppearanceKey,
@@ -305,11 +304,18 @@ internal fun CompactSegmentBlock(
         targetState = isExpanded,
         label = "compactSegmentExpansion",
     )
-    val mergedBottomPadding by expansionTransition.animateDp(
-        transitionSpec = { tween(500) },
-        label = "compactSegmentPad",
-    ) { expanded ->
-        if (expanded) 12.dp else 4.dp
+    val mergedBottomPadding = if (allowSpatialTransitions) {
+        val animatedPadding by expansionTransition.animateDp(
+            transitionSpec = { tween(500) },
+            label = "compactSegmentPad",
+        ) { expanded ->
+            if (expanded) 12.dp else 4.dp
+        }
+        animatedPadding
+    } else if (isExpanded) {
+        12.dp
+    } else {
+        4.dp
     }
     LaunchedEffect(expansionTransition, expansionKey) {
         var observedRunning = false
@@ -320,6 +326,11 @@ internal fun CompactSegmentBlock(
                 observedRunning = false
                 currentOnExpansionSettled(expansionKey)
             }
+        }
+    }
+    LaunchedEffect(isExpanded, allowSpatialTransitions, expansionKey) {
+        if (!allowSpatialTransitions) {
+            currentOnExpansionSettled(expansionKey)
         }
     }
     DisposableEffect(expansionKey) {
@@ -343,7 +354,6 @@ internal fun CompactSegmentBlock(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .clickable {
-                        haptics.selection()
                         currentOnExpansionStarted(expansionKey)
                         expandedStates[expansionKey] = !isExpanded
                     }
@@ -409,8 +419,16 @@ internal fun CompactSegmentBlock(
             }
             expansionTransition.AnimatedVisibility(
                 visible = { it },
-                enter = fadeIn(tween(400)) + expandVertically(tween(400)),
-                exit = fadeOut(tween(400)) + shrinkVertically(tween(400))
+                enter = if (allowSpatialTransitions) {
+                    fadeIn(tween(400)) + expandVertically(tween(400))
+                } else {
+                    fadeIn(tween(400))
+                },
+                exit = if (allowSpatialTransitions) {
+                    fadeOut(tween(400)) + shrinkVertically(tween(400))
+                } else {
+                    fadeOut(tween(400))
+                },
             ) {
                 Column {
                     Spacer(modifier = Modifier.height(2.dp))
@@ -432,7 +450,6 @@ internal fun CompactSegmentBlock(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(18.dp))
                                     .clickable {
-                                        haptics.tap()
                                         onSegmentClick(segmentIndices.getOrElse(idx) { idx })
                                     }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
@@ -475,7 +492,6 @@ internal fun CompactSegmentBlock(
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(18.dp))
                                     .clickable {
-                                        haptics.tap()
                                         onSegmentClick(segmentIndices.getOrElse(idx) { idx })
                                     }
                                     .padding(horizontal = 10.dp, vertical = 8.dp)
@@ -673,7 +689,6 @@ private fun TimelineInfoSegmentCard(
     segmentAppearanceRegistry: SegmentAppearanceRegistry,
     onClick: () -> Unit
 ) {
-    val haptics = LocalAgoraHaptics.current
     val animateCardAppearance = rememberSegmentAppearance(
         registry = segmentAppearanceRegistry,
         animationKey = cardAnimationKey,
@@ -694,7 +709,6 @@ private fun TimelineInfoSegmentCard(
             .then(cardAppearanceModifier)
             .clip(RoundedCornerShape(18.dp))
             .clickable {
-                haptics.tap()
                 onClick()
             }
             .noOpBringIntoView()

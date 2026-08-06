@@ -20,6 +20,7 @@ import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
+import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -180,7 +181,7 @@ internal class MessageGenerationController(
     private val messages: StateFlow<List<ChatMessage>>,
     // ── Callbacks into ChatViewModel-owned side effects ──
     private val onScrollToMessage: (String?) -> Unit,
-    private val onScrollToAbsoluteBottomAfter: (String) -> Unit,
+    private val onScrollToAbsoluteBottomAfter: (conversationId: String, messageId: String) -> Unit,
     private val onSnackbar: (String) -> Unit,
     private val onSnackbarSuspend: suspend (String) -> Unit,  // sequential emit inside generateTitle
     // Called when sendMessage creates a NEW conversation, so the UI can suppress the
@@ -596,6 +597,14 @@ internal class MessageGenerationController(
                             thoughts = existing.thoughts,
                             thoughtTitle = existing.thoughtTitle,
                             tokenCount = existing.tokenCount,
+                            tokenUsage = TokenUsage.fromPersisted(
+                                totalTokenCount = existing.tokenCount,
+                                inputTokenCount = existing.inputTokenCount,
+                                cachedInputTokenCount = existing.cachedInputTokenCount,
+                                uncachedInputTokenCount = existing.uncachedInputTokenCount,
+                                outputTokenCount = existing.outputTokenCount,
+                                reasoningTokenCount = existing.reasoningTokenCount,
+                            ),
                             status = MessageStatus.ERROR,
                             participant = existing.participant,
                             timestamp = existing.timestamp,
@@ -1177,6 +1186,11 @@ internal class MessageGenerationController(
                 notifySendAccepted(acceptance, onAccepted)
 
                 if (wasNewChat) {
+                    // Arm the lifecycle entrance before publishing the new conversation id. Room
+                    // already owns the durable rows, so publishing the id first can let its first
+                    // lazy item compose one frame before the scroll request and permanently miss
+                    // the one-shot user-bubble fade.
+                    onScrollToAbsoluteBottomAfter(genId, userMessageId)
                     // The composer is already cleared. Publish the new conversation only now, so
                     // its first Room snapshot cannot expose the bubble during media processing.
                     onConversationCreatedBySend()
@@ -1196,7 +1210,9 @@ internal class MessageGenerationController(
                     //
                     // Send is the only absolute-bottom request that opts into tween easing. The
                     // ordinary bottom button keeps the actor's default adaptive curve.
-                    onScrollToAbsoluteBottomAfter(userMessageId)
+                    if (!wasNewChat) {
+                        onScrollToAbsoluteBottomAfter(genId, userMessageId)
+                    }
                     renderStore.commitGraph(
                         committedMessages =
                             listOf(userEntity.toUiChatMessage(appContext), placeholder),

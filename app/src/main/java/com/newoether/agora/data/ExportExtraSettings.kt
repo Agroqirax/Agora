@@ -1,8 +1,10 @@
 package com.newoether.agora.data
 
 import com.newoether.agora.model.ThinkingLevels
+import com.newoether.agora.model.OpenAiServiceTiers
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -58,6 +60,12 @@ object ExportExtraSettings {
                         cs.thinkingLevel?.let { put("thinkingLevel", JsonPrimitive(it)) }
                         cs.thinkingBudgetEnabled?.let { put("thinkingBudgetEnabled", JsonPrimitive(it)) }
                         cs.thinkingBudgetTokens?.let { put("thinkingBudgetTokens", JsonPrimitive(it)) }
+                        cs.openAiServiceTierEnabled?.let {
+                            put("openAiServiceTierEnabled", JsonPrimitive(it))
+                        }
+                        cs.openAiServiceTier?.let {
+                            put("openAiServiceTier", JsonPrimitive(it))
+                        }
                         cs.webSearchEnabled?.let { put("webSearchEnabled", JsonPrimitive(it)) }
                         cs.shellEnabled?.let { put("shellEnabled", JsonPrimitive(it)) }
                     }
@@ -71,6 +79,8 @@ object ExportExtraSettings {
         put("dynamicColor", JsonPrimitive(sm.dynamicColor.first()))
         put("blurEffectsEnabled", JsonPrimitive(sm.blurEffectsEnabled.first()))
         put("reduceMotion", JsonPrimitive(sm.reduceMotion.first()))
+        put("openAiServiceTierEnabled", JsonPrimitive(sm.openAiServiceTierEnabled.first()))
+        put("openAiServiceTier", JsonPrimitive(sm.openAiServiceTier.first()))
         put("hapticsEnabled", JsonPrimitive(sm.hapticsEnabled.first()))
         put("autoExpandActiveGroup", JsonPrimitive(sm.autoExpandActiveGroup.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
@@ -94,6 +104,10 @@ object ExportExtraSettings {
                 aliases.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
             }
         }
+        put(
+            "customModels",
+            JsonArray(sm.customModels.first().sorted().map(::JsonPrimitive)),
+        )
     }
 
     suspend fun restoreFromJsonObject(obj: JsonObject, sm: SettingsManager) {
@@ -130,6 +144,12 @@ object ExportExtraSettings {
                 thinkingBudgetEnabled = s["thinkingBudgetEnabled"]?.jsonPrimitive?.boolean
                     ?: legacyBudgetTokens?.let { true },
                 thinkingBudgetTokens = s["thinkingBudgetTokens"]?.jsonPrimitive?.int ?: legacyBudgetTokens,
+                openAiServiceTierEnabled =
+                    s["openAiServiceTierEnabled"]?.jsonPrimitive?.boolean,
+                openAiServiceTier = s["openAiServiceTier"]
+                    ?.jsonPrimitive
+                    ?.contentOrNull
+                    ?.let(OpenAiServiceTiers::normalize),
                 webSearchEnabled = s["webSearchEnabled"]?.jsonPrimitive?.boolean,
                 shellEnabled = s["shellEnabled"]?.jsonPrimitive?.boolean
             )
@@ -148,6 +168,12 @@ object ExportExtraSettings {
         obj["dynamicColor"]?.jsonPrimitive?.boolean?.let { sm.saveDynamicColor(it) }
         obj["blurEffectsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveBlurEffectsEnabled(it) }
         obj["reduceMotion"]?.jsonPrimitive?.boolean?.let { sm.saveReduceMotion(it) }
+        obj["openAiServiceTierEnabled"]?.jsonPrimitive?.boolean?.let {
+            sm.saveOpenAiServiceTierEnabled(it)
+        }
+        obj["openAiServiceTier"]?.jsonPrimitive?.contentOrNull?.let {
+            sm.saveOpenAiServiceTier(OpenAiServiceTiers.normalize(it))
+        }
         obj["hapticsEnabled"]?.jsonPrimitive?.boolean?.let { sm.saveHapticsEnabled(it) }
         obj["autoExpandActiveGroup"]?.jsonPrimitive?.boolean?.let {
             sm.saveAutoExpandActiveGroup(it)
@@ -165,6 +191,11 @@ object ExportExtraSettings {
                 v.jsonPrimitive?.contentOrNull?.let { k to it }
             }.toMap()
             if (map.isNotEmpty()) sm.saveModelAliases(map)
+        }
+        (obj["customModels"] as? JsonArray)?.let { models ->
+            sm.saveCustomModels(
+                models.mapNotNull { it.jsonPrimitive.contentOrNull }.toSet()
+            )
         }
     }
 }

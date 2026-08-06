@@ -84,7 +84,10 @@ class BaseOpenAiProviderTerminationTest {
             }
         }
 
-        assertEquals(17, events.filterIsInstance<StreamEvent.UsageUpdate>().single().tokenCount)
+        val usage = events.filterIsInstance<StreamEvent.UsageUpdate>().single().usage
+        assertEquals(17, usage.totalTokenCount)
+        assertEquals(10, usage.inputTokenCount)
+        assertEquals(7, usage.outputTokenCount)
         assertTrue(events.none { it is StreamEvent.Error })
     }
 

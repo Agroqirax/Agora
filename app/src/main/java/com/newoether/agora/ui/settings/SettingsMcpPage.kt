@@ -35,7 +35,7 @@ import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -383,11 +383,6 @@ private fun McpServerEditor(
         onBack = onBack,
         scrollState = scrollState,
         actions = {
-            if (!isNew) {
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, stringResource(R.string.mcp_refresh))
-                }
-            }
             IconButton(
                 onClick = ::save,
                 enabled = canSave,

@@ -1,6 +1,5 @@
 package com.newoether.agora.ui.chat
 
-import androidx.compose.animation.core.Easing
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.withFrameNanos
@@ -295,7 +294,7 @@ internal suspend fun LazyListState.animateToAbsoluteBottom(
     estimateRemainingDistancePx: () -> Float?,
     minimumStepPx: Float,
     onPhaseChanged: (AbsoluteBottomScrollPhase) -> Unit,
-    easing: Easing? = null,
+    feedbackSpec: FeedbackScrollSpec = DefaultFeedbackScrollSpec,
 ): Boolean {
     var phase = AbsoluteBottomScrollPhase.IDLE
     var followedActiveGeneration = isGenerationActive()
@@ -337,7 +336,7 @@ internal suspend fun LazyListState.animateToAbsoluteBottom(
                     ).sentinelVisible
                 },
                 minimumStepPx = minimumStepPx,
-                easing = easing,
+                feedbackSpec = feedbackSpec,
             )
             if (!reached) {
                 dispatch(AbsoluteBottomScrollEvent.Finished)

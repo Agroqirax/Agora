@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.newoether.agora.R
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.MotionAwareModalBottomSheet as ModalBottomSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -141,6 +144,8 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
     var showInfo by remember { mutableStateOf(false) }
     var imageInfo by remember(url) { mutableStateOf<ImageInfo?>(null) }
     var imageInfoLoading by remember(url) { mutableStateOf(false) }
+    var sheetVisible by remember(url) { mutableStateOf(true) }
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val sheetState = rememberModalBottomSheetState()
 
     // Animate the sheet down before running the action, so every option exits with a
@@ -148,8 +153,13 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
     // composition during hide(), so actions that need it (the Info dialog, an in-flight
     // save) keep working.
     fun collapseThen(action: () -> Unit) {
-        scope.launch {
-            try { sheetState.hide() } finally { action() }
+        if (motionPolicy.allowSpatialTransitions) {
+            scope.launch {
+                try { sheetState.hide() } finally { action() }
+            }
+        } else {
+            sheetVisible = false
+            action()
         }
     }
 
@@ -183,18 +193,20 @@ fun ImageActionsSheet(url: String, onMessage: (String) -> Unit, onDismiss: () ->
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted -> if (granted) doSave() else onMessage(failMsg) }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
-        DialogWindowEdgeToEdge()
-        Column(modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
-            ActionRow(Icons.Default.Download, stringResource(R.string.img_action_save)) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) collapseThen { doSave() }
-                else permLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-            ActionRow(Icons.Default.Share, stringResource(R.string.img_action_share)) {
-                collapseThen { doShare() }
-            }
-            ActionRow(Icons.Default.Info, stringResource(R.string.info)) {
-                collapseThen { showInfo = true }
+    if (sheetVisible) {
+        ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+            DialogWindowEdgeToEdge()
+            Column(modifier = Modifier.navigationBarsPadding().padding(bottom = 12.dp)) {
+                ActionRow(Icons.Default.Download, stringResource(R.string.img_action_save)) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) collapseThen { doSave() }
+                    else permLauncher.launch(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+                ActionRow(Icons.Default.Share, stringResource(R.string.img_action_share)) {
+                    collapseThen { doShare() }
+                }
+                ActionRow(Icons.Default.Info, stringResource(R.string.info)) {
+                    collapseThen { showInfo = true }
+                }
             }
         }
     }

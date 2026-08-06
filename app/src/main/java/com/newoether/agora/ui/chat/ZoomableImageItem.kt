@@ -4,7 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -43,6 +44,7 @@ internal fun ZoomableImageItem(
     consumeConditionally: Boolean = false
 ) {
     val scope = rememberCoroutineScope()
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val density = LocalDensity.current
     val viewConfiguration = LocalViewConfiguration.current
 
@@ -103,7 +105,7 @@ internal fun ZoomableImageItem(
         modifier = Modifier
             .fillMaxSize()
             .onSizeChanged { containerSize = Size(it.width.toFloat(), it.height.toFloat()) }
-            .pointerInput(url) {
+            .pointerInput(url, motionPolicy.allowSpatialTransitions) {
                 detectTapGestures(
                     onTap = { onTap() },
                     onLongPress = onLongPress?.let { cb -> { _ -> cb() } },
@@ -120,6 +122,36 @@ internal fun ZoomableImageItem(
                             var prevS = s0
                             var prevOX = offsetX
                             var prevOY = offsetY
+                            if (!motionPolicy.allowSpatialTransitions) {
+                                val r = visualScale(targetScale) / visualScale(s0)
+                                val (maxX, maxY) = getMaxOffsets(targetScale)
+                                if (isZoomIn) {
+                                    val isLandscape =
+                                        imageSize.width / imageSize.height >
+                                            containerSize.width / containerSize.height
+                                    val longO = if (isLandscape) maxX > 0f else maxY > 0f
+                                    val shortO = if (isLandscape) maxY > 0f else maxX > 0f
+                                    val pivX =
+                                        if (shortO) tapRelX
+                                        else if (longO && isLandscape) tapRelX
+                                        else 0f
+                                    val pivY =
+                                        if (shortO) tapRelY
+                                        else if (longO && !isLandscape) tapRelY
+                                        else 0f
+                                    offsetX = (offsetX * r + pivX * (1f - r))
+                                        .coerceIn(-maxX, maxX)
+                                    offsetY = (offsetY * r + pivY * (1f - r))
+                                        .coerceIn(-maxY, maxY)
+                                } else {
+                                    offsetX = (offsetX * r + tapRelX * (1f - r))
+                                        .coerceIn(-maxX, maxX)
+                                    offsetY = (offsetY * r + tapRelY * (1f - r))
+                                        .coerceIn(-maxY, maxY)
+                                }
+                                scale = targetScale
+                                return@launch
+                            }
                             AnimationState(s0).animateTo(targetScale, spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow, 0.001f)) {
                                 scale = value
                                 val r = visualScale(value) / visualScale(prevS)
@@ -153,7 +185,7 @@ internal fun ZoomableImageItem(
             onSuccess = { state -> imageSize = state.painter.intrinsicSize },
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(url) {
+                .pointerInput(url, motionPolicy.allowSpatialTransitions) {
                     val velocityTracker = VelocityTracker()
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
@@ -217,6 +249,14 @@ internal fun ZoomableImageItem(
                             y = if (rawVelocity.y.isNaN()) 0f else rawVelocity.y.coerceIn(-maxV, maxV)
                         )
                         animationJob = scope.launch {
+                            if (!motionPolicy.allowSpatialTransitions) {
+                                val targetScale = scale.coerceIn(1f, 10f)
+                                val (maxX, maxY) = getMaxOffsets(targetScale)
+                                scale = targetScale
+                                offsetX = offsetX.coerceIn(-maxX, maxX)
+                                offsetY = offsetY.coerceIn(-maxY, maxY)
+                                return@launch
+                            }
                             if (scale < 0.95f || scale > 10.05f) {
                                 val sS = scale; val sX = offsetX; val sY = offsetY
                                 val targetS = scale.coerceIn(1f, 10f)

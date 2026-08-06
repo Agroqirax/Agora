@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -399,7 +400,8 @@ internal fun AssistantMessageContent(
                                     .clip(RoundedCornerShape(12.dp))
                                     .combinedClickable(
                                         onClick = { onMediaClick(genImages, idx) },
-                                        onLongClick = { haptics.longPress() }
+                                        onLongClick = { haptics.longPress() },
+                                        hapticFeedbackEnabled = false,
                                     )
                             )
                         }
@@ -524,7 +526,6 @@ internal fun AssistantMessageContent(
                         Box {
                             IconButton(
                                 onClick = {
-                                    haptics.tap()
                                     showMenu = true
                                 },
                                 enabled = actionAvailability.informationEnabled,
@@ -549,7 +550,6 @@ internal fun AssistantMessageContent(
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.info)) },
                                     onClick = {
-                                        haptics.tap()
                                         showMenu = false
                                         onShowInfo()
                                     },
@@ -565,7 +565,6 @@ internal fun AssistantMessageContent(
                                     },
                                     onClick = {
                                         if (actionAvailability.terminalEnabled) {
-                                            haptics.tap()
                                             showMenu = false
                                             onShowDelete()
                                         }

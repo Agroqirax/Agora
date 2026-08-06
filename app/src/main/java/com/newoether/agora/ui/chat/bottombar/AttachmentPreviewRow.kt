@@ -17,7 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -124,14 +124,16 @@ internal fun AttachmentPreviewRow(
                             val mediaIndex = allMediaUrls.indexOf(uriStr).coerceAtLeast(0)
                             Modifier.combinedClickable(
                                 onClick = { onAllMediaClick?.invoke(allMediaUrls, mediaIndex) },
-                                onLongClick = { haptics.longPress() }
+                                onLongClick = { haptics.longPress() },
+                                hapticFeedbackEnabled = false,
                             )
                         }
                         else -> {
                             val mediaIndex = allMediaUrls.indexOf(uriStr).coerceAtLeast(0)
                             Modifier.combinedClickable(
                                 onClick = { onAllMediaClick?.invoke(allMediaUrls, mediaIndex) },
-                                onLongClick = { haptics.longPress() }
+                                onLongClick = { haptics.longPress() },
+                                hapticFeedbackEnabled = false,
                             )
                         }
                     }

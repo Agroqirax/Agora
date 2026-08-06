@@ -117,7 +117,6 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallDisplayModes
-import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.MonoFamily
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.ui.components.*

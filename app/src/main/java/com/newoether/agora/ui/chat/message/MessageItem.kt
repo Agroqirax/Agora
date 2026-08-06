@@ -1,6 +1,10 @@
 package com.newoether.agora.ui.chat.message
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandIn
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
@@ -26,6 +30,7 @@ import com.newoether.agora.ui.chat.ConversationSearchMatch
 import com.newoether.agora.ui.chat.conversationSearchMatchRanges
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.mikepenz.markdown.compose.components.markdownComponents
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -82,6 +87,7 @@ internal fun MessageItem(
     var showInfoDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
+    val motionPolicy = LocalAgoraMotionPolicy.current
 
     if (showInfoDialog) {
         MessageInfoDialog(
@@ -95,7 +101,7 @@ internal fun MessageItem(
         MessageDeleteDialog(
             onConfirm = {
                 showDeleteConfirm = false
-                haptics.destructive()
+                haptics.destructiveConfirmed()
                 onDelete(deleteTargetMessageId)
             },
             onDismiss = { showDeleteConfirm = false }
@@ -163,7 +169,19 @@ internal fun MessageItem(
             .then(entranceModifier),
         verticalAlignment = Alignment.Top,
     ) {
-        AnimatedVisibility(visible = selectionMode) {
+        AnimatedVisibility(
+            visible = selectionMode,
+            enter = if (motionPolicy.allowSpatialTransitions) {
+                fadeIn() + expandIn()
+            } else {
+                fadeIn()
+            },
+            exit = if (motionPolicy.allowSpatialTransitions) {
+                shrinkOut() + fadeOut()
+            } else {
+                fadeOut()
+            },
+        ) {
             Checkbox(
                 checked = selected,
                 onCheckedChange = { onToggleSelection() },

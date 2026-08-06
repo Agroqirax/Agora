@@ -6,6 +6,7 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ToolCallData
+import com.newoether.agora.model.TokenUsage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -22,6 +23,7 @@ class GenerationStatusMessagesTest {
             thoughts = "private reasoning",
             thoughtTitle = "Thinking",
             tokenCount = 42,
+            tokenUsage = TokenUsage(totalTokenCount = 42, outputTokenCount = 42),
             status = MessageStatus.ERROR,
             participant = Participant.MODEL,
             thoughtTimeMs = 100,
@@ -43,6 +45,7 @@ class GenerationStatusMessagesTest {
         assertEquals(null, projected.toolCall)
         assertEquals(null, projected.segments)
         assertEquals(null, projected.attachmentMeta)
+        assertEquals(null, projected.tokenUsage)
     }
 
     @Test

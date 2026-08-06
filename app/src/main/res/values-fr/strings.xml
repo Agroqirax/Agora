@@ -269,6 +269,15 @@
     <string name="models_title">Modèles</string>
     <string name="models_default">Modèle par défaut</string>
     <string name="models_no_models">Aucun modèle activé</string>
+    <string name="models_manual">Modèles manuels</string>
+    <string name="models_manual_empty">Aucun modèle personnalisé ajouté</string>
+    <string name="models_add_custom">Ajouter un modèle personnalisé</string>
+    <string name="models_auto_fetch">Récupération automatique</string>
+    <string name="models_auto_empty">Aucun modèle récupéré</string>
+    <string name="models_search_hint">Rechercher des modèles…</string>
+    <string name="models_search_empty">Aucun modèle correspondant</string>
+    <string name="models_clear_search">Effacer la recherche de modèles</string>
+    <string name="models_custom_exists">Ce modèle existe déjà</string>
     <string name="models_available">Modèles disponibles</string>
     <string name="models_sync">Synchroniser depuis tous les fournisseurs</string>
     <string name="models_sync_desc">Récupérer la dernière liste de modèles pour toutes les API configurées</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">Effets de flou</string>
     <string name="blur_effects_desc">Floute le haut de la liste de discussion sous la barre d’outils. Désactivez cette option pour économiser les performances.</string>
     <string name="reduce_motion">Réduire les animations</string>
-    <string name="reduce_motion_desc">Arrête les animations décoratives continues et l’effet de saisie. Conserve les indicateurs de chargement et les transitions d’état.</string>
+    <string name="reduce_motion_desc">Réduit les mouvements continus et les grands déplacements spatiaux, tout en conservant les fondus, les gestes directs et les retours d’état utiles.</string>
 
     <!-- Language -->
     <string name="language_title">Langue</string>
@@ -1009,4 +1018,12 @@
     <string name="web_search_kagi_desc">API de recherche premium avec résultats personnalisés. Paiement à l’usage.</string>
     <string name="web_search_kagi_key">Clé d\'API Kagi Search</string>
     <string name="web_search_kagi_key_hint">Clé d\'API depuis kagi.com/api/keys</string>
+    <string name="default_service_tier">Niveau de service par défaut</string>
+    <string name="openai_service_tier_title">Niveau de service</string>
+    <string name="openai_service_tier_desc">Contrôle la latence et la priorité des requêtes utilisant le protocole OpenAI.</string>
+    <string name="openai_service_tier_off">Désactivé</string>
+    <string name="openai_service_tier_auto">Automatique</string>
+    <string name="openai_service_tier_default">Par défaut</string>
+    <string name="openai_service_tier_flex">Flexible</string>
+    <string name="openai_service_tier_fast">Rapide</string>
 </resources>

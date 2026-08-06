@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.data.local.LoopEntity
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.viewmodel.QueuedSend
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -89,6 +90,7 @@ internal fun ComposerStatusColumn(
     onRemoveQueuedSend: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val order = remember { ComposerStatusOrder() }
     val orderedItems = remember(activeLoop, queuedSends) {
         val candidates = buildList {
@@ -118,8 +120,20 @@ internal fun ComposerStatusColumn(
         onDispose { transitionRequests.close() }
     }
 
-    LaunchedEffect(transitionRequests, rowHeightPx, rowGapPx) {
+    LaunchedEffect(
+        transitionRequests,
+        rowHeightPx,
+        rowGapPx,
+        allowSpatialTransitions,
+    ) {
         for (targetItems in transitionRequests) {
+            if (!allowSpatialTransitions) {
+                columnTranslation.snapTo(0f)
+                itemTranslations.clear()
+                tombstones = emptyList()
+                displayedItems = targetItems
+                continue
+            }
             val oldItems = displayedItems
             val oldKeys = oldItems.map(ComposerStatusItem::stableKey)
             val targetKeys = targetItems.map(ComposerStatusItem::stableKey)

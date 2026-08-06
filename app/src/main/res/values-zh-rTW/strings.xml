@@ -196,6 +196,15 @@
     <string name="models_title">模型</string>
     <string name="models_default">預設模型</string>
     <string name="models_no_models">未啟用模型</string>
+    <string name="models_manual">手動模型</string>
+    <string name="models_manual_empty">尚未新增自訂模型</string>
+    <string name="models_add_custom">新增自訂模型</string>
+    <string name="models_auto_fetch">自動取得</string>
+    <string name="models_auto_empty">尚未取得模型</string>
+    <string name="models_search_hint">搜尋模型…</string>
+    <string name="models_search_empty">沒有符合的模型</string>
+    <string name="models_clear_search">清除模型搜尋</string>
+    <string name="models_custom_exists">此模型已存在</string>
     <string name="models_available">可用模型</string>
     <string name="models_sync">從所有服務商同步</string>
     <string name="models_sync_desc">取得所有已設定 API 的最新模型列表</string>
@@ -476,7 +485,7 @@
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">對聊天列表頂部工具列下方套用模糊。關閉可節省效能。</string>
     <string name="reduce_motion">減少動態效果</string>
-    <string name="reduce_motion_desc">停止持續的裝飾動畫與打字效果，同時保留載入指示與狀態切換回饋。</string>
+    <string name="reduce_motion_desc">減少持續運動和大範圍空間位移，同時保留淡入淡出、直接手勢和必要的狀態回饋。</string>
     <string name="message_display">訊息顯示</string>
     <string name="tool_call_display_mode">思考與工具區塊</string>
     <string name="tool_call_display_mode_timeline">時間軸</string>
@@ -1017,4 +1026,12 @@
     <string name="more">更多</string>
     <string name="delete_message_title">刪除訊息？</string>
     <string name="delete_message_confirm">此訊息及其後的所有回覆都將永久刪除。</string>
+    <string name="default_service_tier">預設服務層級</string>
+    <string name="openai_service_tier_title">服務層級</string>
+    <string name="openai_service_tier_desc">控制 OpenAI 協定請求的延遲與處理優先順序。</string>
+    <string name="openai_service_tier_off">關閉</string>
+    <string name="openai_service_tier_auto">自動</string>
+    <string name="openai_service_tier_default">預設</string>
+    <string name="openai_service_tier_flex">彈性</string>
+    <string name="openai_service_tier_fast">快速</string>
 </resources>

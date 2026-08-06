@@ -33,6 +33,8 @@ import com.newoether.agora.R
 import com.newoether.agora.data.DefaultSystemPrompt
 import com.newoether.agora.data.PromptTemplateItem
 import com.newoether.agora.data.SystemPromptEntry
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.MotionAwareModalBottomSheet as ModalBottomSheet
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -50,6 +52,7 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showTemplatePicker by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val templateSheetState = rememberModalBottomSheetState()
     val duplicateTitleTemplate = stringResource(
         R.string.prompts_duplicate_title,
@@ -59,11 +62,16 @@ fun SettingsPromptsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     // Animate the sheet closed first, then flip to the editor page — avoids the sheet popping away
     // at the same instant the page transition starts.
     val pickTemplate: (SystemPromptEntry) -> Unit = { entry ->
-        scope.launch { templateSheetState.hide() }.invokeOnCompletion {
-            if (!templateSheetState.isVisible) {
-                showTemplatePicker = false
-                editingEntry = entry
+        if (motionPolicy.allowSpatialTransitions) {
+            scope.launch { templateSheetState.hide() }.invokeOnCompletion {
+                if (!templateSheetState.isVisible) {
+                    showTemplatePicker = false
+                    editingEntry = entry
+                }
             }
+        } else {
+            showTemplatePicker = false
+            editingEntry = entry
         }
     }
 

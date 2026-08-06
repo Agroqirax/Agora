@@ -23,6 +23,7 @@ import com.newoether.agora.data.local.migration.V17RunRecord
 import com.newoether.agora.data.local.migration.regenerationInputFingerprint
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.ThinkingLevels
@@ -515,6 +516,11 @@ class DataImporter(
             thoughts = thoughts,
             thoughtTitle = thoughtTitle,
             tokenCount = tokenCount,
+            inputTokenCount = inputTokenCount,
+            cachedInputTokenCount = cachedInputTokenCount,
+            uncachedInputTokenCount = uncachedInputTokenCount,
+            outputTokenCount = outputTokenCount,
+            reasoningTokenCount = reasoningTokenCount,
             status = if (
                 assignment.runId in recoveredRunIds &&
                 parsedParticipant == Participant.MODEL &&
@@ -1070,6 +1076,8 @@ class DataImporter(
                         settingsManager.saveThinkingBudgetEnabled(s.thinkingBudgetEnabled || legacyBudgetTokens != null)
                         settingsManager.saveThinkingBudgetTokens(s.thinkingBudgetTokens ?: legacyBudgetTokens ?: ThinkingLevels.DefaultBudgetTokens)
                         settingsManager.saveAutoCacheEnabled(s.autoCacheEnabled)
+                        settingsManager.saveOpenAiServiceTierEnabled(s.openAiServiceTierEnabled)
+                        settingsManager.saveOpenAiServiceTier(s.openAiServiceTier)
                         for ((provider, url) in s.providerBaseUrls) {
                             settingsManager.saveProviderBaseUrl(provider, url)
                         }
@@ -1283,6 +1291,11 @@ class DataImporter(
         val thoughts: String? = null,
         val thoughtTitle: String? = null,
         val tokenCount: Int = 0,
+        val inputTokenCount: Int? = null,
+        val cachedInputTokenCount: Int? = null,
+        val uncachedInputTokenCount: Int? = null,
+        val outputTokenCount: Int? = null,
+        val reasoningTokenCount: Int? = null,
         val status: String = "SUCCESS",
         val participant: String = "MODEL",
         val timestamp: Long,
@@ -1324,6 +1337,8 @@ class DataImporter(
         val thinkingBudgetEnabled: Boolean = false,
         val thinkingBudgetTokens: Int? = null,
         val autoCacheEnabled: Boolean = true,
+        val openAiServiceTierEnabled: Boolean = false,
+        val openAiServiceTier: String = OpenAiServiceTiers.AUTO,
         val providerBaseUrls: Map<String, String> = emptyMap(),
         val titleGenerationEnabled: Boolean = true,
         val titleGenerationModel: String? = null,

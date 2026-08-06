@@ -7,6 +7,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ThinkingLevels
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.adaptToolRoundsForProvider
@@ -128,7 +129,9 @@ internal data class AnthropicMessageInfo(
 @Serializable
 internal data class AnthropicUsage(
     @SerialName("input_tokens") val inputTokens: Int? = null,
-    @SerialName("output_tokens") val outputTokens: Int? = null
+    @SerialName("output_tokens") val outputTokens: Int? = null,
+    @SerialName("cache_creation_input_tokens") val cacheCreationInputTokens: Int? = null,
+    @SerialName("cache_read_input_tokens") val cacheReadInputTokens: Int? = null,
 )
 
 /**
@@ -148,12 +151,20 @@ internal class AnthropicStreamEventRouter {
     private val thinkingSignatures = mutableMapOf<Int, String?>()
     private var lastBlockIndex = -1
     private var syntheticIndex = 0
-    private var inputTokens = 0
+    private var inputTokens: Int? = null
+    private var cacheCreationInputTokens = 0
+    private var cacheReadInputTokens = 0
 
     fun route(event: AnthropicStreamEvent): List<StreamEvent> = buildList {
         when (event.type) {
             "message_start" -> {
-                inputTokens = event.message?.usage?.inputTokens ?: inputTokens
+                event.message?.usage?.let { usage ->
+                    inputTokens = usage.inputTokens?.coerceAtLeast(0) ?: inputTokens
+                    cacheCreationInputTokens =
+                        usage.cacheCreationInputTokens?.coerceAtLeast(0) ?: 0
+                    cacheReadInputTokens =
+                        usage.cacheReadInputTokens?.coerceAtLeast(0) ?: 0
+                }
             }
 
             "content_block_start" -> {
@@ -241,7 +252,31 @@ internal class AnthropicStreamEventRouter {
             }
 
             "message_delta" -> event.usage?.let { usage ->
-                add(StreamEvent.UsageUpdate(inputTokens + (usage.outputTokens ?: 0)))
+                val uncachedInput = inputTokens?.let { input ->
+                    TokenUsage.addCounts(input, cacheCreationInputTokens)
+                }
+                val totalInput = uncachedInput?.let { uncached ->
+                    TokenUsage.addCounts(uncached, cacheReadInputTokens)
+                }
+                val output = usage.outputTokens?.coerceAtLeast(0)
+                val total = when {
+                    totalInput != null && output != null ->
+                        TokenUsage.addCounts(totalInput, output)
+                    totalInput != null -> totalInput
+                    else -> output ?: 0
+                }
+                add(
+                    StreamEvent.UsageUpdate(
+                        TokenUsage(
+                            totalTokenCount = total,
+                            inputTokenCount = totalInput,
+                            cachedInputTokenCount =
+                                cacheReadInputTokens.takeIf { totalInput != null },
+                            uncachedInputTokenCount = uncachedInput,
+                            outputTokenCount = output,
+                        )
+                    )
+                )
             }
         }
     }

@@ -378,8 +378,10 @@ class ProviderRegistry(
                     prevConfigured = current
 
                     if (changed) {
-                        val allAvailable = settings.getAvailableModels().values.flatten().toSet()
-                        val newEnabled = settings.enabledModels.value.intersect(allAvailable)
+                        val allKnownModels =
+                            settings.getAvailableModels().values.flatten().toSet() +
+                                settings.customModels.value
+                        val newEnabled = settings.enabledModels.value.intersect(allKnownModels)
                         if (newEnabled != settings.enabledModels.value) {
                             settings.setEnabledModels(newEnabled)
                         }

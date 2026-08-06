@@ -5,6 +5,7 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.SearchResultFormatter
@@ -46,6 +47,18 @@ internal fun MessageEntity.toUiChatMessage(
         thoughts = if (isSynthetic) null else thoughts,
         thoughtTitle = if (isSynthetic) null else thoughtTitle,
         tokenCount = if (isSynthetic) 0 else tokenCount,
+        tokenUsage = if (isSynthetic) {
+            null
+        } else {
+            TokenUsage.fromPersisted(
+                totalTokenCount = tokenCount,
+                inputTokenCount = inputTokenCount,
+                cachedInputTokenCount = cachedInputTokenCount,
+                uncachedInputTokenCount = uncachedInputTokenCount,
+                outputTokenCount = outputTokenCount,
+                reasoningTokenCount = reasoningTokenCount,
+            )
+        },
         status = status,
         participant = participant,
         timestamp = timestamp,

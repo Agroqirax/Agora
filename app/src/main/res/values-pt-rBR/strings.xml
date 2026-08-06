@@ -269,6 +269,15 @@
     <string name="models_title">Modelos</string>
     <string name="models_default">Modelo padrão</string>
     <string name="models_no_models">Nenhum modelo ativado</string>
+    <string name="models_manual">Modelos manuais</string>
+    <string name="models_manual_empty">Nenhum modelo personalizado adicionado</string>
+    <string name="models_add_custom">Adicionar modelo personalizado</string>
+    <string name="models_auto_fetch">Busca automática</string>
+    <string name="models_auto_empty">Nenhum modelo obtido</string>
+    <string name="models_search_hint">Pesquisar modelos…</string>
+    <string name="models_search_empty">Nenhum modelo correspondente</string>
+    <string name="models_clear_search">Limpar pesquisa de modelos</string>
+    <string name="models_custom_exists">Este modelo já existe</string>
     <string name="models_available">Modelos disponíveis</string>
     <string name="models_sync">Sincronizar de todos os provedores</string>
     <string name="models_sync_desc">Obter a lista de modelos mais recente para todas as APIs configuradas</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">Efeitos de desfoque</string>
     <string name="blur_effects_desc">Desfoca o topo da lista de chat sob a barra. Desative para economizar desempenho.</string>
     <string name="reduce_motion">Reduzir movimento</string>
-    <string name="reduce_motion_desc">Interrompe animações decorativas contínuas e o efeito de digitação. Mantém indicadores de carregamento e transições de estado.</string>
+    <string name="reduce_motion_desc">Reduz movimentos contínuos e grandes deslocamentos espaciais, mantendo transições por opacidade, gestos diretos e feedbacks úteis de estado.</string>
 
     <!-- Language -->
     <string name="language_title">Idioma</string>
@@ -1009,4 +1018,12 @@
     <string name="web_search_kagi_desc">API de busca premium com resultados personalizados. Pagamento por uso.</string>
     <string name="web_search_kagi_key">Chave de API do Kagi Search</string>
     <string name="web_search_kagi_key_hint">Chave de API de kagi.com/api/keys</string>
+    <string name="default_service_tier">Nível de serviço padrão</string>
+    <string name="openai_service_tier_title">Nível de serviço</string>
+    <string name="openai_service_tier_desc">Controla a latência e a prioridade das solicitações com protocolo OpenAI.</string>
+    <string name="openai_service_tier_off">Desativado</string>
+    <string name="openai_service_tier_auto">Automático</string>
+    <string name="openai_service_tier_default">Padrão</string>
+    <string name="openai_service_tier_flex">Flexível</string>
+    <string name="openai_service_tier_fast">Rápido</string>
 </resources>

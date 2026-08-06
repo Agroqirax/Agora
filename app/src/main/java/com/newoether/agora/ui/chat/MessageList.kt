@@ -52,6 +52,7 @@ import com.newoether.agora.ui.chat.message.REGENERATION_ABORT_RESTORE_DURATION_M
 import com.newoether.agora.ui.chat.message.REGENERATION_EXIT_DURATION_MS
 import com.newoether.agora.ui.chat.message.SegmentAppearanceRegistry
 import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.RegenerationTransitionRequest
 import kotlinx.coroutines.Job
@@ -183,8 +184,8 @@ internal class MessageLifecycleAppearanceRegistry {
 
     fun isKnown(messageId: String): Boolean = messageId in knownMessageIds
 
-    fun markKnown(messages: Iterable<ChatMessage>) {
-        messages.forEach { knownMessageIds += it.id }
+    fun markKnown(messageId: String) {
+        knownMessageIds += messageId
     }
 }
 
@@ -395,6 +396,7 @@ internal fun MessageList(
         remember { SegmentAppearanceRegistry() },
     lifecycleEntranceTargetMessageId: String? = null,
 ) {
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val groupedSegmentAutoExpansionController = remember(conversationId) {
         GroupedSegmentAutoExpansionController()
     }
@@ -595,10 +597,6 @@ internal fun MessageList(
         latestRegenerationFadeFinished(transition.id)
     }
 
-    SideEffect {
-        lifecycleAppearanceRegistry.markKnown(messages.list)
-    }
-
     LaunchedEffect(
         state,
         conversationId,
@@ -796,7 +794,10 @@ internal fun MessageList(
     // One progressive actor owns the complete search movement. Far-away turns are approached in
     // bounded per-frame steps; once composed, the same actor retargets against exact glyph
     // geometry. There is no animateScrollToItem teleport and no second correction animation.
-    LaunchedEffect(activeSearchMatch?.key) {
+    LaunchedEffect(
+        activeSearchMatch?.key,
+        motionPolicy.allowProgrammaticScrollMotion,
+    ) {
         val match = activeSearchMatch ?: return@LaunchedEffect
         val turnIndex = messageListTurnIndex(turns, match.messageId)
         if (turnIndex < 0) return@LaunchedEffect
@@ -823,6 +824,17 @@ internal fun MessageList(
             messageHeights = messageHeights,
             fallbackHeightPx = fallbackHeightPx,
         )
+        if (!motionPolicy.allowProgrammaticScrollMotion) {
+            state.scrollToItem(
+                index = turnIndex,
+                scrollOffset = (
+                    listRootY +
+                        estimatedAnchorInTurn -
+                        targetCenterY
+                    ).roundToInt(),
+            )
+            return@LaunchedEffect
+        }
 
         state.smoothSeekToItem(
             targetIndex = { turnIndex },
@@ -890,6 +902,13 @@ internal fun MessageList(
                     lastUserMessageId = lastUserMessage?.id,
                     requestedTargetMessageId = lifecycleEntranceTargetMessageId,
                 )
+        // LazyColumn items are subcomposed on demand. Marking the whole projected list in the
+        // parent composition races ahead of that subcomposition and makes a brand-new Send look
+        // historical before its bubble gets a first frame. Claim "known" only after this concrete
+        // item has composed and captured its one-shot entrance decision.
+        SideEffect {
+            lifecycleAppearanceRegistry.markKnown(message.id)
+        }
 
         MessageItem(
             message = message,

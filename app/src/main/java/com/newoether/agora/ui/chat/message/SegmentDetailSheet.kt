@@ -26,7 +26,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -64,6 +64,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.newoether.agora.ui.components.DialogWindowEdgeToEdge
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.ui.theme.ChatType
@@ -103,6 +104,7 @@ internal fun SegmentDetailSheet(
     if (seg == null) {
         onDismiss()
     } else {
+        val motionPolicy = LocalAgoraMotionPolicy.current
         val density = LocalDensity.current
         val screenHeightPx =
             LocalWindowInfo.current.containerSize.height.toFloat().coerceAtLeast(1f)
@@ -147,7 +149,11 @@ internal fun SegmentDetailSheet(
         fun animateTo(target: Float) {
             snapJob?.cancel()
             snapJob = coroutineScope.launch {
-                visualFraction.animateTo(target, snapSpring)
+                if (motionPolicy.allowSpatialTransitions) {
+                    visualFraction.animateTo(target, snapSpring)
+                } else {
+                    visualFraction.snapTo(target)
+                }
                 rawFraction = visualFraction.value
                 phase = when (target) {
                     FULL -> PHASE_FULL

@@ -402,6 +402,7 @@ internal fun ChatMarkdownCodeBlock(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
+        showHeader = true,
         language = null,
         code = code,
     ) {
@@ -795,6 +796,7 @@ private fun SearchHighlightedMarkdownCodeText(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
+        showHeader = true,
         language = language,
         code = code,
     ) {

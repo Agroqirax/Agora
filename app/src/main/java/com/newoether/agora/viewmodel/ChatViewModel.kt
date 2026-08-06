@@ -447,8 +447,7 @@ class ChatViewModel(
         )
     }
 
-    fun triggerScrollToAbsoluteBottomAfter(messageId: String) {
-        val conversationId = _currentConversationId.value ?: return
+    fun triggerScrollToAbsoluteBottomAfter(conversationId: String, messageId: String) {
         _animatedScrollRequest.value = AnimatedScrollRequest(
             id = animatedScrollIds.incrementAndGet(),
             conversationId = conversationId,
@@ -1109,12 +1108,18 @@ class ChatViewModel(
         }
     }
 
-    fun selectConversation(id: String) {
+    fun selectConversation(
+        id: String,
+        hapticOnCompletion: Boolean = true,
+    ) {
         if (_currentConversationId.value == id && !_isNewChatMode.value) return
         regenerationTransitions.abortCurrent()
 
         val previousJob = switchingJob
-        val request = switchingCoordinator.beginConversation(id)
+        val request = switchingCoordinator.beginConversation(
+            conversationId = id,
+            hapticOnCompletion = hapticOnCompletion,
+        )
         previousJob?.cancel()
         _isTransitioningToNewChat.value = false
         _animatedScrollRequest.value = null
@@ -1507,8 +1512,10 @@ class ChatViewModel(
                     }
                 }
 
-                val allFetchedModels = settings.getAvailableModels().values.flatten().toSet()
-                val newEnabled = settings.enabledModels.value.intersect(allFetchedModels)
+                val allKnownModels =
+                    settings.getAvailableModels().values.flatten().toSet() +
+                        settings.customModels.value
+                val newEnabled = settings.enabledModels.value.intersect(allKnownModels)
                 settings.setEnabledModels(newEnabled)
 
                 // A failed provider must remain eligible for automatic retry on the next visit.

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.model.ThinkingLevels
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -292,16 +293,26 @@ private fun MaybeAnimatedVisibility(
     content: @Composable () -> Unit
 ) {
     if (animate) {
+        val allowSpatialTransitions =
+            LocalAgoraMotionPolicy.current.allowSpatialTransitions
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(animationSpec = tween(400)) + expandVertically(
-                animationSpec = tween(400),
-                expandFrom = Alignment.Top
-            ),
-            exit = fadeOut(animationSpec = tween(400)) + shrinkVertically(
-                animationSpec = tween(400),
-                shrinkTowards = Alignment.Top
-            )
+            enter = if (allowSpatialTransitions) {
+                fadeIn(animationSpec = tween(400)) + expandVertically(
+                    animationSpec = tween(400),
+                    expandFrom = Alignment.Top
+                )
+            } else {
+                fadeIn(animationSpec = tween(400))
+            },
+            exit = if (allowSpatialTransitions) {
+                fadeOut(animationSpec = tween(400)) + shrinkVertically(
+                    animationSpec = tween(400),
+                    shrinkTowards = Alignment.Top
+                )
+            } else {
+                fadeOut(animationSpec = tween(400))
+            },
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 content()

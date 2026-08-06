@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.ui.res.painterResource
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
@@ -25,7 +26,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.OpenAiServiceTierControlPanel
 import com.newoether.agora.ui.common.ThinkingControlPanel
+import com.newoether.agora.ui.common.openAiServiceTierShortLabel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlin.math.roundToInt
@@ -45,6 +48,9 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val thinkingLevel by viewModel.settings.thinkingLevel.collectAsState()
     val thinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
     val thinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
+    val openAiServiceTierEnabled by
+        viewModel.settings.openAiServiceTierEnabled.collectAsState()
+    val openAiServiceTier by viewModel.settings.openAiServiceTier.collectAsState()
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
 
     CollapsingSettingsScaffold(
@@ -164,7 +170,62 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     )
                 )
 
-                // ── Section 3: Generation Parameters ──
+                // ── Section 3: Default OpenAI service tier ──
+                SettingsGroup(
+                    title = stringResource(R.string.default_service_tier),
+                    items = listOf(
+                        {
+                            SettingsItem(
+                                headlineContent = {
+                                    Text(stringResource(R.string.openai_service_tier_title))
+                                },
+                                supportingContent = {
+                                    Text(
+                                        openAiServiceTierShortLabel(
+                                            openAiServiceTierEnabled,
+                                            openAiServiceTier,
+                                        )
+                                    )
+                                },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
+                                trailingContent = {
+                                    Switch(
+                                        checked = openAiServiceTierEnabled,
+                                        onCheckedChange =
+                                            viewModel.settings::setOpenAiServiceTierEnabled,
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    viewModel.settings.setOpenAiServiceTierEnabled(
+                                        !openAiServiceTierEnabled,
+                                    )
+                                },
+                            )
+                        },
+                        {
+                            OpenAiServiceTierControlPanel(
+                                enabled = openAiServiceTierEnabled,
+                                tier = openAiServiceTier,
+                                onEnabledChange =
+                                    viewModel.settings::setOpenAiServiceTierEnabled,
+                                onTierChange = viewModel.settings::setOpenAiServiceTier,
+                                modifier = Modifier.padding(
+                                    horizontal = 16.dp,
+                                    vertical = 16.dp,
+                                ),
+                                showHeader = false,
+                            )
+                        },
+                    ),
+                )
+
+                // ── Section 4: Generation Parameters ──
                 SettingsGroup(
                     title = stringResource(R.string.generation_params),
                     items = listOf(

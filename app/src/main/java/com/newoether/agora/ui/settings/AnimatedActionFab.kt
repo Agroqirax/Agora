@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 
 /** Shared pill-shaped FAB with the press animation used by settings documentation actions. */
 @Composable
@@ -44,7 +45,10 @@ fun AnimatedActionFab(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
-    val animatePress = isPressed && enabled
+    val animatePress =
+        isPressed &&
+            enabled &&
+            LocalAgoraMotionPolicy.current.allowSpatialTransitions
 
     val targetWidth = if (animatePress) 240.dp else 200.dp
     val targetHeight = if (animatePress) 56.dp else 48.dp

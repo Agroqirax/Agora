@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Image
 
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Language
@@ -53,8 +54,12 @@ import com.newoether.agora.viewmodel.QueuedSend
 import com.newoether.agora.ui.chat.PdfPageSelectDialog
 import com.newoether.agora.ui.chat.VideoSliceDialog
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.common.OpenAiServiceTierControlPanel
 import com.newoether.agora.ui.common.ThinkingControlPanel
+import com.newoether.agora.ui.common.openAiServiceTierShortLabel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.MotionAwareModalBottomSheet as ModalBottomSheet
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.SendAcceptance
@@ -86,6 +91,9 @@ fun ChatBottomBar(
     thinkingLevel: String = "medium",
     thinkingBudgetEnabled: Boolean = false,
     thinkingBudgetTokens: Int = 4096,
+    openAiServiceTierAvailable: Boolean = false,
+    openAiServiceTierEnabled: Boolean = false,
+    openAiServiceTier: String = "auto",
     activeLoop: com.newoether.agora.data.local.LoopEntity? = null,
     loopRunning: Boolean = false,
     onStopLoop: () -> Unit = {},
@@ -97,6 +105,8 @@ fun ChatBottomBar(
     onThinkingLevelChange: (String) -> Unit = {},
     onThinkingBudgetEnabledChange: (Boolean) -> Unit = {},
     onThinkingBudgetTokensChange: (Int) -> Unit = {},
+    onOpenAiServiceTierToggle: (Boolean) -> Unit = {},
+    onOpenAiServiceTierChange: (String) -> Unit = {},
     onWebSearchToggle: (Boolean) -> Unit = {},
     onShellToggle: (Boolean) -> Unit = {},
     onModelSelect: (String) -> Unit,
@@ -126,6 +136,7 @@ fun ChatBottomBar(
     onRemoveQueuedSend: (String) -> Unit = {},
     isStopping: Boolean = false,
 ) {
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val scrollState = rememberScrollState()
     BackHandler(enabled = isExpanded) { onCollapse() }
     val isModelValid = selectedModel.isNotBlank() && enabledModels.contains(selectedModel)
@@ -140,6 +151,7 @@ fun ChatBottomBar(
     val context = LocalContext.current
     val haptics = LocalAgoraHaptics.current
     var showThinkingSheet by rememberSaveable { mutableStateOf(false) }
+    var showOpenAiServiceTierSheet by rememberSaveable { mutableStateOf(false) }
     val composerOcclusionColor = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
     val composerOcclusionShape = RoundedCornerShape(
         topStart = 20.dp,
@@ -152,6 +164,9 @@ fun ChatBottomBar(
             composer.showPdfPageDialog = true
             composer.pdfDialogHiddenForPreview = false
         }
+    }
+    LaunchedEffect(openAiServiceTierAvailable) {
+        if (!openAiServiceTierAvailable) showOpenAiServiceTierSheet = false
     }
 
     val photoLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -207,7 +222,11 @@ fun ChatBottomBar(
             AnimatedVisibility(
                 visible = isExpanded,
                 enter = EnterTransition.None,
-                exit = shrinkVertically(tween(250)) + fadeOut(tween(250))
+                exit = if (allowSpatialTransitions) {
+                    shrinkVertically(tween(250)) + fadeOut(tween(250))
+                } else {
+                    fadeOut(tween(250))
+                },
             ) {
                 Spacer(modifier = Modifier.height(44.dp))
             }
@@ -225,7 +244,15 @@ fun ChatBottomBar(
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(if (isExpanded) Modifier.weight(1f) else Modifier)
-                    .animateContentSize(animationSpec = tween(durationMillis = 400))
+                    .then(
+                        if (allowSpatialTransitions) {
+                            Modifier.animateContentSize(
+                                animationSpec = tween(durationMillis = 400),
+                            )
+                        } else {
+                            Modifier
+                        },
+                    )
                     .clip(composerOcclusionShape)
                     .background(composerOcclusionColor)
                     .zIndex(1f),
@@ -296,7 +323,6 @@ fun ChatBottomBar(
                 ) {
                     IconButton(
                         onClick = {
-                            haptics.action()
                             val now = System.currentTimeMillis()
                             if (showAddMenu) {
                                 showAddMenu = false
@@ -334,7 +360,6 @@ fun ChatBottomBar(
                                 }
                             },
                             onClick = {
-                                haptics.selection()
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
                                 activityLaunchScope.launch {
@@ -366,7 +391,6 @@ fun ChatBottomBar(
                                 }
                             },
                             onClick = {
-                                haptics.selection()
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
                                 photoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -381,7 +405,6 @@ fun ChatBottomBar(
                                 }
                             },
                             onClick = {
-                                haptics.selection()
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
                                 videoLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
@@ -396,7 +419,6 @@ fun ChatBottomBar(
                                 }
                             },
                             onClick = {
-                                haptics.selection()
                                 showAddMenu = false
                                 lastAddDismissTime = 0L
                                 fileLauncher.launch("*/*")
@@ -424,7 +446,6 @@ fun ChatBottomBar(
                 ) {
                     TextButton(
                         onClick = {
-                            haptics.action()
                             val now = System.currentTimeMillis()
                             if (activeMenu == "model") {
                                 activeMenu = null
@@ -503,7 +524,6 @@ fun ChatBottomBar(
                 ) {
                     IconButton(
                         onClick = { 
-                            haptics.action()
                             val now = System.currentTimeMillis()
                             if (activeMenu == "tools") {
                                 activeMenu = null
@@ -597,11 +617,46 @@ fun ChatBottomBar(
                                 )
                             },
                             onClick = {
-                                haptics.action()
                                 activeMenu = null
                                 showThinkingSheet = true
                             }
                         )
+                        if (openAiServiceTierAvailable && isModelValid) {
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            Icons.Default.Speed,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Column {
+                                            Text(stringResource(R.string.openai_service_tier_title))
+                                            Text(
+                                                text = openAiServiceTierShortLabel(
+                                                    openAiServiceTierEnabled,
+                                                    openAiServiceTier,
+                                                ),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                },
+                                trailingIcon = {
+                                    Switch(
+                                        checked = openAiServiceTierEnabled,
+                                        onCheckedChange = onOpenAiServiceTierToggle,
+                                        modifier = Modifier.scale(0.7f),
+                                    )
+                                },
+                                onClick = {
+                                    activeMenu = null
+                                    showOpenAiServiceTierSheet = true
+                                },
+                            )
+                        }
                         if (showWebSearch) {
                             DropdownMenuItem(
                                 text = {
@@ -649,7 +704,7 @@ fun ChatBottomBar(
                                 }
                             },
                             // Unlike the toggle rows, this opens a dialog — collapse the menu first.
-                            onClick = { haptics.action(); activeMenu = null; onAdvancedClick() }
+                            onClick = { activeMenu = null; onAdvancedClick() }
                         )
                     }
                 }
@@ -674,7 +729,7 @@ fun ChatBottomBar(
             modifier = Modifier.align(Alignment.TopEnd).padding(end = 4.dp, top = 4.dp)
         ) {
             val elevatedSurface = MaterialTheme.colorScheme.surfaceColorAtElevation(2.dp)
-            IconButton(onClick = { if (!isExpandAnimating) { haptics.action(); onCollapse() } }, modifier = Modifier.size(40.dp).background(Brush.radialGradient(listOf(elevatedSurface, elevatedSurface.copy(alpha = 0.5f), Color.Transparent)), CircleShape)) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
+            IconButton(onClick = { if (!isExpandAnimating) onCollapse() }, modifier = Modifier.size(40.dp).background(Brush.radialGradient(listOf(elevatedSurface, elevatedSurface.copy(alpha = 0.5f), Color.Transparent)), CircleShape)) { Icon(painter = androidx.compose.ui.res.painterResource(id = R.drawable.collapse_all_24px), contentDescription = stringResource(R.string.collapse), modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)) }
         }
     }
 
@@ -701,6 +756,29 @@ fun ChatBottomBar(
                     onBudgetTokensChange = onThinkingBudgetTokensChange,
                     providerName = com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
                     animateSections = true
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+            }
+        }
+    }
+
+    if (showOpenAiServiceTierSheet && openAiServiceTierAvailable) {
+        ModalBottomSheet(
+            onDismissRequest = { showOpenAiServiceTierSheet = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ) {
+            DialogWindowEdgeToEdge()
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 16.dp),
+            ) {
+                OpenAiServiceTierControlPanel(
+                    enabled = openAiServiceTierEnabled,
+                    tier = openAiServiceTier,
+                    onEnabledChange = onOpenAiServiceTierToggle,
+                    onTierChange = onOpenAiServiceTierChange,
                 )
                 Spacer(modifier = Modifier.height(24.dp))
             }

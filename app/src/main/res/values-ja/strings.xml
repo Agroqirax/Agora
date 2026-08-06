@@ -269,6 +269,15 @@
     <string name="models_title">モデル</string>
     <string name="models_default">デフォルトモデル</string>
     <string name="models_no_models">有効なモデルがありません</string>
+    <string name="models_manual">手動モデル</string>
+    <string name="models_manual_empty">カスタムモデルは追加されていません</string>
+    <string name="models_add_custom">カスタムモデルを追加</string>
+    <string name="models_auto_fetch">自動取得</string>
+    <string name="models_auto_empty">取得済みのモデルはありません</string>
+    <string name="models_search_hint">モデルを検索…</string>
+    <string name="models_search_empty">一致するモデルはありません</string>
+    <string name="models_clear_search">モデル検索をクリア</string>
+    <string name="models_custom_exists">このモデルは既に存在します</string>
     <string name="models_available">利用可能なモデル</string>
     <string name="models_sync">すべてのプロバイダーから同期</string>
     <string name="models_sync_desc">設定済みのすべての API の最新モデル一覧を取得</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">ぼかし効果</string>
     <string name="blur_effects_desc">ツールバー下のチャット一覧上部をぼかします。オフにするとパフォーマンスを節約できます。</string>
     <string name="reduce_motion">モーションを減らす</string>
-    <string name="reduce_motion_desc">継続的な装飾アニメーションとタイプ入力効果を停止します。読み込み表示と状態遷移は維持されます。</string>
+    <string name="reduce_motion_desc">継続的な動きや大きな空間移動を減らし、フェード、直接操作、必要な状態フィードバックは維持します。</string>
 
     <!-- Language -->
     <string name="language_title">言語</string>
@@ -1009,4 +1018,12 @@
     <string name="web_search_kagi_desc">パーソナライズされた結果を提供するプレミアム検索 API。従量課金。</string>
     <string name="web_search_kagi_key">Kagi Search API キー</string>
     <string name="web_search_kagi_key_hint">kagi.com/api/keys の API キー</string>
+    <string name="default_service_tier">デフォルトのサービス階層</string>
+    <string name="openai_service_tier_title">サービス階層</string>
+    <string name="openai_service_tier_desc">OpenAI プロトコルのリクエストの遅延と処理優先度を制御します。</string>
+    <string name="openai_service_tier_off">オフ</string>
+    <string name="openai_service_tier_auto">自動</string>
+    <string name="openai_service_tier_default">デフォルト</string>
+    <string name="openai_service_tier_flex">フレックス</string>
+    <string name="openai_service_tier_fast">高速</string>
 </resources>

@@ -17,6 +17,7 @@ data class SwitchingScrollRequest(
     val targetMessageId: String?,
     val kind: SwitchingRequestKind,
     val readyForUi: Boolean,
+    val hapticOnCompletion: Boolean,
 )
 
 /**
@@ -35,12 +36,16 @@ internal class SwitchingCoordinator {
     val isSwitching: StateFlow<Boolean> = _isSwitching.asStateFlow()
     val request: StateFlow<SwitchingScrollRequest?> = _request.asStateFlow()
 
-    fun beginConversation(conversationId: String): SwitchingScrollRequest =
+    fun beginConversation(
+        conversationId: String,
+        hapticOnCompletion: Boolean = true,
+    ): SwitchingScrollRequest =
         begin(
             conversationId = conversationId,
             targetMessageId = null,
             kind = SwitchingRequestKind.CONVERSATION,
             readyForUi = false,
+            hapticOnCompletion = hapticOnCompletion,
         )
 
     fun beginTreeMutation(conversationId: String): SwitchingScrollRequest =
@@ -49,6 +54,7 @@ internal class SwitchingCoordinator {
             targetMessageId = null,
             kind = SwitchingRequestKind.TREE_MUTATION,
             readyForUi = false,
+            hapticOnCompletion = false,
         )
 
     fun beginNewChat(): SwitchingScrollRequest =
@@ -57,6 +63,7 @@ internal class SwitchingCoordinator {
             targetMessageId = null,
             kind = SwitchingRequestKind.NEW_CHAT,
             readyForUi = false,
+            hapticOnCompletion = false,
         )
 
     private fun begin(
@@ -64,6 +71,7 @@ internal class SwitchingCoordinator {
         targetMessageId: String?,
         kind: SwitchingRequestKind,
         readyForUi: Boolean,
+        hapticOnCompletion: Boolean,
     ): SwitchingScrollRequest {
         val next = SwitchingScrollRequest(
             id = ids.incrementAndGet(),
@@ -71,6 +79,7 @@ internal class SwitchingCoordinator {
             targetMessageId = targetMessageId,
             kind = kind,
             readyForUi = readyForUi,
+            hapticOnCompletion = hapticOnCompletion,
         )
         _request.value = next
         _isSwitching.value = true

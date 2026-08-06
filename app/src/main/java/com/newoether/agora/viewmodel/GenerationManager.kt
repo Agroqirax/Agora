@@ -16,6 +16,8 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
+import com.newoether.agora.model.RequestTokenUsageAccumulator
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.R
 import com.newoether.agora.service.AgoraForegroundService
@@ -154,6 +156,7 @@ data class GenerationConfig(
     val thinkingLevel: String = "medium",
     val thinkingBudgetEnabled: Boolean = false,
     val thinkingBudgetTokens: Int = 4096,
+    val openAiServiceTier: String? = null,
     val baseUrl: String?,
     val userPrepend: String? = null,
     val userPostpend: String? = null,
@@ -590,6 +593,14 @@ class GenerationManager(
                 thoughts = it.thoughts,
                 thoughtTitle = it.thoughtTitle,
                 tokenCount = it.tokenCount,
+                tokenUsage = TokenUsage.fromPersisted(
+                    totalTokenCount = it.tokenCount,
+                    inputTokenCount = it.inputTokenCount,
+                    cachedInputTokenCount = it.cachedInputTokenCount,
+                    uncachedInputTokenCount = it.uncachedInputTokenCount,
+                    outputTokenCount = it.outputTokenCount,
+                    reasoningTokenCount = it.reasoningTokenCount,
+                ),
                 status = it.status,
                 participant = it.participant,
                 timestamp = it.timestamp,
@@ -621,6 +632,7 @@ class GenerationManager(
             thinkingLevel = config.thinkingLevel,
             thinkingBudgetEnabled = config.thinkingBudgetEnabled,
             thinkingBudgetTokens = config.thinkingBudgetTokens,
+            openAiServiceTier = config.openAiServiceTier,
             baseUrl = config.baseUrl,
             tools = allTools,
             userPrepend = config.userPrepend,
@@ -664,6 +676,8 @@ class GenerationManager(
         var thinkingPlaceholder = ""
         var totalThoughtTitle: String? = null
         var totalTokenCount = 0
+        var totalTokenUsage: TokenUsage? = null
+        val tokenUsageAccumulator = RequestTokenUsageAccumulator()
         var totalThoughtTimeMs: Long? = null
         var cumulativeThoughtMs: Long = 0
         var currentThoughtStartMs: Long? = null
@@ -708,6 +722,7 @@ class GenerationManager(
                 totalThoughts = snapshot.thoughts.orEmpty()
                 totalThoughtTitle = snapshot.thoughtTitle
                 totalTokenCount = snapshot.tokenCount
+                totalTokenUsage = snapshot.tokenUsage
                 totalThoughtTimeMs = snapshot.thoughtTimeMs
                 generatedImages.clear()
                 generatedImages.addAll(snapshot.images)
@@ -822,6 +837,7 @@ class GenerationManager(
                 id = modelMessageId, parentId = parentId,
                 text = totalText, thoughts = totalThoughts.ifBlank { null },
                 thoughtTitle = totalThoughtTitle, tokenCount = totalTokenCount,
+                tokenUsage = totalTokenUsage,
                 status = currentStatus, participant = Participant.MODEL,
                 timestamp = startTime, thoughtTimeMs = totalThoughtTimeMs,
                 modelName = modelName, toolCall = toolCallData,
@@ -1084,7 +1100,9 @@ class GenerationManager(
                         }
                     }
                     is StreamEvent.UsageUpdate -> {
-                        if (event.tokenCount > 0) totalTokenCount = event.tokenCount
+                        tokenUsageAccumulator.observeRequestSnapshot(event.usage)
+                        totalTokenUsage = tokenUsageAccumulator.snapshot()
+                        totalTokenCount = totalTokenUsage?.totalTokenCount ?: 0
                         if (totalText.isEmpty() && event.thoughtsTokenCount > 0) {
                             currentStatus = MessageStatus.THINKING
                             if (currentThoughtStartMs == null) {
@@ -1173,19 +1191,35 @@ class GenerationManager(
                 }
             }
 
+            suspend fun collectProviderRequest(
+                messages: List<ChatMessage>,
+                onFirstEvent: (() -> Unit)? = null,
+            ) {
+                tokenUsageAccumulator.beginRequest()
+                var firstEventPending = onFirstEvent != null
+                try {
+                    provider.generateResponse(messages, providerConfig).collect { event ->
+                        if (firstEventPending) {
+                            firstEventPending = false
+                            onFirstEvent?.invoke()
+                        }
+                        handleStreamEvent(event)
+                    }
+                } finally {
+                    tokenUsageAccumulator.finishRequest()
+                    totalTokenUsage = tokenUsageAccumulator.snapshot()
+                    totalTokenCount = totalTokenUsage?.totalTokenCount ?: totalTokenCount
+                }
+            }
+
             val projectedPath = projectToolResultImagesToUserMessage(
                 projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages),
                 providerConfig.includeImages,
             )
             val apiPath = applyUserTemplate(projectedPath, config.userPrepend, config.userPostpend)
-            var firstProviderEventPending = true
             requestTrace?.mark("provider_dispatch")
-            provider.generateResponse(apiPath, providerConfig).collect { event ->
-                if (firstProviderEventPending) {
-                    firstProviderEventPending = false
+            collectProviderRequest(apiPath) {
                     requestTrace?.mark("first_semantic_event")
-                }
-                handleStreamEvent(event)
             }
             finishCurrentThoughtTiming()
             executeCompletedToolCalls()
@@ -1314,9 +1348,7 @@ class GenerationManager(
                     providerConfig.includeImages,
                 )
                 val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
-                provider.generateResponse(apiToolPath, providerConfig).collect { event ->
-                    handleStreamEvent(event)
-                }
+                collectProviderRequest(apiToolPath)
                 finishCurrentThoughtTiming()
                 executeCompletedToolCalls()
                 // Publish the round's final UI state immediately. The next loop boundary or the
@@ -1404,6 +1436,7 @@ class GenerationManager(
                                 thoughts = totalThoughts.ifBlank { null },
                                 thoughtTitle = totalThoughtTitle,
                                 tokenCount = totalTokenCount,
+                                tokenUsage = totalTokenUsage,
                                 status = currentStatus,
                                 participant = Participant.MODEL,
                                 timestamp = startTime,

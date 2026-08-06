@@ -9,24 +9,59 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
-private const val SEEK_STARTUP_EASING_DURATION_NANOS = 240_000_000L
+internal data class FeedbackScrollStartupSpec(
+    val durationMillis: Long,
+    val easing: Easing,
+) {
+    init {
+        require(durationMillis > 0L)
+    }
+}
 
 /**
- * Applies an optional short easing envelope only to the seek's initial velocity. Once the envelope
- * reaches one, [coalescedScrollStep] is returned unchanged, preserving its existing long adaptive
- * ease-out as the target becomes measured and the remaining error shrinks.
+ * Motion parameters for the frame-driven feedback scroll.
+ *
+ * Both exact and still-unmeasured targets use the same closed-loop controller. Their separate
+ * gains let a distant target travel quickly while retaining the long error-proportional ease-out
+ * once its final geometry is known. A caller may add a short [startup] envelope without replacing
+ * that shared feedback response.
  */
-internal fun applySeekStartupEasing(
+internal data class FeedbackScrollSpec(
+    val measuredTargetTimeConstantSeconds: Float = 0.09f,
+    val unmeasuredTargetTimeConstantSeconds: Float = 0.16f,
+    val measuredTargetMaximumVelocityViewportsPerSecond: Float = 16f,
+    val unmeasuredTargetMaximumVelocityViewportsPerSecond: Float = 52f,
+    val maximumFrameStepViewportFraction: Float = 0.82f,
+    val startup: FeedbackScrollStartupSpec? = null,
+) {
+    init {
+        require(measuredTargetTimeConstantSeconds > 0f)
+        require(unmeasuredTargetTimeConstantSeconds > 0f)
+        require(measuredTargetMaximumVelocityViewportsPerSecond > 0f)
+        require(unmeasuredTargetMaximumVelocityViewportsPerSecond > 0f)
+        require(maximumFrameStepViewportFraction in 0f..1f)
+    }
+}
+
+internal val DefaultFeedbackScrollSpec = FeedbackScrollSpec()
+
+/**
+ * Applies an optional startup envelope to the feedback controller's output. Once the envelope
+ * reaches one, [coalescedScrollStep] is returned unchanged, preserving the controller's existing
+ * long adaptive ease-out as the target becomes measured and the remaining error shrinks.
+ */
+internal fun applyFeedbackScrollStartup(
     adaptiveStepPx: Float,
     elapsedNanos: Long,
-    easing: Easing?,
+    startup: FeedbackScrollStartupSpec?,
 ): Float {
-    if (adaptiveStepPx == 0f || easing == null) return adaptiveStepPx
+    if (adaptiveStepPx == 0f || startup == null) return adaptiveStepPx
+    val durationNanos = startup.durationMillis * 1_000_000L
     val progress =
         (elapsedNanos.coerceAtLeast(0L).toFloat() /
-            SEEK_STARTUP_EASING_DURATION_NANOS.toFloat())
+            durationNanos.toFloat())
             .coerceIn(0f, 1f)
-    return adaptiveStepPx * easing.transform(progress).coerceIn(0f, 1f)
+    return adaptiveStepPx * startup.easing.transform(progress).coerceIn(0f, 1f)
 }
 
 /**
@@ -49,7 +84,7 @@ internal suspend fun LazyListState.smoothSeekToItem(
     targetTolerancePx: Float = 1.5f,
     stableFrameCount: Int = 4,
     maximumDurationMillis: Long = 30_000L,
-    easing: Easing? = null,
+    feedbackSpec: FeedbackScrollSpec = DefaultFeedbackScrollSpec,
 ): Boolean {
     var reached = false
     scroll(MutatePriority.Default) {
@@ -125,19 +160,30 @@ internal suspend fun LazyListState.smoothSeekToItem(
             // decelerates instead of snapping.
             val targetIsMeasured = visibleTarget != null
             val maximumVelocityPxPerSecond = viewportSizePx *
-                if (targetIsMeasured) 16f else 52f
+                if (targetIsMeasured) {
+                    feedbackSpec.measuredTargetMaximumVelocityViewportsPerSecond
+                } else {
+                    feedbackSpec.unmeasuredTargetMaximumVelocityViewportsPerSecond
+                }
             val adaptiveStep = coalescedScrollStep(
                 errorPx = error,
                 elapsedSeconds = elapsedSeconds,
-                timeConstantSeconds = if (targetIsMeasured) 0.09f else 0.16f,
+                timeConstantSeconds = if (targetIsMeasured) {
+                    feedbackSpec.measuredTargetTimeConstantSeconds
+                } else {
+                    feedbackSpec.unmeasuredTargetTimeConstantSeconds
+                },
                 maximumVelocityPxPerSecond = maximumVelocityPxPerSecond,
                 minimumStepPx = minimumStepPx,
             )
-            val step = applySeekStartupEasing(
+            val step = applyFeedbackScrollStartup(
                 adaptiveStepPx = adaptiveStep,
                 elapsedNanos = frameNanos - startedAtNanos,
-                easing = easing,
-            ).coerceIn(-viewportSizePx * 0.82f, viewportSizePx * 0.82f)
+                startup = feedbackSpec.startup,
+            ).coerceIn(
+                -viewportSizePx * feedbackSpec.maximumFrameStepViewportFraction,
+                viewportSizePx * feedbackSpec.maximumFrameStepViewportFraction,
+            )
 
             if (abs(step) <= 0.05f) continue
             val consumed = scrollBy(step)

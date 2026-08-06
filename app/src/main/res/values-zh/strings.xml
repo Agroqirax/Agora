@@ -294,6 +294,15 @@
     <string name="models_title">模型</string>
     <string name="models_default">默认模型</string>
     <string name="models_no_models">未启用模型</string>
+    <string name="models_manual">手动模型</string>
+    <string name="models_manual_empty">尚未添加自定义模型</string>
+    <string name="models_add_custom">添加自定义模型</string>
+    <string name="models_auto_fetch">自动获取</string>
+    <string name="models_auto_empty">尚未获取模型</string>
+    <string name="models_search_hint">搜索模型…</string>
+    <string name="models_search_empty">没有匹配的模型</string>
+    <string name="models_clear_search">清除模型搜索</string>
+    <string name="models_custom_exists">该模型已存在</string>
     <string name="models_available">可用模型</string>
     <string name="models_sync">从所有提供商同步</string>
     <string name="models_sync_desc">获取所有已配置 API 的最新模型列表</string>
@@ -574,7 +583,7 @@
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">对聊天列表顶部工具栏下方应用模糊。关闭可节省性能。</string>
     <string name="reduce_motion">减少动态效果</string>
-    <string name="reduce_motion_desc">停止持续的装饰动画和打字效果，同时保留加载指示与状态切换反馈。</string>
+    <string name="reduce_motion_desc">减少持续运动和大范围空间位移，同时保留淡入淡出、直接手势和必要的状态反馈。</string>
     <string name="message_display">消息显示</string>
     <string name="tool_call_display_mode">思考与工具块</string>
     <string name="tool_call_display_mode_timeline">时间线</string>
@@ -1109,4 +1118,12 @@
     <string name="proxy_password">密码(可选)</string>
     <string name="proxy_bypass">直连列表</string>
     <string name="proxy_bypass_desc">直接连接、不经过代理的主机和 CIDR 网段,每行一个</string>
+    <string name="default_service_tier">默认服务层级</string>
+    <string name="openai_service_tier_title">服务层级</string>
+    <string name="openai_service_tier_desc">控制 OpenAI 协议请求的延迟和处理优先级。</string>
+    <string name="openai_service_tier_off">关闭</string>
+    <string name="openai_service_tier_auto">自动</string>
+    <string name="openai_service_tier_default">默认</string>
+    <string name="openai_service_tier_flex">弹性</string>
+    <string name="openai_service_tier_fast">快速</string>
 </resources>

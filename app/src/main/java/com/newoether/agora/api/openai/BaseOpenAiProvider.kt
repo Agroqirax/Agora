@@ -128,6 +128,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
             stream = true,
             streamOptions = OpenAiStreamOptions(includeUsage = true),
             tools = config.tools,
+            serviceTier = config.openAiServiceTier,
             temperature = config.temperature,
             maxTokens = config.maxTokens,
             topP = config.topP,
@@ -407,12 +408,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 }
 
                 response.usage?.let { usage ->
-                    emit(
-                        StreamEvent.UsageUpdate(
-                            tokenCount = usage.totalTokens,
-                            thoughtsTokenCount = usage.completionTokensDetails?.reasoningTokens ?: 0
-                        )
-                    )
+                    emit(StreamEvent.UsageUpdate(usage.toTokenUsage()))
                 }
 
                 if (!choice?.finishReason.isNullOrBlank() && terminalDeadlineNanos == null) {

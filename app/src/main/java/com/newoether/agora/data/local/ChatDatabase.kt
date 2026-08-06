@@ -16,6 +16,7 @@ import com.newoether.agora.data.local.migration.MIGRATION_16_17
 import com.newoether.agora.data.local.migration.MIGRATION_17_18
 import com.newoether.agora.data.local.migration.MIGRATION_18_19
 import com.newoether.agora.data.local.migration.MIGRATION_19_20
+import com.newoether.agora.data.local.migration.MIGRATION_20_21
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -190,6 +191,11 @@ data class MessageEntity(
     val thoughts: String? = null,
     val thoughtTitle: String? = null,
     val tokenCount: Int = 0,
+    val inputTokenCount: Int? = null,
+    val cachedInputTokenCount: Int? = null,
+    val uncachedInputTokenCount: Int? = null,
+    val outputTokenCount: Int? = null,
+    val reasoningTokenCount: Int? = null,
     val status: MessageStatus = MessageStatus.SUCCESS,
     val participant: Participant,
     val timestamp: Long,
@@ -221,6 +227,11 @@ data class MessageStreamCheckpoint(
     val thoughts: String?,
     val thoughtTitle: String?,
     val tokenCount: Int,
+    val inputTokenCount: Int?,
+    val cachedInputTokenCount: Int?,
+    val uncachedInputTokenCount: Int?,
+    val outputTokenCount: Int?,
+    val reasoningTokenCount: Int?,
     val status: MessageStatus,
     val thoughtTimeMs: Long?,
     val toolCallJson: String?,
@@ -341,6 +352,36 @@ interface ChatDao {
                     OR substr(id, 1, 7) = 'result_' THEN 0
                 ELSE tokenCount
             END AS tokenCount,
+            CASE
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE inputTokenCount
+            END AS inputTokenCount,
+            CASE
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE cachedInputTokenCount
+            END AS cachedInputTokenCount,
+            CASE
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE uncachedInputTokenCount
+            END AS uncachedInputTokenCount,
+            CASE
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE outputTokenCount
+            END AS outputTokenCount,
+            CASE
+                WHEN id = :streamingMessageId
+                    OR substr(id, 1, 5) = 'tool_'
+                    OR substr(id, 1, 7) = 'result_' THEN NULL
+                ELSE reasoningTokenCount
+            END AS reasoningTokenCount,
             CASE WHEN id = :streamingMessageId THEN 'SENDING' ELSE status END AS status,
             participant,
             timestamp,
@@ -968,6 +1009,11 @@ interface ChatDao {
                         thoughts = message.thoughts,
                         thoughtTitle = message.thoughtTitle,
                         tokenCount = message.tokenCount,
+                        inputTokenCount = message.inputTokenCount,
+                        cachedInputTokenCount = message.cachedInputTokenCount,
+                        uncachedInputTokenCount = message.uncachedInputTokenCount,
+                        outputTokenCount = message.outputTokenCount,
+                        reasoningTokenCount = message.reasoningTokenCount,
                         status = recoveredStatus,
                         thoughtTimeMs = message.thoughtTimeMs,
                         toolCallJson = recoveredToolJson,
@@ -1269,7 +1315,7 @@ abstract class ChatDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
 
     companion object {
-        const val CURRENT_VERSION = 20
+        const val CURRENT_VERSION = 21
         const val DB_NAME = "agora_db"
 
         val ALL_MIGRATIONS = listOf(
@@ -1402,6 +1448,7 @@ abstract class ChatDatabase : RoomDatabase() {
             MIGRATION_17_18,
             MIGRATION_18_19,
             MIGRATION_19_20,
+            MIGRATION_20_21,
         )
 
         fun getStoredVersion(context: Context): Int {

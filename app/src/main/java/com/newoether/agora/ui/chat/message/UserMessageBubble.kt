@@ -38,6 +38,7 @@ import com.newoether.agora.ui.chat.ThumbnailClickHandlers
 import com.newoether.agora.ui.chat.findMetaForIndex
 import com.newoether.agora.ui.chat.resolveAttachmentType
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.theme.ChatType
 
 /**
@@ -75,6 +76,7 @@ internal fun UserMessageBubble(
     @Suppress("DEPRECATION")
     val clipboardManager = LocalClipboardManager.current
     val haptics = LocalAgoraHaptics.current
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     var showMenu by remember { mutableStateOf(false) }
 
     Column(horizontalAlignment = Alignment.End) {
@@ -87,7 +89,15 @@ internal fun UserMessageBubble(
                 // Keep size interpolation local to the stable user-bubble surface. Initial
                 // measurement is immediate; subsequent editor enter/exit changes animate
                 // without involving the message row or assistant streaming layout.
-                .animateContentSize(animationSpec = tween(durationMillis = 500))
+                .then(
+                    if (allowSpatialTransitions) {
+                        Modifier.animateContentSize(
+                            animationSpec = tween(durationMillis = 500),
+                        )
+                    } else {
+                        Modifier
+                    },
+                )
         ) {
             if (isEditing) {
                 val editState = rememberTextFieldState(message.text)
@@ -262,11 +272,11 @@ internal fun UserMessageBubble(
                         Icon(Icons.Default.ContentCopy, contentDescription = stringResource(R.string.copy), modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                     }
                 }
-                IconButton(onClick = { haptics.tap(); onStartEdit() }, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onStartEdit, enabled = isEditingAllowed, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.edit), modifier = Modifier.size(16.dp), tint = LocalContentColor.current.copy(alpha = if (isEditingAllowed) 0.6f else 0.3f))
                 }
                 Box {
-                    IconButton(onClick = { haptics.tap(); showMenu = true }, modifier = Modifier.size(32.dp)) {
+                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more), modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                     }
                     DropdownMenu(
@@ -278,12 +288,12 @@ internal fun UserMessageBubble(
                     ) {
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.info)) },
-                            onClick = { haptics.tap(); showMenu = false; onShowInfo() },
+                            onClick = { showMenu = false; onShowInfo() },
                             leadingIcon = { Icon(Icons.Default.Info, null) }
                         )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.delete), color = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) },
-                            onClick = { haptics.tap(); showMenu = false; onShowDelete() },
+                            onClick = { showMenu = false; onShowDelete() },
                             enabled = !isLoading,
                             leadingIcon = { Icon(Icons.Default.Delete, null, tint = if (!isLoading) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.error.copy(alpha = 0.5f)) }
                         )

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -41,7 +42,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDefaults
 import androidx.compose.material3.DatePickerDialog
@@ -125,18 +126,36 @@ fun TasksScreen(
     onOpenConversation: (taskId: String, conversationId: String) -> Unit,
 ) {
     val tasks by viewModel.tasks.collectAsState()
-    var openTaskId by remember { mutableStateOf<String?>(null) }
+    // Seed the navigation target synchronously. In particular, returning from a history
+    // conversation must compose the detail page on the overlay's first visible frame instead of
+    // briefly composing the list and then animating list -> detail from a LaunchedEffect.
+    var openTaskId by remember { mutableStateOf(initialTaskId) }
+    var resolvingInitialTaskId by remember { mutableStateOf(initialTaskId) }
+    var initialTaskSnapshot by remember { mutableStateOf<TaskEntity?>(null) }
     // A brand-new task only reaches Room once it has a name + prompt, so backing out of an
     // untouched draft leaves nothing behind. Until then it lives here.
     var draft by remember { mutableStateOf<TaskEntity?>(null) }
 
     LaunchedEffect(initialTaskId) {
         val id = initialTaskId ?: return@LaunchedEffect
-        viewModel.getTask(id)?.let {
+        resolvingInitialTaskId = id
+        val initialTask = viewModel.getTask(id)
+        initialTaskSnapshot = initialTask
+        if (initialTask != null) {
             draft = null
-            openTaskId = it.id
+            openTaskId = initialTask.id
+        } else if (openTaskId == id) {
+            openTaskId = null
         }
+        resolvingInitialTaskId = null
         onInitialTaskHandled()
+    }
+
+    LaunchedEffect(tasks, initialTaskSnapshot?.id) {
+        val snapshotId = initialTaskSnapshot?.id ?: return@LaunchedEffect
+        if (tasks.any { it.id == snapshotId }) {
+            initialTaskSnapshot = null
+        }
     }
 
     GuardedAnimatedContent(
@@ -159,11 +178,19 @@ fun TasksScreen(
                 onOpenTask = { draft = null; openTaskId = it.id },
             )
         } else {
-            val task = tasks.firstOrNull { it.id == taskId } ?: draft?.takeIf { it.id == taskId }
+            val task = tasks.firstOrNull { it.id == taskId }
+                ?: initialTaskSnapshot?.takeIf { it.id == taskId }
+                ?: draft?.takeIf { it.id == taskId }
             if (task == null) {
-                // Deleted (or never persisted) while open — fall back to the list instead of
-                // rendering an empty editor.
-                LaunchedEffect(taskId) { openTaskId = null }
+                if (resolvingInitialTaskId == taskId) {
+                    // Hold the overlay background until the initial task is resolved. Rendering
+                    // the list here would expose both navigation destinations during return.
+                    Box(modifier = Modifier.fillMaxSize())
+                } else {
+                    // Deleted (or never persisted) while open — fall back to the list instead of
+                    // rendering an empty editor.
+                    LaunchedEffect(taskId) { openTaskId = null }
+                }
             } else {
                 TaskDetailPage(
                     viewModel = viewModel,

@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.chat.message.AssistantMessageHorizontalInset
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 
 internal val StreamingTailAnchorHeight = 24.dp
 internal val StreamingTailVisualLift = 56.dp
@@ -209,6 +210,8 @@ internal fun StreamingTailIndicator(
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val allowContinuousMotion = LocalAgoraMotionPolicy.current.allowContinuousMotion
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val density = LocalDensity.current
     val visualLiftPx = with(density) { StreamingTailVisualLift.toPx() }
     Box(
@@ -221,27 +224,40 @@ internal fun StreamingTailIndicator(
         AnimatedVisibility(
             modifier = Modifier.graphicsLayer { translationY = -visualLiftPx },
             visible = visible,
-            enter = fadeIn(tween(400, easing = FastOutSlowInEasing)) +
-                scaleIn(
-                    initialScale = 0.55f,
-                    animationSpec = tween(400, easing = FastOutSlowInEasing),
-                ),
-            exit = fadeOut(tween(320, easing = FastOutSlowInEasing)) +
-                scaleOut(
-                    targetScale = 0.55f,
-                    animationSpec = tween(320, easing = FastOutSlowInEasing),
-                ),
+            enter = if (allowSpatialTransitions) {
+                fadeIn(tween(400, easing = FastOutSlowInEasing)) +
+                    scaleIn(
+                        initialScale = 0.55f,
+                        animationSpec = tween(400, easing = FastOutSlowInEasing),
+                    )
+            } else {
+                fadeIn(tween(400, easing = FastOutSlowInEasing))
+            },
+            exit = if (allowSpatialTransitions) {
+                fadeOut(tween(320, easing = FastOutSlowInEasing)) +
+                    scaleOut(
+                        targetScale = 0.55f,
+                        animationSpec = tween(320, easing = FastOutSlowInEasing),
+                    )
+            } else {
+                fadeOut(tween(320, easing = FastOutSlowInEasing))
+            },
         ) {
-            val breathing = rememberInfiniteTransition(label = "StreamingTailBreathing")
-            val breathingScale by breathing.animateFloat(
-                initialValue = 0.55f,
-                targetValue = 1.30f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(1_000, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "StreamingTailBreathingScale",
-            )
+            val breathingScale = if (allowContinuousMotion) {
+                val breathing = rememberInfiniteTransition(label = "StreamingTailBreathing")
+                val animatedScale by breathing.animateFloat(
+                    initialValue = 0.55f,
+                    targetValue = 1.30f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1_000, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse,
+                    ),
+                    label = "StreamingTailBreathingScale",
+                )
+                animatedScale
+            } else {
+                1f
+            }
             Box(
                 modifier = Modifier
                     .size(11.dp)

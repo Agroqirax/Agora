@@ -15,6 +15,7 @@ import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -36,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -59,6 +61,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.newoether.agora.R
+import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ChatMessage
@@ -72,7 +75,11 @@ import com.newoether.agora.ui.components.TypewriterMode
 import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.common.rememberAgoraHaptics
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.closeWithMotionPolicy
+import com.newoether.agora.ui.motion.openWithMotionPolicy
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.util.DebugLog
@@ -97,6 +104,12 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
+private val SEND_FEEDBACK_SCROLL_SPEC = DefaultFeedbackScrollSpec.copy(
+    startup = FeedbackScrollStartupSpec(
+        durationMillis = 240L,
+        easing = FastOutSlowInEasing,
+    ),
+)
 private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
@@ -354,6 +367,7 @@ fun ChatApp(
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val shareChooserTitle = stringResource(R.string.conversation_share)
     val shareFailureTemplate = stringResource(
         R.string.conversation_share_failed,
@@ -391,8 +405,8 @@ fun ChatApp(
             allowed
         }
     )
-    LaunchedEffect(drawerEnabled) {
-        if (!drawerEnabled) drawerState.close()
+    LaunchedEffect(drawerEnabled, motionPolicy.allowSpatialTransitions) {
+        if (!drawerEnabled) drawerState.closeWithMotionPolicy(motionPolicy)
     }
 
     val conversations by viewModel.conversations.collectAsState()
@@ -427,6 +441,10 @@ fun ChatApp(
     val globalThinkingLevel by viewModel.settings.thinkingLevel.collectAsState()
     val globalThinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
     val globalThinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
+    val globalOpenAiServiceTierEnabled by
+        viewModel.settings.openAiServiceTierEnabled.collectAsState()
+    val globalOpenAiServiceTier by viewModel.settings.openAiServiceTier.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
     val globalWebSearch by viewModel.settings.webSearchEnabled.collectAsState()
     val webSearchApiKeys by viewModel.settings.webSearchApiKeys.collectAsState()
     val globalShell by viewModel.settings.shellEnabled.collectAsState()
@@ -444,12 +462,20 @@ fun ChatApp(
     val thinkingLevel = convOverride?.thinkingLevel ?: globalThinkingLevel
     val thinkingBudgetEnabled = convOverride?.thinkingBudgetEnabled ?: globalThinkingBudgetEnabled
     val thinkingBudgetTokens = convOverride?.thinkingBudgetTokens ?: globalThinkingBudgetTokens
+    val openAiServiceTierEnabled =
+        convOverride?.openAiServiceTierEnabled ?: globalOpenAiServiceTierEnabled
+    val openAiServiceTier = OpenAiServiceTiers.normalize(
+        convOverride?.openAiServiceTier ?: globalOpenAiServiceTier,
+    )
+    val selectedProviderName = viewModel.getProviderForModel(selectedModel)
+    val openAiServiceTierAvailable =
+        isOpenAiProtocolProvider(selectedProviderName, customProviders)
     // Web Search and Shell: global switch OFF → always false, regardless of override
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = convOverride?.contextWindow ?: maxContextWindow
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
-    val reduceMotion by viewModel.settings.reduceMotion.collectAsState()
+    val reduceMotion = motionPolicy.reduceMotion
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
 
@@ -466,10 +492,14 @@ fun ChatApp(
     // a fixed 16ms sleep that drifts against the real refresh rate.
     val spacerProgress = remember { Animatable(0f) }
     val spacerEasing = remember { CubicBezierEasing(0.15f, 0.5f, 0.25f, 1.0f) }
-    LaunchedEffect(isExpanded) {
+    LaunchedEffect(isExpanded, motionPolicy.allowSpatialTransitions) {
         if (isExpanded) {
-            spacerProgress.snapTo(0f)
-            spacerProgress.animateTo(1f, tween(400, easing = spacerEasing))
+            if (motionPolicy.allowSpatialTransitions) {
+                spacerProgress.snapTo(0f)
+                spacerProgress.animateTo(1f, tween(400, easing = spacerEasing))
+            } else {
+                spacerProgress.snapTo(1f)
+            }
         } else {
             spacerProgress.snapTo(0f)
         }
@@ -510,8 +540,8 @@ fun ChatApp(
     var absoluteBottomRequestToken by remember(currentConversationId) {
         mutableLongStateOf(0L)
     }
-    var absoluteBottomRequestEasing by remember(currentConversationId) {
-        mutableStateOf<Easing?>(null)
+    var absoluteBottomRequestFeedbackSpec by remember(currentConversationId) {
+        mutableStateOf(DefaultFeedbackScrollSpec)
     }
     val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
     val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
@@ -555,7 +585,9 @@ fun ChatApp(
     // Follow state belongs to one conversation. Reusing it across a conversation switch can
     // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
     val streamingTailController = rememberStreamingTailController(currentConversationId)
-    fun requestAbsoluteBottomScroll(easing: Easing? = null): Boolean {
+    fun requestAbsoluteBottomScroll(
+        feedbackSpec: FeedbackScrollSpec = DefaultFeedbackScrollSpec,
+    ): Boolean {
         if (absoluteBottomScrollPhase.isActive) return false
         imeBottomAnchorState = reduceImeBottomAnchor(
             imeBottomAnchorState,
@@ -565,7 +597,7 @@ fun ChatApp(
             absoluteBottomScrollPhase,
             AbsoluteBottomScrollEvent.Requested,
         )
-        absoluteBottomRequestEasing = easing
+        absoluteBottomRequestFeedbackSpec = feedbackSpec
         absoluteBottomRequestToken =
             if (absoluteBottomRequestToken == Long.MAX_VALUE) 1L
             else absoluteBottomRequestToken + 1L
@@ -749,6 +781,10 @@ fun ChatApp(
         val layoutTurns = buildMessageListTurns(currentMessages)
         val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
         if (targetIndex == -1) return false
+        if (!motionPolicy.allowProgrammaticScrollMotion) {
+            listState.scrollToItem(targetIndex, 0)
+            return true
+        }
 
         val firstVisibleIndex = listState.firstVisibleItemIndex
         val visibleSizes = listState.layoutInfo.visibleItemsInfo.associate {
@@ -844,11 +880,9 @@ fun ChatApp(
     ) {
         if (!imeBottomAnchorState.active) return@LaunchedEffect
 
-        val minimumStepPx = with(density) { 1.dp.toPx() }
-        var previousFrameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
-        val actorStartNanos = previousFrameNanos
+        val actorStartNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
         var lastObservedInsetPx = latestImeBottomPx
-        var lastInsetChangeNanos = previousFrameNanos
+        var lastInsetChangeNanos = actorStartNanos
         var stableFrames = 0
         while (true) {
             val frameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
@@ -857,10 +891,6 @@ fun ChatApp(
                 lastObservedInsetPx = latestImeBottomPx
                 lastInsetChangeNanos = frameNanos
             }
-            val elapsedSeconds =
-                ((frameNanos - previousFrameNanos).coerceAtLeast(1L) / 1_000_000_000f)
-                    .coerceAtMost(0.05f)
-            previousFrameNanos = frameNanos
 
             val layout = absoluteBottomLayoutSnapshot(
                 layoutInfo = listState.layoutInfo,
@@ -876,17 +906,10 @@ fun ChatApp(
                     }
 
             if (remainingDistancePx > 0.5f) {
-                // Keep the correction outside LazyList's MutatorMutex, but distribute a one-frame
-                // IME jump over display frames. This preserves immediate drag cancellation and
-                // drawer/tap input without exposing uneven platform inset delivery as a hard snap.
-                val step = coalescedScrollStep(
-                    errorPx = remainingDistancePx,
-                    elapsedSeconds = elapsedSeconds,
-                    timeConstantSeconds = 0.055f,
-                    maximumVelocityPxPerSecond = 6_000f,
-                    minimumStepPx = minimumStepPx,
-                )
-                listState.dispatchRawDelta(step)
+                // IME anchoring is a positional correction, not navigational travel. Consume each
+                // newly exposed gap in one frame in both motion modes, so the composer and list
+                // remain visually attached to the keyboard instead of trailing its inset motion.
+                listState.dispatchRawDelta(remainingDistancePx)
                 stableFrames = 0
             } else {
                 val insetStableForNanos = frameNanos - lastInsetChangeNanos
@@ -1069,7 +1092,11 @@ fun ChatApp(
 
             if (settleCoveredTransition(request.targetMessageId)) {
                 val completed = viewModel.completeSwitchingScroll(request.id)
-                if (completed && request.kind == SwitchingRequestKind.CONVERSATION) {
+                if (
+                    completed &&
+                    request.kind == SwitchingRequestKind.CONVERSATION &&
+                    request.hapticOnCompletion
+                ) {
                     haptics.confirm()
                 }
             } else {
@@ -1214,16 +1241,32 @@ fun ChatApp(
     }
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
-    LaunchedEffect(absoluteBottomRequestToken, currentConversationId) {
+    LaunchedEffect(
+        absoluteBottomRequestToken,
+        currentConversationId,
+        motionPolicy.allowProgrammaticScrollMotion,
+    ) {
         if (absoluteBottomRequestToken == 0L) return@LaunchedEffect
         try {
-            val reachedBottom = listState.animateToAbsoluteBottom(
-                isGenerationActive = { latestGenerationCanGrow },
-                estimateRemainingDistancePx = ::estimateRemainingAbsoluteBottomDistance,
-                minimumStepPx = with(density) { 2.dp.toPx() },
-                onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
-                easing = absoluteBottomRequestEasing,
-            )
+            val reachedBottom = if (motionPolicy.allowProgrammaticScrollMotion) {
+                listState.animateToAbsoluteBottom(
+                    isGenerationActive = { latestGenerationCanGrow },
+                    estimateRemainingDistancePx = ::estimateRemainingAbsoluteBottomDistance,
+                    minimumStepPx = with(density) { 2.dp.toPx() },
+                    onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
+                    feedbackSpec = absoluteBottomRequestFeedbackSpec,
+                )
+            } else {
+                absoluteBottomScrollPhase = AbsoluteBottomScrollPhase.SEEKING
+                val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                if (lastIndex >= 0) {
+                    listState.scrollToItem(lastIndex)
+                    withFrameNanos { }
+                    !listState.canScrollForward
+                } else {
+                    false
+                }
+            }
             if (reachedBottom) {
                 imeBottomAnchorState = reduceImeBottomAnchor(
                     imeBottomAnchorState,
@@ -1328,7 +1371,12 @@ fun ChatApp(
     LaunchedEffect(animatedScrollRequest?.id, currentConversationId) {
         val request = animatedScrollRequest ?: return@LaunchedEffect
         if (request.conversationId != currentConversationId) {
-            viewModel.completeAnimatedScroll(request.id)
+            // A first Send arms its entrance/scroll request immediately before publishing the
+            // newly-created conversation id. Keep that request alive across the single null-id
+            // frame; this effect restarts as soon as currentConversationId is published.
+            if (currentConversationId != null || !isNewChatMode) {
+                viewModel.completeAnimatedScroll(request.id)
+            }
             return@LaunchedEffect
         }
         when (request.destination) {
@@ -1356,7 +1404,7 @@ fun ChatApp(
                     targetCommitted &&
                     request.conversationId == currentConversationId
                 ) {
-                    requestAbsoluteBottomScroll(easing = FastOutSlowInEasing)
+                    requestAbsoluteBottomScroll(feedbackSpec = SEND_FEEDBACK_SCROLL_SPEC)
                 } else if (!targetCommitted) {
                     DebugLog.e(
                         "AgoraUI",
@@ -1369,7 +1417,7 @@ fun ChatApp(
 
     BackHandler(enabled = drawerState.currentValue != DrawerValue.Closed || drawerState.targetValue != DrawerValue.Closed) {
         focusManager.clearFocus()
-        scope.launch { drawerState.close() }
+        scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
     }
     BackHandler(
         enabled = onNavigateBack != null &&
@@ -1479,9 +1527,8 @@ fun ChatApp(
                         onNavigateBack = onNavigateBack,
                         onOpenDrawer = {
                             if (drawerEnabled) {
-                                haptics.tap()
                                 focusManager.clearFocus()
-                                scope.launch { drawerState.open() }
+                                scope.launch { drawerState.openWithMotionPolicy(motionPolicy) }
                             }
                         },
                         onSearchQueryChange = { query ->
@@ -1504,25 +1551,21 @@ fun ChatApp(
                             }
                         },
                         onSearchDismiss = {
-                            haptics.tap()
                             conversationSearchActive = false
                             conversationSearchQuery = ""
                             conversationSearchMatchIndex = -1
                             focusManager.clearFocus()
                         },
                         onSearchClick = {
-                            haptics.tap()
                             shareSelectionActive = false
                             selectedShareMessageIds = emptySet()
                             conversationSearchActive = true
                         },
-                        onSystemPromptClick = { haptics.tap(); showPromptDialog = true },
+                        onSystemPromptClick = { showPromptDialog = true },
                         onForkConversation = {
-                            haptics.tap()
                             viewModel.forkConversationFrom()
                         },
                         onShareConversation = {
-                            haptics.tap()
                             conversationSearchActive = false
                             conversationSearchQuery = ""
                             conversationSearchMatchIndex = -1
@@ -1531,9 +1574,6 @@ fun ChatApp(
                             shareSelectionActive = true
                         },
                         onNewChat = {
-                            // Haptic = button touch feel, fires on every tap even when the action
-                            // is a no-op (already on the new-chat screen), so feedback never feels dead.
-                            if (!isNewChatMode) haptics.tap()
                             if (!isNewChatMode) {
                                 isExpanded = false
                                 viewModel.createNewChat()
@@ -1557,10 +1597,22 @@ fun ChatApp(
                             val initialShowLaunch = initialState.second
 
                             if (targetNewChat && (targetShowLaunch != initialShowLaunch || targetNewChat != initialNewChat)) {
-                                // Entering new-chat mode: scale+fade animation
-                                val enterSpec = tween<Float>(700, easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1.0f))
                                 val fadeInSpec = tween<Float>(500)
-                                (fadeIn(animationSpec = fadeInSpec) + scaleIn(initialScale = 0.6f, transformOrigin = TransformOrigin(0.5f, pivotY), animationSpec = enterSpec))
+                                val enter = if (motionPolicy.allowSpatialTransitions) {
+                                    val enterSpec = tween<Float>(
+                                        700,
+                                        easing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1.0f),
+                                    )
+                                    fadeIn(animationSpec = fadeInSpec) +
+                                        scaleIn(
+                                            initialScale = 0.6f,
+                                            transformOrigin = TransformOrigin(0.5f, pivotY),
+                                            animationSpec = enterSpec,
+                                        )
+                                } else {
+                                    fadeIn(animationSpec = fadeInSpec)
+                                }
+                                enter
                                     .togetherWith(fadeOut(animationSpec = tween(300)))
                             } else if (!targetNewChat && !initialNewChat) {
                                 // Switching between existing conversations: no animation
@@ -1586,7 +1638,8 @@ fun ChatApp(
                                     isStopping ||
                                         isSwitching ||
                                         conversationSearchActive ||
-                                        shareSelectionActive,
+                                        shareSelectionActive ||
+                                        !motionPolicy.allowProgrammaticScrollMotion,
                                 programmaticHandoff =
                                     imeBottomAnchorState.active ||
                                         absoluteBottomScrollPhase.isActive ||
@@ -1639,25 +1692,23 @@ fun ChatApp(
                                     ?.takeIf { it.conversationId == currentConversationId }
                                     ?.targetMessageId,
                                 onEditMessage = { id, text ->
-                                    // Same feel as the composer's Send: an edit re-sends, so it
-                                    // gets the identical single confirmation tap.
-                                    haptics.tap()
-                                    viewModel.editMessage(id, text)
+                                    val accepted = viewModel.editMessage(id, text)
+                                    if (accepted) haptics.confirm()
+                                    accepted
                                 },
                                 onSwitchBranch = { parentId, currentMessageId, direction ->
                                     haptics.selection()
                                     viewModel.switchBranch(parentId, currentMessageId, direction)
                                 },
                                 onRegenerate = { id ->
-                                    haptics.tap()
-                                    viewModel.regenerate(id)
+                                    val accepted = viewModel.regenerate(id)
+                                    if (accepted) haptics.confirm()
+                                    accepted
                                 },
                                 onFork = { id ->
-                                    haptics.tap()
                                     viewModel.forkConversationFrom(id)
                                 },
                                 onShare = { id ->
-                                    haptics.tap()
                                     viewModel.shareGeneration(id)
                                 },
                                 onDelete = { id -> viewModel.deleteMessage(id) },
@@ -1683,16 +1734,16 @@ fun ChatApp(
                                         }
                                 },
                                 onMediaClick = { urls, index ->
-                                    haptics.tap()
                                     onMediaClick(urls, index)
                                 },
                                 onFileContentClick = onFileContentClick?.let { open ->
                                     { name, content ->
-                                        haptics.tap()
                                         open(name, content)
                                     }
                                 },
-                                onPdfPagesClick = { pages, idx -> haptics.tap(); onPdfPagesClick?.invoke(pages, idx) },
+                                onPdfPagesClick = { pages, idx ->
+                                    onPdfPagesClick?.invoke(pages, idx)
+                                },
                                 thoughtExpandedStates = thoughtExpandedStates,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,
@@ -1783,20 +1834,32 @@ fun ChatApp(
 
                     val fabElevation by animateDpAsState(
                         targetValue = if (showButton) 4.dp else 0.dp,
-                        animationSpec = tween(400)
+                        animationSpec = if (motionPolicy.allowSpatialTransitions) {
+                            tween(400)
+                        } else {
+                            snap()
+                        }
                     )
 
                     AnimatedVisibility(
                         visible = showButton,
-                        enter = fadeIn(tween(400)) + scaleIn(initialScale = 0.6f, animationSpec = tween(400)),
-                        exit = fadeOut(tween(400)) + scaleOut(targetScale = 0.6f, animationSpec = tween(400)),
+                        enter = if (motionPolicy.allowSpatialTransitions) {
+                            fadeIn(tween(400)) +
+                                scaleIn(initialScale = 0.6f, animationSpec = tween(400))
+                        } else {
+                            fadeIn(tween(400))
+                        },
+                        exit = if (motionPolicy.allowSpatialTransitions) {
+                            fadeOut(tween(400)) +
+                                scaleOut(targetScale = 0.6f, animationSpec = tween(400))
+                        } else {
+                            fadeOut(tween(400))
+                        },
                         modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottomBarHeight + 8.dp)
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             FloatingActionButton(onClick = {
-                                if (requestAbsoluteBottomScroll()) {
-                                    haptics.tap()
-                                }
+                                requestAbsoluteBottomScroll()
                             }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }
@@ -1805,14 +1868,22 @@ fun ChatApp(
 
                     AnimatedVisibility(
                         visible = shareSelectionActive,
-                        enter = fadeIn(tween(220)) + scaleIn(
-                            initialScale = 0.86f,
-                            animationSpec = tween(220),
-                        ),
-                        exit = fadeOut(tween(180)) + scaleOut(
-                            targetScale = 0.86f,
-                            animationSpec = tween(180),
-                        ),
+                        enter = if (motionPolicy.allowSpatialTransitions) {
+                            fadeIn(tween(220)) + scaleIn(
+                                initialScale = 0.86f,
+                                animationSpec = tween(220),
+                            )
+                        } else {
+                            fadeIn(tween(220))
+                        },
+                        exit = if (motionPolicy.allowSpatialTransitions) {
+                            fadeOut(tween(180)) + scaleOut(
+                                targetScale = 0.86f,
+                                animationSpec = tween(180),
+                            )
+                        } else {
+                            fadeOut(tween(180))
+                        },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = bottomBarHeight + 10.dp),
@@ -1822,7 +1893,6 @@ fun ChatApp(
                                 selectedShareMessageIds.containsAll(selectableShareMessageIds),
                             hasSelection = selectedShareMessageIds.isNotEmpty(),
                             onDismiss = {
-                                haptics.tap()
                                 shareSelectionActive = false
                                 selectedShareMessageIds = emptySet()
                             },
@@ -1840,7 +1910,6 @@ fun ChatApp(
                             onConfirm = {
                                 val selection = selectedShareMessageIds
                                 if (selection.isNotEmpty()) {
-                                    haptics.tap()
                                     shareSelectionActive = false
                                     selectedShareMessageIds = emptySet()
                                     viewModel.shareMessages(selection)
@@ -1937,7 +2006,7 @@ fun ChatApp(
                             )
                         },
                         onStopGeneration = {
-                            haptics.destructive()
+                            haptics.interrupt()
                             viewModel.stopGeneration()
                         },
                         isLoading = isLoading,
@@ -1951,25 +2020,40 @@ fun ChatApp(
                         thinkingLevel = thinkingLevel,
                         thinkingBudgetEnabled = thinkingBudgetEnabled,
                         thinkingBudgetTokens = thinkingBudgetTokens,
+                        openAiServiceTierAvailable = openAiServiceTierAvailable,
+                        openAiServiceTierEnabled = openAiServiceTierEnabled,
+                        openAiServiceTier = openAiServiceTier,
                         activeLoop = currentLoop,
                         loopRunning = currentConversationId in runningLoopIds,
                         onStopLoop = { viewModel.stopCurrentLoop() },
-                        onCodeExecutionToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
-                        onGoogleSearchToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
-                        onThinkingToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
+                        onCodeExecutionToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
+                        onGoogleSearchToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
+                        onThinkingToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
                         onThinkingLevelChange = { level -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingLevel = level) } },
-                        onThinkingBudgetEnabledChange = { enabled -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingBudgetEnabled = enabled) } },
+                        onThinkingBudgetEnabledChange = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingBudgetEnabled = enabled) } },
                         onThinkingBudgetTokensChange = { tokens -> viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingBudgetTokens = tokens) } },
+                        onOpenAiServiceTierToggle = { enabled ->
+                            haptics.toggle(enabled)
+                            viewModel.updateConversationSetting(currentConversationId) {
+                                it.copy(openAiServiceTierEnabled = enabled)
+                            }
+                        },
+                        onOpenAiServiceTierChange = { tier ->
+                            haptics.selection()
+                            viewModel.updateConversationSetting(currentConversationId) {
+                                it.copy(openAiServiceTier = OpenAiServiceTiers.normalize(tier))
+                            }
+                        },
                         webSearchEnabled = webSearchEnabled,
-                        onWebSearchToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(webSearchEnabled = enabled) } },
+                        onWebSearchToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(webSearchEnabled = enabled) } },
                         shellEnabled = shellEnabled,
-                        onShellToggle = { enabled -> haptics.selection(); viewModel.updateConversationSetting(currentConversationId) { it.copy(shellEnabled = enabled) } },
+                        onShellToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(shellEnabled = enabled) } },
                         // The model row owns its selection tick. Repeating it here produced the
                         // previous double buzz for one physical tap.
                         onModelSelect = { viewModel.setActiveModel(it) },
-                        onImageClick = { url -> haptics.tap(); onMediaClick(listOf(url), 0) },
-                        onAllMediaClick = { urls, idx -> haptics.tap(); onMediaClick(urls, idx) },
-                        onFileContentClick = { name, content -> haptics.tap(); viewModel.showFilePreview(name, content) },
+                        onImageClick = { url -> onMediaClick(listOf(url), 0) },
+                        onAllMediaClick = { urls, idx -> onMediaClick(urls, idx) },
+                        onFileContentClick = { name, content -> viewModel.showFilePreview(name, content) },
                         modifier = Modifier,
                         textFieldState = textFieldState,
                         composerState = composer,
@@ -1981,15 +2065,12 @@ fun ChatApp(
                         },
                         isExpanded = isExpanded,
                         isExpandAnimating = isExpandAnimating,
-                        // No haptic here: onCollapse also fires on back gesture and — the reason
-                        // Send felt like a double tap — automatically after a successful send.
-                        // The collapse BUTTON does its own haptic, where a press actually happened.
                         onCollapse = { isExpanded = false },
-                        onExpand = { haptics.tap(); isExpanded = true },
+                        onExpand = { isExpanded = true },
                         showWebSearch = globalWebSearch,
                         showShell = shellDevices.isNotEmpty() && globalShell,
-                        onPdfPagesClick = { pages, idx -> haptics.tap(); onPdfPagesClick?.invoke(pages, idx) },
-                        onPdfPreviewSelect = { pages, idx -> haptics.tap(); onPdfPreviewSelect?.invoke(pages, idx) },
+                        onPdfPagesClick = { pages, idx -> onPdfPagesClick?.invoke(pages, idx) },
+                        onPdfPreviewSelect = { pages, idx -> onPdfPreviewSelect?.invoke(pages, idx) },
                         pdfViewerSelection = pdfViewerSelection,
                         onTogglePdfSelection = onTogglePdfSelection,
                         onInitPdfSelection = onInitPdfSelection,
@@ -2021,7 +2102,7 @@ fun ChatApp(
     showDeleteConfirmDialog?.let { id ->
         ChatDeleteConfirmDialog(
             onConfirm = {
-                haptics.destructive()
+                haptics.destructiveConfirmed()
                 viewModel.deleteConversation(id)
                 showDeleteConfirmDialog = null
             },

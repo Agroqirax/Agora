@@ -89,6 +89,7 @@ private fun ChatMessage.asGenerationStatusEvent(): ChatMessage = copy(
     thoughts = null,
     thoughtTitle = null,
     tokenCount = 0,
+    tokenUsage = null,
     status = MessageStatus.SUCCESS,
     participant = Participant.USER,
     thoughtTimeMs = null,

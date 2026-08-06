@@ -1,6 +1,7 @@
 package com.newoether.agora.data
 
 import android.content.Context
+import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.ThinkingLevels
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
@@ -102,6 +103,8 @@ data class ConversationSettings(
     val thinkingLevel: String? = null,
     val thinkingBudgetEnabled: Boolean? = null,
     val thinkingBudgetTokens: Int? = null,
+    val openAiServiceTierEnabled: Boolean? = null,
+    val openAiServiceTier: String? = null,
     val webSearchEnabled: Boolean? = null,
     val shellEnabled: Boolean? = null
 ) {
@@ -109,6 +112,7 @@ data class ConversationSettings(
         && frequencyPenalty == null && presencePenalty == null
         && codeExecutionEnabled == null && googleSearchEnabled == null && thinkingEnabled == null
         && thinkingLevel == null && thinkingBudgetEnabled == null && thinkingBudgetTokens == null
+        && openAiServiceTierEnabled == null && openAiServiceTier == null
         && webSearchEnabled == null && shellEnabled == null
 }
 
@@ -118,6 +122,7 @@ class SettingsManager(private val context: Context) {
     companion object {
         val SELECTED_MODEL = stringPreferencesKey("selected_model")
         val AVAILABLE_MODELS_JSON = stringPreferencesKey("available_models_json")
+        val CUSTOM_MODELS = stringSetPreferencesKey("custom_models")
         val ENABLED_MODELS = stringSetPreferencesKey("enabled_models")
         
         val API_KEYS_JSON = stringPreferencesKey("api_keys_json")
@@ -134,6 +139,8 @@ class SettingsManager(private val context: Context) {
         val THINKING_LEVEL = stringPreferencesKey("thinking_level")
         val THINKING_BUDGET_ENABLED = booleanPreferencesKey("thinking_budget_enabled")
         val THINKING_BUDGET_TOKENS = intPreferencesKey("thinking_budget_tokens")
+        val OPENAI_SERVICE_TIER_ENABLED = booleanPreferencesKey("openai_service_tier_enabled")
+        val OPENAI_SERVICE_TIER = stringPreferencesKey("openai_service_tier")
         val PROVIDER_BASE_URLS = stringPreferencesKey("provider_base_urls")
         val CUSTOM_ENDPOINT_RESOLUTIONS_JSON = stringPreferencesKey("custom_endpoint_resolutions_json")
         val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
@@ -247,6 +254,9 @@ class SettingsManager(private val context: Context) {
         try { json.decodeFromString<Map<String, List<String>>>(jsonStr) } catch (e: Exception) { DebugLog.e("SettingsManager", "Failed to decode availableModels", e); emptyMap() }
     }
 
+    val customModels: Flow<Set<String>> =
+        context.dataStore.data.map { it[CUSTOM_MODELS] ?: emptySet() }
+
     val enabledModels: Flow<Set<String>> = context.dataStore.data.map { it[ENABLED_MODELS] ?: emptySet() }
 
     val modelAliases: Flow<Map<String, String>> = context.dataStore.data.map { pref ->
@@ -285,7 +295,11 @@ class SettingsManager(private val context: Context) {
             ?: ThinkingLevels.legacyBudgetTokens(pref[THINKING_LEVEL])
             ?: ThinkingLevels.DefaultBudgetTokens
     }
-
+    val openAiServiceTierEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[OPENAI_SERVICE_TIER_ENABLED] ?: false }
+    val openAiServiceTier: Flow<String> = context.dataStore.data.map { pref ->
+        OpenAiServiceTiers.normalize(pref[OPENAI_SERVICE_TIER])
+    }
     val titleGenerationEnabled: Flow<Boolean> = context.dataStore.data.map { it[TITLE_GENERATION_ENABLED] ?: true }
     val titleGenerationModel: Flow<String?> = context.dataStore.data.map { it[TITLE_GENERATION_MODEL] }
     val titleGenerationPrompt: Flow<String> = context.dataStore.data.map { pref ->
@@ -498,6 +512,10 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun saveCustomModels(models: Set<String>) {
+        context.dataStore.edit { it[CUSTOM_MODELS] = models }
+    }
+
     suspend fun saveEnabledModels(models: Set<String>) {
         context.dataStore.edit { it[ENABLED_MODELS] = models }
     }
@@ -621,6 +639,16 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveThinkingBudgetTokens(tokens: Int) {
         context.dataStore.edit { it[THINKING_BUDGET_TOKENS] = tokens.coerceAtLeast(1) }
+    }
+
+    suspend fun saveOpenAiServiceTierEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[OPENAI_SERVICE_TIER_ENABLED] = enabled }
+    }
+
+    suspend fun saveOpenAiServiceTier(tier: String) {
+        context.dataStore.edit {
+            it[OPENAI_SERVICE_TIER] = OpenAiServiceTiers.normalize(tier)
+        }
     }
 
     suspend fun saveTitleGenerationEnabled(enabled: Boolean) {

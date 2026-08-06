@@ -10,6 +10,7 @@ import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.api.util.requireValidSerializedRequest
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +52,24 @@ internal data class OllamaStreamResponse(
     @SerialName("prompt_eval_count") val promptEvalCount: Int? = null,
     @SerialName("eval_count") val evalCount: Int? = null
 )
+
+internal fun OllamaStreamResponse.toTokenUsage(): TokenUsage {
+    val input = promptEvalCount?.coerceAtLeast(0)
+    val output = evalCount?.coerceAtLeast(0)
+    val total = when {
+        input != null && output != null -> TokenUsage.addCounts(input, output)
+        input != null -> input
+        else -> output ?: 0
+    }
+    return TokenUsage(
+        totalTokenCount = total,
+        inputTokenCount = input,
+        // Ollama reports prompt evaluation, but not a cache hit/miss split.
+        cachedInputTokenCount = null,
+        uncachedInputTokenCount = null,
+        outputTokenCount = output,
+    )
+}
 
 @Serializable
 internal data class OllamaTagsResponse(
@@ -289,8 +308,7 @@ class OllamaProvider : LlmProvider {
                                     onThought = { emit(StreamEvent.ThoughtChunk(it)) },
                                     thinkingEnabled = config.thinkingEnabled
                                 )
-                                val total = (response.promptEvalCount ?: 0) + (response.evalCount ?: 0)
-                                emit(StreamEvent.UsageUpdate(total))
+                                emit(StreamEvent.UsageUpdate(response.toTokenUsage()))
                             }
                         } catch (e: Exception) {
                             DebugLog.e("AgoraAPI", "Parse error: ${e.message}")

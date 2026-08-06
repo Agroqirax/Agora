@@ -43,7 +43,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,6 +97,7 @@ import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.TypewriterMode
 import com.newoether.agora.ui.components.TypewriterText
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.model.apiModelName
@@ -133,6 +134,7 @@ fun WelcomeScreen(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val motionPolicy = LocalAgoraMotionPolicy.current
 
     // ── Onboarding state ──
     val builtInProviders = listOf(
@@ -290,6 +292,11 @@ fun WelcomeScreen(
     }
 
     DisposableEffect(players) { onDispose { players.forEach { it?.release() } } }
+    LaunchedEffect(motionPolicy.allowContinuousMotion, players) {
+        if (!motionPolicy.allowContinuousMotion) {
+            players.forEach { player -> player?.pause() }
+        }
+    }
 
     val visitedPages = remember { mutableSetOf<Int>() }
     val typedPages = remember { mutableSetOf<Int>() }
@@ -335,7 +342,9 @@ fun WelcomeScreen(
         fm.clearFocus()
         if (pagerState.currentPage !in visitedPages) {
             visitedPages.add(pagerState.currentPage)
-            players[pagerState.currentPage]?.playWhenReady = true
+            if (motionPolicy.allowContinuousMotion) {
+                players[pagerState.currentPage]?.playWhenReady = true
+            }
         }
         // Models are fetched only while the Model Select page is visible. (Re)fetch
         // on every entry with the latest key; cancel on leave so an in-flight request
@@ -358,7 +367,12 @@ fun WelcomeScreen(
         }
     }
 
-    LaunchedEffect(Unit) { kotlinx.coroutines.delay(2000); showContent = true }
+    LaunchedEffect(motionPolicy.reduceMotion) {
+        if (!motionPolicy.reduceMotion) {
+            kotlinx.coroutines.delay(2000)
+        }
+        showContent = true
+    }
 
     LaunchedEffect(exiting) { if (exiting) { kotlinx.coroutines.delay(300); onComplete() } }
 
@@ -499,7 +513,7 @@ fun WelcomeScreen(
                                     color = MaterialTheme.colorScheme.onSurface,
                                     typeSpeedMs = 50,
                                     initialDelayMs = if (anim) delay else 0,
-                                    animate = anim,
+                                    animate = anim && motionPolicy.allowContinuousMotion,
                                     showText = show,
                                     mode = TypewriterMode.TEXT_GRADIENT,
                                     modifier = Modifier.fillMaxWidth(),
@@ -513,7 +527,7 @@ fun WelcomeScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     typeSpeedMs = 30,
                                     initialDelayMs = if (anim) delay + 200 else 0,
-                                    animate = anim,
+                                    animate = anim && motionPolicy.allowContinuousMotion,
                                     showText = show,
                                     mode = TypewriterMode.TEXT_GRADIENT,
                                     modifier = Modifier.fillMaxWidth(),
@@ -545,7 +559,20 @@ fun WelcomeScreen(
                             // Credentials are saved by the page-leave effect (covers both
                             // swipe and this button), so we only advance here.
                             if (pagerState.currentPage == PAGE_PROVIDER && selectedProvider != null && selectedProvider != Constants.PROVIDER_LOCAL) apiKeyText = ""
-                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1, animationSpec = tween<Float>(500, easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))) }
+                            scope.launch {
+                                val targetPage = pagerState.currentPage + 1
+                                if (motionPolicy.allowProgrammaticScrollMotion) {
+                                    pagerState.animateScrollToPage(
+                                        targetPage,
+                                        animationSpec = tween<Float>(
+                                            500,
+                                            easing = CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f),
+                                        ),
+                                    )
+                                } else {
+                                    pagerState.scrollToPage(targetPage)
+                                }
+                            }
                         }
                     }, Modifier.fillMaxWidth(), shape = RoundedCornerShape(50), enabled = showContent, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
                         Text(if (last) stringResource(R.string.onboarding_get_started) else stringResource(R.string.onboarding_continue), modifier = Modifier.padding(vertical = 4.dp))

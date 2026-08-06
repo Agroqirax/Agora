@@ -10,7 +10,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -79,6 +79,9 @@ internal fun ComposerSendButton(
                 submittedText,
                 submittedAttachments,
             ) {
+                // Confirm the durable handoff, not the initial tap. Attachment-backed sends can
+                // spend noticeable time processing before this point.
+                haptics.confirm()
                 if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
                     composer.clearAttachments()
                 }
@@ -141,9 +144,6 @@ internal fun ComposerSendButton(
                 composer.pendingSend = false
             }
             else if (canSend) {
-                // Haptic = button touch feel, fires on every tap regardless of whether the send
-                // is immediate or deferred behind attachment processing.
-                haptics.action()
                 if (anyProcessing) {
                     composer.pendingSend = true
                 } else {

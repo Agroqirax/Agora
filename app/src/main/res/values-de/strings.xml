@@ -269,6 +269,15 @@
     <string name="models_title">Modelle</string>
     <string name="models_default">Standardmodell</string>
     <string name="models_no_models">Keine Modelle aktiviert</string>
+    <string name="models_manual">Manuelle Modelle</string>
+    <string name="models_manual_empty">Keine benutzerdefinierten Modelle hinzugefügt</string>
+    <string name="models_add_custom">Benutzerdefiniertes Modell hinzufügen</string>
+    <string name="models_auto_fetch">Automatischer Abruf</string>
+    <string name="models_auto_empty">Keine Modelle abgerufen</string>
+    <string name="models_search_hint">Modelle suchen…</string>
+    <string name="models_search_empty">Keine passenden Modelle</string>
+    <string name="models_clear_search">Modellsuche löschen</string>
+    <string name="models_custom_exists">Dieses Modell ist bereits vorhanden</string>
     <string name="models_available">Verfügbare Modelle</string>
     <string name="models_sync">Von allen Anbietern synchronisieren</string>
     <string name="models_sync_desc">Neueste Modellliste für alle konfigurierten APIs abrufen</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">Unschärfeeffekte</string>
     <string name="blur_effects_desc">Den oberen Bereich der Chatliste unter der Toolbar weichzeichnen. Zum Sparen von Leistung deaktivieren.</string>
     <string name="reduce_motion">Bewegung reduzieren</string>
-    <string name="reduce_motion_desc">Stoppt fortlaufende dekorative Animationen und den Schreibmaschineneffekt. Ladeanzeigen und Statusübergänge bleiben erhalten.</string>
+    <string name="reduce_motion_desc">Reduziert kontinuierliche und großflächige räumliche Bewegungen; Überblendungen, direkte Gesten und nützliche Statusrückmeldungen bleiben erhalten.</string>
 
     <!-- Language -->
     <string name="language_title">Sprache</string>
@@ -1009,4 +1018,12 @@
     <string name="web_search_kagi_desc">Premium-Such-API mit personalisierten Ergebnissen. Nutzungsabhängige Abrechnung.</string>
     <string name="web_search_kagi_key">Kagi-Search-API-Schlüssel</string>
     <string name="web_search_kagi_key_hint">API-Schlüssel von kagi.com/api/keys</string>
+    <string name="default_service_tier">Standard-Servicestufe</string>
+    <string name="openai_service_tier_title">Servicestufe</string>
+    <string name="openai_service_tier_desc">Steuert Latenz und Verarbeitungspriorität für Anfragen mit OpenAI-Protokoll.</string>
+    <string name="openai_service_tier_off">Aus</string>
+    <string name="openai_service_tier_auto">Automatisch</string>
+    <string name="openai_service_tier_default">Standard</string>
+    <string name="openai_service_tier_flex">Flex</string>
+    <string name="openai_service_tier_fast">Schnell</string>
 </resources>

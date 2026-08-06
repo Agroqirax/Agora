@@ -32,7 +32,7 @@ import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -74,6 +74,8 @@ import com.newoether.agora.ui.chat.search.SearchResultItem
 import com.newoether.agora.ui.chat.search.rememberDrawerSearchState
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.closeWithMotionPolicy
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.verticalEdgeFade
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -102,6 +104,7 @@ internal fun ChatDrawerContent(
     onRequestDelete: (String) -> Unit,
 ) {
     val haptics = LocalAgoraHaptics.current
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
     val windowHeightPx = LocalWindowInfo.current.containerSize.height.toFloat()
@@ -169,10 +172,9 @@ internal fun ChatDrawerContent(
             if (!search.isActive) {
                 FilledTonalButton(
                     onClick = {
-                        haptics.action()
                         focusManager.clearFocus()
                         onOpenTasks()
-                        scope.launch { drawerState.close() }
+                        scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
                     },
                     modifier = Modifier.fillMaxWidth().height(42.dp),
                     shape = CircleShape
@@ -198,10 +200,9 @@ internal fun ChatDrawerContent(
                 Button(
                     onClick = {
                         if (!newChatDisabled) {
-                            haptics.action()
                             viewModel.createNewChat()
                             scope.launch {
-                                drawerState.close()
+                                drawerState.closeWithMotionPolicy(motionPolicy)
                                 inputFocusRequester.requestFocus()
                             }
                         }
@@ -240,9 +241,8 @@ internal fun ChatDrawerContent(
                             score = bestScore,
                             query = search.query,
                             onClick = {
-                                haptics.selection()
                                 viewModel.selectConversation(convId)
-                                scope.launch { drawerState.close() }
+                                scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
                             }
                         )
                     }
@@ -275,10 +275,12 @@ internal fun ChatDrawerContent(
                                     }
                                     .combinedClickable(
                                         enabled = !isSwitching,
+                                        hapticFeedbackEnabled = false,
                                         onClick = {
-                                            haptics.selection()
                                             viewModel.selectConversation(conversation.id)
-                                            scope.launch { drawerState.close() }
+                                            scope.launch {
+                                                drawerState.closeWithMotionPolicy(motionPolicy)
+                                            }
                                         },
                                         onLongClick = {
                                             haptics.longPress()
@@ -333,7 +335,6 @@ internal fun ChatDrawerContent(
                                     leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
                                     enabled = menuEnabled,
                                     onClick = {
-                                        haptics.action()
                                         showMenu = false
                                         viewModel.generateTitle(conversation.id)
                                 }
@@ -343,7 +344,6 @@ internal fun ChatDrawerContent(
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                 enabled = menuEnabled,
                                 onClick = {
-                                    haptics.action()
                                     showMenu = false
                                     onRequestRename(conversation.id, conversation.title)
                                 }
@@ -367,10 +367,9 @@ internal fun ChatDrawerContent(
 
             FilledTonalButton(
                 onClick = {
-                    haptics.action()
                     focusManager.clearFocus()
                     onOpenSettings()
-                    scope.launch { drawerState.close() }
+                    scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
                 },
                 modifier = Modifier
                     .fillMaxWidth()

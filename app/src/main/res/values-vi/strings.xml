@@ -272,6 +272,15 @@
     <string name="models_title">Mô hình</string>
     <string name="models_default">Mô hình mặc định</string>
     <string name="models_no_models">Không có mô hình nào được bật</string>
+    <string name="models_manual">Mô hình thủ công</string>
+    <string name="models_manual_empty">Chưa thêm mô hình tùy chỉnh</string>
+    <string name="models_add_custom">Thêm mô hình tùy chỉnh</string>
+    <string name="models_auto_fetch">Tự động tải</string>
+    <string name="models_auto_empty">Chưa tải được mô hình nào</string>
+    <string name="models_search_hint">Tìm kiếm mô hình…</string>
+    <string name="models_search_empty">Không có mô hình phù hợp</string>
+    <string name="models_clear_search">Xóa tìm kiếm mô hình</string>
+    <string name="models_custom_exists">Mô hình này đã tồn tại</string>
     <string name="models_available">Mô hình khả dụng</string>
     <string name="models_sync">Đồng bộ từ tất cả nhà cung cấp</string>
     <string name="models_sync_desc">Lấy danh sách mô hình mới nhất từ tất cả các API đã cấu hình</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">Hiệu ứng làm mờ</string>
     <string name="blur_effects_desc">Làm mờ phần đầu của danh sách trò chuyện dưới thanh công cụ. Tắt đi để tiết kiệm hiệu năng.</string>
     <string name="reduce_motion">Giảm chuyển động</string>
-    <string name="reduce_motion_desc">Dừng hiệu ứng trang trí lặp lại và hiệu ứng gõ chữ. Vẫn giữ chỉ báo tải và chuyển đổi trạng thái.</string>
+    <string name="reduce_motion_desc">Giảm chuyển động liên tục và dịch chuyển không gian lớn, đồng thời giữ hiệu ứng mờ dần, cử chỉ trực tiếp và phản hồi trạng thái hữu ích.</string>
     <string name="interaction_feedback">Phản hồi tương tác</string>
     <string name="haptic_feedback">Phản hồi xúc giác (Haptic)</string>
     <string name="haptic_feedback_desc">Sử dụng rung nhẹ cho trạng thái tạo và các hành động chính.</string>
@@ -1015,4 +1024,12 @@
     <string name="web_search_kagi_desc">API tìm kiếm cao cấp với kết quả được cá nhân hóa. Trả phí theo mức sử dụng.</string>
     <string name="web_search_kagi_key">Khóa API Kagi Search</string>
     <string name="web_search_kagi_key_hint">Khóa API từ kagi.com/api/keys</string>
+    <string name="default_service_tier">Cấp dịch vụ mặc định</string>
+    <string name="openai_service_tier_title">Cấp dịch vụ</string>
+    <string name="openai_service_tier_desc">Kiểm soát độ trễ và mức ưu tiên cho các yêu cầu theo giao thức OpenAI.</string>
+    <string name="openai_service_tier_off">Tắt</string>
+    <string name="openai_service_tier_auto">Tự động</string>
+    <string name="openai_service_tier_default">Mặc định</string>
+    <string name="openai_service_tier_flex">Linh hoạt</string>
+    <string name="openai_service_tier_fast">Nhanh</string>
 </resources>

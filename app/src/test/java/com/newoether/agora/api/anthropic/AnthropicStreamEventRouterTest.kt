@@ -114,6 +114,36 @@ class AnthropicStreamEventRouterTest {
         assertEquals(StreamEvent.ThoughtChunk("reasoning"), thought)
     }
 
+    @Test
+    fun usageSeparatesCacheReadFromUncachedInput() {
+        val router = AnthropicStreamEventRouter()
+        router.route(
+            AnthropicStreamEvent(
+                type = "message_start",
+                message = AnthropicMessageInfo(
+                    usage = AnthropicUsage(
+                        inputTokens = 100,
+                        cacheCreationInputTokens = 20,
+                        cacheReadInputTokens = 30,
+                    )
+                ),
+            )
+        )
+
+        val event = router.route(
+            AnthropicStreamEvent(
+                type = "message_delta",
+                usage = AnthropicUsage(outputTokens = 40),
+            )
+        ).single() as StreamEvent.UsageUpdate
+
+        assertEquals(190, event.usage.totalTokenCount)
+        assertEquals(150, event.usage.inputTokenCount)
+        assertEquals(30, event.usage.cachedInputTokenCount)
+        assertEquals(120, event.usage.uncachedInputTokenCount)
+        assertEquals(40, event.usage.outputTokenCount)
+    }
+
     private fun toolStart(index: Int, id: String, name: String) = AnthropicStreamEvent(
         type = "content_block_start",
         index = index,

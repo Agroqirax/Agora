@@ -22,6 +22,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -56,6 +57,7 @@ internal fun <T> GuardedAnimatedContent(
     forward: Boolean,
     content: @Composable (T) -> Unit
 ) {
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val pageSlots = remember {
         mutableStateListOf(
             SettingsTransitionSlot(
@@ -72,7 +74,7 @@ internal fun <T> GuardedAnimatedContent(
     var nextPageId by remember { mutableIntStateOf(1) }
     var activeForward by remember { mutableStateOf(forward) }
 
-    LaunchedEffect(targetState) {
+    LaunchedEffect(targetState, allowSpatialTransitions) {
         val currentTarget = pageSlots.lastOrNull { it.role == SettingsTransitionRole.Target }
             ?: return@LaunchedEffect
         if (targetState != currentTarget.state) {
@@ -84,22 +86,43 @@ internal fun <T> GuardedAnimatedContent(
                 id = nextPageId,
                 state = targetState,
                 initialRole = SettingsTransitionRole.Target,
-                enterSlideProgress = Animatable(0f),
+                enterSlideProgress = Animatable(if (allowSpatialTransitions) 0f else 1f),
                 exitSlideProgress = Animatable(0f),
                 alpha = Animatable(0f),
-                scale = Animatable(ScaleFrom)
+                scale = Animatable(if (allowSpatialTransitions) ScaleFrom else 1f)
             )
             nextPageId += 1
             pageSlots.add(newTarget)
 
-            listOf(
-                launch { newTarget.enterSlideProgress.animateTo(1f, animationSpec = settingsSpring()) },
-                launch { newTarget.alpha.animateTo(1f, animationSpec = tween(FadeDuration)) },
-                launch { newTarget.scale.animateTo(1f, animationSpec = settingsSpring()) },
-                launch { currentTarget.exitSlideProgress.animateTo(1f, animationSpec = settingsSpring()) },
-                launch { currentTarget.alpha.animateTo(0f, animationSpec = settingsSpring()) },
-                launch { currentTarget.scale.animateTo(ScaleTo, animationSpec = settingsSpring()) }
-            ).joinAll()
+            if (allowSpatialTransitions) {
+                listOf(
+                    launch { newTarget.enterSlideProgress.animateTo(1f, animationSpec = settingsSpring()) },
+                    launch { newTarget.alpha.animateTo(1f, animationSpec = tween(FadeDuration)) },
+                    launch { newTarget.scale.animateTo(1f, animationSpec = settingsSpring()) },
+                    launch { currentTarget.exitSlideProgress.animateTo(1f, animationSpec = settingsSpring()) },
+                    launch { currentTarget.alpha.animateTo(0f, animationSpec = settingsSpring()) },
+                    launch { currentTarget.scale.animateTo(ScaleTo, animationSpec = settingsSpring()) }
+                ).joinAll()
+            } else {
+                newTarget.enterSlideProgress.snapTo(1f)
+                newTarget.scale.snapTo(1f)
+                currentTarget.exitSlideProgress.snapTo(0f)
+                currentTarget.scale.snapTo(1f)
+                listOf(
+                    launch {
+                        newTarget.alpha.animateTo(
+                            1f,
+                            animationSpec = tween(FadeDuration),
+                        )
+                    },
+                    launch {
+                        currentTarget.alpha.animateTo(
+                            0f,
+                            animationSpec = tween(FadeDuration),
+                        )
+                    },
+                ).joinAll()
+            }
             pageSlots.remove(currentTarget)
             newTarget.enterSlideProgress.snapTo(1f)
             newTarget.exitSlideProgress.snapTo(0f)
@@ -115,7 +138,9 @@ internal fun <T> GuardedAnimatedContent(
 
         pageSlots.forEach { slot ->
             val isOutgoing = slot.role == SettingsTransitionRole.Outgoing
-            val offset = if (isOutgoing) {
+            val offset = if (!allowSpatialTransitions) {
+                0
+            } else if (isOutgoing) {
                 outgoingOffsetPx(activeForward, slot.exitSlideProgress.value, widthPx)
             } else {
                 targetOffsetPx(activeForward, slot.enterSlideProgress.value, widthPx)
@@ -125,7 +150,7 @@ internal fun <T> GuardedAnimatedContent(
                 SettingsTransitionPage(
                     offsetX = offset,
                     alpha = slot.alpha.value.coerceIn(0f, 1f),
-                    scale = slot.scale.value,
+                    scale = if (allowSpatialTransitions) slot.scale.value else 1f,
                     zIndex = if (isOutgoing) 0f else 1f,
                     consumeInput = isOutgoing
                 ) {

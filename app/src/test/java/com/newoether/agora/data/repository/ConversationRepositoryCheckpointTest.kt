@@ -6,6 +6,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.TokenUsage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -36,6 +37,14 @@ class ConversationRepositoryCheckpointTest {
                 thoughts = "partial thought",
                 thoughtTitle = "Reasoning",
                 tokenCount = 42,
+                tokenUsage = TokenUsage(
+                    totalTokenCount = 42,
+                    inputTokenCount = 30,
+                    cachedInputTokenCount = 10,
+                    uncachedInputTokenCount = 20,
+                    outputTokenCount = 12,
+                    reasoningTokenCount = 4,
+                ),
                 status = MessageStatus.THINKING,
                 participant = Participant.MODEL,
                 timestamp = 1234,
@@ -52,6 +61,11 @@ class ConversationRepositoryCheckpointTest {
         assertEquals("partial thought", captured.captured.thoughts)
         assertEquals("Reasoning", captured.captured.thoughtTitle)
         assertEquals(42, captured.captured.tokenCount)
+        assertEquals(30, captured.captured.inputTokenCount)
+        assertEquals(10, captured.captured.cachedInputTokenCount)
+        assertEquals(20, captured.captured.uncachedInputTokenCount)
+        assertEquals(12, captured.captured.outputTokenCount)
+        assertEquals(4, captured.captured.reasoningTokenCount)
         assertEquals(MessageStatus.THINKING, captured.captured.status)
         assertEquals(987L, captured.captured.thoughtTimeMs)
         assertEquals(

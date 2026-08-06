@@ -70,6 +70,8 @@ import com.newoether.agora.ui.chat.ChatApp
 import com.newoether.agora.ui.chat.FullScreenMediaViewer
 import com.newoether.agora.ui.chat.message.ChatMarkdownCodeBlock
 import com.newoether.agora.ui.onboarding.WelcomeScreen
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.ProvideAgoraMotionPolicy
 import com.newoether.agora.ui.settings.SettingsScreen
 import com.newoether.agora.ui.tasks.TaskHistoryPreviewPhase
 import com.newoether.agora.ui.tasks.TaskHistoryPreviewState
@@ -166,6 +168,7 @@ class MainActivity : ComponentActivity() {
             val dynamicColor by settingsManager.dynamicColor.collectAsState(initial = true)
             val fontPreference by settingsManager.fontPreference.collectAsState(initial = "app_default")
             val customFontPath by settingsManager.customFontPath.collectAsState(initial = "")
+            val appReduceMotion by settingsManager.reduceMotion.collectAsState(initial = false)
 
             val themeModeEnum = try { com.newoether.agora.ui.theme.ThemeMode.valueOf(themeMode) } catch (_: Exception) { com.newoether.agora.ui.theme.ThemeMode.FOLLOW_DEVICE }
             val colorSchemePreset = try { com.newoether.agora.ui.theme.ColorSchemePreset.valueOf(colorSchemeName) } catch (_: Exception) { com.newoether.agora.ui.theme.ColorSchemePreset.MIDNIGHT }
@@ -193,6 +196,7 @@ class MainActivity : ComponentActivity() {
                 fontPreference = fontPreference,
                 customFontPath = customFontPath
             ) {
+                ProvideAgoraMotionPolicy(appReduceMotion = appReduceMotion) {
                 val activity = LocalActivity.current
 
                 if (needsErrorDialog) {
@@ -264,6 +268,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             }
+            }
             startupReady = true
         }
     }
@@ -306,6 +311,7 @@ private fun SettingsOverlayHost(
     onEnterFinished: () -> Unit = {},
     content: @Composable () -> Unit
 ) {
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val scrimAlpha = remember { Animatable(0f) }
     val pageOffsetFraction = remember { Animatable(0f) }
     val pageAlpha = remember { Animatable(1f) }
@@ -313,70 +319,104 @@ private fun SettingsOverlayHost(
     var renderOverlay by remember { mutableStateOf(visible) }
     val latestOnEnterFinished by rememberUpdatedState(onEnterFinished)
 
+    // Motion policy changes while the overlay is already visible must not replay its entrance.
+    // The latest policy is still observed when `visible` changes and a new enter/exit begins.
     LaunchedEffect(visible) {
         if (visible) {
             renderOverlay = true
             scrimAlpha.snapTo(0f)
-            pageOffsetFraction.snapTo(SettingsOverlayEnterOffsetFraction)
+            pageOffsetFraction.snapTo(
+                if (allowSpatialTransitions) SettingsOverlayEnterOffsetFraction else 0f,
+            )
             pageAlpha.snapTo(0f)
-            pageScale.snapTo(SettingsOverlayEnterScale)
-            listOf(
-                launch {
-                    scrimAlpha.animateTo(
-                        SettingsOverlayScrimAlpha,
-                        animationSpec = tween(300, delayMillis = 50)
-                    )
-                },
-                launch {
-                    pageOffsetFraction.animateTo(
-                        0f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessLow,
-                            visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+            pageScale.snapTo(
+                if (allowSpatialTransitions) SettingsOverlayEnterScale else 1f,
+            )
+            if (allowSpatialTransitions) {
+                listOf(
+                    launch {
+                        scrimAlpha.animateTo(
+                            SettingsOverlayScrimAlpha,
+                            animationSpec = tween(300, delayMillis = 50)
                         )
-                    )
-                },
-                launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
-                launch {
-                    pageScale.animateTo(
-                        1f,
-                        animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessLow,
-                            visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+                    },
+                    launch {
+                        pageOffsetFraction.animateTo(
+                            0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessLow,
+                                visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+                            )
                         )
-                    )
-                }
-            ).joinAll()
+                    },
+                    launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
+                    launch {
+                        pageScale.animateTo(
+                            1f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioLowBouncy,
+                                stiffness = Spring.StiffnessLow,
+                                visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
+                            )
+                        )
+                    }
+                ).joinAll()
+            } else {
+                pageOffsetFraction.snapTo(0f)
+                pageScale.snapTo(1f)
+                listOf(
+                    launch {
+                        scrimAlpha.animateTo(
+                            SettingsOverlayScrimAlpha,
+                            animationSpec = tween(300),
+                        )
+                    },
+                    launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
+                ).joinAll()
+            }
             latestOnEnterFinished()
         } else if (renderOverlay) {
-            listOf(
-                launch {
-                    scrimAlpha.animateTo(
-                        0f,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    )
-                },
-                launch {
-                    pageOffsetFraction.animateTo(
-                        1f,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    )
-                },
-                launch {
-                    pageAlpha.animateTo(
-                        0f,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    )
-                },
-                launch {
-                    pageScale.animateTo(
-                        SettingsOverlayExitScale,
-                        animationSpec = tween(400, easing = FastOutSlowInEasing)
-                    )
-                }
-            ).joinAll()
+            if (allowSpatialTransitions) {
+                listOf(
+                    launch {
+                        scrimAlpha.animateTo(
+                            0f,
+                            animationSpec = tween(400, easing = FastOutSlowInEasing)
+                        )
+                    },
+                    launch {
+                        pageOffsetFraction.animateTo(
+                            1f,
+                            animationSpec = tween(400, easing = FastOutSlowInEasing)
+                        )
+                    },
+                    launch {
+                        pageAlpha.animateTo(
+                            0f,
+                            animationSpec = tween(400, easing = FastOutSlowInEasing)
+                        )
+                    },
+                    launch {
+                        pageScale.animateTo(
+                            SettingsOverlayExitScale,
+                            animationSpec = tween(400, easing = FastOutSlowInEasing)
+                        )
+                    }
+                ).joinAll()
+            } else {
+                pageOffsetFraction.snapTo(0f)
+                pageScale.snapTo(1f)
+                listOf(
+                    launch {
+                        scrimAlpha.animateTo(
+                            0f,
+                            animationSpec = tween(300),
+                        )
+                    },
+                    launch { pageAlpha.animateTo(0f, animationSpec = tween(300)) },
+                ).joinAll()
+            }
             renderOverlay = false
         }
     }
@@ -385,7 +425,11 @@ private fun SettingsOverlayHost(
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
-        val pageOffsetX = (widthPx * pageOffsetFraction.value).roundToInt()
+        val pageOffsetX = if (allowSpatialTransitions) {
+            (widthPx * pageOffsetFraction.value).roundToInt()
+        } else {
+            0
+        }
 
         Box(
             modifier = Modifier
@@ -404,8 +448,9 @@ private fun SettingsOverlayHost(
                 .offset { IntOffset(pageOffsetX, 0) }
                 .alpha(pageAlpha.value.coerceIn(0f, 1f))
                 .graphicsLayer {
-                    scaleX = pageScale.value
-                    scaleY = pageScale.value
+                    val resolvedScale = if (allowSpatialTransitions) pageScale.value else 1f
+                    scaleX = resolvedScale
+                    scaleY = resolvedScale
                 }
         ) {
             Surface(
@@ -445,6 +490,7 @@ fun MainNavigation(
     onNotificationConversationConsumed: (String) -> Unit,
 ) {
     val appContext = LocalContext.current.applicationContext
+    val motionPolicy = LocalAgoraMotionPolicy.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showTasks by rememberSaveable { mutableStateOf(false) }
     var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
@@ -502,7 +548,11 @@ fun MainNavigation(
     val targetSnackbarPadding = if (showSettings || fullScreenMediaUrls != null) navBarPadding else chatSnackbarOffset
     val snackbarBottomPadding by animateDpAsState(
         targetValue = targetSnackbarPadding,
-        animationSpec = spring(dampingRatio = 1.0f, stiffness = 1000f),
+        animationSpec = if (motionPolicy.allowSpatialTransitions) {
+            spring(dampingRatio = 1.0f, stiffness = 1000f)
+        } else {
+            snap()
+        },
         label = "snackbarPadding"
     )
     val focusManager = LocalFocusManager.current
@@ -916,7 +966,12 @@ fun MainNavigation(
                         if (preview.originWasNewChat) {
                             viewModel.createNewChat()
                         } else {
-                            preview.originConversationId?.let(viewModel::selectConversation)
+                            preview.originConversationId?.let { conversationId ->
+                                viewModel.selectConversation(
+                                    id = conversationId,
+                                    hapticOnCompletion = false,
+                                )
+                            }
                         }
                         taskHistoryPreview = TaskHistoryPreviewState.Idle
                     }
@@ -1018,8 +1073,16 @@ fun MainNavigation(
 
             AnimatedVisibility(
                 visible = showing,
-                enter = fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.8f),
-                exit = fadeOut(tween(400)) + scaleOut(tween(400), targetScale = 0.8f),
+                enter = if (motionPolicy.allowSpatialTransitions) {
+                    fadeIn(tween(400)) + scaleIn(tween(400), initialScale = 0.8f)
+                } else {
+                    fadeIn(tween(400))
+                },
+                exit = if (motionPolicy.allowSpatialTransitions) {
+                    fadeOut(tween(400)) + scaleOut(tween(400), targetScale = 0.8f)
+                } else {
+                    fadeOut(tween(400))
+                },
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = snackbarBottomPadding + 2.dp)
             ) {
                 content?.let { data ->

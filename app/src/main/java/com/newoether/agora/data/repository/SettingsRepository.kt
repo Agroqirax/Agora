@@ -14,6 +14,8 @@ import com.newoether.agora.data.SettingsManager
 import com.newoether.agora.data.ShellDeviceConfig
 import com.newoether.agora.data.McpServerConfig
 import com.newoether.agora.data.SystemPromptEntry
+import com.newoether.agora.model.ModelId
+import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CompletableDeferred
@@ -79,6 +81,7 @@ class SettingsRepository(
 
     val selectedModel: StateFlow<String> = hot(settingsManager.selectedModel, Constants.EXAMPLE_MODEL_ID)
     val availableModels: StateFlow<Map<String, List<String>>> = hot(settingsManager.availableModels, emptyMap())
+    val customModels: StateFlow<Set<String>> = hot(settingsManager.customModels, emptySet())
     val enabledModels: StateFlow<Set<String>> = hot(settingsManager.enabledModels, emptySet())
     val modelAliases: StateFlow<Map<String, String>> = hot(settingsManager.modelAliases, emptyMap())
     val apiKeys: StateFlow<List<ApiKeyEntry>> = hot(settingsManager.apiKeys, emptyList())
@@ -93,6 +96,10 @@ class SettingsRepository(
     val thinkingLevel: StateFlow<String> = hot(settingsManager.thinkingLevel, "medium")
     val thinkingBudgetEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingBudgetEnabled, false)
     val thinkingBudgetTokens: StateFlow<Int> = hot(settingsManager.thinkingBudgetTokens, 4096)
+    val openAiServiceTierEnabled: StateFlow<Boolean> =
+        hot(settingsManager.openAiServiceTierEnabled, false)
+    val openAiServiceTier: StateFlow<String> =
+        hot(settingsManager.openAiServiceTier, OpenAiServiceTiers.AUTO)
     val providerBaseUrls: StateFlow<Map<String, String>> = hot(settingsManager.providerBaseUrls, emptyMap())
     val customEndpointResolutions: StateFlow<Map<String, CustomEndpointResolution>> =
         hot(settingsManager.customEndpointResolutions, emptyMap())
@@ -201,6 +208,34 @@ class SettingsRepository(
             val updated = modelAliases.value.toMutableMap()
             if (alias.isBlank()) updated.remove(model) else updated[model] = alias
             settingsManager.saveModelAliases(updated)
+        }
+    }
+
+    fun addCustomModel(provider: String, modelName: String) {
+        val normalizedProvider = provider.trim()
+        val normalizedName = modelName.trim()
+        if (normalizedProvider.isEmpty() || normalizedName.isEmpty()) return
+        val modelId = ModelId(normalizedProvider, normalizedName).prefixed
+        scope.launch {
+            settingsManager.saveCustomModels(customModels.value + modelId)
+            val updatedEnabled = enabledModels.value + modelId
+            settingsManager.saveEnabledModels(updatedEnabled)
+            if (selectedModel.value.isBlank()) {
+                settingsManager.saveSelectedModel(modelId)
+            }
+        }
+    }
+
+    fun removeCustomModel(modelId: String) {
+        if (modelId !in customModels.value) return
+        scope.launch {
+            settingsManager.saveCustomModels(customModels.value - modelId)
+            val updatedEnabled = enabledModels.value - modelId
+            settingsManager.saveEnabledModels(updatedEnabled)
+            settingsManager.saveModelAliases(modelAliases.value - modelId)
+            if (selectedModel.value == modelId) {
+                settingsManager.saveSelectedModel(updatedEnabled.firstOrNull().orEmpty())
+            }
         }
     }
 
@@ -322,6 +357,16 @@ class SettingsRepository(
                 models[newName] = models.remove(oldName) ?: emptyList()
                 settingsManager.saveAvailableModels(newName, models[newName] ?: emptyList())
                 settingsManager.saveAvailableModels(oldName, emptyList())
+                settingsManager.saveCustomModels(
+                    customModels.value.mapTo(linkedSetOf()) { model ->
+                        val parsed = ModelId.parse(model)
+                        if (parsed.providerName == oldName) {
+                            ModelId(newName, parsed.modelName).prefixed
+                        } else {
+                            model
+                        }
+                    }
+                )
                 val newEnabled = enabledModels.value.map { if (it.startsWith("$oldName:")) it.replace("$oldName:", "$newName:") else it }.toSet()
                 settingsManager.saveEnabledModels(newEnabled)
                 val newAliases = modelAliases.value.mapKeys { if (it.key.startsWith("$oldName:")) it.key.replace("$oldName:", "$newName:") else it.key }
@@ -351,6 +396,11 @@ class SettingsRepository(
             settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
             settingsManager.saveCustomEndpointResolution(name, null)
             settingsManager.saveAvailableModels(name, emptyList())
+            settingsManager.saveCustomModels(
+                customModels.value.filterTo(linkedSetOf()) {
+                    ModelId.parse(it).providerName != name
+                }
+            )
             settingsManager.saveEnabledModels(enabledModels.value.filter { !it.startsWith("$name:") }.toSet())
             settingsManager.saveModelAliases(modelAliases.value.filterKeys { !it.startsWith("$name:") })
             settingsManager.saveProviderBaseUrl(name, "")
@@ -421,6 +471,10 @@ class SettingsRepository(
     fun setThinkingLevel(level: String) = scope.launch { settingsManager.saveThinkingLevel(level) }
     fun setThinkingBudgetEnabled(enabled: Boolean) = scope.launch { settingsManager.saveThinkingBudgetEnabled(enabled) }
     fun setThinkingBudgetTokens(tokens: Int) = scope.launch { settingsManager.saveThinkingBudgetTokens(tokens) }
+    fun setOpenAiServiceTierEnabled(enabled: Boolean) =
+        scope.launch { settingsManager.saveOpenAiServiceTierEnabled(enabled) }
+    fun setOpenAiServiceTier(tier: String) =
+        scope.launch { settingsManager.saveOpenAiServiceTier(tier) }
     fun setDefaultTemperature(v: Float?) = scope.launch { settingsManager.saveDefaultTemperature(v) }
     fun setDefaultMaxTokens(v: Int?) = scope.launch { settingsManager.saveDefaultMaxTokens(v) }
     fun setDefaultTopP(v: Float?) = scope.launch { settingsManager.saveDefaultTopP(v) }
@@ -498,6 +552,7 @@ class SettingsRepository(
     suspend fun getSystemPrompts(): List<SystemPromptEntry> = settingsManager.systemPrompts.first()
 
     suspend fun saveAvailableModels(provider: String, models: List<String>) = settingsManager.saveAvailableModels(provider, models)
+    suspend fun saveCustomModels(models: Set<String>) = settingsManager.saveCustomModels(models)
     suspend fun saveModelAliases(aliases: Map<String, String>) = settingsManager.saveModelAliases(aliases)
     suspend fun saveLastUpdateCheckTime(time: Long) = settingsManager.saveLastUpdateCheckTime(time)
     suspend fun saveLastModelsFetchFingerprint(fingerprint: String) = settingsManager.saveLastModelsFetchFingerprint(fingerprint)

@@ -1,5 +1,6 @@
 package com.newoether.agora.data
 
+import com.newoether.agora.util.Constants
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.descriptors.PrimitiveKind
@@ -45,6 +46,15 @@ data class CustomProviderConfig(
     // Configs written before protocol selection existed were OpenAI-compatible.
     val protocol: CustomEndpointProtocol = CustomEndpointProtocol.OPENAI,
 )
+
+fun isOpenAiProtocolProvider(
+    providerName: String,
+    customProviders: List<CustomProviderConfig>,
+): Boolean =
+    providerName == Constants.PROVIDER_OPENAI ||
+        customProviders.any {
+            it.name == providerName && it.protocol == CustomEndpointProtocol.OPENAI
+        }
 
 /**
  * Derived endpoint discovered during model sync.

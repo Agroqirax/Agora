@@ -105,6 +105,7 @@ data class ChatMessage(
     val thoughts: String? = null,
     val thoughtTitle: String? = null,
     val tokenCount: Int = 0,
+    val tokenUsage: TokenUsage? = null,
     val status: MessageStatus = MessageStatus.SUCCESS, // Default to SUCCESS for old messages
     val participant: Participant,
     val timestamp: Long = System.currentTimeMillis(),

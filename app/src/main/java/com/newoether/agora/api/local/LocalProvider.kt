@@ -10,6 +10,7 @@ import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -182,7 +183,14 @@ class LocalProvider(
             return@flow
         }
 
-        emit(StreamEvent.UsageUpdate(totalTokens))
+        emit(
+            StreamEvent.UsageUpdate(
+                TokenUsage(
+                    totalTokenCount = totalTokens.coerceAtLeast(0),
+                    outputTokenCount = totalTokens.coerceAtLeast(0),
+                )
+            )
+        )
     }.flowOn(Dispatchers.IO)
 
     private fun formatGenerationError(

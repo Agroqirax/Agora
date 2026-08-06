@@ -12,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import com.newoether.agora.R
 import com.newoether.agora.data.ShellDeviceConfig
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -220,6 +222,7 @@ private fun DeviceEditor(
     onNewDeviceId: (String?) -> Unit,
     onDeleteConfirm: (String?) -> Unit
 ) {
+    val motionPolicy = LocalAgoraMotionPolicy.current
     val isNewlyAdded = device.id == newlyAddedDeviceId
     var expanded by remember(device.id) { mutableStateOf(false) }
     var nameInput by remember(device.id) { mutableStateOf(device.name) }
@@ -252,7 +255,12 @@ private fun DeviceEditor(
     LaunchedEffect(isNewlyAdded) {
         if (isNewlyAdded) {
             expanded = true; delay(50); urlFocusRequester.requestFocus()
-            scrollState.animateScrollTo(scrollState.maxValue + (250 * density.density).toInt(), tween(500))
+            val target = scrollState.maxValue + (250 * density.density).toInt()
+            if (motionPolicy.allowProgrammaticScrollMotion) {
+                scrollState.animateScrollTo(target, tween(500))
+            } else {
+                scrollState.scrollTo(target)
+            }
             onNewDeviceId(null)
         }
     }
@@ -286,7 +294,19 @@ private fun DeviceEditor(
             modifier = Modifier.clickable { expanded = !expanded }
         )
 
-        AnimatedVisibility(visible = expanded, enter = expandVertically(), exit = shrinkVertically()) {
+        AnimatedVisibility(
+            visible = expanded,
+            enter = if (motionPolicy.allowSpatialTransitions) {
+                expandVertically()
+            } else {
+                fadeIn()
+            },
+            exit = if (motionPolicy.allowSpatialTransitions) {
+                shrinkVertically()
+            } else {
+                fadeOut()
+            },
+        ) {
             Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
                 Spacer(Modifier.height(8.dp))
 

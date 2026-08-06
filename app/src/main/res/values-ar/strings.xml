@@ -269,6 +269,15 @@
     <string name="models_title">النماذج</string>
     <string name="models_default">النموذج الافتراضي</string>
     <string name="models_no_models">لا توجد نماذج مفعّلة</string>
+    <string name="models_manual">النماذج اليدوية</string>
+    <string name="models_manual_empty">لم تتم إضافة نماذج مخصصة</string>
+    <string name="models_add_custom">إضافة نموذج مخصص</string>
+    <string name="models_auto_fetch">الجلب التلقائي</string>
+    <string name="models_auto_empty">لم يتم جلب أي نماذج</string>
+    <string name="models_search_hint">البحث في النماذج…</string>
+    <string name="models_search_empty">لا توجد نماذج مطابقة</string>
+    <string name="models_clear_search">مسح بحث النماذج</string>
+    <string name="models_custom_exists">هذا النموذج موجود بالفعل</string>
     <string name="models_available">النماذج المتاحة</string>
     <string name="models_sync">المزامنة من جميع المزوّدين</string>
     <string name="models_sync_desc">جلب أحدث قائمة نماذج لجميع واجهات API المهيأة</string>
@@ -558,7 +567,7 @@
     <string name="blur_effects">تأثيرات التمويه</string>
     <string name="blur_effects_desc">تمويه أعلى قائمة الدردشة أسفل شريط الأدوات. عطّله لتوفير الأداء.</string>
     <string name="reduce_motion">تقليل الحركة</string>
-    <string name="reduce_motion_desc">إيقاف الحركة الزخرفية المستمرة وتأثير الكتابة، مع إبقاء مؤشرات التحميل وانتقالات الحالة.</string>
+    <string name="reduce_motion_desc">يقلّل الحركة المستمرة والانتقالات المكانية الكبيرة مع الإبقاء على التلاشي والإيماءات المباشرة وملاحظات الحالة المفيدة.</string>
 
     <!-- Language -->
     <string name="language_title">اللغة</string>
@@ -1009,4 +1018,12 @@
     <string name="web_search_kagi_desc">واجهة بحث مميزة بنتائج مخصصة. الدفع حسب الاستخدام.</string>
     <string name="web_search_kagi_key">مفتاح API لـ Kagi Search</string>
     <string name="web_search_kagi_key_hint">مفتاح API من kagi.com/api/keys</string>
+    <string name="default_service_tier">مستوى الخدمة الافتراضي</string>
+    <string name="openai_service_tier_title">مستوى الخدمة</string>
+    <string name="openai_service_tier_desc">يتحكم في زمن الاستجابة وأولوية طلبات بروتوكول OpenAI.</string>
+    <string name="openai_service_tier_off">إيقاف</string>
+    <string name="openai_service_tier_auto">تلقائي</string>
+    <string name="openai_service_tier_default">افتراضي</string>
+    <string name="openai_service_tier_flex">مرن</string>
+    <string name="openai_service_tier_fast">سريع</string>
 </resources>

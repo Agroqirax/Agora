@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.chat
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -46,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatConversation
-import com.newoether.agora.ui.common.LocalAgoraHaptics
+import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.theme.ChatType
 
 /**
@@ -79,7 +80,7 @@ internal fun ChatTopBar(
     onNewChat: () -> Unit,
 ) {
     var moreMenuOpen by remember { mutableStateOf(false) }
-    val haptics = LocalAgoraHaptics.current
+    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(searchActive) {
         if (searchActive) {
@@ -105,7 +106,12 @@ internal fun ChatTopBar(
         AnimatedContent(
             targetState = searchActive,
             transitionSpec = {
-                if (targetState) {
+                val contentTransform = if (!allowSpatialTransitions) {
+                    fadeIn(tween(360, easing = FastOutSlowInEasing))
+                        .togetherWith(
+                            fadeOut(tween(300, easing = FastOutSlowInEasing)),
+                        )
+                } else if (targetState) {
                     (
                         fadeIn(tween(400, easing = FastOutSlowInEasing)) +
                             scaleIn(
@@ -134,6 +140,7 @@ internal fun ChatTopBar(
                             )
                     )
                 }
+                contentTransform.using(SizeTransform(clip = false))
             },
             contentAlignment = Alignment.Center,
             label = "ChatTopBarSearchTransition",
@@ -149,11 +156,7 @@ internal fun ChatTopBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (targetSearchActive) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 4.dp,
-                        shadowElevation = 4.dp,
+                    ChatTopBarCapsule(
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         Row(
@@ -246,11 +249,7 @@ internal fun ChatTopBar(
                 val showBrandTitle = resolvedTitle == null
 
                 // Title capsule: menu + title
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 4.dp,
+                ChatTopBarCapsule(
                     modifier = Modifier.fillMaxHeight().widthIn(max = 260.dp)
                 ) {
                     Row(
@@ -310,11 +309,7 @@ internal fun ChatTopBar(
                 Spacer(modifier = Modifier.weight(1f))
 
                 // Actions capsule: system prompt + new chat
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 4.dp,
+                ChatTopBarCapsule(
                     modifier = Modifier.fillMaxHeight()
                 ) {
                     Row(
@@ -328,7 +323,6 @@ internal fun ChatTopBar(
                         Box {
                             IconButton(
                                 onClick = {
-                                    haptics.tap()
                                     moreMenuOpen = true
                                 },
                                 modifier = Modifier.size(44.dp),
@@ -395,5 +389,31 @@ internal fun ChatTopBar(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ChatTopBarCapsule(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val shape = RoundedCornerShape(50)
+    Box(
+        modifier = modifier,
+        propagateMinConstraints = true,
+    ) {
+        Surface(
+            modifier = Modifier.matchParentSize(),
+            shape = shape,
+            color = Color.Transparent,
+            shadowElevation = 4.dp,
+        ) {}
+        Surface(
+            shape = shape,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 4.dp,
+            shadowElevation = 0.dp,
+            content = content,
+        )
     }
 }

@@ -306,6 +306,15 @@
     <string name="models_title">Models</string>
     <string name="models_default">Default Model</string>
     <string name="models_no_models">No models enabled</string>
+    <string name="models_manual">Manual Models</string>
+    <string name="models_manual_empty">No custom models added</string>
+    <string name="models_add_custom">Add custom model</string>
+    <string name="models_auto_fetch">Auto Fetch</string>
+    <string name="models_auto_empty">No fetched models</string>
+    <string name="models_search_hint">Search models…</string>
+    <string name="models_search_empty">No matching models</string>
+    <string name="models_clear_search">Clear model search</string>
+    <string name="models_custom_exists">This model already exists</string>
     <string name="models_available">Available Models</string>
     <string name="models_sync">Sync from All Providers</string>
     <string name="models_sync_desc">Fetch the latest model list for all configured APIs</string>
@@ -596,7 +605,7 @@
     <string name="blur_effects">Blur Effects</string>
     <string name="blur_effects_desc">Blur the top of the chat list under the toolbar. Turn off to save performance.</string>
     <string name="reduce_motion">Reduce motion</string>
-    <string name="reduce_motion_desc">Stop continuous decorative motion and the welcome typing effect. Loading indicators and state feedback remain available.</string>
+    <string name="reduce_motion_desc">Reduce continuous and large spatial motion while keeping fades, direct gestures, and useful state feedback.</string>
     <string name="interaction_feedback">Interaction Feedback</string>
     <string name="haptic_feedback">Haptic Feedback</string>
     <string name="haptic_feedback_desc">Use subtle vibration for generation status and key actions.</string>
@@ -1010,4 +1019,12 @@
     <string name="proxy_password">Password (optional)</string>
     <string name="proxy_bypass">Bypass List</string>
     <string name="proxy_bypass_desc">Hosts and CIDR ranges that connect directly, one per line</string>
+    <string name="default_service_tier">Default Service Tier</string>
+    <string name="openai_service_tier_title">Service tier</string>
+    <string name="openai_service_tier_desc">Controls latency and processing priority for OpenAI-protocol requests.</string>
+    <string name="openai_service_tier_off">Off</string>
+    <string name="openai_service_tier_auto">Auto</string>
+    <string name="openai_service_tier_default">Default</string>
+    <string name="openai_service_tier_flex">Flex</string>
+    <string name="openai_service_tier_fast">Fast</string>
 </resources>

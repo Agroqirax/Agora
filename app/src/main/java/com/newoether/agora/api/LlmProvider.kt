@@ -1,6 +1,7 @@
 package com.newoether.agora.api
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -10,7 +11,21 @@ import kotlinx.serialization.json.JsonObject
 sealed class StreamEvent {
     data class TextChunk(val text: String) : StreamEvent()
     data class ThoughtChunk(val thought: String, val title: String? = null, val signature: String? = null) : StreamEvent()
-    data class UsageUpdate(val tokenCount: Int, val thoughtsTokenCount: Int = 0) : StreamEvent()
+    data class UsageUpdate(val usage: TokenUsage) : StreamEvent() {
+        constructor(tokenCount: Int, thoughtsTokenCount: Int = 0) : this(
+            TokenUsage(
+                totalTokenCount = tokenCount.coerceAtLeast(0),
+                reasoningTokenCount = thoughtsTokenCount
+                    .takeIf { it > 0 },
+            )
+        )
+
+        val tokenCount: Int
+            get() = usage.totalTokenCount
+
+        val thoughtsTokenCount: Int
+            get() = usage.reasoningTokenCount ?: 0
+    }
     data class Error(val error: GenerationError) : StreamEvent() {
         val message: String get() = error.userMessage()
     }
@@ -53,6 +68,7 @@ data class ProviderConfig(
     val thinkingLevel: String = "medium",
     val thinkingBudgetEnabled: Boolean = false,
     val thinkingBudgetTokens: Int = 4096,
+    val openAiServiceTier: String? = null,
     val baseUrl: String? = null,
     val tools: List<ToolDefinition>? = null,
     val userPrepend: String? = null,
@@ -102,6 +118,7 @@ data class OpenAiChatRequest(
     @SerialName("reasoning_effort") val reasoningEffort: String? = null,
     val reasoning: OpenAiReasoning? = null,
     val plugins: List<OpenAiPlugin>? = null,
+    @SerialName("service_tier") val serviceTier: String? = null,
     val temperature: Float? = null,
     @SerialName("max_tokens") val maxTokens: Int? = null,
     @SerialName("top_p") val topP: Float? = null,
@@ -220,16 +237,55 @@ data class OpenAiFunctionCall(
 
 @Serializable
 data class OpenAiUsage(
-    @SerialName("prompt_tokens") val promptTokens: Int,
-    @SerialName("completion_tokens") val completionTokens: Int,
-    @SerialName("total_tokens") val totalTokens: Int,
+    @SerialName("prompt_tokens") val promptTokens: Int? = null,
+    @SerialName("completion_tokens") val completionTokens: Int? = null,
+    @SerialName("total_tokens") val totalTokens: Int? = null,
+    @SerialName("prompt_tokens_details") val promptTokensDetails: OpenAiPromptTokensDetails? = null,
+    @SerialName("prompt_cache_hit_tokens") val promptCacheHitTokens: Int? = null,
+    @SerialName("prompt_cache_miss_tokens") val promptCacheMissTokens: Int? = null,
     @SerialName("completion_tokens_details") val completionTokensDetails: OpenAiCompletionTokensDetails? = null
+)
+
+@Serializable
+data class OpenAiPromptTokensDetails(
+    @SerialName("cached_tokens") val cachedTokens: Int? = null
 )
 
 @Serializable
 data class OpenAiCompletionTokensDetails(
     @SerialName("reasoning_tokens") val reasoningTokens: Int? = null
 )
+
+internal fun OpenAiUsage.toTokenUsage(): TokenUsage {
+    val input = promptTokens?.coerceAtLeast(0)
+    val cached = (
+        promptCacheHitTokens
+            ?: promptTokensDetails?.cachedTokens
+        )?.coerceAtLeast(0)
+    val uncached = (
+        promptCacheMissTokens
+            ?: if (input != null && cached != null) {
+                (input - cached).coerceAtLeast(0)
+            } else {
+                null
+            }
+        )?.coerceAtLeast(0)
+    val output = completionTokens?.coerceAtLeast(0)
+    val reasoning = completionTokensDetails?.reasoningTokens?.coerceAtLeast(0)
+    val derivedTotal = listOfNotNull(input, output).sum()
+    return TokenUsage(
+        totalTokenCount = (totalTokens ?: derivedTotal).coerceAtLeast(0),
+        inputTokenCount = input ?: if (cached != null && uncached != null) {
+            TokenUsage.addCounts(cached, uncached)
+        } else {
+            null
+        },
+        cachedInputTokenCount = cached,
+        uncachedInputTokenCount = uncached,
+        outputTokenCount = output,
+        reasoningTokenCount = reasoning,
+    )
+}
 
 @Serializable
 data class OpenAiModelListResponse(

@@ -18,6 +18,17 @@ import org.junit.Test
 
 class MessageListLayoutTest {
     @Test
+    fun lifecycleRegistryMarksOnlyActuallyComposedMessages() {
+        val registry = MessageLifecycleAppearanceRegistry()
+
+        assertFalse(registry.isKnown("projected-but-not-composed"))
+        registry.markKnown("composed")
+
+        assertTrue(registry.isKnown("composed"))
+        assertFalse(registry.isKnown("projected-but-not-composed"))
+    }
+
+    @Test
     fun attachmentDraftMutationsBypassTheTextDebounce() {
         val attachment = SelectedAttachment(uri = "file:///draft", type = "file")
 
@@ -824,27 +835,36 @@ class MessageListLayoutTest {
     @Test
     fun sendEasingOnlyShapesStartupThenReturnsTheAdaptiveTailUnchanged() {
         val adaptiveStep = 120f
-        val initial = applySeekStartupEasing(
-            adaptiveStepPx = adaptiveStep,
-            elapsedNanos = 0L,
+        val startupSpec = FeedbackScrollStartupSpec(
+            durationMillis = 240L,
             easing = FastOutSlowInEasing,
         )
-        val startup = applySeekStartupEasing(
+        val sendSpec = DefaultFeedbackScrollSpec.copy(startup = startupSpec)
+        val initial = applyFeedbackScrollStartup(
+            adaptiveStepPx = adaptiveStep,
+            elapsedNanos = 0L,
+            startup = sendSpec.startup,
+        )
+        val startup = applyFeedbackScrollStartup(
             adaptiveStepPx = adaptiveStep,
             elapsedNanos = 120_000_000L,
-            easing = FastOutSlowInEasing,
+            startup = sendSpec.startup,
         )
-        val adaptiveTail = applySeekStartupEasing(
+        val adaptiveTail = applyFeedbackScrollStartup(
             adaptiveStepPx = adaptiveStep,
             elapsedNanos = 240_000_000L,
-            easing = FastOutSlowInEasing,
+            startup = sendSpec.startup,
         )
-        val bottomButtonStep = applySeekStartupEasing(
+        val bottomButtonStep = applyFeedbackScrollStartup(
             adaptiveStepPx = -adaptiveStep,
             elapsedNanos = 0L,
-            easing = null,
+            startup = DefaultFeedbackScrollSpec.startup,
         )
 
+        assertEquals(
+            DefaultFeedbackScrollSpec,
+            sendSpec.copy(startup = null),
+        )
         assertEquals(0f, initial, 0.001f)
         assertTrue(startup in 0f..adaptiveStep)
         assertEquals(adaptiveStep, adaptiveTail, 0.001f)
