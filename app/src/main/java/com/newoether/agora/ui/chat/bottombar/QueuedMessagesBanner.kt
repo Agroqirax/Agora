@@ -35,15 +35,15 @@ internal fun QueuedMessageRow(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .height(COMPOSER_STATUS_ROW_HEIGHT),
-        shape = COMPOSER_STATUS_ROW_SHAPE,
+            .height(QUEUED_MESSAGE_HEIGHT),
+        shape = QUEUED_MESSAGE_SHAPE,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 14.dp, end = 4.dp),
+                .padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -66,11 +66,11 @@ internal fun QueuedMessageRow(
                 )
                 Spacer(Modifier.width(4.dp))
             }
-            IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+            IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
                 Icon(
                     Icons.Default.Close,
                     contentDescription = stringResource(R.string.remove),
-                    modifier = Modifier.size(16.dp),
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }

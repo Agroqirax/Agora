@@ -312,7 +312,12 @@ internal fun CompactSegmentBlock(
             if (expanded) 12.dp else 4.dp
         }
         animatedPadding
-    } else if (isExpanded) {
+    } else if (
+        retainExpandedLayoutDuringFade(
+            currentExpanded = expansionTransition.currentState,
+            targetExpanded = expansionTransition.targetState,
+        )
+    ) {
         12.dp
     } else {
         4.dp
@@ -525,6 +530,18 @@ internal fun CompactSegmentBlock(
         }
     }
 }
+
+/**
+ * Reduced Motion keeps expanded layout space for the whole content fade.
+ *
+ * On expansion the target state reserves the final layout immediately. On collapse the current
+ * state retains that layout until the exit fade finishes. AnimatedVisibility then removes the
+ * content in the same transition settlement that releases the card's external spacing.
+ */
+internal fun retainExpandedLayoutDuringFade(
+    currentExpanded: Boolean,
+    targetExpanded: Boolean,
+): Boolean = currentExpanded || targetExpanded
 
 @Composable
 internal fun TimelineSegmentsContent(

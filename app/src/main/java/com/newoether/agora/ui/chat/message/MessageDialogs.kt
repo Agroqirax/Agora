@@ -39,6 +39,19 @@ internal fun MessageInfoDialog(
         val provider = parsed?.providerName ?: Constants.PROVIDER_UNKNOWN
         modelAliases[message.modelName] ?: ("$modelId ($provider)")
     } else stringResource(R.string.unknown)
+    val tokenUsage = tokenUsagePresentation(message.tokenUsage)
+    val inputTokens = when {
+        tokenUsage.input == null -> "—"
+        tokenUsage.cachedInput != null -> stringResource(
+            R.string.token_count_with_cached,
+            tokenUsage.input,
+            tokenUsage.cachedInput,
+        )
+        else -> stringResource(R.string.token_count, tokenUsage.input)
+    }
+    val outputTokens = tokenUsage.output?.let {
+        stringResource(R.string.token_count, it)
+    } ?: "—"
 
     AlertDialog(
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -50,6 +63,27 @@ internal fun MessageInfoDialog(
                 if (message.participant == Participant.MODEL) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(stringResource(R.string.model_with_label, modelDisplay), style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp, lineHeight = 20.sp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        stringResource(
+                            R.string.input_tokens_with_label,
+                            inputTokens,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                        ),
+                    )
+                    Text(
+                        stringResource(
+                            R.string.output_tokens_with_label,
+                            outputTokens,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 14.sp,
+                            lineHeight = 20.sp,
+                        ),
+                    )
                 }
             }
         },

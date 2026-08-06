@@ -369,6 +369,7 @@ internal fun MessageList(
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
+    detailedTokenUsage: Boolean = false,
     maxContextWindow: Int = 20,
     modelAliases: StableModelAliases = StableModelAliases(),
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
@@ -971,6 +972,7 @@ internal fun MessageList(
             visualizeContextRollout = visualizeContextRollout,
             toolCallDisplayMode = toolCallDisplayMode,
             autoExpandActiveGroup = autoExpandActiveGroup,
+            detailedTokenUsage = detailedTokenUsage,
             groupedSegmentAutoExpansionController =
                 groupedSegmentAutoExpansionController,
             onStartEdit = {

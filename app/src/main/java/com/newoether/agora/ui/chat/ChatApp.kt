@@ -32,7 +32,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -66,7 +65,9 @@ import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
+import com.newoether.agora.ui.chat.bottombar.LoopStatusBackdrop
 import com.newoether.agora.ui.chat.bottombar.PendingAttachmentRemoval
 import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
 import com.newoether.agora.ui.components.AnimatedBlobBackground
@@ -451,6 +452,7 @@ fun ChatApp(
     val shellDevices by viewModel.settings.shellDevices.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
     val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
+    val detailedTokenUsage by viewModel.settings.detailedTokenUsage.collectAsState()
     val conversationSettings by viewModel.settings.conversationSettings.collectAsState()
     val pendingSettings by viewModel.pendingConversationSettings.collectAsState()
     // Resolved per-conversation values: override → global default
@@ -1682,6 +1684,7 @@ fun ChatApp(
                                 visualizeContextRollout = visualizeContextRollout,
                                 toolCallDisplayMode = toolCallDisplayMode,
                                 autoExpandActiveGroup = autoExpandActiveGroup,
+                                detailedTokenUsage = detailedTokenUsage,
                                 maxContextWindow = contextWindow,
                                 modelAliases = StableModelAliases(modelAliases),
                                 bottomBarHeight = bottomBarHeight + shareSelectionBarSpace,
@@ -1979,25 +1982,39 @@ fun ChatApp(
                     if (outerSpacerHeightPx > 0f) {
                         Spacer(modifier = Modifier.height(with(density) { outerSpacerHeightPx.toDp() }))
                     }
-                    Surface(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(if (isExpanded) Modifier.fillMaxHeight() else Modifier)
                             .onSizeChanged {
-                            if (!isExpanded) bottomBarHeightPx = it.height.toFloat()
-                        }
-                        .navigationBarsPadding()
-                        .imePadding()
-                        .padding(8.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 8.dp,
-                    shape = RoundedCornerShape(28.dp)
-                ) {
-                    Box(
-                        contentAlignment = Alignment.BottomCenter
+                                if (!isExpanded) bottomBarHeightPx = it.height.toFloat()
+                            }
+                            .navigationBarsPadding()
+                            .imePadding()
+                            .padding(8.dp),
                     ) {
-                        ChatBottomBar(
+                        // This is a sibling behind the complete outer bar, not a child of the
+                        // composer. Its lower overflow is therefore occluded by the 28dp Surface
+                        // and shadow below.
+                        LoopStatusBackdrop(
+                            loop = currentLoop,
+                            isRunning = currentConversationId in runningLoopIds,
+                            onStop = { viewModel.stopCurrentLoop() },
+                        )
+
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(if (isExpanded) Modifier.weight(1f) else Modifier),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            shadowElevation = 8.dp,
+                            shape = CHAT_BOTTOM_BAR_OUTER_SHAPE,
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.BottomCenter,
+                            ) {
+                                ChatBottomBar(
                         onSendMessage = { text, attachments, onAccepted ->
                             viewModel.sendMessage(
                                 text = text,
@@ -2023,9 +2040,6 @@ fun ChatApp(
                         openAiServiceTierAvailable = openAiServiceTierAvailable,
                         openAiServiceTierEnabled = openAiServiceTierEnabled,
                         openAiServiceTier = openAiServiceTier,
-                        activeLoop = currentLoop,
-                        loopRunning = currentConversationId in runningLoopIds,
-                        onStopLoop = { viewModel.stopCurrentLoop() },
                         onCodeExecutionToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
                         onGoogleSearchToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
                         onThinkingToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
@@ -2080,13 +2094,14 @@ fun ChatApp(
                         onRemoveQueuedSend = viewModel::removeQueuedSend,
                         isStopping = isStopping,
                     )
+                            }
+                        }
+                    }
                 }
             }
             }
         }
         }
-    }
-    }
 
     showRenameDialog?.let { id ->
         ChatRenameDialog(

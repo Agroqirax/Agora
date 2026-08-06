@@ -42,6 +42,7 @@ import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
@@ -60,6 +61,40 @@ private data class AssistantStatusPresentation(
     val text: String,
     val kind: AssistantStatusKind,
 )
+
+internal data class TokenUsagePresentation(
+    val input: Int?,
+    val cachedInput: Int?,
+    val output: Int?,
+)
+
+internal fun tokenUsagePresentation(
+    usage: TokenUsage?,
+): TokenUsagePresentation {
+    if (usage == null) return TokenUsagePresentation(null, null, null)
+    val input = usage.inputTokenCount
+        ?: if (
+            usage.cachedInputTokenCount != null &&
+            usage.uncachedInputTokenCount != null
+        ) {
+            TokenUsage.addCounts(
+                usage.cachedInputTokenCount,
+                usage.uncachedInputTokenCount,
+            )
+        } else {
+            usage.outputTokenCount
+                ?.let { output -> (usage.totalTokenCount - output).takeIf { it >= 0 } }
+        }
+    val output = usage.outputTokenCount
+        ?: input?.let { inputCount ->
+            (usage.totalTokenCount - inputCount).takeIf { it >= 0 }
+        }
+    return TokenUsagePresentation(
+        input = input,
+        cachedInput = usage.cachedInputTokenCount,
+        output = output,
+    )
+}
 
 @Composable
 private fun AssistantStatusRow(status: AssistantStatusPresentation) {
@@ -134,6 +169,7 @@ internal fun AssistantMessageContent(
     showBranchSelector: Boolean,
     toolCallDisplayMode: String,
     autoExpandActiveGroup: Boolean,
+    detailedTokenUsage: Boolean,
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController,
     thoughtExpandedStates: SnapshotStateMap<String, Boolean>,
     renderContext: ChatMarkdownRenderContext,
@@ -201,12 +237,27 @@ internal fun AssistantMessageContent(
                 val hasActiveAnswer = message.hasActiveAnswerSegment()
                 val toolCallingStatus = stringResource(R.string.tool_calling_ellipsis)
                 val transcribingStatus = stringResource(R.string.transcription_ellipsis)
+                val detailedUsage = if (detailedTokenUsage) {
+                    tokenUsagePresentation(message.tokenUsage)
+                        .takeIf { it.input != null || it.output != null }
+                } else {
+                    null
+                }
+                val completedUsageText = detailedUsage?.let { usage ->
+                    stringResource(
+                        R.string.token_usage_detail,
+                        usage.input?.toString() ?: "—",
+                        usage.output?.toString() ?: "—",
+                    )
+                } ?: stringResource(
+                    R.string.cost_tokens,
+                    message.tokenCount.coerceAtLeast(0),
+                )
                 val displayText = when {
                     // Keep the header's measured row across stream → terminal even when a
                     // provider omits usage. Removing it for tokenCount=0 shifts every Markdown
                     // line upward on the exact frame generation completes.
-                    message.status == MessageStatus.SUCCESS ->
-                        stringResource(R.string.cost_tokens, message.tokenCount.coerceAtLeast(0))
+                    message.status == MessageStatus.SUCCESS -> completedUsageText
                     message.status == MessageStatus.STOPPED -> stringResource(R.string.generation_stopped)
                     isStreaming && isTranscribing -> transcribingStatus
                     isStreaming && isToolCalling -> toolCallingStatus

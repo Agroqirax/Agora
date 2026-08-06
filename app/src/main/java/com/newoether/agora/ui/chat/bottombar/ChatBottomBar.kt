@@ -71,6 +71,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
 
+internal val CHAT_BOTTOM_BAR_OUTER_RADIUS = 28.dp
+internal val CHAT_BOTTOM_BAR_OUTER_SHAPE = RoundedCornerShape(CHAT_BOTTOM_BAR_OUTER_RADIUS)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatBottomBar(
@@ -94,9 +97,6 @@ fun ChatBottomBar(
     openAiServiceTierAvailable: Boolean = false,
     openAiServiceTierEnabled: Boolean = false,
     openAiServiceTier: String = "auto",
-    activeLoop: com.newoether.agora.data.local.LoopEntity? = null,
-    loopRunning: Boolean = false,
-    onStopLoop: () -> Unit = {},
     webSearchEnabled: Boolean = false,
     shellEnabled: Boolean = false,
     onCodeExecutionToggle: (Boolean) -> Unit = {},
@@ -232,9 +232,6 @@ fun ChatBottomBar(
             }
 
             ComposerStatusColumn(
-                activeLoop = activeLoop,
-                loopRunning = loopRunning,
-                onStopLoop = onStopLoop,
                 queuedSends = queuedSends,
                 onRemoveQueuedSend = onRemoveQueuedSend,
                 modifier = Modifier.zIndex(0f),

@@ -52,6 +52,7 @@ internal fun MessageItem(
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
+    detailedTokenUsage: Boolean = false,
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController =
         remember { GroupedSegmentAutoExpansionController() },
     onStartEdit: () -> Unit = {},
@@ -238,6 +239,7 @@ internal fun MessageItem(
                         showBranchSelector = showBranchSelector,
                         toolCallDisplayMode = toolCallDisplayMode,
                         autoExpandActiveGroup = autoExpandActiveGroup,
+                        detailedTokenUsage = detailedTokenUsage,
                         groupedSegmentAutoExpansionController =
                             groupedSegmentAutoExpansionController,
                         thoughtExpandedStates = thoughtExpandedStates,

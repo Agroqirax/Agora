@@ -1,8 +1,11 @@
 package com.newoether.agora.ui.chat
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -65,6 +68,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -81,6 +86,22 @@ import com.newoether.agora.util.verticalEdgeFade
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+
+internal enum class DrawerConversationIndicator {
+    NONE,
+    GENERATING,
+    UNREAD,
+}
+
+internal fun resolveDrawerConversationIndicator(
+    isGenerating: Boolean,
+    isSelected: Boolean,
+    hasUnreadGeneration: Boolean,
+): DrawerConversationIndicator = when {
+    isGenerating -> DrawerConversationIndicator.GENERATING
+    hasUnreadGeneration && !isSelected -> DrawerConversationIndicator.UNREAD
+    else -> DrawerConversationIndicator.NONE
+}
 
 /**
  * The conversation navigation drawer: search box, new-chat button, conversation list with
@@ -250,7 +271,14 @@ internal fun ChatDrawerContent(
                     items(conversations, key = { it.id }) { conversation ->
                         val isSelected = conversation.id == currentConversationId
                         val isGenerating = conversation.id in generatingConversationIds
+                        val indicator = resolveDrawerConversationIndicator(
+                            isGenerating = isGenerating,
+                            isSelected = isSelected,
+                            hasUnreadGeneration = conversation.hasUnreadGeneration,
+                        )
                         val menuEnabled = !isSwitching && !isGenerating
+                        val unreadDescription =
+                            stringResource(R.string.conversation_unread_generation)
                         var showMenu by remember { mutableStateOf(false) }
                         var pressOffset by remember { mutableStateOf(DpOffset.Zero) }
                         var lastPosition by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Zero) }
@@ -307,17 +335,47 @@ internal fun ChatDrawerContent(
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = if (isSelected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                                     )
-                                    if (isGenerating) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        CircularProgressIndicator(
-                                            modifier = Modifier.size(18.dp),
-                                            strokeWidth = 2.dp,
-                                            color = if (isSelected) {
-                                                MaterialTheme.colorScheme.onSecondaryContainer
-                                            } else {
-                                                MaterialTheme.colorScheme.primary
-                                            },
-                                        )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Box(
+                                        modifier = Modifier.size(18.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            visible =
+                                                indicator ==
+                                                    DrawerConversationIndicator.GENERATING,
+                                            enter = fadeIn(tween(200)),
+                                            exit = fadeOut(tween(200)),
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(18.dp),
+                                                strokeWidth = 2.dp,
+                                                color = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                },
+                                            )
+                                        }
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            visible =
+                                                indicator ==
+                                                    DrawerConversationIndicator.UNREAD,
+                                            enter = fadeIn(tween(200)),
+                                            exit = fadeOut(tween(200)),
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .background(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        CircleShape,
+                                                    )
+                                                    .semantics {
+                                                        contentDescription = unreadDescription
+                                                    },
+                                            )
+                                        }
                                     }
                                 }
                             }
