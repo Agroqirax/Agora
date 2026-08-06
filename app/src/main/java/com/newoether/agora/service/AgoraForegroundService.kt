@@ -10,7 +10,9 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import android.app.ActivityManager
@@ -19,30 +21,132 @@ import com.newoether.agora.R
 import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.util.DebugLog
 
+internal enum class ForegroundServiceLifecycleState {
+    STOPPED,
+    STARTING,
+    RUNNING,
+    STOPPING,
+    DESTROYING,
+}
+
+internal sealed interface ForegroundServiceLeaseAction {
+    data object None : ForegroundServiceLeaseAction
+    data object Start : ForegroundServiceLeaseAction
+    data class Stop(val startId: Int) : ForegroundServiceLeaseAction
+}
+
+internal data class ForegroundServiceLeaseTransition(
+    val accepted: Boolean,
+    val action: ForegroundServiceLeaseAction = ForegroundServiceLeaseAction.None,
+)
+
 /**
- * Thread-safe owner set for the shared generation foreground service. The transition callbacks
- * run under the same lock as the set mutation, preventing a last-release stop from racing past a
- * new first-acquire start. Duplicate acquires/releases are deliberately idempotent.
+ * Thread-safe owner and lifecycle state machine for the shared generation foreground service.
+ *
+ * A call to startForegroundService() creates a platform obligation that remains until this
+ * Service has actually called startForeground(). Stopping the Service while it is STARTING, or
+ * starting it again while the previous ServiceRecord is being destroyed, can therefore produce
+ * ForegroundServiceDidNotStartInTimeException even though onCreate() promotes immediately.
+ *
+ * STARTING deliberately survives a zero-owner interval so onStartCommand() can promote and then
+ * stop with its exact startId. Acquires during STOPPING/DESTROYING wait until destruction has
+ * completed before a replacement start is allowed.
  */
 internal class ForegroundOwnerLeases {
+    private val lock = Any()
     private val owners = linkedSetOf<String>()
+    private var lifecycleState = ForegroundServiceLifecycleState.STOPPED
+    private var latestStartId: Int? = null
 
-    fun acquire(owner: String, onFirstAcquire: () -> Boolean): Boolean = synchronized(owners) {
-        if (!owners.add(owner)) return@synchronized false
-        if (owners.size == 1 && !onFirstAcquire()) {
-            owners.remove(owner)
-            return@synchronized false
+    fun acquire(owner: String): ForegroundServiceLeaseTransition = synchronized(lock) {
+        if (!owners.add(owner)) {
+            return@synchronized ForegroundServiceLeaseTransition(accepted = false)
         }
-        true
+        val action = if (lifecycleState == ForegroundServiceLifecycleState.STOPPED) {
+            lifecycleState = ForegroundServiceLifecycleState.STARTING
+            ForegroundServiceLeaseAction.Start
+        } else {
+            ForegroundServiceLeaseAction.None
+        }
+        ForegroundServiceLeaseTransition(accepted = true, action = action)
     }
 
-    fun release(owner: String, onLastRelease: () -> Unit): Boolean = synchronized(owners) {
-        if (!owners.remove(owner)) return@synchronized false
-        if (owners.isEmpty()) onLastRelease()
-        true
+    /**
+     * Rolls back only the owner whose synchronous platform start request failed. Other owners stay
+     * registered and can continue without an FGS; a later acquire may safely retry from STOPPED.
+     */
+    fun startRequestFailed(ownerToRollback: String? = null) = synchronized(lock) {
+        if (lifecycleState != ForegroundServiceLifecycleState.STARTING) return@synchronized
+        ownerToRollback?.let(owners::remove)
+        latestStartId = null
+        lifecycleState = ForegroundServiceLifecycleState.STOPPED
     }
 
-    fun size(): Int = synchronized(owners) { owners.size }
+    fun release(owner: String): ForegroundServiceLeaseTransition = synchronized(lock) {
+        if (!owners.remove(owner)) {
+            return@synchronized ForegroundServiceLeaseTransition(accepted = false)
+        }
+        val action =
+            if (owners.isEmpty() && lifecycleState == ForegroundServiceLifecycleState.RUNNING) {
+                lifecycleState = ForegroundServiceLifecycleState.STOPPING
+                ForegroundServiceLeaseAction.Stop(checkNotNull(latestStartId))
+            } else {
+                ForegroundServiceLeaseAction.None
+            }
+        ForegroundServiceLeaseTransition(accepted = true, action = action)
+    }
+
+    /**
+     * Called only after onCreate() has promoted the Service. A zero-owner STARTING service must
+     * still reach this point before it can be stopped, satisfying the platform FGS obligation.
+     */
+    fun serviceCommandReceived(startId: Int): ForegroundServiceLeaseAction = synchronized(lock) {
+        latestStartId = startId
+        when (lifecycleState) {
+            ForegroundServiceLifecycleState.STARTING,
+            ForegroundServiceLifecycleState.STOPPED,
+            ForegroundServiceLifecycleState.RUNNING -> {
+                if (owners.isEmpty()) {
+                    lifecycleState = ForegroundServiceLifecycleState.STOPPING
+                    ForegroundServiceLeaseAction.Stop(startId)
+                } else {
+                    lifecycleState = ForegroundServiceLifecycleState.RUNNING
+                    ForegroundServiceLeaseAction.None
+                }
+            }
+
+            ForegroundServiceLifecycleState.STOPPING,
+            ForegroundServiceLifecycleState.DESTROYING ->
+                ForegroundServiceLeaseAction.Stop(startId)
+        }
+    }
+
+    /** Prevents acquires from restarting the component until onDestroy() has fully returned. */
+    fun serviceDestroyed() = synchronized(lock) {
+        latestStartId = null
+        lifecycleState = ForegroundServiceLifecycleState.DESTROYING
+    }
+
+    /**
+     * Runs from the next main-loop turn after onDestroy(). Only now is the old ServiceRecord safe
+     * to replace; owners may have appeared or disappeared while destruction was in progress.
+     */
+    fun completeServiceDestroyed(): ForegroundServiceLeaseAction = synchronized(lock) {
+        if (lifecycleState != ForegroundServiceLifecycleState.DESTROYING) {
+            return@synchronized ForegroundServiceLeaseAction.None
+        }
+        if (owners.isEmpty()) {
+            lifecycleState = ForegroundServiceLifecycleState.STOPPED
+            ForegroundServiceLeaseAction.None
+        } else {
+            lifecycleState = ForegroundServiceLifecycleState.STARTING
+            ForegroundServiceLeaseAction.Start
+        }
+    }
+
+    fun size(): Int = synchronized(lock) { owners.size }
+
+    fun lifecycleState(): ForegroundServiceLifecycleState = synchronized(lock) { lifecycleState }
 }
 
 /** Uses all non-sign bits, including the Int.MIN_VALUE edge that Math.abs cannot normalize. */
@@ -56,13 +160,23 @@ class AgoraForegroundService : Service() {
         const val NOTIFICATION_ID = 1
         private const val COMPLETION_CHANNEL_ID = "agora_completed"
         private const val TAG = "AgoraForegroundService"
-        private var instance: AgoraForegroundService? = null
+        private val mainHandler = Handler(Looper.getMainLooper())
+        @Volatile private var instance: AgoraForegroundService? = null
         private val ownerLeases = ForegroundOwnerLeases()
 
         /** Acquires this generation's lease; returns false for a duplicate owner/start failure. */
         fun acquire(context: Context, owner: String): Boolean {
             if (owner.isBlank()) return false
-            return ownerLeases.acquire(owner) { startService(context) }
+            val transition = ownerLeases.acquire(owner)
+            if (!transition.accepted) return false
+            if (transition.action == ForegroundServiceLeaseAction.Start && !startService(context)) {
+                ownerLeases.startRequestFailed(owner)
+                return false
+            }
+            CrashReporter.note(
+                "FGS.acquire owners=${ownerLeases.size()} state=${ownerLeases.lifecycleState()}"
+            )
+            return true
         }
 
         private fun startService(context: Context): Boolean {
@@ -112,14 +226,21 @@ class AgoraForegroundService : Service() {
             instance?.updateNotificationText(text)
         }
 
-        /** Releases only [owner]'s lease. The service stops after the final distinct owner. */
-        fun release(context: Context, owner: String) {
-            val released = ownerLeases.release(owner) {
-                CrashReporter.note("FGS.stop foregroundStarted=${instance?.foregroundStarted}")
-                val appContext = context.applicationContext
-                appContext.stopService(Intent(appContext, AgoraForegroundService::class.java))
+        /**
+         * Releases only [owner]'s lease. A running Service stops with its exact startId; a Service
+         * that is still starting is allowed to promote first and stops from onStartCommand().
+         */
+        fun release(owner: String) {
+            val transition = ownerLeases.release(owner)
+            val action = transition.action
+            if (action is ForegroundServiceLeaseAction.Stop) {
+                CrashReporter.note("FGS.stop requested startId=${action.startId}")
+                instance?.requestLeaseStop(action.startId)
             }
-            CrashReporter.note("FGS.release released=$released owners=${ownerLeases.size()}")
+            CrashReporter.note(
+                "FGS.release released=${transition.accepted} owners=${ownerLeases.size()} " +
+                    "state=${ownerLeases.lifecycleState()}"
+            )
         }
 
         fun createChannel(context: Context) {
@@ -226,13 +347,51 @@ class AgoraForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // startForeground() already called in onCreate(); no re-promote needed.
+        // startForeground() already ran in onCreate(). Only now do we have the platform startId
+        // required to stop without racing the ServiceRecord's foreground-start obligation.
+        val action = ownerLeases.serviceCommandReceived(startId)
+        CrashReporter.note(
+            "FGS.onStartCommand startId=$startId owners=${ownerLeases.size()} " +
+                "state=${ownerLeases.lifecycleState()}"
+        )
+        if (action is ForegroundServiceLeaseAction.Stop) {
+            requestLeaseStop(action.startId)
+        }
         return START_NOT_STICKY
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        ownerLeases.serviceDestroyed()
         if (instance === this) instance = null
+        foregroundStarted = false
+        CrashReporter.note("FGS.onDestroy owners=${ownerLeases.size()}")
+        super.onDestroy()
+
+        val appContext = applicationContext
+        // Posting is essential: starting from inside onDestroy() can target the ServiceRecord that
+        // is still being brought down. The next main-loop turn runs after destruction completion.
+        mainHandler.post {
+            val action = ownerLeases.completeServiceDestroyed()
+            CrashReporter.note(
+                "FGS.destroy complete owners=${ownerLeases.size()} " +
+                    "state=${ownerLeases.lifecycleState()} restart=${action is ForegroundServiceLeaseAction.Start}"
+            )
+            if (action == ForegroundServiceLeaseAction.Start && !startService(appContext)) {
+                ownerLeases.startRequestFailed()
+            }
+        }
+    }
+
+    private fun requestLeaseStop(startId: Int) {
+        val stop = Runnable {
+            val stopped = stopSelfResult(startId)
+            CrashReporter.note("FGS.stopSelfResult startId=$startId stopped=$stopped")
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            stop.run()
+        } else {
+            mainHandler.post(stop)
+        }
     }
 
     private fun updateNotificationText(text: String) {
