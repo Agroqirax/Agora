@@ -127,6 +127,14 @@
     <string name="arguments_label">Argumentos:</string>
     <string name="result_label">Resultado:</string>
     <string name="cost_tokens">Coste %1$d tokens</string>
+    <string name="token_usage_with_label">Uso de tokens: %1$d tokens</string>
+    <string name="input_tokens_with_label">Tokens de entrada: %1$s</string>
+    <string name="output_tokens_with_label">Tokens de salida: %1$s</string>
+    <string name="token_count">%1$d tokens</string>
+    <string name="token_count_with_cached">%1$d tokens (%2$d en caché)</string>
+    <string name="detailed_token_usage">Uso detallado de tokens</string>
+    <string name="detailed_token_usage_desc">Muestra el número de tokens de entrada y salida en las respuestas completadas</string>
+    <string name="token_usage_detail">Entrada %1$s · Salida %2$s</string>
     <string name="thinking_ellipsis">Razonando...</string>
     <string name="answering_ellipsis">Respondiendo...</string>
     <string name="sending_ellipsis">Enviando...</string>
@@ -152,6 +160,7 @@
 
     <!-- Drawer -->
     <string name="conversations">Conversaciones</string>
+    <string name="conversation_unread_generation">Respuesta generada sin leer</string>
     <string name="new_chat">Nuevo chat</string>
 
     <!-- Settings - Main -->
@@ -269,10 +278,10 @@
     <string name="models_title">Modelos</string>
     <string name="models_default">Modelo predeterminado</string>
     <string name="models_no_models">No hay modelos activados</string>
-    <string name="models_manual">Modelos manuales</string>
+    <string name="models_manual">Modelos personalizados</string>
     <string name="models_manual_empty">No se han añadido modelos personalizados</string>
     <string name="models_add_custom">Añadir modelo personalizado</string>
-    <string name="models_auto_fetch">Obtención automática</string>
+    <string name="models_auto_fetch">Modelos obtenidos</string>
     <string name="models_auto_empty">No hay modelos obtenidos</string>
     <string name="models_search_hint">Buscar modelos…</string>
     <string name="models_search_empty">No hay modelos coincidentes</string>
@@ -282,6 +291,12 @@
     <string name="models_sync">Sincronizar desde todos los proveedores</string>
     <string name="models_sync_desc">Obtén la última lista de modelos de todas las API configuradas</string>
     <string name="models_count">%1$d modelos disponibles</string>
+    <string name="models_count_status">%1$d activados · %2$d en total</string>
+    <string name="models_search_count_status">%1$d activados · %2$d coincidencias</string>
+    <string name="models_delete_custom_title">¿Eliminar modelo personalizado?</string>
+    <string name="models_delete_custom_text">¿Quitar %1$s de los modelos personalizados?</string>
+    <string name="models_edit_custom">Editar modelo personalizado</string>
+    <string name="models_custom_details">Detalles del modelo personalizado</string>
     <string name="models_rename">Renombrar modelo</string>
     <string name="models_rename_current">ID actual: %1$s</string>
     <string name="models_alias_hint">Alias</string>
@@ -481,6 +496,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">Modelo de transcripción</string>
+    <string name="transcription_enable">Activar transcripción de imágenes</string>
     <string name="transcription_no_model">No seleccionado</string>
     <string name="transcription_select_model">Seleccionar modelo de transcripción</string>
     <string name="transcription_batch_size">Tamaño de lote</string>
@@ -713,7 +729,7 @@
     <string name="local_mmproj_path_label">Proyector de visión (.mmproj)</string>
     <string name="local_chat_delete_title">¿Eliminar modelo local?</string>
     <string name="local_chat_delete_text">¿Seguro que quieres eliminar \'%1$s\'? Esto también eliminará el archivo del modelo.</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">ID del modelo</string>
     <string name="model_alias_label">Alias</string>
 
     <!-- Settings - Group Labels -->
@@ -774,8 +790,8 @@
     <string name="export_category_memories">Memorias</string>
     <string name="export_category_system_prompts">Instrucciones del sistema</string>
     <string name="export_category_settings">Ajustes</string>
-    <string name="export_category_api_keys">Claves de API</string>
-    <string name="export_api_keys_warning">Las claves de API se exportarán en texto plano. Actívalo solo si confías en el destino.</string>
+    <string name="export_category_api_keys">Credenciales y secretos</string>
+    <string name="export_api_keys_warning">Las claves de API, las contraseñas y los encabezados de autenticación personalizados se exportarán en texto plano. Actívalo solo si confías en el destino.</string>
     <string name="export_button">Exportar</string>
     <string name="exporting_label">Exportando…</string>
     <string name="export_success">Datos exportados correctamente.</string>
@@ -783,10 +799,11 @@
     <string name="export_failed">Error al exportar: %1$s</string>
     <string name="import_preview_title">Importar datos</string>
     <string name="import_from">Exportado el %1$s\nDesde Agora v%2$s</string>
+    <string name="import_unsupported_backup_version">El formato de copia v%1$d no es compatible. Esta aplicación admite hasta v%2$d.</string>
     <string name="import_strategy_merge">Combinar</string>
     <string name="import_strategy_replace">Reemplazar</string>
     <string name="import_strategy_skip">Omitir</string>
-    <string name="import_api_keys_warning">Esta exportación contiene claves de API. Las claves se importarán en texto plano. Continúa solo si confías en el origen.</string>
+    <string name="import_api_keys_warning">Esta copia de seguridad contiene credenciales y secretos. Se importarán en texto plano. Continúa solo si confías en el origen.</string>
     <string name="import_button">Importar</string>
     <string name="importing_label">Importando…</string>
     <string name="import_success">Importación completada: %1$s</string>
@@ -920,7 +937,7 @@
     <string name="auto_backup_categories_label">Contenido de la copia de seguridad</string>
     <string name="auto_backup_categories_desc">Elige qué respaldar</string>
     <string name="auto_backup_categories_dialog_title">Seleccionar contenido de la copia de seguridad</string>
-    <string name="auto_backup_api_key_warning">Las claves de API se guardarán sin cifrar en el archivo de copia de seguridad</string>
+    <string name="auto_backup_api_key_warning">Las credenciales y los secretos se guardarán sin cifrar en el archivo de copia de seguridad</string>
     <string name="auto_backup_directory_label">Ubicación de la copia de seguridad</string>
     <string name="auto_delete_title">Eliminar copias antiguas automáticamente</string>
     <string name="auto_delete_subtitle">Eliminar copias de seguridad más antiguas que el periodo indicado</string>

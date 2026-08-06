@@ -130,6 +130,14 @@
     <string name="arguments_label">Đối số:</string>
     <string name="result_label">Kết quả:</string>
     <string name="cost_tokens">Tiêu tốn %1$d token</string>
+    <string name="token_usage_with_label">Mức sử dụng token: %1$d token</string>
+    <string name="input_tokens_with_label">Token đầu vào: %1$s</string>
+    <string name="output_tokens_with_label">Token đầu ra: %1$s</string>
+    <string name="token_count">%1$d token</string>
+    <string name="token_count_with_cached">%1$d token (%2$d đã lưu đệm)</string>
+    <string name="detailed_token_usage">Mức sử dụng token chi tiết</string>
+    <string name="detailed_token_usage_desc">Hiển thị số token đầu vào và đầu ra cho câu trả lời đã hoàn tất</string>
+    <string name="token_usage_detail">Đầu vào %1$s · Đầu ra %2$s</string>
     <string name="thinking_ellipsis">Đang suy nghĩ...</string>
     <string name="answering_ellipsis">Đang trả lời...</string>
     <string name="sending_ellipsis">Đang gửi...</string>
@@ -155,6 +163,7 @@
 
     <!-- Drawer -->
     <string name="conversations">Cuộc trò chuyện</string>
+    <string name="conversation_unread_generation">Phản hồi đã tạo chưa đọc</string>
     <string name="new_chat">Trò chuyện mới</string>
 
     <!-- Settings - Main -->
@@ -272,10 +281,10 @@
     <string name="models_title">Mô hình</string>
     <string name="models_default">Mô hình mặc định</string>
     <string name="models_no_models">Không có mô hình nào được bật</string>
-    <string name="models_manual">Mô hình thủ công</string>
+    <string name="models_manual">Mô hình tùy chỉnh</string>
     <string name="models_manual_empty">Chưa thêm mô hình tùy chỉnh</string>
     <string name="models_add_custom">Thêm mô hình tùy chỉnh</string>
-    <string name="models_auto_fetch">Tự động tải</string>
+    <string name="models_auto_fetch">Mô hình đã tải</string>
     <string name="models_auto_empty">Chưa tải được mô hình nào</string>
     <string name="models_search_hint">Tìm kiếm mô hình…</string>
     <string name="models_search_empty">Không có mô hình phù hợp</string>
@@ -285,6 +294,12 @@
     <string name="models_sync">Đồng bộ từ tất cả nhà cung cấp</string>
     <string name="models_sync_desc">Lấy danh sách mô hình mới nhất từ tất cả các API đã cấu hình</string>
     <string name="models_count">Có %1$d mô hình khả dụng</string>
+    <string name="models_count_status">Đã bật %1$d · tổng cộng %2$d</string>
+    <string name="models_search_count_status">Đã bật %1$d · %2$d kết quả</string>
+    <string name="models_delete_custom_title">Xóa mô hình tùy chỉnh?</string>
+    <string name="models_delete_custom_text">Xóa %1$s khỏi các mô hình tùy chỉnh?</string>
+    <string name="models_edit_custom">Chỉnh sửa mô hình tùy chỉnh</string>
+    <string name="models_custom_details">Chi tiết mô hình tùy chỉnh</string>
     <string name="models_rename">Đổi tên mô hình</string>
     <string name="models_rename_current">ID hiện tại: %1$s</string>
     <string name="models_alias_hint">Tên thay thế</string>
@@ -480,6 +495,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">Mô hình chuyển tả</string>
+    <string name="transcription_enable">Bật chuyển tả hình ảnh</string>
     <string name="transcription_no_model">Chưa chọn</string>
     <string name="transcription_select_model">Chọn mô hình chuyển tả</string>
     <string name="transcription_batch_size">Kích thước lô (Batch Size)</string>
@@ -716,7 +732,7 @@
     <string name="local_mmproj_path_label">Bộ chiếu thị giác (.mmproj)</string>
     <string name="local_chat_delete_title">Xóa mô hình cục bộ?</string>
     <string name="local_chat_delete_text">Bạn có chắc chắn muốn xóa \'%1$s\'? Thao tác này cũng sẽ xóa tệp mô hình.</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">ID mô hình</string>
     <string name="model_alias_label">Tên thay thế</string>
 
     <!-- Settings - Group Labels -->
@@ -777,18 +793,19 @@
     <string name="export_category_memories">Ký ức</string>
     <string name="export_category_system_prompts">Gợi ý hệ thống</string>
     <string name="export_category_settings">Cài đặt</string>
-    <string name="export_category_api_keys">Khóa API</string>
-    <string name="export_api_keys_warning">Khóa API sẽ được xuất dạng văn bản thuần. Chỉ bật nếu bạn tin tưởng nơi lưu trữ.</string>
+    <string name="export_category_api_keys">Thông tin xác thực và bí mật</string>
+    <string name="export_api_keys_warning">Khóa API, mật khẩu và tiêu đề xác thực tùy chỉnh sẽ được xuất dưới dạng văn bản thuần. Chỉ bật nếu bạn tin tưởng nơi lưu trữ.</string>
     <string name="export_button">Xuất</string>
     <string name="exporting_label">Đang xuất…</string>
     <string name="export_success">Xuất dữ liệu thành công.</string>
     <string name="export_failed">Xuất thất bại: %1$s</string>
     <string name="import_preview_title">Nhập dữ liệu</string>
     <string name="import_from">Xuất ngày %1$s\nTừ Agora v%2$s</string>
+    <string name="import_unsupported_backup_version">Định dạng sao lưu v%1$d không được hỗ trợ. Ứng dụng này hỗ trợ đến v%2$d.</string>
     <string name="import_strategy_merge">Gộp</string>
     <string name="import_strategy_replace">Thay thế</string>
     <string name="import_strategy_skip">Bỏ qua</string>
-    <string name="import_api_keys_warning">Bản xuất này chứa khóa API. Khóa sẽ được nhập dạng văn bản thuần. Chỉ tiếp tục nếu bạn tin tưởng nguồn.</string>
+    <string name="import_api_keys_warning">Bản sao lưu này chứa thông tin xác thực và bí mật. Chúng sẽ được nhập dưới dạng văn bản thuần. Chỉ tiếp tục nếu bạn tin tưởng nguồn.</string>
     <string name="import_button">Nhập</string>
     <string name="importing_label">Đang nhập…</string>
     <string name="import_success">Nhập hoàn tất: %1$s</string>
@@ -926,7 +943,7 @@
     <string name="auto_backup_categories_label">Nội dung sao lưu</string>
     <string name="auto_backup_categories_desc">Chọn những gì cần sao lưu</string>
     <string name="auto_backup_categories_dialog_title">Chọn nội dung sao lưu</string>
-    <string name="auto_backup_api_key_warning">Các khóa API sẽ được lưu trữ mà không mã hóa trong tệp sao lưu</string>
+    <string name="auto_backup_api_key_warning">Thông tin xác thực và bí mật sẽ được lưu trữ mà không mã hóa trong tệp sao lưu</string>
     <string name="auto_backup_directory_label">Vị trí sao lưu</string>
     <string name="auto_delete_title">Tự động xóa các bản sao lưu cũ</string>
     <string name="auto_delete_subtitle">Xóa các bản sao lưu cũ hơn khoảng thời gian được chỉ định</string>

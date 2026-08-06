@@ -127,6 +127,14 @@
     <string name="arguments_label">인수:</string>
     <string name="result_label">결과:</string>
     <string name="cost_tokens">비용 %1$d 토큰</string>
+    <string name="token_usage_with_label">토큰 사용량: %1$d 토큰</string>
+    <string name="input_tokens_with_label">입력 토큰: %1$s</string>
+    <string name="output_tokens_with_label">출력 토큰: %1$s</string>
+    <string name="token_count">%1$d 토큰</string>
+    <string name="token_count_with_cached">%1$d 토큰 (캐시 %2$d)</string>
+    <string name="detailed_token_usage">상세 토큰 사용량</string>
+    <string name="detailed_token_usage_desc">완료된 답변에 입력 및 출력 토큰 수를 표시합니다</string>
+    <string name="token_usage_detail">입력 %1$s · 출력 %2$s</string>
     <string name="thinking_ellipsis">사고 중...</string>
     <string name="answering_ellipsis">답변 중...</string>
     <string name="sending_ellipsis">보내는 중...</string>
@@ -152,6 +160,7 @@
 
     <!-- Drawer -->
     <string name="conversations">대화</string>
+    <string name="conversation_unread_generation">읽지 않은 생성 응답</string>
     <string name="new_chat">새 채팅</string>
 
     <!-- Settings - Main -->
@@ -269,10 +278,10 @@
     <string name="models_title">모델</string>
     <string name="models_default">기본 모델</string>
     <string name="models_no_models">활성화된 모델 없음</string>
-    <string name="models_manual">수동 모델</string>
+    <string name="models_manual">사용자 지정 모델</string>
     <string name="models_manual_empty">추가된 사용자 지정 모델 없음</string>
     <string name="models_add_custom">사용자 지정 모델 추가</string>
-    <string name="models_auto_fetch">자동 가져오기</string>
+    <string name="models_auto_fetch">가져온 모델</string>
     <string name="models_auto_empty">가져온 모델 없음</string>
     <string name="models_search_hint">모델 검색…</string>
     <string name="models_search_empty">일치하는 모델 없음</string>
@@ -282,6 +291,12 @@
     <string name="models_sync">모든 제공자에서 동기화</string>
     <string name="models_sync_desc">구성된 모든 API의 최신 모델 목록 가져오기</string>
     <string name="models_count">%1$d개의 모델 사용 가능</string>
+    <string name="models_count_status">%1$d개 사용 · 총 %2$d개</string>
+    <string name="models_search_count_status">%1$d개 사용 · %2$d개 일치</string>
+    <string name="models_delete_custom_title">사용자 지정 모델을 삭제할까요?</string>
+    <string name="models_delete_custom_text">사용자 지정 모델에서 %1$s을(를) 삭제할까요?</string>
+    <string name="models_edit_custom">사용자 지정 모델 편집</string>
+    <string name="models_custom_details">사용자 지정 모델 세부정보</string>
     <string name="models_rename">모델 이름 변경</string>
     <string name="models_rename_current">현재 ID: %1$s</string>
     <string name="models_alias_hint">별칭</string>
@@ -481,6 +496,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">전사 모델</string>
+    <string name="transcription_enable">이미지 전사 사용</string>
     <string name="transcription_no_model">선택되지 않음</string>
     <string name="transcription_select_model">전사 모델 선택</string>
     <string name="transcription_batch_size">배치 크기</string>
@@ -713,7 +729,7 @@
     <string name="local_mmproj_path_label">비전 프로젝터(.mmproj)</string>
     <string name="local_chat_delete_title">로컬 모델을 삭제하시겠습니까?</string>
     <string name="local_chat_delete_text">\'%1$s\'을(를) 삭제하시겠습니까? 모델 파일도 삭제됩니다.</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">모델 ID</string>
     <string name="model_alias_label">별칭</string>
 
     <!-- Settings - Group Labels -->
@@ -774,8 +790,8 @@
     <string name="export_category_memories">메모리</string>
     <string name="export_category_system_prompts">시스템 프롬프트</string>
     <string name="export_category_settings">설정</string>
-    <string name="export_category_api_keys">API 키</string>
-    <string name="export_api_keys_warning">API 키는 평문으로 내보내집니다. 대상을 신뢰하는 경우에만 활성화하세요.</string>
+    <string name="export_category_api_keys">자격 증명 및 비밀 정보</string>
+    <string name="export_api_keys_warning">API 키, 비밀번호 및 사용자 지정 인증 헤더는 평문으로 내보내집니다. 대상을 신뢰하는 경우에만 활성화하세요.</string>
     <string name="export_button">내보내기</string>
     <string name="exporting_label">내보내는 중…</string>
     <string name="export_success">데이터를 성공적으로 내보냈습니다.</string>
@@ -783,10 +799,11 @@
     <string name="export_failed">내보내기 실패: %1$s</string>
     <string name="import_preview_title">데이터 가져오기</string>
     <string name="import_from">%1$s에 내보냄\nAgora v%2$s에서</string>
+    <string name="import_unsupported_backup_version">백업 형식 v%1$d은(는) 지원되지 않습니다. 이 앱은 v%2$d까지 지원합니다.</string>
     <string name="import_strategy_merge">병합</string>
     <string name="import_strategy_replace">교체</string>
     <string name="import_strategy_skip">건너뛰기</string>
-    <string name="import_api_keys_warning">이 내보내기에는 API 키가 포함되어 있습니다. 키는 평문으로 가져옵니다. 출처를 신뢰하는 경우에만 계속하세요.</string>
+    <string name="import_api_keys_warning">이 백업에는 자격 증명 및 비밀 정보가 포함되어 있습니다. 평문으로 가져오므로 출처를 신뢰하는 경우에만 계속하세요.</string>
     <string name="import_button">가져오기</string>
     <string name="importing_label">가져오는 중…</string>
     <string name="import_success">가져오기 완료: %1$s</string>
@@ -920,7 +937,7 @@
     <string name="auto_backup_categories_label">백업 콘텐츠</string>
     <string name="auto_backup_categories_desc">백업할 항목 선택</string>
     <string name="auto_backup_categories_dialog_title">백업 콘텐츠 선택</string>
-    <string name="auto_backup_api_key_warning">API 키는 백업 파일에 암호화되지 않은 상태로 저장됩니다</string>
+    <string name="auto_backup_api_key_warning">자격 증명 및 비밀 정보는 백업 파일에 암호화되지 않은 상태로 저장됩니다</string>
     <string name="auto_backup_directory_label">백업 위치</string>
     <string name="auto_delete_title">오래된 백업 자동 삭제</string>
     <string name="auto_delete_subtitle">지정한 기간보다 오래된 백업 제거</string>

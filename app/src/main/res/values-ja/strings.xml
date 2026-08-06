@@ -127,6 +127,14 @@
     <string name="arguments_label">引数:</string>
     <string name="result_label">結果:</string>
     <string name="cost_tokens">コスト %1$d トークン</string>
+    <string name="token_usage_with_label">トークン使用量: %1$d トークン</string>
+    <string name="input_tokens_with_label">入力トークン: %1$s</string>
+    <string name="output_tokens_with_label">出力トークン: %1$s</string>
+    <string name="token_count">%1$d トークン</string>
+    <string name="token_count_with_cached">%1$d トークン（%2$d キャッシュ済み）</string>
+    <string name="detailed_token_usage">トークン使用量の詳細</string>
+    <string name="detailed_token_usage_desc">完了した返信に入力と出力のトークン数を表示します</string>
+    <string name="token_usage_detail">入力 %1$s · 出力 %2$s</string>
     <string name="thinking_ellipsis">思考中...</string>
     <string name="answering_ellipsis">回答中...</string>
     <string name="sending_ellipsis">送信中...</string>
@@ -152,6 +160,7 @@
 
     <!-- Drawer -->
     <string name="conversations">会話</string>
+    <string name="conversation_unread_generation">未読の生成済み回答</string>
     <string name="new_chat">新しいチャット</string>
 
     <!-- Settings - Main -->
@@ -269,10 +278,10 @@
     <string name="models_title">モデル</string>
     <string name="models_default">デフォルトモデル</string>
     <string name="models_no_models">有効なモデルがありません</string>
-    <string name="models_manual">手動モデル</string>
+    <string name="models_manual">カスタムモデル</string>
     <string name="models_manual_empty">カスタムモデルは追加されていません</string>
     <string name="models_add_custom">カスタムモデルを追加</string>
-    <string name="models_auto_fetch">自動取得</string>
+    <string name="models_auto_fetch">取得済みモデル</string>
     <string name="models_auto_empty">取得済みのモデルはありません</string>
     <string name="models_search_hint">モデルを検索…</string>
     <string name="models_search_empty">一致するモデルはありません</string>
@@ -282,6 +291,12 @@
     <string name="models_sync">すべてのプロバイダーから同期</string>
     <string name="models_sync_desc">設定済みのすべての API の最新モデル一覧を取得</string>
     <string name="models_count">%1$d 個のモデルが利用可能</string>
+    <string name="models_count_status">%1$d 件有効 · 全 %2$d 件</string>
+    <string name="models_search_count_status">%1$d 件有効 · %2$d 件一致</string>
+    <string name="models_delete_custom_title">カスタムモデルを削除しますか？</string>
+    <string name="models_delete_custom_text">カスタムモデルから %1$s を削除しますか？</string>
+    <string name="models_edit_custom">カスタムモデルを編集</string>
+    <string name="models_custom_details">カスタムモデルの詳細</string>
     <string name="models_rename">モデルの名前を変更</string>
     <string name="models_rename_current">現在の ID: %1$s</string>
     <string name="models_alias_hint">エイリアス</string>
@@ -481,6 +496,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">文字起こしモデル</string>
+    <string name="transcription_enable">画像の文字起こしを有効にする</string>
     <string name="transcription_no_model">未選択</string>
     <string name="transcription_select_model">文字起こしモデルを選択</string>
     <string name="transcription_batch_size">バッチサイズ</string>
@@ -713,7 +729,7 @@
     <string name="local_mmproj_path_label">ビジョンプロジェクター（.mmproj）</string>
     <string name="local_chat_delete_title">ローカルモデルを削除しますか?</string>
     <string name="local_chat_delete_text">\'%1$s\' を削除してもよろしいですか? モデルファイルも削除されます。</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">モデル ID</string>
     <string name="model_alias_label">エイリアス</string>
 
     <!-- Settings - Group Labels -->
@@ -774,8 +790,8 @@
     <string name="export_category_memories">メモリ</string>
     <string name="export_category_system_prompts">システムプロンプト</string>
     <string name="export_category_settings">設定</string>
-    <string name="export_category_api_keys">API キー</string>
-    <string name="export_api_keys_warning">API キーは平文でエクスポートされます。送信先を信頼できる場合のみ有効にしてください。</string>
+    <string name="export_category_api_keys">認証情報とシークレット</string>
+    <string name="export_api_keys_warning">API キー、パスワード、カスタム認証ヘッダーは平文でエクスポートされます。送信先を信頼できる場合のみ有効にしてください。</string>
     <string name="export_button">エクスポート</string>
     <string name="exporting_label">エクスポート中…</string>
     <string name="export_success">データを正常にエクスポートしました。</string>
@@ -783,10 +799,11 @@
     <string name="export_failed">エクスポートに失敗しました: %1$s</string>
     <string name="import_preview_title">データをインポート</string>
     <string name="import_from">%1$s にエクスポート\nAgora v%2$s から</string>
+    <string name="import_unsupported_backup_version">バックアップ形式 v%1$d はサポートされていません。このアプリは v%2$d まで対応しています。</string>
     <string name="import_strategy_merge">マージ</string>
     <string name="import_strategy_replace">置換</string>
     <string name="import_strategy_skip">スキップ</string>
-    <string name="import_api_keys_warning">このエクスポートには API キーが含まれています。キーは平文でインポートされます。送信元を信頼できる場合のみ続行してください。</string>
+    <string name="import_api_keys_warning">このバックアップには認証情報とシークレットが含まれています。これらは平文でインポートされます。送信元を信頼できる場合のみ続行してください。</string>
     <string name="import_button">インポート</string>
     <string name="importing_label">インポート中…</string>
     <string name="import_success">インポートが完了しました: %1$s</string>
@@ -920,7 +937,7 @@
     <string name="auto_backup_categories_label">バックアップ内容</string>
     <string name="auto_backup_categories_desc">バックアップする内容を選択</string>
     <string name="auto_backup_categories_dialog_title">バックアップ内容を選択</string>
-    <string name="auto_backup_api_key_warning">API キーはバックアップファイルに暗号化されずに保存されます</string>
+    <string name="auto_backup_api_key_warning">認証情報とシークレットはバックアップファイルに暗号化されずに保存されます</string>
     <string name="auto_backup_directory_label">バックアップ場所</string>
     <string name="auto_delete_title">古いバックアップを自動削除</string>
     <string name="auto_delete_subtitle">指定した期間より古いバックアップを削除</string>

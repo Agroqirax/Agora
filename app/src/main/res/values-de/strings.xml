@@ -127,6 +127,14 @@
     <string name="arguments_label">Argumente:</string>
     <string name="result_label">Ergebnis:</string>
     <string name="cost_tokens">Kosten %1$d Tokens</string>
+    <string name="token_usage_with_label">Tokenverbrauch: %1$d Tokens</string>
+    <string name="input_tokens_with_label">Eingabe-Tokens: %1$s</string>
+    <string name="output_tokens_with_label">Ausgabe-Tokens: %1$s</string>
+    <string name="token_count">%1$d Tokens</string>
+    <string name="token_count_with_cached">%1$d Tokens (%2$d im Cache)</string>
+    <string name="detailed_token_usage">Detaillierte Token-Nutzung</string>
+    <string name="detailed_token_usage_desc">Zeigt Eingabe- und Ausgabe-Tokenzahlen für abgeschlossene Antworten</string>
+    <string name="token_usage_detail">Eingabe %1$s · Ausgabe %2$s</string>
     <string name="thinking_ellipsis">Nachdenken...</string>
     <string name="answering_ellipsis">Antworten...</string>
     <string name="sending_ellipsis">Senden...</string>
@@ -152,6 +160,7 @@
 
     <!-- Drawer -->
     <string name="conversations">Unterhaltungen</string>
+    <string name="conversation_unread_generation">Ungelesene generierte Antwort</string>
     <string name="new_chat">Neuer Chat</string>
 
     <!-- Settings - Main -->
@@ -269,10 +278,10 @@
     <string name="models_title">Modelle</string>
     <string name="models_default">Standardmodell</string>
     <string name="models_no_models">Keine Modelle aktiviert</string>
-    <string name="models_manual">Manuelle Modelle</string>
+    <string name="models_manual">Benutzerdefinierte Modelle</string>
     <string name="models_manual_empty">Keine benutzerdefinierten Modelle hinzugefügt</string>
     <string name="models_add_custom">Benutzerdefiniertes Modell hinzufügen</string>
-    <string name="models_auto_fetch">Automatischer Abruf</string>
+    <string name="models_auto_fetch">Abgerufene Modelle</string>
     <string name="models_auto_empty">Keine Modelle abgerufen</string>
     <string name="models_search_hint">Modelle suchen…</string>
     <string name="models_search_empty">Keine passenden Modelle</string>
@@ -282,6 +291,12 @@
     <string name="models_sync">Von allen Anbietern synchronisieren</string>
     <string name="models_sync_desc">Neueste Modellliste für alle konfigurierten APIs abrufen</string>
     <string name="models_count">%1$d Modelle verfügbar</string>
+    <string name="models_count_status">%1$d aktiviert · %2$d insgesamt</string>
+    <string name="models_search_count_status">%1$d aktiviert · %2$d Treffer</string>
+    <string name="models_delete_custom_title">Benutzerdefiniertes Modell löschen?</string>
+    <string name="models_delete_custom_text">%1$s aus den benutzerdefinierten Modellen entfernen?</string>
+    <string name="models_edit_custom">Benutzerdefiniertes Modell bearbeiten</string>
+    <string name="models_custom_details">Details zum benutzerdefinierten Modell</string>
     <string name="models_rename">Modell umbenennen</string>
     <string name="models_rename_current">Aktuelle ID: %1$s</string>
     <string name="models_alias_hint">Alias</string>
@@ -481,6 +496,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">Transkriptionsmodell</string>
+    <string name="transcription_enable">Bildtranskription aktivieren</string>
     <string name="transcription_no_model">Nicht ausgewählt</string>
     <string name="transcription_select_model">Transkriptionsmodell auswählen</string>
     <string name="transcription_batch_size">Stapelgröße</string>
@@ -713,7 +729,7 @@
     <string name="local_mmproj_path_label">Vision-Projektor (.mmproj)</string>
     <string name="local_chat_delete_title">Lokales Modell löschen?</string>
     <string name="local_chat_delete_text">Möchtest du \'%1$s\' wirklich löschen? Dadurch wird auch die Modelldatei gelöscht.</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">Modell-ID</string>
     <string name="model_alias_label">Alias</string>
 
     <!-- Settings - Group Labels -->
@@ -774,8 +790,8 @@
     <string name="export_category_memories">Erinnerungen</string>
     <string name="export_category_system_prompts">System-Prompts</string>
     <string name="export_category_settings">Einstellungen</string>
-    <string name="export_category_api_keys">API-Schlüssel</string>
-    <string name="export_api_keys_warning">API-Schlüssel werden im Klartext exportiert. Aktiviere dies nur, wenn du dem Ziel vertraust.</string>
+    <string name="export_category_api_keys">Zugangsdaten &amp; Geheimnisse</string>
+    <string name="export_api_keys_warning">API-Schlüssel, Passwörter und benutzerdefinierte Authentifizierungsheader werden im Klartext exportiert. Aktiviere dies nur, wenn du dem Ziel vertraust.</string>
     <string name="export_button">Exportieren</string>
     <string name="exporting_label">Exportieren…</string>
     <string name="export_success">Daten erfolgreich exportiert.</string>
@@ -783,10 +799,11 @@
     <string name="export_failed">Export fehlgeschlagen: %1$s</string>
     <string name="import_preview_title">Daten importieren</string>
     <string name="import_from">Exportiert am %1$s\nAus Agora v%2$s</string>
+    <string name="import_unsupported_backup_version">Das Sicherungsformat v%1$d wird nicht unterstützt. Diese App unterstützt bis v%2$d.</string>
     <string name="import_strategy_merge">Zusammenführen</string>
     <string name="import_strategy_replace">Ersetzen</string>
     <string name="import_strategy_skip">Überspringen</string>
-    <string name="import_api_keys_warning">Dieser Export enthält API-Schlüssel. Die Schlüssel werden im Klartext importiert. Fahre nur fort, wenn du der Quelle vertraust.</string>
+    <string name="import_api_keys_warning">Diese Sicherung enthält Zugangsdaten und Geheimnisse. Sie werden im Klartext importiert. Fahre nur fort, wenn du der Quelle vertraust.</string>
     <string name="import_button">Importieren</string>
     <string name="importing_label">Importieren…</string>
     <string name="import_success">Import abgeschlossen: %1$s</string>
@@ -920,7 +937,7 @@
     <string name="auto_backup_categories_label">Sicherungsinhalte</string>
     <string name="auto_backup_categories_desc">Wähle, was gesichert werden soll</string>
     <string name="auto_backup_categories_dialog_title">Sicherungsinhalte auswählen</string>
-    <string name="auto_backup_api_key_warning">API-Schlüssel werden unverschlüsselt in der Sicherungsdatei gespeichert</string>
+    <string name="auto_backup_api_key_warning">Zugangsdaten und Geheimnisse werden unverschlüsselt in der Sicherungsdatei gespeichert</string>
     <string name="auto_backup_directory_label">Speicherort der Sicherung</string>
     <string name="auto_delete_title">Alte Sicherungen automatisch löschen</string>
     <string name="auto_delete_subtitle">Sicherungen entfernen, die älter als der angegebene Zeitraum sind</string>

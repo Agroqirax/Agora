@@ -127,6 +127,14 @@
     <string name="arguments_label">الوسائط:</string>
     <string name="result_label">النتيجة:</string>
     <string name="cost_tokens">التكلفة %1$d رمز</string>
+    <string name="token_usage_with_label">استخدام الرموز: %1$d رمزًا</string>
+    <string name="input_tokens_with_label">رموز الإدخال: %1$s</string>
+    <string name="output_tokens_with_label">رموز الإخراج: %1$s</string>
+    <string name="token_count">%1$d رمزًا</string>
+    <string name="token_count_with_cached">%1$d رمزًا (%2$d مخزنة مؤقتًا)</string>
+    <string name="detailed_token_usage">استخدام الرموز بالتفصيل</string>
+    <string name="detailed_token_usage_desc">عرض عدد رموز الإدخال والإخراج للردود المكتملة</string>
+    <string name="token_usage_detail">إدخال %1$s · إخراج %2$s</string>
     <string name="thinking_ellipsis">جارٍ التفكير...</string>
     <string name="answering_ellipsis">جارٍ الإجابة...</string>
     <string name="sending_ellipsis">جارٍ الإرسال...</string>
@@ -152,6 +160,7 @@
 
     <!-- Drawer -->
     <string name="conversations">المحادثات</string>
+    <string name="conversation_unread_generation">رد مُنشأ غير مقروء</string>
     <string name="new_chat">محادثة جديدة</string>
 
     <!-- Settings - Main -->
@@ -269,10 +278,10 @@
     <string name="models_title">النماذج</string>
     <string name="models_default">النموذج الافتراضي</string>
     <string name="models_no_models">لا توجد نماذج مفعّلة</string>
-    <string name="models_manual">النماذج اليدوية</string>
+    <string name="models_manual">النماذج المخصصة</string>
     <string name="models_manual_empty">لم تتم إضافة نماذج مخصصة</string>
     <string name="models_add_custom">إضافة نموذج مخصص</string>
-    <string name="models_auto_fetch">الجلب التلقائي</string>
+    <string name="models_auto_fetch">النماذج التي تم جلبها</string>
     <string name="models_auto_empty">لم يتم جلب أي نماذج</string>
     <string name="models_search_hint">البحث في النماذج…</string>
     <string name="models_search_empty">لا توجد نماذج مطابقة</string>
@@ -282,6 +291,12 @@
     <string name="models_sync">المزامنة من جميع المزوّدين</string>
     <string name="models_sync_desc">جلب أحدث قائمة نماذج لجميع واجهات API المهيأة</string>
     <string name="models_count">%1$d نموذج متاح</string>
+    <string name="models_count_status">تم تمكين %1$d · المجموع %2$d</string>
+    <string name="models_search_count_status">تم تمكين %1$d · %2$d نتائج مطابقة</string>
+    <string name="models_delete_custom_title">حذف النموذج المخصص؟</string>
+    <string name="models_delete_custom_text">هل تريد إزالة %1$s من النماذج المخصصة؟</string>
+    <string name="models_edit_custom">تعديل النموذج المخصص</string>
+    <string name="models_custom_details">تفاصيل النموذج المخصص</string>
     <string name="models_rename">إعادة تسمية النموذج</string>
     <string name="models_rename_current">المعرّف الحالي: %1$s</string>
     <string name="models_alias_hint">اسم مستعار</string>
@@ -481,6 +496,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">نموذج النسخ</string>
+    <string name="transcription_enable">تمكين نسخ الصور</string>
     <string name="transcription_no_model">غير محدد</string>
     <string name="transcription_select_model">اختيار نموذج النسخ</string>
     <string name="transcription_batch_size">حجم الدُفعة</string>
@@ -713,7 +729,7 @@
     <string name="local_mmproj_path_label">مُسقِط الرؤية (.mmproj)</string>
     <string name="local_chat_delete_title">حذف النموذج المحلي؟</string>
     <string name="local_chat_delete_text">هل أنت متأكد أنك تريد حذف \'%1$s\'؟ سيؤدي هذا أيضًا إلى حذف ملف النموذج.</string>
-    <string name="model_id_label">المعرّف</string>
+    <string name="model_id_label">معرّف النموذج</string>
     <string name="model_alias_label">اسم مستعار</string>
 
     <!-- Settings - Group Labels -->
@@ -774,8 +790,8 @@
     <string name="export_category_memories">الذكريات</string>
     <string name="export_category_system_prompts">موجّهات النظام</string>
     <string name="export_category_settings">الإعدادات</string>
-    <string name="export_category_api_keys">مفاتيح API</string>
-    <string name="export_api_keys_warning">سيتم تصدير مفاتيح API كنص عادي. فعّل ذلك فقط إذا كنت تثق بالوجهة.</string>
+    <string name="export_category_api_keys">بيانات الاعتماد والأسرار</string>
+    <string name="export_api_keys_warning">سيتم تصدير مفاتيح API وكلمات المرور ورؤوس المصادقة المخصصة كنص عادي. فعّل ذلك فقط إذا كنت تثق بالوجهة.</string>
     <string name="export_button">تصدير</string>
     <string name="exporting_label">جارٍ التصدير…</string>
     <string name="export_success">تم تصدير البيانات بنجاح.</string>
@@ -783,10 +799,11 @@
     <string name="export_failed">فشل التصدير: %1$s</string>
     <string name="import_preview_title">استيراد البيانات</string>
     <string name="import_from">تم التصدير في %1$s\nمن Agora v%2$s</string>
+    <string name="import_unsupported_backup_version">تنسيق النسخة الاحتياطية v%1$d غير مدعوم. يدعم هذا التطبيق حتى v%2$d.</string>
     <string name="import_strategy_merge">دمج</string>
     <string name="import_strategy_replace">استبدال</string>
     <string name="import_strategy_skip">تخطٍّ</string>
-    <string name="import_api_keys_warning">يحتوي هذا التصدير على مفاتيح API. سيتم استيراد المفاتيح كنص عادي. تابع فقط إذا كنت تثق بالمصدر.</string>
+    <string name="import_api_keys_warning">تحتوي هذه النسخة الاحتياطية على بيانات اعتماد وأسرار. سيتم استيرادها كنص عادي. تابع فقط إذا كنت تثق بالمصدر.</string>
     <string name="import_button">استيراد</string>
     <string name="importing_label">جارٍ الاستيراد…</string>
     <string name="import_success">اكتمل الاستيراد: %1$s</string>
@@ -920,7 +937,7 @@
     <string name="auto_backup_categories_label">محتوى النسخ الاحتياطي</string>
     <string name="auto_backup_categories_desc">اختر ما تريد نسخه احتياطيًا</string>
     <string name="auto_backup_categories_dialog_title">اختيار محتوى النسخ الاحتياطي</string>
-    <string name="auto_backup_api_key_warning">سيتم تخزين مفاتيح API بدون تشفير في ملف النسخ الاحتياطي</string>
+    <string name="auto_backup_api_key_warning">سيتم تخزين بيانات الاعتماد والأسرار بدون تشفير في ملف النسخ الاحتياطي</string>
     <string name="auto_backup_directory_label">موقع النسخ الاحتياطي</string>
     <string name="auto_delete_title">حذف النسخ الاحتياطية القديمة تلقائيًا</string>
     <string name="auto_delete_subtitle">إزالة النسخ الاحتياطية الأقدم من الفترة المحددة</string>

@@ -61,6 +61,7 @@
 
     <!-- Drawer -->
     <string name="conversations">對話</string>
+    <string name="conversation_unread_generation">未讀的新回覆</string>
     <string name="new_chat">新對話</string>
     <string name="thinking_ellipsis">思考中…</string>
     <string name="answering_ellipsis">回覆中…</string>
@@ -196,10 +197,10 @@
     <string name="models_title">模型</string>
     <string name="models_default">預設模型</string>
     <string name="models_no_models">未啟用模型</string>
-    <string name="models_manual">手動模型</string>
+    <string name="models_manual">自訂模型</string>
     <string name="models_manual_empty">尚未新增自訂模型</string>
     <string name="models_add_custom">新增自訂模型</string>
-    <string name="models_auto_fetch">自動取得</string>
+    <string name="models_auto_fetch">已取得模型</string>
     <string name="models_auto_empty">尚未取得模型</string>
     <string name="models_search_hint">搜尋模型…</string>
     <string name="models_search_empty">沒有符合的模型</string>
@@ -209,6 +210,12 @@
     <string name="models_sync">從所有服務商同步</string>
     <string name="models_sync_desc">取得所有已設定 API 的最新模型列表</string>
     <string name="models_count">%1$d 個模型可用</string>
+    <string name="models_count_status">已啟用 %1$d 個 · 共 %2$d 個</string>
+    <string name="models_search_count_status">已啟用 %1$d 個 · %2$d 個符合項目</string>
+    <string name="models_delete_custom_title">刪除自訂模型？</string>
+    <string name="models_delete_custom_text">從自訂模型中刪除 %1$s？</string>
+    <string name="models_edit_custom">編輯自訂模型</string>
+    <string name="models_custom_details">自訂模型詳細資料</string>
     <string name="models_rename">重新命名模型</string>
     <string name="models_rename_current">目前 ID：%1$s</string>
     <string name="models_alias_hint">別名</string>
@@ -398,6 +405,7 @@
 
     <!-- Settings - Image Transcription Page -->
     <string name="transcription_model">轉述模型</string>
+    <string name="transcription_enable">啟用圖片轉述</string>
     <string name="transcription_no_model">未選擇</string>
     <string name="transcription_select_model">選擇轉述模型</string>
     <string name="transcription_batch_size">批次大小</string>
@@ -699,6 +707,14 @@
 
     <!-- Cost & Tokens -->
     <string name="cost_tokens">消耗 %1$d Tokens</string>
+    <string name="token_usage_with_label">Token 用量：%1$d</string>
+    <string name="input_tokens_with_label">輸入 Token：%1$s</string>
+    <string name="output_tokens_with_label">輸出 Token：%1$s</string>
+    <string name="token_count">%1$d Tokens</string>
+    <string name="token_count_with_cached">%1$d Tokens（%2$d 已快取）</string>
+    <string name="detailed_token_usage">詳細 Token 用量</string>
+    <string name="detailed_token_usage_desc">在已完成的回覆中顯示輸入和輸出 Token 數量</string>
+    <string name="token_usage_detail">輸入 %1$s · 輸出 %2$s</string>
     <string name="total_tokens">總計：%1$d Tokens</string>
 
     <!-- General Actions -->
@@ -742,7 +758,7 @@
     <string name="local_max_tokens">最大 Token 數</string>
     <string name="local_chat_delete_title">刪除本機模型？</string>
     <string name="local_chat_delete_text">確定要刪除 \'%1$s\' 嗎？這將同時刪除模型檔案。</string>
-    <string name="model_id_label">ID</string>
+    <string name="model_id_label">模型 ID</string>
     <string name="model_alias_label">別名</string>
     <string name="local_title">本機</string>
     <string name="not_configured">未設定</string>
@@ -835,14 +851,15 @@
     <string name="export_category_memories">記憶</string>
     <string name="export_category_system_prompts">系統提示詞</string>
     <string name="export_category_settings">設定</string>
-    <string name="export_category_api_keys">API 金鑰</string>
-    <string name="export_api_keys_warning">API 金鑰將以明文形式匯出。僅在信任目標位置時啟用。</string>
+    <string name="export_category_api_keys">憑證與祕密</string>
+    <string name="export_api_keys_warning">API 金鑰、密碼和自訂驗證標頭將以明文匯出。僅在信任目標位置時啟用。</string>
     <string name="export_button">匯出</string>
     <string name="exporting_label">匯出中…</string>
     <string name="export_success">資料匯出成功。</string>
     <string name="export_failed">匯出失敗: %1$s</string>
     <string name="import_preview_title">匯入資料</string>
     <string name="import_from">匯出時間 %1$s\n來自 Agora v%2$s</string>
+    <string name="import_unsupported_backup_version">不支援備份格式 v%1$d；目前應用程式最高支援 v%2$d。</string>
     <string name="import_button">匯入</string>
     <string name="importing_label">匯入中…</string>
     <string name="import_success">匯入完成: %1$s</string>
@@ -852,7 +869,7 @@
     <string name="import_strategy_merge">合併</string>
     <string name="import_strategy_replace">取代</string>
     <string name="import_strategy_skip">略過</string>
-    <string name="import_api_keys_warning">此匯出包含 API 金鑰。金鑰將以明文形式匯入。僅在信任來源時繼續。</string>
+    <string name="import_api_keys_warning">此匯出包含明文憑證與祕密。僅在信任來源時繼續。</string>
     <string name="third_party_import">第三方</string>
     <string name="claude_import_title">從 Claude 匯入</string>
     <string name="claude_import_subtitle">從 Claude 匯出的 .zip 檔案中匯入對話。</string>
@@ -962,7 +979,7 @@
     <string name="auto_backup_categories_label">備份內容</string>
     <string name="auto_backup_categories_desc">選擇備份內容</string>
     <string name="auto_backup_categories_dialog_title">選擇備份內容</string>
-    <string name="auto_backup_api_key_warning">API 金鑰將以未加密方式儲存在備份檔案中</string>
+    <string name="auto_backup_api_key_warning">憑證與祕密將以未加密方式儲存在備份檔案中</string>
     <string name="auto_backup_directory_label">備份目錄</string>
     <string name="auto_delete_title">自動刪除舊備份</string>
     <string name="auto_delete_subtitle">刪除超過指定時限的備份檔案</string>
