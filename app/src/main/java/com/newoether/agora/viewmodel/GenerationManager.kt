@@ -16,6 +16,7 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.RequestTokenUsageAccumulator
@@ -238,10 +239,8 @@ internal fun applyUserTemplateToMessages(
  * ownership tokens in exactly one place instead of re-threading lambdas by hand.
  *
  * Note: the generation-slot lifecycle (generating flag / active-conversation set) is owned by
- * [MessageGenerationController] via [ConversationGenerationState.acquireForSend] /
- * [ConversationGenerationState.tryAcquireForReplacement] / [ConversationGenerationState.endGeneration],
- * NOT by these callbacks — GenerationManager only streams tokens into the message and persists the
- * terminal DB row.
+ * [ConversationGenerationState]. These callbacks project token-gated UI state and carry identified
+ * tool effects/results; GenerationManager does not directly mutate the process Run state.
  */
 data class GenerationCallbacks(
     val onStreamUpdate: (ChatMessage) -> Unit,
@@ -252,6 +251,22 @@ data class GenerationCallbacks(
      *  each round boundary and ends the generation there so the queue can flush immediately
      *  (steering) instead of waiting out the entire loop. Headless runs keep the default. */
     val hasQueuedSends: () -> Boolean = { false },
+    /** A validated Provider outcome is necessary but not sufficient: runtime identity must accept
+     * the exact batch before any tool can execute. Defaults preserve the isolated headless test
+     * adapter until Task ownership migrates fully in Phase 7. */
+    val onToolBatchRequested: suspend (RunEffectIdentity) -> RunEffect.ExecuteToolBatch? = {
+        RunEffect.ExecuteToolBatch(it.copy(effectId = "tool-batch-${it.effectId}"))
+    },
+    /** Authoritative results exist only after every call in the accepted batch completed. */
+    val onToolBatchCompleted: suspend (RunEffectIdentity) -> RunEffect.CommitToolRound? = {
+        RunEffect.CommitToolRound(it.copy(effectId = "tool-round-${it.effectId}"))
+    },
+    /** Only an accepted durable success result authorizes the next Provider pass. */
+    val onToolRoundCommitted: suspend (RunEffectIdentity, Boolean) -> RunEffect? =
+        { identity, success ->
+            if (success) RunEffect.ContinueProviderPass(identity)
+            else RunEffect.ToolRoundCommitFailed(identity)
+        },
     val onToolRoundPersisted: suspend () -> Unit = {},
 )
 
@@ -837,6 +852,7 @@ class GenerationManager(
             var toolRoundSegmentCursor = 0
             var providerRequestOrdinal = 0
             var expectedProviderPassIdentity: RunEffectIdentity? = null
+            val toolRoundEffects = ToolRoundEffectCoordinator(callbacks)
 
             var lastEmitMs = 0L
             var firstUiPublishPending = true
@@ -1000,8 +1016,9 @@ class GenerationManager(
                 }
             }
 
-            suspend fun executeCompletedToolCalls() {
+            suspend fun executeAcceptedToolBatch() {
                 if (completedToolCalls.isEmpty()) return
+                val batchEffect = toolRoundEffects.requireBatchEffect()
                 val calls = completedToolCalls.values.toList()
                 completedToolCalls.clear()
                 val results = mutableListOf<ToolCallData>()
@@ -1065,6 +1082,7 @@ class GenerationManager(
 
                 toolCallData = results.firstOrNull()
                 toolCallDataList = results
+                toolRoundEffects.completeBatch(batchEffect.identity)
                 currentStatus = MessageStatus.SENDING
                 publishStreamUpdate(forceCheckpoint = true)
                 lastEmitMs = System.currentTimeMillis()
@@ -1230,7 +1248,7 @@ class GenerationManager(
                 }
             }
 
-            fun acceptProviderPass(outcome: ProviderPassOutcome) {
+            suspend fun acceptProviderPass(outcome: ProviderPassOutcome) {
                 check(expectedProviderPassIdentity == outcome.identity) {
                     "Stale, duplicate, or unexpected Provider pass outcome"
                 }
@@ -1241,6 +1259,7 @@ class GenerationManager(
                         check(completedToolCalls.isEmpty()) {
                             "A Provider pass cannot overlap an unconsumed tool batch"
                         }
+                        toolRoundEffects.acceptValidatedBatch(outcome.identity)
                         outcome.calls.forEach { call ->
                             completedToolCalls[call.streamKey] = call
                         }
@@ -1266,7 +1285,7 @@ class GenerationManager(
                 requestTrace?.mark("first_semantic_event")
             })
             finishCurrentThoughtTiming()
-            if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
+            if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
             // Publish the final in-memory snapshot without waiting for another Room round trip.
             // The terminal transaction below persists this exact state after fencing the
             // checkpoint writer, while genuine tool lifecycle boundaries remain forced.
@@ -1370,7 +1389,12 @@ class GenerationManager(
                         ))
                     }
                 }
-                conversations.appendToolRoundToRun(toolRoundEntities)
+                toolRoundEffects.commitRound { commitIdentity ->
+                    conversations.appendToolRoundToRun(
+                        messages = toolRoundEntities,
+                        expectedPass = commitIdentity.pass,
+                    )
+                }
                 callbacks.onToolRoundPersisted()
                 toolPath = buildApiPath(
                     resultMsgs.last().first,
@@ -1403,7 +1427,7 @@ class GenerationManager(
                 val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
                 acceptProviderPass(collectProviderRequest(apiToolPath))
                 finishCurrentThoughtTiming()
-                if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
+                if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
                 // Publish the round's final UI state immediately. The next loop boundary or the
                 // terminal transaction supplies durability, so blocking here would only duplicate
                 // I/O and visibly delay the transition out of generating.

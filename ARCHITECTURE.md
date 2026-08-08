@@ -109,9 +109,11 @@ attachments, and optional transcription. A Provider owns retry and semantic term
 stream. `ProviderPassRunner` collects exactly one such stream and closes it as an identity-bearing
 `CompletedText`, `CompletedToolCalls`, `Truncated`, `Failed`, or `Cancelled` outcome. Live events
 may update the streaming overlay, but `GenerationManager` accepts the exact expected outcome before
-completed tool calls can enter execution. The runner adds fail-closed tool metadata validation; it
-does not replace or weaken Provider-specific termination validation and retry. `GenerationManager`
-still owns multi-pass Provider/tool continuation and normal Run finalization, while
+a `ToolBatchRequested` command can enter the conversation mailbox. The reducer emits the identified
+`ExecuteToolBatch`, `CommitToolRound`, and (only after durable success) `ContinueProviderPass`
+effects. The runner adds fail-closed tool metadata validation; it does not replace or weaken
+Provider-specific termination validation and retry. `GenerationManager` executes those effects and
+still owns normal Run finalization, while
 `GenerationFinalizer` owns durable Stop finalization and its retry path.
 
 The migrated conversation-runtime slice is authoritative for ordinary foreground Send placement,
@@ -145,9 +147,10 @@ non-cancellable once
 accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conversation deletion is
 separate runtime disposal and does not fabricate a durable user-Stop effect.
 
-This is not yet the final mailbox architecture: Provider outcomes are still accepted by the
-`GenerationManager` adapter rather than the conversation mailbox, and tools, guidance execution,
-Compact, automation, and recovery have not moved into it. A bounded 256-entry runtime
+This is not yet the final mailbox architecture: Provider outcomes are still first closed/accepted by
+the `GenerationManager` adapter, and guidance execution, Compact, automation, recovery, and Run
+finalization have not moved into it. State-backed tool execution/commit authorization does use the
+mailbox; the registry-less headless compatibility adapter remains until automation unification. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 
@@ -166,12 +169,14 @@ SENDING
    └── provider stream boundary
                                       │
                                       ▼
-                                 execute tool(s)
-                                      │
-                                      ├── streamed progress/output
-                                      └── authoritative final result
-                                      │
-                         another provider round if needed
+                         mailbox-authorized tool batch
+                                       │
+                                       ├── streamed progress/output
+                                       └── authoritative final result
+                                       │
+                         atomic Room protocol-round commit
+                                       │
+                         mailbox-authorized provider continuation
 
 terminal: SUCCESS | STOPPED | ERROR
 ```
@@ -203,9 +208,12 @@ offered. Tagged `<tool_call>` payloads and supported bare JSON tool calls are di
 into the same streaming tool-call path instead of flashing as answer text or being
 lost at end-of-stream.
 
-A completed tool request is executed only after the current provider stream reaches
-its boundary. This keeps parsing and execution as separate owners and prevents a
-terminal chunk, `[DONE]`, EOF, or parallel tool call from racing the collector.
+A completed tool request is executed only after the current provider stream reaches its validated
+boundary and the conversation reducer accepts its full effect identity. The complete result batch
+must then be accepted before Room can commit the assistant request plus every result, and the next
+Provider request requires the matching successful commit result. This keeps parsing, execution,
+durability, and continuation as separate owners and prevents a terminal chunk, `[DONE]`, EOF,
+duplicate result, or parallel tool call from racing the collector.
 
 ### 4.2 Tool execution contract
 
@@ -222,9 +230,9 @@ uses the existing states:
 CALLING → RUNNING → SUCCEEDED | EMPTY | FAILED | STOPPED | BACKGROUND_RUNNING
 ```
 
-The UI is updated at most every 120 ms for ordinary stream content and every 80 ms for
-tool-call content, with first and terminal changes emitted immediately. Durable
-checkpoints are best-effort and cannot cancel a healthy provider stream.
+The UI is updated at most every 50 ms for ordinary stream and tool content, with first and terminal
+changes emitted immediately. Durable checkpoints are best-effort and cannot cancel a healthy
+provider stream.
 
 ### 4.3 Stop and terminal ownership
 
@@ -292,6 +300,9 @@ Room database version 22 contains six entities:
 Room stores Run ancestry/status/pass state, the conversation graph, selected message and Run
 branches, durable streaming checkpoints, automation state, and embedding metadata. The unique
 `(conversationId, activeSlot)` index prevents two durable live Runs for one conversation.
+`appendToolRoundToRun` is one protocol-atomic transaction: it accepts only the current ACTIVE slot
+and expected pass, validates a one-to-one ordered request/result batch, and treats only an exact
+complete replay of the same message ids as idempotent. Partial or conflicting replay fails closed.
 Migrations are explicit and schema snapshots are committed under `app/schemas`; v16→v17
 introduced Runs, and the current chain continues through v22.
 

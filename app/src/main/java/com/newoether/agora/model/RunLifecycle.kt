@@ -97,8 +97,24 @@ sealed interface RunState {
         }
     }
 
-    data class Active(val identity: RuntimeRunIdentity) : RunState {
+    data class Active(
+        val identity: RuntimeRunIdentity,
+        val toolPhase: RunToolPhase = RunToolPhase.None,
+    ) : RunState {
         override val conversationId: String = identity.conversationId
+
+        init {
+            when (toolPhase) {
+                RunToolPhase.None -> Unit
+                is RunToolPhase.Executing -> require(
+                    toolPhase.batchIdentity.runIdentity() == identity,
+                )
+                is RunToolPhase.Committing -> {
+                    require(toolPhase.batchIdentity.runIdentity() == identity)
+                    require(toolPhase.commitIdentity.runIdentity() == identity)
+                }
+            }
+        }
     }
 
     data class Stopping(
@@ -121,6 +137,21 @@ sealed interface RunState {
             }
         }
     }
+}
+
+/** Authoritative in-process boundary for one validated provider tool batch. */
+sealed interface RunToolPhase {
+    data object None : RunToolPhase
+
+    data class Executing(
+        val batchIdentity: RunEffectIdentity,
+    ) : RunToolPhase
+
+    data class Committing(
+        val batchIdentity: RunEffectIdentity,
+        val commitIdentity: RunEffectIdentity,
+        val failureReported: Boolean = false,
+    ) : RunToolPhase
 }
 
 sealed interface ConversationCommand {
@@ -169,6 +200,24 @@ sealed interface ConversationCommand {
         }
     }
 
+    /** A termination-validated Provider outcome requests execution of exactly one tool batch. */
+    data class ToolBatchRequested(val identity: RunEffectIdentity) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
+    /** All tools in the exact emitted batch completed with authoritative results. */
+    data class ToolBatchCompleted(val identity: RunEffectIdentity) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
+    /** Result of the exact atomic protocol-round Room commit. */
+    data class ToolRoundCommitted(
+        val identity: RunEffectIdentity,
+        val success: Boolean,
+    ) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
     data class StopRequested(
         val identity: RuntimeRunIdentity,
         val coroutineAlreadySettled: Boolean,
@@ -215,6 +264,10 @@ sealed interface RunEffect {
     data class CancelProviderPass(val identity: RuntimeRunIdentity) : RunEffect
     data class FinalizeStop(val identity: RunEffectIdentity) : RunEffect
     data class StopPersistenceFailed(val identity: RunEffectIdentity) : RunEffect
+    data class ExecuteToolBatch(val identity: RunEffectIdentity) : RunEffect
+    data class CommitToolRound(val identity: RunEffectIdentity) : RunEffect
+    data class ContinueProviderPass(val identity: RunEffectIdentity) : RunEffect
+    data class ToolRoundCommitFailed(val identity: RunEffectIdentity) : RunEffect
     data class ReleaseSlot(
         val identity: RuntimeRunIdentity,
         val reason: SlotReleaseReason,
@@ -238,10 +291,11 @@ data class Transition(
 /**
  * Authoritative migrated slice of the conversation runtime reducer.
  *
- * It owns ordinary Send placement/input acceptance, the process slot, and Stop's coroutine/
- * persistence barriers. Provider phases, tools, guidance execution, Compact, and recovery remain
- * behind the legacy adapter until their later migration phases. The reducer has no Android,
- * coroutine, Room, network, or Compose dependency.
+ * It owns ordinary Send placement/input acceptance, the process slot, Stop's coroutine/persistence
+ * barriers, and the tool-batch/result/commit/continuation gate. Provider outcome delivery,
+ * guidance execution, Compact, recovery, and Run finalization remain behind bounded adapters until
+ * their later migration phases. The reducer has no Android, coroutine, Room, network, or Compose
+ * dependency.
  */
 object ConversationRuntimeReducer {
     fun reduce(
@@ -259,6 +313,9 @@ object ConversationRuntimeReducer {
             is ConversationCommand.InputPersistenceFailed -> inputPersistenceFailed(state, command)
             is ConversationCommand.SendLaunchAbandoned -> abandonSendLaunch(state, command)
             is ConversationCommand.BindRun -> bindRun(state, command)
+            is ConversationCommand.ToolBatchRequested -> requestToolBatch(state, command)
+            is ConversationCommand.ToolBatchCompleted -> completeToolBatch(state, command)
+            is ConversationCommand.ToolRoundCommitted -> commitToolRound(state, command)
             is ConversationCommand.StopRequested -> requestStop(state, command)
             is ConversationCommand.CoroutineSettled -> settleCoroutine(state, command)
             is ConversationCommand.PersistenceSettled -> settlePersistence(state, command)
@@ -384,6 +441,9 @@ object ConversationRuntimeReducer {
     ): Transition {
         val active = state as? RunState.Active
             ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (active.toolPhase != RunToolPhase.None) {
+            return reject(state, CommandRejection.ILLEGAL_STATE)
+        }
         if (!sameOwner(active.identity, command.identity)) {
             return reject(state, CommandRejection.STALE_IDENTITY)
         }
@@ -401,6 +461,103 @@ object ConversationRuntimeReducer {
             return reject(state, CommandRejection.STALE_IDENTITY)
         }
         return Transition(RunState.Active(command.identity))
+    }
+
+    private fun requestToolBatch(
+        state: RunState,
+        command: ConversationCommand.ToolBatchRequested,
+    ): Transition {
+        val active = state as? RunState.Active
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (active.identity != command.identity.runIdentity()) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        val batchIdentity = command.identity.derived("tool-batch")
+        return when (val phase = active.toolPhase) {
+            RunToolPhase.None -> Transition(
+                newState = active.copy(toolPhase = RunToolPhase.Executing(batchIdentity)),
+                effects = listOf(RunEffect.ExecuteToolBatch(batchIdentity)),
+            )
+            is RunToolPhase.Executing -> reject(
+                state,
+                if (phase.batchIdentity == batchIdentity) {
+                    CommandRejection.DUPLICATE_RESULT
+                } else {
+                    CommandRejection.STALE_IDENTITY
+                },
+            )
+            is RunToolPhase.Committing -> reject(
+                state,
+                if (phase.batchIdentity == batchIdentity) {
+                    CommandRejection.DUPLICATE_RESULT
+                } else {
+                    CommandRejection.STALE_IDENTITY
+                },
+            )
+        }
+    }
+
+    private fun completeToolBatch(
+        state: RunState,
+        command: ConversationCommand.ToolBatchCompleted,
+    ): Transition {
+        val active = state as? RunState.Active
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        return when (val phase = active.toolPhase) {
+            RunToolPhase.None -> reject(state, CommandRejection.ILLEGAL_STATE)
+            is RunToolPhase.Executing -> {
+                if (phase.batchIdentity != command.identity) {
+                    reject(state, CommandRejection.STALE_IDENTITY)
+                } else {
+                    val commitIdentity = command.identity.derived("tool-round")
+                    Transition(
+                        newState = active.copy(
+                            toolPhase = RunToolPhase.Committing(
+                                batchIdentity = command.identity,
+                                commitIdentity = commitIdentity,
+                            ),
+                        ),
+                        effects = listOf(RunEffect.CommitToolRound(commitIdentity)),
+                    )
+                }
+            }
+            is RunToolPhase.Committing -> reject(
+                state,
+                if (phase.batchIdentity == command.identity) {
+                    CommandRejection.DUPLICATE_RESULT
+                } else {
+                    CommandRejection.STALE_IDENTITY
+                },
+            )
+        }
+    }
+
+    private fun commitToolRound(
+        state: RunState,
+        command: ConversationCommand.ToolRoundCommitted,
+    ): Transition {
+        val active = state as? RunState.Active
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        val committing = active.toolPhase as? RunToolPhase.Committing
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (committing.commitIdentity != command.identity) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        if (!command.success) {
+            if (committing.failureReported) {
+                return reject(state, CommandRejection.DUPLICATE_RESULT)
+            }
+            return Transition(
+                newState = active.copy(
+                    toolPhase = committing.copy(failureReported = true),
+                ),
+                effects = listOf(RunEffect.ToolRoundCommitFailed(command.identity)),
+            )
+        }
+        return Transition(
+            newState = active.copy(toolPhase = RunToolPhase.None),
+            effects = listOf(RunEffect.ContinueProviderPass(command.identity)),
+        )
     }
 
     private fun requestStop(
@@ -538,6 +695,10 @@ object ConversationRuntimeReducer {
         },
         pass = pass,
         effectId = effectId,
+    )
+
+    private fun RunEffectIdentity.derived(prefix: String) = copy(
+        effectId = "$prefix-$effectId",
     )
 
     private fun sameOwner(first: RuntimeRunIdentity, second: RuntimeRunIdentity): Boolean =

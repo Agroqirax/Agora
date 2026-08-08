@@ -120,23 +120,23 @@ must not collapse into Boolean combinations.
 
 | Current owner | Writes | Current fence | Migration consequence |
 | --- | --- | --- | --- |
-| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative ordinary-Send placement/input acceptance, slot, and Stop-barrier transitions | conversation + owner + run id + pass + effect id | Extend the real reducer slice one lifecycle boundary at a time. |
-| Per-conversation command mailbox | serial delivery of ordinary Send plus `StopRequested`, `CoroutineSettled`, and `PersistenceSettled` | one bounded FIFO consumer per conversation | Move Provider/tool, guidance execution, Compact, and recovery delivery here in later commits. |
+| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative ordinary-Send placement/input acceptance, slot, Stop barriers, and tool-batch/commit/continuation transitions | conversation + owner + run id + pass + effect id | Extend the real reducer slice one lifecycle boundary at a time. |
+| Per-conversation command mailbox | serial delivery of ordinary Send, Stop lifecycle, and tool batch/result/commit commands | one bounded FIFO consumer per conversation | Move Provider outcome delivery, guidance execution, Compact, and recovery here in later commits. |
 | `ConversationGenerationState` adapter | executes mailbox-approved Job/stream cancellation, overlay/token projection, queue/UI projection, and compatibility claims | conversation + owner token; Stop cutoff is reducer-approved | Preserve only until each remaining path moves behind reducer effects. |
 | `MessageGenerationController` | executes accepted-input Room effect, edit/regenerate graph, queue drain, Compact entry, and setup failure | conversation + token + run/effect id | Provider and queue execution remain later migration seams; installed Job completion owns settlement delivery. |
-| `GenerationManager` | accepts one closed Provider-pass outcome, stream/checkpoint, tools, continuation, terminal messages/Run, notification | conversation + owner + run id + durable pass + per-request effect id | Provider pass is isolated; move outcome acceptance, tool effects, and Run finalization behind the mailbox separately. |
+| `GenerationManager` | accepts one closed Provider-pass outcome, executes mailbox-authorized tool/commit effects, stream/checkpoint, terminal messages/Run, notification | conversation + owner + run id + durable pass + per-request effect id | Provider pass is isolated and state-backed tools are effect-gated; move Provider outcome acceptance and Run finalization separately. |
 | `GenerationFinalizer` | executes the mailbox-emitted durable Stop effect and returns `PersistenceSettled` to that mailbox | conversation + owner + run id + pass + effect id | Keep Room execution external; mailbox acceptance and two-barrier release are authoritative. |
 | `TaskExecutionEngine` | headless Run setup, Compact, generation and terminal cleanup | conversation + run id/pass | Remove duplication only after Task/Loop parity. |
 | `LoopManager` | occurrence claim/revision/cycle/schedule | revision + fire time + count | Preserve replay fencing; trigger normal Send contract. |
 | `TaskManager`/Workers | reservation, execution conversation, occurrence retry/schedule | task + scheduled time + execution id | Preserve deterministic occurrence identity. |
 | Providers + `ProviderPassRunner` | retry and semantic stream termination remain Provider-local; runner normalizes one request into a closed outcome and validates completed tool metadata | conversation + owner + run id + durable pass + per-request effect id | Move closed outcome acceptance into the conversation mailbox without weakening Provider validators. |
-| ToolProviders | external side effects and progress/result | tool call metadata | Progress is non-authoritative; result needs effect identity. |
-| Room transactions | durable Run/message/selection/Compact/task/loop state | SQL preconditions vary | Remain durable source of truth; consolidate domain boundaries. |
+| ToolProviders | external side effects and progress/result | validated batch effect identity | Progress is non-authoritative; only the complete batch result can request commit. |
+| Room transactions | durable Run/message/selection/Compact/task/loop state | SQL preconditions vary; tool round requires ACTIVE slot + expected pass | Remain durable source of truth; consolidate remaining domain boundaries. |
 
 This inventory proves that the current implementation is not yet a process-level single writer.
-The execution coordinator serializes the main generation lease and Stop state now has one mailbox
-writer, but Provider/tool, queue/guidance, Compact, automation, recovery, and graph mutations still
-retain bounded legacy authorities.
+The execution coordinator serializes the main generation lease; Stop and state-backed tool-effect
+state now have one mailbox writer. Provider outcome acceptance, queue/guidance, Compact, automation,
+recovery, Run finalization, and graph mutations still retain bounded legacy authorities.
 
 ## 5. Identity and stale-result policy
 
@@ -179,8 +179,10 @@ The live orders that constrain migration are:
    accepted cutoff/result delivery is non-cancellable.
 8. Exclusive import: close automation admission → cancel/quiesce Workers → wait for active
    executions → import transaction.
-9. Tool execution is nested inside the conversation lease. Remote Shell jobs can outlive one
-   bounded wait, so timeout is not synonymous with process termination.
+9. Tool execution is nested inside the conversation lease: mailbox `ToolBatchRequested` → external
+   batch → mailbox `ToolBatchCompleted` → conditional Room transaction → mailbox
+   `ToolRoundCommitted` → continuation authorization. Remote Shell jobs can outlive one bounded
+   wait, so timeout is not synonymous with process termination.
 
 Target reducer transitions never suspend. The intended order is:
 
@@ -198,7 +200,7 @@ The live DAO already provides useful starting points:
 - `createConversationRunWithMessages`
 - `createRunWithMessages`
 - provider/message checkpoint update
-- `appendToolRoundToRun`
+- `appendToolRoundToRun` (ACTIVE slot + expected-pass predicate; exact complete replay is idempotent)
 - `appendGuidanceBatchAndClaimPass`
 - `claimPendingRunInputsAndAppendPlaceholder`
 - `finishGeneration`
@@ -244,9 +246,9 @@ ownership. No Room schema rewrite is planned.
 | One live durable Run | unique active-slot index and Run invariants | Concurrent transaction/conditional-update tests. |
 | One process writer | not satisfied | Mailbox is sole transition authority. |
 | Cross-conversation parallelism | coordinator supports it | Runtime tests with two conversations. |
-| Stale/duplicate rejection | Stop finalizer has reducer rejection; each Provider request now closes with full identity and exact expected-outcome acceptance in the `GenerationManager` adapter | move Provider acceptance into the mailbox and extend identity to tool/Compact effects. |
+| Stale/duplicate rejection | Stop and state-backed tool effects/results have reducer rejection; each Provider request closes with full identity and exact expected-outcome acceptance in the `GenerationManager` adapter | move Provider outcome delivery into the mailbox and extend identity to Compact effects. |
 | Stop two-barrier release | Stop and both settlement results use the mailbox; reducer owns both orders and exact release effect | add real Room failure/process-lifecycle coverage without adding a second state writer. |
-| Tool atomicity | transaction and protocol normalization exist | Room failure/reorder/duplicate tests. |
+| Tool atomicity | validated outcome → mailbox batch effect → complete result command → expected-pass Room transaction → commit result → continuation; partial/conflicting replay fails closed | add real Room failure/reorder integration tests when the Room test harness is introduced. |
 | Queue FIFO and memory ownership | protected unit policies | end-to-end Stop/error/attachment tests. |
 | Compact graph safety | graph re-read and unit tests | real Room selected-ancestry tests. |
 | Recovery | orphan terminalization exists | deterministic snapshot-to-command tests. |
@@ -264,13 +266,15 @@ Each row is an independent semantic commit and rollback boundary:
 1. Pure runtime vocabulary, reducer tests, Stop identity envelope, and bounded redacted trace — implemented for the authoritative slot/Stop slice.
 2. Ordinary foreground Send enters a real per-conversation mailbox — implemented for placement and the accepted-input Room result; Provider and guidance execution remain adapters.
 3. One Provider pass becomes an isolated runner and closed outcome — implemented; live events are
-   UI/checkpoint input, while only an exact, validated `CompletedToolCalls` outcome authorizes tool
-   execution. Mailbox acceptance is intentionally deferred to the tool/effect migration.
+   UI/checkpoint input, while only an exact, validated `CompletedToolCalls` outcome can request tool
+   execution.
 4. Stop and both settlement barriers become mailbox commands — implemented; cutoff precedes
    cancellation, only actual Job completion reports coroutine settlement, both result orders are
    covered, stale/duplicate identities are rejected, and accepted delivery survives submitter
    cancellation.
-5. Tool batch execution/commit/continuation becomes effects and result commands.
+5. Tool batch execution/commit/continuation becomes effects and result commands — implemented for
+   state-backed foreground and production Task execution. The registry-less headless compatibility
+   callback remains permissive until automation unification in step 7.
 6. Queued guidance and attachment ownership move through the normal Send contract.
 7. Loop and Task reuse the same runtime contract.
 8. Manual/automatic Compact become serialized runtime effects.

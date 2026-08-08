@@ -13,6 +13,7 @@ import com.newoether.agora.data.local.PendingRunInputCommit
 import com.newoether.agora.data.local.RemovedPendingRunInput
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.local.RunGraphCommit
+import com.newoether.agora.data.local.ToolRoundCommit
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ChatConversation
@@ -206,10 +207,13 @@ class ConversationRepository(
         return chatDao.appendPendingInputToRun(message, at)
     }
 
-    suspend fun appendToolRoundToRun(messages: List<MessageEntity>): List<MessageEntity> {
+    suspend fun appendToolRoundToRun(
+        messages: List<MessageEntity>,
+        expectedPass: Int,
+    ): ToolRoundCommit {
         ensureRunRecovery()
         require(messages.isNotEmpty() && messages.all { it.runId.isNotBlank() })
-        return chatDao.appendToolRoundToRun(messages)
+        return chatDao.appendToolRoundToRun(messages, expectedPass)
     }
 
     suspend fun getRun(runId: String): RunEntity? = chatDao.getRun(runId)

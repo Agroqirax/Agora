@@ -62,6 +62,9 @@ class ConversationRuntimeTrace(
         is ConversationCommand.InputPersistenceFailed -> identity.runIdentity()
         is ConversationCommand.SendLaunchAbandoned -> identity.runIdentity()
         is ConversationCommand.BindRun -> identity
+        is ConversationCommand.ToolBatchRequested -> identity.runIdentity()
+        is ConversationCommand.ToolBatchCompleted -> identity.runIdentity()
+        is ConversationCommand.ToolRoundCommitted -> identity.runIdentity()
         is ConversationCommand.StopRequested -> identity
         is ConversationCommand.CoroutineSettled -> identity
         is ConversationCommand.PersistenceSettled -> identity.runIdentity()
@@ -72,6 +75,9 @@ class ConversationRuntimeTrace(
         is ConversationCommand.InputPersisted -> identity.effectId
         is ConversationCommand.InputPersistenceFailed -> identity.effectId
         is ConversationCommand.SendLaunchAbandoned -> identity.effectId
+        is ConversationCommand.ToolBatchRequested -> identity.effectId
+        is ConversationCommand.ToolBatchCompleted -> identity.effectId
+        is ConversationCommand.ToolRoundCommitted -> identity.effectId
         is ConversationCommand.StopRequested -> effectId
         is ConversationCommand.PersistenceSettled -> identity.effectId
         is ConversationCommand.AcquireSlot,
@@ -83,7 +89,11 @@ class ConversationRuntimeTrace(
     private fun RunState.traceName(): String = when (this) {
         is RunState.Idle -> "Idle"
         is RunState.Preparing -> "Preparing"
-        is RunState.Active -> "Active"
+        is RunState.Active -> when (toolPhase) {
+            RunToolPhase.None -> "Active"
+            is RunToolPhase.Executing -> "ExecutingTools"
+            is RunToolPhase.Committing -> "CommittingToolRound"
+        }
         is RunState.Stopping -> "Stopping"
     }
 
@@ -94,6 +104,9 @@ class ConversationRuntimeTrace(
         is ConversationCommand.InputPersistenceFailed -> "InputPersistenceFailed"
         is ConversationCommand.SendLaunchAbandoned -> "SendLaunchAbandoned"
         is ConversationCommand.BindRun -> "BindRun"
+        is ConversationCommand.ToolBatchRequested -> "ToolBatchRequested"
+        is ConversationCommand.ToolBatchCompleted -> "ToolBatchCompleted"
+        is ConversationCommand.ToolRoundCommitted -> "ToolRoundCommitted"
         is ConversationCommand.StopRequested -> "StopRequested"
         is ConversationCommand.CoroutineSettled -> "CoroutineSettled"
         is ConversationCommand.PersistenceSettled -> "PersistenceSettled"
@@ -109,6 +122,10 @@ class ConversationRuntimeTrace(
         is RunEffect.CancelProviderPass -> "CancelProviderPass"
         is RunEffect.FinalizeStop -> "FinalizeStop"
         is RunEffect.StopPersistenceFailed -> "StopPersistenceFailed"
+        is RunEffect.ExecuteToolBatch -> "ExecuteToolBatch"
+        is RunEffect.CommitToolRound -> "CommitToolRound"
+        is RunEffect.ContinueProviderPass -> "ContinueProviderPass"
+        is RunEffect.ToolRoundCommitFailed -> "ToolRoundCommitFailed"
         is RunEffect.ReleaseSlot -> "ReleaseSlot"
     }
 

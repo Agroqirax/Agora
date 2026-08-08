@@ -287,6 +287,111 @@ data class ClaimedRunPassCommit(
     val messageSelections: Map<String?, String>,
 )
 
+data class ToolRoundCommit(
+    val messages: List<MessageEntity>,
+    /** False only when the exact same complete round was already durable. */
+    val inserted: Boolean,
+)
+
+/** Pure validation/idempotency policy shared by the Room transaction and JVM tests. */
+internal object ToolRoundCommitPolicy {
+    fun canInsert(run: RunEntity, runId: String, expectedPass: Int): Boolean =
+        expectedPass >= 0 &&
+            run.id == runId &&
+            run.status == RunStatus.ACTIVE &&
+            run.activeSlot == 1 &&
+            run.currentPass == expectedPass
+
+    fun requireValidShape(messages: List<MessageEntity>): String {
+        require(messages.size >= 2) {
+            "A tool round requires a tool row and at least one result"
+        }
+        require(messages.map { it.id }.distinct().size == messages.size) {
+            "A tool round cannot contain duplicate message ids"
+        }
+        val toolMessage = messages.first()
+        val runId = toolMessage.runId
+        require(runId.isNotBlank()) { "A tool round requires a durable Run" }
+        require(messages.all { it.runId == runId }) { "One tool round cannot span Runs" }
+        require(messages.all { it.conversationId == toolMessage.conversationId }) {
+            "One tool round cannot span conversations"
+        }
+        require(toolMessage.participant == Participant.MODEL) {
+            "A tool round must start with an assistant tool-call row"
+        }
+        require(!toolMessage.toolCallJson.isNullOrBlank()) {
+            "A tool-call row requires protocol metadata"
+        }
+        require(messages.drop(1).all { result ->
+            result.participant == Participant.USER &&
+                result.parentId == toolMessage.id &&
+                !result.toolCallJson.isNullOrBlank()
+        }) {
+            "Every tool result must be complete and attached to the tool-call row"
+        }
+        val requestCalls = decodeSegments(toolMessage)
+            .filter { segment -> segment.type == "tool" }
+        require(requestCalls.isNotEmpty()) { "A tool-call row requires at least one call" }
+        val requestIds = requestCalls.map { call ->
+            requireNotNull(call.toolCallId?.takeIf { it.isNotBlank() }) {
+                "Every tool request requires an id"
+            }
+        }
+        require(requestIds.distinct().size == requestIds.size) {
+            "A tool round cannot contain duplicate call ids"
+        }
+        val resultIds = messages.drop(1).map { resultMessage ->
+            val result = decodeSegments(resultMessage)
+                .filter { segment -> segment.type == "tool" }
+                .singleOrNull()
+                ?: throw IllegalArgumentException(
+                    "Each result row must contain exactly one tool result",
+                )
+            require(result.toolResult != null) { "A tool result payload cannot be missing" }
+            requireNotNull(result.toolCallId?.takeIf { it.isNotBlank() }) {
+                "Every tool result requires a call id"
+            }
+        }
+        require(resultIds == requestIds) {
+            "Tool request and result ids must form one complete ordered batch"
+        }
+        return runId
+    }
+
+    private fun decodeSegments(message: MessageEntity): List<MessageSegment> = try {
+        Json.decodeFromString(requireNotNull(message.toolCallJson))
+    } catch (error: Exception) {
+        throw IllegalArgumentException(
+            "Tool protocol metadata is not a valid segment list",
+            error,
+        )
+    }
+
+    /** Null means no row exists yet; any partial or conflicting replay fails closed. */
+    fun resolveExactReplay(
+        proposed: List<MessageEntity>,
+        existing: List<MessageEntity>,
+    ): List<MessageEntity>? {
+        if (existing.isEmpty()) return null
+        check(existing.size == proposed.size) {
+            "A partially persisted tool round cannot be replayed"
+        }
+        val existingById = existing.associateBy { it.id }
+        val ordered = proposed.map { message ->
+            checkNotNull(existingById[message.id]) {
+                "A conflicting message id exists for the tool round"
+            }
+        }
+        check(ordered.zip(proposed).all { (durable, requested) ->
+            durable.copy(runSequence = MessageEntity.UNASSIGNED_RUN_SEQUENCE) ==
+                requested.copy(runSequence = MessageEntity.UNASSIGNED_RUN_SEQUENCE)
+        }) {
+            "A conflicting tool round replay was rejected"
+        }
+        return ordered
+    }
+}
+
 private fun decodeSelectionMap(raw: String?): MutableMap<String?, String> =
     raw?.let {
         runCatching {
@@ -742,19 +847,30 @@ interface ChatDao {
     /** A provider tool round is protocol-atomic: assistant tool_calls and every result commit
      * together, or none of them do. */
     @Transaction
-    suspend fun appendToolRoundToRun(messages: List<MessageEntity>): List<MessageEntity> {
-        require(messages.size >= 2) { "A tool round requires a tool row and at least one result" }
-        val runId = messages.first().runId
-        require(messages.all { it.runId == runId }) { "One tool round cannot span Runs" }
+    suspend fun appendToolRoundToRun(
+        messages: List<MessageEntity>,
+        expectedPass: Int,
+    ): ToolRoundCommit {
+        require(expectedPass >= 0)
+        val runId = ToolRoundCommitPolicy.requireValidShape(messages)
+        ToolRoundCommitPolicy.resolveExactReplay(
+            proposed = messages,
+            // Avoid SQLite's bound-parameter ceiling for a malformed/extreme provider batch.
+            existing = messages.mapNotNull { message -> getMessage(message.id) },
+        )?.let { existing ->
+            return ToolRoundCommit(existing, inserted = false)
+        }
         val run = getRun(runId) ?: error("Run $runId does not exist")
-        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
+        check(ToolRoundCommitPolicy.canInsert(run, runId, expectedPass)) {
+            "Cannot append tool round to non-current Run $runId Pass $expectedPass"
+        }
         val firstSequence = nextRunSequence(runId)
         val assigned = messages.mapIndexed { index, message ->
             message.copy(runSequence = firstSequence + index)
         }
         assigned.forEach { insertMessage(it) }
         touchRun(runId, maxOf(run.lastCheckpointAt, assigned.maxOf { it.timestamp }))
-        return assigned
+        return ToolRoundCommit(assigned, inserted = true)
     }
 
     @Query(

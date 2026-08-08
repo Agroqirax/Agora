@@ -94,7 +94,7 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
-    /** Foreground Send and Stop lifecycle commands enter here; remaining paths migrate by phase. */
+    /** Foreground Send, Stop, and tool-effect lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
@@ -179,6 +179,40 @@ class ConversationGenerationState(
     suspend fun inputPersistenceFailed(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
         ConversationCommandFactory { ConversationCommand.InputPersistenceFailed(identity) },
     ).accepted
+
+    /** Authorize one exact validated Provider tool batch. */
+    suspend fun requestToolBatch(
+        providerOutcomeIdentity: RunEffectIdentity,
+    ): RunEffect.ExecuteToolBatch? = withContext(NonCancellable) {
+        commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.ToolBatchRequested(providerOutcomeIdentity)
+            },
+        ).effects.filterIsInstance<RunEffect.ExecuteToolBatch>().singleOrNull()
+    }
+
+    /** Close one exact tool batch and authorize its atomic protocol-round commit. */
+    suspend fun completeToolBatch(
+        batchIdentity: RunEffectIdentity,
+    ): RunEffect.CommitToolRound? = withContext(NonCancellable) {
+        commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.ToolBatchCompleted(batchIdentity)
+            },
+        ).effects.filterIsInstance<RunEffect.CommitToolRound>().singleOrNull()
+    }
+
+    /** Echo the exact Room tool-round result; only success authorizes another Provider pass. */
+    suspend fun finishToolRoundCommit(
+        commitIdentity: RunEffectIdentity,
+        success: Boolean,
+    ): RunEffect? = withContext(NonCancellable) {
+        commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.ToolRoundCommitted(commitIdentity, success)
+            },
+        ).effects.singleOrNull()
+    }
 
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
     // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly
@@ -410,6 +444,9 @@ class ConversationGenerationState(
         // Steering: lets the tool loop see a mid-generation queued send and end at the next
         // round boundary, so the queue flushes without waiting out the whole tool loop.
         hasQueuedSends = { queuedSends.value.isNotEmpty() },
+        onToolBatchRequested = ::requestToolBatch,
+        onToolBatchCompleted = ::completeToolBatch,
+        onToolRoundCommitted = ::finishToolRoundCommit,
     )
 
     // ── Stop / finalization ───────────────────────────────────────────────

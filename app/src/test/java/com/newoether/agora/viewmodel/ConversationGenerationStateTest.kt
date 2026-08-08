@@ -5,6 +5,7 @@ import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -573,6 +574,35 @@ class ConversationGenerationStateTest {
         assertEquals(listOf("one", "two"), state.queuedSends.value.map { it.id })
         assertEquals(listOf(first, second), state.takeQueuedSends())
         assertTrue(state.queuedSends.value.isEmpty())
+    }
+
+    @Test
+    fun toolBatchAndCommitResultsAreSerializedByConversationMailbox() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 2)
+        val providerIdentity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = token,
+            runId = "run",
+            pass = 2,
+            effectId = "provider-2-0",
+        )
+
+        val batch = state.requestToolBatch(providerIdentity)!!
+        val commit = state.completeToolBatch(batch.identity)!!
+        val continuation = state.finishToolRoundCommit(commit.identity, success = true)
+
+        assertEquals(RunEffect.ContinueProviderPass(commit.identity), continuation)
+        assertEquals(
+            listOf("ToolBatchRequested", "ToolBatchCompleted", "ToolRoundCommitted"),
+            state.runtimeTraceSnapshot().takeLast(3).map { it.commandType },
+        )
+        assertEquals(
+            listOf("ExecutingTools", "CommittingToolRound", "Active"),
+            state.runtimeTraceSnapshot().takeLast(3).map { it.newState },
+        )
+        assertTrue(state.endGeneration(token))
     }
 
     @Test
