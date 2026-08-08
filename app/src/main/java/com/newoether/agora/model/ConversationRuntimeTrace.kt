@@ -57,6 +57,10 @@ class ConversationRuntimeTrace(
 
     private fun ConversationCommand.runIdentity(): RuntimeRunIdentity = when (this) {
         is ConversationCommand.AcquireSlot -> identity
+        is ConversationCommand.SendRequested -> identity.runIdentity()
+        is ConversationCommand.InputPersisted -> identity.runIdentity()
+        is ConversationCommand.InputPersistenceFailed -> identity.runIdentity()
+        is ConversationCommand.SendLaunchAbandoned -> identity.runIdentity()
         is ConversationCommand.BindRun -> identity
         is ConversationCommand.StopRequested -> identity
         is ConversationCommand.CoroutineSettled -> identity
@@ -64,6 +68,10 @@ class ConversationRuntimeTrace(
     }
 
     private fun ConversationCommand.effectIdOrNull(): String? = when (this) {
+        is ConversationCommand.SendRequested -> identity.effectId
+        is ConversationCommand.InputPersisted -> identity.effectId
+        is ConversationCommand.InputPersistenceFailed -> identity.effectId
+        is ConversationCommand.SendLaunchAbandoned -> identity.effectId
         is ConversationCommand.StopRequested -> effectId
         is ConversationCommand.PersistenceSettled -> identity.effectId
         is ConversationCommand.AcquireSlot,
@@ -74,12 +82,17 @@ class ConversationRuntimeTrace(
 
     private fun RunState.traceName(): String = when (this) {
         is RunState.Idle -> "Idle"
+        is RunState.Preparing -> "Preparing"
         is RunState.Active -> "Active"
         is RunState.Stopping -> "Stopping"
     }
 
     private fun ConversationCommand.traceName(): String = when (this) {
         is ConversationCommand.AcquireSlot -> "AcquireSlot"
+        is ConversationCommand.SendRequested -> "SendRequested"
+        is ConversationCommand.InputPersisted -> "InputPersisted"
+        is ConversationCommand.InputPersistenceFailed -> "InputPersistenceFailed"
+        is ConversationCommand.SendLaunchAbandoned -> "SendLaunchAbandoned"
         is ConversationCommand.BindRun -> "BindRun"
         is ConversationCommand.StopRequested -> "StopRequested"
         is ConversationCommand.CoroutineSettled -> "CoroutineSettled"
@@ -88,6 +101,11 @@ class ConversationRuntimeTrace(
 
     private fun RunEffect.traceName(): String = when (this) {
         is RunEffect.SlotActivated -> "SlotActivated"
+        is RunEffect.PersistAcceptedInput -> "PersistAcceptedInput"
+        is RunEffect.AcceptGuidance -> "AcceptGuidance"
+        is RunEffect.DrainGuidanceFirst -> "DrainGuidanceFirst"
+        is RunEffect.AwaitRunRelease -> "AwaitRunRelease"
+        is RunEffect.RejectSendBusy -> "RejectSendBusy"
         is RunEffect.CancelProviderPass -> "CancelProviderPass"
         is RunEffect.FinalizeStop -> "FinalizeStop"
         is RunEffect.StopPersistenceFailed -> "StopPersistenceFailed"

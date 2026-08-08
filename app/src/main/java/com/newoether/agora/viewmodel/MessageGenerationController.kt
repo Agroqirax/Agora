@@ -16,11 +16,12 @@ import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunStatus
+import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
-import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -43,7 +44,11 @@ import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
 private sealed interface SendPlacement {
-    data class Direct(val uiToken: Long, val runId: String) : SendPlacement
+    data class Direct(
+        val uiToken: Long,
+        val runId: String,
+        val inputEffect: RunEffect.PersistAcceptedInput,
+    ) : SendPlacement
     data class Queued(val messageId: String) : SendPlacement
     data class QueuedAndDrain(
         val messageId: String,
@@ -130,11 +135,6 @@ sealed interface SendAcceptance {
 
 internal fun SendAcceptance.hasDurableAttachmentOwner(): Boolean =
     this is SendAcceptance.Direct
-
-internal fun mustDrainPendingQueueBeforeDirect(
-    isGenerating: Boolean,
-    pendingQueueSize: Int,
-): Boolean = !isGenerating && pendingQueueSize > 0
 
 /**
  * Resolves the shared user anchor for regeneration.
@@ -1373,13 +1373,12 @@ internal class MessageGenerationController(
 
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
-     * background send lands in its own conversation). Atomically claims the generation slot
-     * via [ConversationGenerationState.acquireForSend]: if a generation is already running (or
-     * still winding down after a Stop) the message is enqueued (carrying its full attachment
-     * list) and this returns true; otherwise the slot is held, generating is set synchronously,
-     * and the generation launches. The finally releases the slot (owner-gated) and batch-drains
-     * the queue. Validation failures after the claim release via [releaseAndDrain] too -a plain
-     * endGeneration would strand queued sends behind an idle slot until the next manual send.
+     * background send lands in its own conversation). Placement enters the conversation command
+     * mailbox: a bound active Run accepts memory-only guidance, STOPPING/PREPARING waits, and IDLE
+     * emits one identified persistence effect before the generation launches. The finally releases
+     * the slot (owner-gated) and batch-drains the queue. Validation failures after the claim release
+     * via [releaseAndDrain] too—a plain endGeneration would strand queued sends behind an idle slot
+     * until the next manual send.
      */
     private suspend fun sendInto(
         genId: String,
@@ -1454,56 +1453,56 @@ internal class MessageGenerationController(
         }
 
         var placement: SendPlacement? = null
+        val proposedRunId = UUID.randomUUID().toString()
+        val sendEffectId = "send-$proposedRunId"
         try {
             while (placement == null) {
                 val decision = state.queueMutationMutex.withLock {
-                val pendingQueue = state.queuedSends.value
-                if (state.stopping.value) {
-                    if (directOnly) SendPlacement.Rejected else SendPlacement.RetryAfterRelease
-                } else if (
-                    mustDrainPendingQueueBeforeDirect(
-                        isGenerating = state.generating.value,
-                        pendingQueueSize = pendingQueue.size,
+                    val pendingQueue = state.queuedSends.value
+                    val transition = state.requestSend(
+                        proposedRunId = proposedRunId,
+                        effectId = sendEffectId,
+                        directOnly = directOnly,
+                        hasPendingGuidance = pendingQueue.isNotEmpty(),
                     )
-                ) {
-                    // A previously accepted batch may still be waiting for its asynchronous
-                    // release/Stop handoff. Never let a newer Direct send leapfrog it. Append the
-                    // new guidance and atomically claim the complete FIFO batch from this lock.
-                    if (directOnly) {
-                        SendPlacement.Rejected
-                    } else {
-                        val queued = enqueueAcceptedGuidance(pendingQueue.last().runId)
-                        val batch = state.takeQueuedSends()
-                        val claim = claimQueuedDrain(state, batch)
-                        if (claim != null) {
-                            SendPlacement.QueuedAndDrain(queued.id, claim)
-                        } else {
-                            SendPlacement.Queued(queued.id)
+                    check(transition.accepted)
+                    when (val effect = transition.effects.single()) {
+                        is RunEffect.PersistAcceptedInput -> SendPlacement.Direct(
+                            uiToken = effect.identity.ownerToken,
+                            runId = effect.identity.runId,
+                            inputEffect = effect,
+                        )
+                        is RunEffect.DrainGuidanceFirst -> {
+                            // A previously accepted batch may still be waiting for its asynchronous
+                            // handoff. Never let a newer Direct send leapfrog the FIFO batch.
+                            check(!directOnly)
+                            val queued = enqueueAcceptedGuidance(pendingQueue.last().runId)
+                            val batch = state.takeQueuedSends()
+                            val claim = claimQueuedDrain(state, batch)
+                            if (claim != null) {
+                                SendPlacement.QueuedAndDrain(queued.id, claim)
+                            } else {
+                                SendPlacement.Queued(queued.id)
+                            }
                         }
-                    }
-                } else {
-                    val uiToken = state.acquireForSend()
-                    if (uiToken != null) {
-                        val runId = UUID.randomUUID().toString()
-                        SendPlacement.Direct(uiToken, runId)
-                    } else if (directOnly) {
-                    // Direct-only callers already hold the conversation lock. The current slot
-                    // owner may be blocked acquiring that same lock, so neither waiting
-                    // (RetryAfterRelease) nor queueing (whose drain also needs the lock) can make
-                    // progress here. Reject without persisting anything and let the caller decide.
-                    SendPlacement.Rejected
-                    } else {
-                        val runId = state.currentRunId()
-                            ?: return@withLock SendPlacement.RetryAfterRelease
-                        val run = convRepo.getRun(runId)
-                        if (run == null || run.status != RunStatus.ACTIVE) {
-                            if (run?.status == RunStatus.STOPPING) convRepo.finishRunStopped(runId)
-                            SendPlacement.RetryAfterRelease
-                        } else {
-                            SendPlacement.Queued(enqueueAcceptedGuidance(runId).id)
+                        is RunEffect.AcceptGuidance -> {
+                            val runId = effect.identity.runId
+                            val run = convRepo.getRun(runId)
+                            if (run == null || run.status != RunStatus.ACTIVE) {
+                                if (run?.status == RunStatus.STOPPING) {
+                                    convRepo.finishRunStopped(runId)
+                                }
+                                SendPlacement.RetryAfterRelease
+                            } else {
+                                SendPlacement.Queued(enqueueAcceptedGuidance(runId).id)
+                            }
                         }
+                        is RunEffect.AwaitRunRelease -> SendPlacement.RetryAfterRelease
+                        is RunEffect.RejectSendBusy -> SendPlacement.Rejected
+                        else -> error(
+                            "SendRequested emitted unexpected effect ${effect.javaClass.simpleName}",
+                        )
                     }
-                }
                 }
                 if (decision == SendPlacement.RetryAfterRelease) {
                     state.generating.filter { generating -> !generating }.first()
@@ -1536,6 +1535,7 @@ internal class MessageGenerationController(
         val generationJob = state.launchGenerationJob(myUiToken) generation@ {
             val myPersistId = state.nextPersistId()
             var runBound = false
+            var inputGraphCommitted = false
             var setupModelMessageId: String? = null
             var roomProjectionFence: RoomMessageProjectionFence? = null
             try {
@@ -1621,12 +1621,13 @@ internal class MessageGenerationController(
                             messageSelectionUpdates = messageSelectionUpdates,
                         )
                     }
+                    inputGraphCommitted = true
                     payloadOwnershipTransferred.set(true)
-                    runBound = state.tryBindRun(myUiToken, runId)
 
                     // Everything below acknowledges a transaction Room already committed. Finish
                     // it even if Stop/Activity teardown cancels this coroutine at that exact edge.
                     withContext(kotlinx.coroutines.NonCancellable) {
+                        runBound = state.inputPersisted(direct.inputEffect.identity)
                         if (text.isNotBlank()) {
                             runCatching { onUserMessagePersisted(userMessageId, text) }
                                 .onFailure { error ->
@@ -1735,6 +1736,13 @@ internal class MessageGenerationController(
                 }
                 throw e
             } catch (e: Exception) {
+                if (!inputGraphCommitted) {
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        runCatching {
+                            state.inputPersistenceFailed(direct.inputEffect.identity)
+                        }
+                    }
+                }
                 failGenerationSetup(
                     conversationId = genId,
                     runId = runId,

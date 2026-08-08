@@ -4,6 +4,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.RunEffect
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -120,6 +121,84 @@ class ConversationGenerationStateTest {
 
         assertEquals(1, firstCancelCount)
         assertEquals(1, secondCancelCount)
+    }
+
+    @Test
+    fun mailboxSend_claimsPreparingAndBindsOnlyItsExactPersistenceResult() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+
+        val requested = state.requestSend(
+            proposedRunId = "run",
+            effectId = "send",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val effect = requested.effects.single() as RunEffect.PersistAcceptedInput
+
+        assertTrue(state.generating.value)
+        assertNull(state.currentRunId())
+        assertTrue(state.inputPersisted(effect.identity))
+        assertEquals("run", state.currentRunId())
+        assertTrue(state.endGeneration(effect.identity.ownerToken))
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun StopBeforeInputPersistence_rejectsTheLateMailboxResult() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val requested = state.requestSend(
+            proposedRunId = "run",
+            effectId = "send",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val effect = requested.effects.single() as RunEffect.PersistAcceptedInput
+
+        val stopped = state.stop()
+
+        assertNull(stopped.finalizationEffect)
+        assertFalse(state.inputPersisted(effect.identity))
+        assertFalse(state.generating.value)
+        assertNull(state.currentRunId())
+    }
+
+    @Test
+    fun mailboxInputFailure_remainsOwnedUntilTheGenerationCoroutineSettles() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val requested = state.requestSend(
+            proposedRunId = "run",
+            effectId = "send",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val effect = requested.effects.single() as RunEffect.PersistAcceptedInput
+
+        assertTrue(state.inputPersistenceFailed(effect.identity))
+        assertTrue(state.generating.value)
+        assertNull(state.acquireForSend())
+        assertTrue(state.endGeneration(effect.identity.ownerToken))
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun activeMailboxSend_returnsGuidanceForTheBoundRunWithoutChangingOwner() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "active-run", pass = 2)
+
+        val requested = state.requestSend(
+            proposedRunId = "unused-run",
+            effectId = "guidance",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+
+        val guidance = requested.effects.single() as RunEffect.AcceptGuidance
+        assertEquals("active-run", guidance.identity.runId)
+        assertEquals(2, guidance.identity.pass)
+        assertEquals(token, guidance.identity.ownerToken)
+        assertEquals("active-run", state.currentRunId())
+        assertTrue(state.endGeneration(token))
     }
 
     @Test

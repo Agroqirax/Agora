@@ -7,10 +7,12 @@ import com.newoether.agora.model.ConversationRuntimeTrace
 import com.newoether.agora.model.ConversationRuntimeTraceEntry
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunState
 import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.SlotReleaseReason
+import com.newoether.agora.model.Transition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -45,14 +47,13 @@ import java.util.concurrent.atomic.AtomicLong
  *    Stop transfers terminal-write ownership to [GenerationFinalizer], so the cancelled provider
  *    coroutine cannot race the dedicated STOPPED transaction.
  *
- * ## Slot lifecycle (acquireForSend / tryAcquireForReplacement / endGeneration / stop)
+ * ## Slot lifecycle (requestSend / compatibility claims / endGeneration / stop)
  *
- * The reducer-backed generation slot under [genLock] is the single atomic decision point for
- * launch-vs-enqueue. [acquireForSend] claims it cooperatively (null → enqueue);
- * [tryAcquireForReplacement] claims it only while idle (regenerate/edit are disabled during an
- * active generation); [endGeneration] releases it token-gated when a generation ends; [stop] is
- * a terminal user Stop that fully releases it. Stop cancels ONLY this conversation's
- * [generationJob] and in-flight HTTP streams (via [streamScope]) — never another conversation's.
+ * Ordinary foreground Send placement enters [requestSend]'s sequential mailbox. The compatibility
+ * [acquireForSend] path remains only for queue/headless adapters not migrated in this phase;
+ * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration]
+ * releases token-gated ownership and [stop] establishes the terminal cutoff. Stop cancels ONLY
+ * this conversation's [generationJob] and in-flight HTTP streams (via [streamScope]).
  */
 class ConversationGenerationState(
     val conversationId: String,
@@ -88,6 +89,8 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
+    /** Ordinary foreground Send commands enter here; remaining paths migrate phase by phase. */
+    private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
     private val persistId = AtomicLong(0L)
@@ -126,12 +129,58 @@ class ConversationGenerationState(
 
     fun currentRunId(): String? = synchronized(genLock) { runState.identityOrNull()?.runId }
 
+    /**
+     * Submit one ordinary foreground Send placement decision to this conversation's mailbox.
+     * Cancellation before the caller receives a direct claim emits an identified abandonment
+     * command, so a Preparing slot cannot be stranded without a generation Job.
+     */
+    suspend fun requestSend(
+        proposedRunId: String,
+        effectId: String,
+        directOnly: Boolean,
+        hasPendingGuidance: Boolean,
+    ): Transition {
+        require(proposedRunId.isNotBlank())
+        require(effectId.isNotBlank())
+        return commandMailbox.submit(
+            commandFactory = ConversationCommandFactory {
+                ConversationCommand.SendRequested(
+                    identity = RunEffectIdentity(
+                        conversationId = conversationId,
+                        ownerToken = uiGenToken + 1,
+                        runId = proposedRunId,
+                        pass = 0,
+                        effectId = effectId,
+                    ),
+                    directOnly = directOnly,
+                    hasPendingGuidance = hasPendingGuidance,
+                )
+            },
+            cancellationCommand = { transition ->
+                transition.effects
+                    .filterIsInstance<RunEffect.PersistAcceptedInput>()
+                    .singleOrNull()
+                    ?.let { effect -> ConversationCommand.SendLaunchAbandoned(effect.identity) }
+            },
+        )
+    }
+
+    /** Echo the exact Room acceptance effect back through the mailbox. */
+    suspend fun inputPersisted(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
+        ConversationCommandFactory { ConversationCommand.InputPersisted(identity) },
+    ).accepted
+
+    /** Report failure of the exact accepted-input persistence effect without releasing its Job. */
+    suspend fun inputPersistenceFailed(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
+        ConversationCommandFactory { ConversationCommand.InputPersistenceFailed(identity) },
+    ).accepted
+
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
     // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly
     // one generation owns a conversation's tree at a time.
 
     /**
-     * Cooperative claim for a fresh send. If the slot is free, atomically marks this conversation
+     * Compatibility claim for queue/headless paths. If the slot is free, marks this conversation
      * generating (advancing the UI token so any just-finished generation's late callbacks are gated
      * out), flips it active in the registry, and returns the captured token. If a generation is
      * already running, returns null → the caller must enqueue instead of launching (fixes the
@@ -147,11 +196,7 @@ class ConversationGenerationState(
         )
         if (!transition.accepted) return null
         check(transition.effects.singleOrNull() is RunEffect.SlotActivated)
-        uiGenToken = nextToken
-        generating.value = true
-        stopping.value = false
-        onRegistryActive(conversationId)
-        onActive?.invoke(conversationId)
+        applyActivatedSlotLocked(transition.newState.identityOrNull()!!, loading = false)
         nextToken
     }
 
@@ -169,12 +214,7 @@ class ConversationGenerationState(
         )
         if (!transition.accepted) return null
         check(transition.effects.singleOrNull() is RunEffect.SlotActivated)
-        uiGenToken = nextToken
-        isLoading.value = true
-        generating.value = true
-        stopping.value = false
-        onRegistryActive(conversationId)
-        onActive?.invoke(conversationId)
+        applyActivatedSlotLocked(transition.newState.identityOrNull()!!, loading = true)
         nextToken
     }
 
@@ -199,7 +239,7 @@ class ConversationGenerationState(
 
         val accepted = synchronized(genLock) {
             if (
-                !runState.isActiveOwner(uiToken) ||
+                !runState.isLaunchableOwner(uiToken) ||
                 generationJob != null
             ) {
                 false
@@ -239,7 +279,7 @@ class ConversationGenerationState(
         }
         return synchronized(genLock) {
             if (
-                !runState.isActiveOwner(uiToken) ||
+                !runState.isLaunchableOwner(uiToken) ||
                 generationJob != null
             ) {
                 false
@@ -283,6 +323,8 @@ class ConversationGenerationState(
                     false
                 }
                 SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
+                SlotReleaseReason.SEND_LAUNCH_ABANDONED ->
+                    error("Coroutine settlement cannot abandon an unlaunched Send")
                 null -> false
             }
         }
@@ -391,8 +433,8 @@ class ConversationGenerationState(
                     finalizationEffect = null,
                 )
             }
-            check(currentState is RunState.Active)
-            val identity = currentState.identity
+            val identity = currentState.identityOrNull()
+                ?: error("A non-idle state must have a Run owner identity")
             val boundRunId = identity.runId
             val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
             check(s == null || boundRunId != null) {
@@ -541,18 +583,59 @@ class ConversationGenerationState(
 
     private fun RunState.identityOrNull(): RuntimeRunIdentity? = when (this) {
         is RunState.Idle -> null
+        is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
         is RunState.Stopping -> identity
     }
 
-    private fun RunState.isActiveOwner(ownerToken: Long): Boolean =
-        this is RunState.Active && identity.ownerToken == ownerToken
+    private fun RunState.isLaunchableOwner(ownerToken: Long): Boolean = when (this) {
+        is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
+        is RunState.Active -> identity.ownerToken == ownerToken
+        is RunState.Idle,
+        is RunState.Stopping,
+        -> false
+    }
 
     private fun RunState.isStoppingOwner(ownerToken: Long): Boolean =
         this is RunState.Stopping && identity.ownerToken == ownerToken
 
     /** Privacy-safe bounded trace for diagnostics/tests; contains no prompt or message content. */
     internal fun runtimeTraceSnapshot(): List<ConversationRuntimeTraceEntry> = runtimeTrace.snapshot()
+
+    private fun reduceMailboxCommand(factory: ConversationCommandFactory): Transition =
+        synchronized(genLock) {
+            val transition = reduceLocked(factory.create())
+            if (transition.accepted) applyMailboxEffectsLocked(transition)
+            transition
+        }
+
+    /** Apply only effects whose authority has moved to the mailbox in the current phase. */
+    private fun applyMailboxEffectsLocked(transition: Transition) {
+        transition.effects.filterIsInstance<RunEffect.PersistAcceptedInput>()
+            .singleOrNull()
+            ?.let { effect ->
+                val preparing = runState as? RunState.Preparing
+                    ?: error("Accepted input persistence must enter Preparing")
+                check(preparing.inputEffectIdentity == effect.identity)
+                applyActivatedSlotLocked(preparing.ownerIdentity, loading = false)
+            }
+        transition.effects.filterIsInstance<RunEffect.ReleaseSlot>()
+            .singleOrNull()
+            ?.takeIf { release ->
+                release.reason == SlotReleaseReason.SEND_LAUNCH_ABANDONED
+            }
+            ?.let { applyReleasedSlotLocked() }
+    }
+
+    private fun applyActivatedSlotLocked(identity: RuntimeRunIdentity, loading: Boolean) {
+        check(runState !is RunState.Idle)
+        uiGenToken = identity.ownerToken
+        isLoading.value = loading
+        generating.value = true
+        stopping.value = false
+        onRegistryActive(conversationId)
+        onActive?.invoke(conversationId)
+    }
 
     /** Must be called while [genLock] is held. This is the only process-slot state write path. */
     private fun reduceLocked(command: ConversationCommand): com.newoether.agora.model.Transition {

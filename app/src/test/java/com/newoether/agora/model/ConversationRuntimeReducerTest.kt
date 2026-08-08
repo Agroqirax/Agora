@@ -34,6 +34,215 @@ class ConversationRuntimeReducerTest {
     }
 
     @Test
+    fun `foreground Send prepares one identified persistence effect before binding the Run`() {
+        val requested = sendCommand(ownerToken = 3, runId = "run", effectId = "send-1")
+
+        val preparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            requested,
+        )
+
+        assertEquals(
+            RunState.Preparing(
+                ownerIdentity = identity(ownerToken = 3),
+                inputEffectIdentity = requested.identity,
+            ),
+            preparing.newState,
+        )
+        assertEquals(
+            listOf(RunEffect.PersistAcceptedInput(requested.identity)),
+            preparing.effects,
+        )
+
+        val persisted = ConversationRuntimeReducer.reduce(
+            preparing.newState,
+            ConversationCommand.InputPersisted(requested.identity),
+        )
+
+        assertEquals(
+            RunState.Active(identity(ownerToken = 3, runId = "run")),
+            persisted.newState,
+        )
+        assertTrue(persisted.effects.isEmpty())
+    }
+
+    @Test
+    fun `active Send accepts guidance only for the currently bound Run`() {
+        val active = active(ownerToken = 4, runId = "active-run", pass = 2)
+        val request = sendCommand(ownerToken = 99, runId = "unused", effectId = "guidance")
+
+        val transition = ConversationRuntimeReducer.reduce(active, request)
+
+        assertSame(active, transition.newState)
+        assertEquals(
+            listOf(
+                RunEffect.AcceptGuidance(
+                    RunEffectIdentity(
+                        conversationId = CONVERSATION_ID,
+                        ownerToken = 4,
+                        runId = "active-run",
+                        pass = 2,
+                        effectId = "guidance",
+                    ),
+                ),
+            ),
+            transition.effects,
+        )
+    }
+
+    @Test
+    fun `Send waits during preparation or stopping and direct-only reports busy`() {
+        val request = sendCommand(ownerToken = 1, runId = "run", effectId = "send")
+        val preparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            request,
+        ).newState
+        val stoppingActive = active(ownerToken = 8, runId = "stopping")
+        val stopping = ConversationRuntimeReducer.reduce(
+            stoppingActive,
+            stopCommand(stoppingActive, effectId = "stop"),
+        ).newState
+
+        for (state in listOf(preparing, stopping)) {
+            val wait = ConversationRuntimeReducer.reduce(state, request.copy(directOnly = false))
+            assertSame(state, wait.newState)
+            assertTrue(wait.effects.single() is RunEffect.AwaitRunRelease)
+
+            val busy = ConversationRuntimeReducer.reduce(state, request.copy(directOnly = true))
+            assertSame(state, busy.newState)
+            assertTrue(busy.effects.single() is RunEffect.RejectSendBusy)
+        }
+    }
+
+    @Test
+    fun `pending guidance is drained before a newer idle Send can claim the slot`() {
+        val state = RunState.Idle(CONVERSATION_ID)
+        val request = sendCommand(
+            ownerToken = 1,
+            runId = "new-run",
+            effectId = "send",
+            hasPendingGuidance = true,
+        )
+
+        val drain = ConversationRuntimeReducer.reduce(state, request)
+        assertSame(state, drain.newState)
+        assertEquals(
+            listOf(RunEffect.DrainGuidanceFirst(request.identity)),
+            drain.effects,
+        )
+
+        val directOnly = ConversationRuntimeReducer.reduce(
+            state,
+            request.copy(directOnly = true),
+        )
+        assertSame(state, directOnly.newState)
+        assertEquals(
+            listOf(RunEffect.RejectSendBusy(request.identity)),
+            directOnly.effects,
+        )
+    }
+
+    @Test
+    fun `stale persistence and abandonment results cannot mutate another Send`() {
+        val first = sendCommand(ownerToken = 1, runId = "first", effectId = "first-effect")
+        val second = sendCommand(ownerToken = 2, runId = "second", effectId = "second-effect")
+        val firstPreparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            first,
+        ).newState
+
+        val staleInput = ConversationRuntimeReducer.reduce(
+            firstPreparing,
+            ConversationCommand.InputPersisted(second.identity),
+        )
+        assertEquals(CommandRejection.STALE_IDENTITY, staleInput.rejection)
+        assertSame(firstPreparing, staleInput.newState)
+
+        val staleAbandonment = ConversationRuntimeReducer.reduce(
+            firstPreparing,
+            ConversationCommand.SendLaunchAbandoned(second.identity),
+        )
+        assertEquals(CommandRejection.STALE_IDENTITY, staleAbandonment.rejection)
+        assertSame(firstPreparing, staleAbandonment.newState)
+
+        val abandoned = ConversationRuntimeReducer.reduce(
+            firstPreparing,
+            ConversationCommand.SendLaunchAbandoned(first.identity),
+        )
+        assertEquals(RunState.Idle(CONVERSATION_ID), abandoned.newState)
+        assertEquals(
+            SlotReleaseReason.SEND_LAUNCH_ABANDONED,
+            releaseEffect(abandoned).reason,
+        )
+    }
+
+    @Test
+    fun `input persistence failure is identified idempotent and releases on coroutine settlement`() {
+        val request = sendCommand(ownerToken = 6, runId = "run", effectId = "input")
+        val preparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            request,
+        ).newState
+        val failureCommand = ConversationCommand.InputPersistenceFailed(request.identity)
+
+        val failed = ConversationRuntimeReducer.reduce(preparing, failureCommand)
+        assertTrue((failed.newState as RunState.Preparing).inputFailureReported)
+        assertTrue(failed.effects.isEmpty())
+
+        val duplicate = ConversationRuntimeReducer.reduce(failed.newState, failureCommand)
+        assertEquals(CommandRejection.DUPLICATE_RESULT, duplicate.rejection)
+        assertSame(failed.newState, duplicate.newState)
+
+        val settled = ConversationRuntimeReducer.reduce(
+            failed.newState,
+            ConversationCommand.CoroutineSettled(identity(ownerToken = 6)),
+        )
+        assertEquals(RunState.Idle(CONVERSATION_ID), settled.newState)
+        assertEquals(SlotReleaseReason.NORMAL_COMPLETION, releaseEffect(settled).reason)
+    }
+
+    @Test
+    fun `Stop before input persistence rejects the late Room result and waits only for coroutine`() {
+        val request = sendCommand(ownerToken = 5, runId = "run", effectId = "input")
+        val preparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            request,
+        ).newState as RunState.Preparing
+        val stop = ConversationCommand.StopRequested(
+            identity = preparing.ownerIdentity,
+            coroutineAlreadySettled = false,
+            requiresPersistence = false,
+            effectId = null,
+        )
+
+        val stopping = ConversationRuntimeReducer.reduce(preparing, stop)
+        assertEquals(
+            RunState.Stopping(
+                identity = preparing.ownerIdentity,
+                finalizationEffectId = null,
+                coroutineSettled = false,
+                persistenceSettled = true,
+            ),
+            stopping.newState,
+        )
+        assertTrue(stopping.effects.none { it is RunEffect.FinalizeStop })
+
+        val lateInput = ConversationRuntimeReducer.reduce(
+            stopping.newState,
+            ConversationCommand.InputPersisted(request.identity),
+        )
+        assertFalse(lateInput.accepted)
+        assertSame(stopping.newState, lateInput.newState)
+
+        val settled = ConversationRuntimeReducer.reduce(
+            stopping.newState,
+            ConversationCommand.CoroutineSettled(preparing.ownerIdentity),
+        )
+        assertEquals(RunState.Idle(CONVERSATION_ID), settled.newState)
+        assertEquals(SlotReleaseReason.STOP_BARRIERS_SETTLED, releaseEffect(settled).reason)
+    }
+
+    @Test
     fun `Stop emits identified cancellation and persistence effects`() {
         val active = active(ownerToken = 4, runId = "run", pass = 3)
 
@@ -258,6 +467,14 @@ class ConversationRuntimeReducerTest {
                 CommandRejection.ILLEGAL_STATE,
             ),
             Triple(
+                RunState.Preparing(
+                    ownerIdentity = identity(ownerToken = 1),
+                    inputEffectIdentity = effectIdentity(identity(1, "run"), "send"),
+                ),
+                ConversationCommand.BindRun(identity(ownerToken = 1, runId = "run")),
+                CommandRejection.ILLEGAL_STATE,
+            ),
+            Triple(
                 idle,
                 stopCommand(active, effectId = "effect"),
                 CommandRejection.ILLEGAL_STATE,
@@ -341,20 +558,21 @@ class ConversationRuntimeReducerTest {
 
     @Test
     fun `same command sequence produces equal states and effects`() {
+        val send = sendCommand(ownerToken = 1, runId = "run", effectId = "input")
         val commands = listOf(
-            ConversationCommand.AcquireSlot(identity(ownerToken = 1)),
-            ConversationCommand.BindRun(identity(ownerToken = 1, runId = "run", pass = 4)),
+            send,
+            ConversationCommand.InputPersisted(send.identity),
             ConversationCommand.StopRequested(
-                identity(ownerToken = 1, runId = "run", pass = 4),
+                identity(ownerToken = 1, runId = "run", pass = 0),
                 coroutineAlreadySettled = false,
                 requiresPersistence = true,
                 effectId = "effect",
             ),
             ConversationCommand.PersistenceSettled(
-                effectIdentity(identity(1, "run", 4), "effect"),
+                effectIdentity(identity(1, "run", 0), "effect"),
                 success = true,
             ),
-            ConversationCommand.CoroutineSettled(identity(1, "run", 4)),
+            ConversationCommand.CoroutineSettled(identity(1, "run", 0)),
         )
 
         fun replay(): List<Transition> {
@@ -383,6 +601,24 @@ class ConversationRuntimeReducerTest {
         coroutineAlreadySettled = coroutineSettled,
         requiresPersistence = true,
         effectId = effectId,
+    )
+
+    private fun sendCommand(
+        ownerToken: Long,
+        runId: String,
+        effectId: String,
+        directOnly: Boolean = false,
+        hasPendingGuidance: Boolean = false,
+    ) = ConversationCommand.SendRequested(
+        identity = RunEffectIdentity(
+            conversationId = CONVERSATION_ID,
+            ownerToken = ownerToken,
+            runId = runId,
+            pass = 0,
+            effectId = effectId,
+        ),
+        directOnly = directOnly,
+        hasPendingGuidance = hasPendingGuidance,
     )
 
     private fun identity(

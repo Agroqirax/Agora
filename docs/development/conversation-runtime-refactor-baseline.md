@@ -96,8 +96,9 @@ second test-only Run reducer with competing transition semantics.
 ### 3.2 In-process slot
 
 Pure `ConversationCommand`, `RunState`, `RunEffect`, `Transition`, and
-`ConversationRuntimeReducer` types now own `Idle`, `Active`, and `Stopping` slot transitions and
-the coroutine/persistence Stop barriers. `ConversationGenerationState` calls the reducer under its
+`ConversationRuntimeReducer` types now own `Idle`, `Preparing`, `Active`, and `Stopping` slot
+transitions, ordinary foreground Send placement/input acceptance, and the coroutine/persistence
+Stop barriers. `ConversationGenerationState` calls the reducer under its
 existing per-conversation monitor and is the only assignment path for this process-slot state.
 The former `SlotPhase`, `stopFinalizationPending`, and `stoppedCoroutineUnwound` authorities were
 deleted. Legacy UI/persistence tokens, Job ownership, streams, and the monitor remain compatibility
@@ -119,9 +120,10 @@ must not collapse into Boolean combinations.
 
 | Current owner | Writes | Current fence | Migration consequence |
 | --- | --- | --- | --- |
-| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative slot and Stop-barrier transitions | conversation + owner + run id + pass + effect id | Keep as the real first reducer slice; move command delivery to the mailbox later. |
-| `ConversationGenerationState` adapter | Job, overlay, tokens, streams, queue, UI projection | conversation + owner token | Preserve only until each remaining path moves behind reducer effects. |
-| `MessageGenerationController` | Send/edit/regenerate graph, queue drain, Compact entry, setup failure, release | conversation + token + run id | First foreground migration seam. |
+| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative ordinary-Send placement/input acceptance, slot, and Stop-barrier transitions | conversation + owner + run id + pass + effect id | Extend the real reducer slice one lifecycle boundary at a time. |
+| Per-conversation command mailbox | serial delivery of ordinary `SendRequested`, `InputPersisted`, and cancellation-abandonment commands | one bounded FIFO consumer per conversation | Move Stop, Provider/tool, guidance execution, Compact, and recovery delivery here in later commits. |
+| `ConversationGenerationState` adapter | Job, overlay, tokens, streams, queue, UI projection, non-Send compatibility claims | conversation + owner token | Preserve only until each remaining path moves behind reducer effects. |
+| `MessageGenerationController` | executes accepted-input Room effect, edit/regenerate graph, queue drain, Compact entry, setup failure, release | conversation + token + run/effect id | Provider and queue execution remain later migration seams. |
 | `GenerationManager` | stream/checkpoint, tools, continuation, terminal messages/Run, notification | captured run id/pass | Must split one Provider pass from whole-Run finalization. |
 | `GenerationFinalizer` | executes identified durable Stop effect and returns a result command | conversation + owner + run id + pass + effect id | Move execution behind the mailbox; identity/stale rejection is already enforced. |
 | `TaskExecutionEngine` | headless Run setup, Compact, generation and terminal cleanup | conversation + run id/pass | Remove duplication only after Task/Loop parity. |
@@ -159,9 +161,10 @@ contract. They may coexist only during a bounded adapter migration.
 
 The live orders that constrain migration are:
 
-1. Direct foreground Send: queue mutex → slot claim; release mutex; Job → conversation lease →
-   Room transaction.
-2. Queue decision: queue mutex → occasional Run read/repair in Room.
+1. Direct foreground Send: queue mutex → mailbox `SendRequested` → pure slot claim; release mutex;
+   Job → conversation lease → Room transaction → mailbox `InputPersisted`/failure command.
+2. Guidance placement: queue mutex → mailbox decision → occasional Run read/repair in Room; the
+   in-memory queue mutation remains a bounded legacy adapter.
 3. Queue drain: queue mutex → origin Run read → slot claim; release mutex; Job → conversation
    lease → Room.
 4. Automation bridge: automation conversation lease → Controller direct-only Send → join the
@@ -256,7 +259,7 @@ JVM suite.
 Each row is an independent semantic commit and rollback boundary:
 
 1. Pure runtime vocabulary, reducer tests, Stop identity envelope, and bounded redacted trace — implemented for the authoritative slot/Stop slice.
-2. Ordinary foreground Send enters a real per-conversation mailbox.
+2. Ordinary foreground Send enters a real per-conversation mailbox — implemented for placement and the accepted-input Room result; Provider and guidance execution remain adapters.
 3. One Provider pass becomes an isolated runner and closed outcome.
 4. Stop and both settlement barriers become mailbox commands.
 5. Tool batch execution/commit/continuation becomes effects and result commands.

@@ -110,17 +110,28 @@ stream, while `GenerationManager` currently owns the multi-pass Provider/tool co
 normal Run finalization. `GenerationFinalizer` owns durable Stop finalization and its retry path.
 Separating one Provider pass from one Run is a target refactor boundary.
 
-The first conversation-runtime migration slice is authoritative for the in-process generation
-slot and Stop barriers. Pure `ConversationCommand`, `RunState`, `RunEffect`, and
-`ConversationRuntimeReducer` types decide `Idle`/`Active`/`Stopping`, coroutine settlement,
+The migrated conversation-runtime slice is authoritative for ordinary foreground Send placement,
+the in-process generation slot, and Stop barriers. Pure `ConversationCommand`, `RunState`, `RunEffect`, and
+`ConversationRuntimeReducer` types decide `Idle`/`Preparing`/`Active`/`Stopping`, coroutine settlement,
 durable settlement, and slot release. `ConversationGenerationState` retains the legacy per-
 conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
 `SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
 conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
 before either slot or overlay mutation.
 
-This is not yet the final mailbox architecture: Send preparation, Provider passes, tools, queue,
-Compact, automation, and recovery have not moved into the reducer. A bounded 256-entry runtime
+Each process-scoped conversation state now also owns a bounded 64-entry sequential command
+mailbox.
+Foreground Send enters as `SendRequested`: `Idle` becomes `Preparing` and emits one identified
+`PersistAcceptedInput`; the Room transaction returns the exact `InputPersisted` command before the
+Run becomes `Active`, while a failed transaction returns `InputPersistenceFailed` and retains
+ownership until its coroutine settles. Cancellation before the controller receives the direct
+claim emits an exact `SendLaunchAbandoned` command, so an unstarted Send cannot strand the slot.
+Active guidance still
+uses the legacy in-memory queue executor, but its accept/wait/busy/drain-first placement decision is
+made by the reducer.
+
+This is not yet the final mailbox architecture: Provider passes, tools, guidance execution,
+Compact, automation, Stop delivery, and recovery have not moved into the mailbox. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 

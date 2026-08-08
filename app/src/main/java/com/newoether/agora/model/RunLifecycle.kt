@@ -43,7 +43,11 @@ data class RuntimeRunIdentity(
     }
 }
 
-/** Full, bound-Run identity echoed by every asynchronous effect result migrated here. */
+/**
+ * Full Run-target identity echoed by every asynchronous effect result migrated here.
+ * [RunEffect.PersistAcceptedInput] carries the proposed Run id before Room binds it; every later
+ * effect carries an already-durable Run id.
+ */
 data class RunEffectIdentity(
     val conversationId: String,
     val ownerToken: Long,
@@ -73,6 +77,23 @@ sealed interface RunState {
     data class Idle(override val conversationId: String) : RunState {
         init {
             require(conversationId.isNotBlank())
+        }
+    }
+
+    /** A foreground Send owns the slot while its conversation/Run/message transaction executes. */
+    data class Preparing(
+        val ownerIdentity: RuntimeRunIdentity,
+        val inputEffectIdentity: RunEffectIdentity,
+        val inputFailureReported: Boolean = false,
+    ) : RunState {
+        override val conversationId: String = ownerIdentity.conversationId
+
+        init {
+            require(ownerIdentity.runId == null)
+            require(ownerIdentity.pass == 0)
+            require(inputEffectIdentity.conversationId == ownerIdentity.conversationId)
+            require(inputEffectIdentity.ownerToken == ownerIdentity.ownerToken)
+            require(inputEffectIdentity.pass == 0)
         }
     }
 
@@ -112,6 +133,32 @@ sealed interface ConversationCommand {
             require(identity.runId == null)
             require(identity.pass == 0)
         }
+    }
+
+    data class SendRequested(
+        val identity: RunEffectIdentity,
+        val directOnly: Boolean,
+        val hasPendingGuidance: Boolean,
+    ) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+
+        init {
+            require(identity.pass == 0)
+        }
+    }
+
+    /** Result of the exact [RunEffect.PersistAcceptedInput] emitted for this Send. */
+    data class InputPersisted(val identity: RunEffectIdentity) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
+    data class InputPersistenceFailed(val identity: RunEffectIdentity) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
+    /** Cancellation won after a direct claim but before its state-owned Job could be installed. */
+    data class SendLaunchAbandoned(val identity: RunEffectIdentity) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
     }
 
     data class BindRun(val identity: RuntimeRunIdentity) : ConversationCommand {
@@ -155,10 +202,16 @@ enum class SlotReleaseReason {
     NORMAL_COMPLETION,
     STOP_BARRIERS_SETTLED,
     EMPTY_STOP,
+    SEND_LAUNCH_ABANDONED,
 }
 
 sealed interface RunEffect {
     data class SlotActivated(val identity: RuntimeRunIdentity) : RunEffect
+    data class PersistAcceptedInput(val identity: RunEffectIdentity) : RunEffect
+    data class AcceptGuidance(val identity: RunEffectIdentity) : RunEffect
+    data class DrainGuidanceFirst(val identity: RunEffectIdentity) : RunEffect
+    data class AwaitRunRelease(val identity: RunEffectIdentity) : RunEffect
+    data class RejectSendBusy(val identity: RunEffectIdentity) : RunEffect
     data class CancelProviderPass(val identity: RuntimeRunIdentity) : RunEffect
     data class FinalizeStop(val identity: RunEffectIdentity) : RunEffect
     data class StopPersistenceFailed(val identity: RunEffectIdentity) : RunEffect
@@ -183,11 +236,12 @@ data class Transition(
 }
 
 /**
- * First authoritative slice of the conversation runtime reducer.
+ * Authoritative migrated slice of the conversation runtime reducer.
  *
- * It owns the process slot and Stop's coroutine/persistence barriers. Provider phases, tools,
- * queue draining, Compact, and recovery remain behind the legacy adapter until their later
- * migration phases. The reducer has no Android, coroutine, Room, network, or Compose dependency.
+ * It owns ordinary Send placement/input acceptance, the process slot, and Stop's coroutine/
+ * persistence barriers. Provider phases, tools, guidance execution, Compact, and recovery remain
+ * behind the legacy adapter until their later migration phases. The reducer has no Android,
+ * coroutine, Room, network, or Compose dependency.
  */
 object ConversationRuntimeReducer {
     fun reduce(
@@ -200,6 +254,10 @@ object ConversationRuntimeReducer {
 
         return when (command) {
             is ConversationCommand.AcquireSlot -> acquire(state, command)
+            is ConversationCommand.SendRequested -> requestSend(state, command)
+            is ConversationCommand.InputPersisted -> inputPersisted(state, command)
+            is ConversationCommand.InputPersistenceFailed -> inputPersistenceFailed(state, command)
+            is ConversationCommand.SendLaunchAbandoned -> abandonSendLaunch(state, command)
             is ConversationCommand.BindRun -> bindRun(state, command)
             is ConversationCommand.StopRequested -> requestStop(state, command)
             is ConversationCommand.CoroutineSettled -> settleCoroutine(state, command)
@@ -215,9 +273,109 @@ object ConversationRuntimeReducer {
             newState = RunState.Active(command.identity),
             effects = listOf(RunEffect.SlotActivated(command.identity)),
         )
+        is RunState.Preparing,
         is RunState.Active,
         is RunState.Stopping,
         -> reject(state, CommandRejection.ILLEGAL_STATE)
+    }
+
+    private fun requestSend(
+        state: RunState,
+        command: ConversationCommand.SendRequested,
+    ): Transition = when (state) {
+        is RunState.Idle -> when {
+            command.directOnly && command.hasPendingGuidance -> Transition(
+                newState = state,
+                effects = listOf(
+                    RunEffect.RejectSendBusy(command.identity),
+                ),
+            )
+            command.hasPendingGuidance -> Transition(
+                newState = state,
+                effects = listOf(
+                    RunEffect.DrainGuidanceFirst(command.identity),
+                ),
+            )
+            else -> {
+                val ownerIdentity = RuntimeRunIdentity(
+                    conversationId = command.identity.conversationId,
+                    ownerToken = command.identity.ownerToken,
+                )
+                Transition(
+                    newState = RunState.Preparing(ownerIdentity, command.identity),
+                    effects = listOf(RunEffect.PersistAcceptedInput(command.identity)),
+                )
+            }
+        }
+        is RunState.Preparing -> deferredOrBusy(state, command)
+        is RunState.Active -> when {
+            command.directOnly -> busy(state, command)
+            state.identity.runId == null -> deferred(state, command)
+            else -> Transition(
+                newState = state,
+                effects = listOf(
+                    RunEffect.AcceptGuidance(
+                        RunEffectIdentity(
+                            conversationId = state.identity.conversationId,
+                            ownerToken = state.identity.ownerToken,
+                            runId = state.identity.runId,
+                            pass = state.identity.pass,
+                            effectId = command.identity.effectId,
+                        ),
+                    ),
+                ),
+            )
+        }
+        is RunState.Stopping -> deferredOrBusy(state, command)
+    }
+
+    private fun inputPersisted(
+        state: RunState,
+        command: ConversationCommand.InputPersisted,
+    ): Transition {
+        val preparing = state as? RunState.Preparing
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (preparing.inputEffectIdentity != command.identity) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        return Transition(RunState.Active(command.identity.runIdentity()))
+    }
+
+    private fun inputPersistenceFailed(
+        state: RunState,
+        command: ConversationCommand.InputPersistenceFailed,
+    ): Transition {
+        val preparing = state as? RunState.Preparing
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (preparing.inputEffectIdentity != command.identity) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        if (preparing.inputFailureReported) {
+            return reject(state, CommandRejection.DUPLICATE_RESULT)
+        }
+        return Transition(
+            newState = preparing.copy(inputFailureReported = true),
+        )
+    }
+
+    private fun abandonSendLaunch(
+        state: RunState,
+        command: ConversationCommand.SendLaunchAbandoned,
+    ): Transition {
+        val preparing = state as? RunState.Preparing
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (preparing.inputEffectIdentity != command.identity) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        return Transition(
+            newState = RunState.Idle(state.conversationId),
+            effects = listOf(
+                RunEffect.ReleaseSlot(
+                    preparing.ownerIdentity,
+                    SlotReleaseReason.SEND_LAUNCH_ABANDONED,
+                ),
+            ),
+        )
     }
 
     private fun bindRun(
@@ -249,35 +407,36 @@ object ConversationRuntimeReducer {
         state: RunState,
         command: ConversationCommand.StopRequested,
     ): Transition {
-        val active = state as? RunState.Active ?: return when (state) {
-            is RunState.Stopping -> reject(
-                state,
-                if (state.identity == command.identity) {
+        val activeIdentity = when (state) {
+            is RunState.Preparing -> state.ownerIdentity
+            is RunState.Active -> state.identity
+            is RunState.Stopping -> return reject(
+                state = state,
+                rejection = if (state.identity == command.identity) {
                     CommandRejection.DUPLICATE_RESULT
                 } else {
                     CommandRejection.STALE_IDENTITY
                 },
             )
-            is RunState.Idle -> reject(state, CommandRejection.ILLEGAL_STATE)
-            is RunState.Active -> error("Handled by the cast above")
+            is RunState.Idle -> return reject(state, CommandRejection.ILLEGAL_STATE)
         }
-        if (active.identity != command.identity) {
+        if (activeIdentity != command.identity) {
             return reject(state, CommandRejection.STALE_IDENTITY)
         }
 
-        val effects = mutableListOf<RunEffect>(RunEffect.CancelProviderPass(active.identity))
+        val effects = mutableListOf<RunEffect>(RunEffect.CancelProviderPass(activeIdentity))
         val effectId = command.effectId
         if (effectId != null) {
-            effects += RunEffect.FinalizeStop(active.identity.effectIdentity(effectId))
+            effects += RunEffect.FinalizeStop(activeIdentity.effectIdentity(effectId))
         }
         val persistenceSettled = !command.requiresPersistence
         if (command.coroutineAlreadySettled && persistenceSettled) {
-            effects += RunEffect.ReleaseSlot(active.identity, SlotReleaseReason.EMPTY_STOP)
-            return Transition(RunState.Idle(active.conversationId), effects)
+            effects += RunEffect.ReleaseSlot(activeIdentity, SlotReleaseReason.EMPTY_STOP)
+            return Transition(RunState.Idle(activeIdentity.conversationId), effects)
         }
         return Transition(
             newState = RunState.Stopping(
-                identity = active.identity,
+                identity = activeIdentity,
                 finalizationEffectId = effectId,
                 coroutineSettled = command.coroutineAlreadySettled,
                 persistenceSettled = persistenceSettled,
@@ -291,6 +450,21 @@ object ConversationRuntimeReducer {
         command: ConversationCommand.CoroutineSettled,
     ): Transition = when (state) {
         is RunState.Idle -> reject(state, CommandRejection.ILLEGAL_STATE)
+        is RunState.Preparing -> {
+            if (state.ownerIdentity != command.identity) {
+                reject(state, CommandRejection.STALE_IDENTITY)
+            } else {
+                Transition(
+                    newState = RunState.Idle(state.conversationId),
+                    effects = listOf(
+                        RunEffect.ReleaseSlot(
+                            state.ownerIdentity,
+                            SlotReleaseReason.NORMAL_COMPLETION,
+                        ),
+                    ),
+                )
+            }
+        }
         is RunState.Active -> {
             if (state.identity != command.identity) {
                 reject(state, CommandRejection.STALE_IDENTITY)
@@ -368,6 +542,31 @@ object ConversationRuntimeReducer {
 
     private fun sameOwner(first: RuntimeRunIdentity, second: RuntimeRunIdentity): Boolean =
         first.conversationId == second.conversationId && first.ownerToken == second.ownerToken
+
+    private fun deferredOrBusy(
+        state: RunState,
+        command: ConversationCommand.SendRequested,
+    ): Transition = if (command.directOnly) busy(state, command) else deferred(state, command)
+
+    private fun busy(
+        state: RunState,
+        command: ConversationCommand.SendRequested,
+    ) = Transition(
+        newState = state,
+        effects = listOf(
+            RunEffect.RejectSendBusy(command.identity),
+        ),
+    )
+
+    private fun deferred(
+        state: RunState,
+        command: ConversationCommand.SendRequested,
+    ) = Transition(
+        newState = state,
+        effects = listOf(
+            RunEffect.AwaitRunRelease(command.identity),
+        ),
+    )
 
     private fun reject(state: RunState, rejection: CommandRejection) = Transition(
         newState = state,
