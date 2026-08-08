@@ -37,6 +37,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
+/** Compatibility identity used only by tests/embedders that omit the process generation registry. */
+private const val HEADLESS_PROVIDER_OWNER_TOKEN = Long.MAX_VALUE
+
 /**
  * Headless single-shot generation engine (process-scoped).
  *
@@ -462,6 +465,7 @@ class TaskExecutionEngine(
                 modelName = effectiveModelId,
                 runId = runId,
                 pass = 0,
+                ownerToken = uiToken ?: HEADLESS_PROVIDER_OWNER_TOKEN,
                 config = config,
                 ctx = genCtx,
                 generationJob = currentJob,

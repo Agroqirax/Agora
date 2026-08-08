@@ -106,9 +106,13 @@ Branch operations must preserve these invariants:
 
 `GenerationRequestBuilder` prepares provider configuration, context, tools, memory,
 attachments, and optional transcription. A Provider owns retry and semantic termination for one
-stream, while `GenerationManager` currently owns the multi-pass Provider/tool continuation and
-normal Run finalization. `GenerationFinalizer` owns durable Stop finalization and its retry path.
-Separating one Provider pass from one Run is a target refactor boundary.
+stream. `ProviderPassRunner` collects exactly one such stream and closes it as an identity-bearing
+`CompletedText`, `CompletedToolCalls`, `Truncated`, `Failed`, or `Cancelled` outcome. Live events
+may update the streaming overlay, but `GenerationManager` accepts the exact expected outcome before
+completed tool calls can enter execution. The runner adds fail-closed tool metadata validation; it
+does not replace or weaken Provider-specific termination validation and retry. `GenerationManager`
+still owns multi-pass Provider/tool continuation and normal Run finalization, while
+`GenerationFinalizer` owns durable Stop finalization and its retry path.
 
 The migrated conversation-runtime slice is authoritative for ordinary foreground Send placement,
 the in-process generation slot, and Stop barriers. Pure `ConversationCommand`, `RunState`, `RunEffect`, and
@@ -130,8 +134,9 @@ Active guidance still
 uses the legacy in-memory queue executor, but its accept/wait/busy/drain-first placement decision is
 made by the reducer.
 
-This is not yet the final mailbox architecture: Provider passes, tools, guidance execution,
-Compact, automation, Stop delivery, and recovery have not moved into the mailbox. A bounded 256-entry runtime
+This is not yet the final mailbox architecture: Provider outcomes are still accepted by the
+`GenerationManager` adapter rather than the conversation mailbox, and tools, guidance execution,
+Compact, automation, Stop delivery, and recovery have not moved into it. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 
@@ -246,7 +251,9 @@ Haptics follow interaction meaning:
 
 `LlmProvider` implementations cover OpenAI-compatible endpoints, Anthropic, Gemini,
 Ollama, and on-device llama.cpp. Provider-specific parsing stays inside each adapter;
-generation code consumes only normalized events.
+generation code consumes only normalized events. `ProviderPassRunner` is the common one-request
+closure boundary: its result carries conversation, owner, Run, durable pass, and effect identity,
+and malformed or duplicate completed tool metadata cannot authorize execution.
 
 Tool providers are capability-oriented:
 

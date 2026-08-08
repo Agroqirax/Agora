@@ -124,12 +124,12 @@ must not collapse into Boolean combinations.
 | Per-conversation command mailbox | serial delivery of ordinary `SendRequested`, `InputPersisted`, and cancellation-abandonment commands | one bounded FIFO consumer per conversation | Move Stop, Provider/tool, guidance execution, Compact, and recovery delivery here in later commits. |
 | `ConversationGenerationState` adapter | Job, overlay, tokens, streams, queue, UI projection, non-Send compatibility claims | conversation + owner token | Preserve only until each remaining path moves behind reducer effects. |
 | `MessageGenerationController` | executes accepted-input Room effect, edit/regenerate graph, queue drain, Compact entry, setup failure, release | conversation + token + run/effect id | Provider and queue execution remain later migration seams. |
-| `GenerationManager` | stream/checkpoint, tools, continuation, terminal messages/Run, notification | captured run id/pass | Must split one Provider pass from whole-Run finalization. |
+| `GenerationManager` | accepts one closed Provider-pass outcome, stream/checkpoint, tools, continuation, terminal messages/Run, notification | conversation + owner + run id + durable pass + per-request effect id | Provider pass is isolated; move outcome acceptance, tool effects, and Run finalization behind the mailbox separately. |
 | `GenerationFinalizer` | executes identified durable Stop effect and returns a result command | conversation + owner + run id + pass + effect id | Move execution behind the mailbox; identity/stale rejection is already enforced. |
 | `TaskExecutionEngine` | headless Run setup, Compact, generation and terminal cleanup | conversation + run id/pass | Remove duplication only after Task/Loop parity. |
 | `LoopManager` | occurrence claim/revision/cycle/schedule | revision + fire time + count | Preserve replay fencing; trigger normal Send contract. |
 | `TaskManager`/Workers | reservation, execution conversation, occurrence retry/schedule | task + scheduled time + execution id | Preserve deterministic occurrence identity. |
-| Providers | retry, semantic stream termination, normalized events | attempt-local closure | Return one identity-bearing pass outcome. |
+| Providers + `ProviderPassRunner` | retry and semantic stream termination remain Provider-local; runner normalizes one request into a closed outcome and validates completed tool metadata | conversation + owner + run id + durable pass + per-request effect id | Move closed outcome acceptance into the conversation mailbox without weakening Provider validators. |
 | ToolProviders | external side effects and progress/result | tool call metadata | Progress is non-authoritative; result needs effect identity. |
 | Room transactions | durable Run/message/selection/Compact/task/loop state | SQL preconditions vary | Remain durable source of truth; consolidate domain boundaries. |
 
@@ -241,7 +241,7 @@ ownership. No Room schema rewrite is planned.
 | One live durable Run | unique active-slot index and Run invariants | Concurrent transaction/conditional-update tests. |
 | One process writer | not satisfied | Mailbox is sole transition authority. |
 | Cross-conversation parallelism | coordinator supports it | Runtime tests with two conversations. |
-| Stale/duplicate rejection | Stop finalizer now has full effect identity and reducer rejection | extend identity to Provider/tool/Compact effects. |
+| Stale/duplicate rejection | Stop finalizer has reducer rejection; each Provider request now closes with full identity and exact expected-outcome acceptance in the `GenerationManager` adapter | move Provider acceptance into the mailbox and extend identity to tool/Compact effects. |
 | Stop two-barrier release | reducer owns both orders and exact release effect | route Stop commands through the mailbox. |
 | Tool atomicity | transaction and protocol normalization exist | Room failure/reorder/duplicate tests. |
 | Queue FIFO and memory ownership | protected unit policies | end-to-end Stop/error/attachment tests. |
@@ -260,7 +260,9 @@ Each row is an independent semantic commit and rollback boundary:
 
 1. Pure runtime vocabulary, reducer tests, Stop identity envelope, and bounded redacted trace — implemented for the authoritative slot/Stop slice.
 2. Ordinary foreground Send enters a real per-conversation mailbox — implemented for placement and the accepted-input Room result; Provider and guidance execution remain adapters.
-3. One Provider pass becomes an isolated runner and closed outcome.
+3. One Provider pass becomes an isolated runner and closed outcome — implemented; live events are
+   UI/checkpoint input, while only an exact, validated `CompletedToolCalls` outcome authorizes tool
+   execution. Mailbox acceptance is intentionally deferred to the tool/effect migration.
 4. Stop and both settlement barriers become mailbox commands.
 5. Tool batch execution/commit/continuation becomes effects and result commands.
 6. Queued guidance and attachment ownership move through the normal Send contract.

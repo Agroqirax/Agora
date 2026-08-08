@@ -777,6 +777,7 @@ internal class MessageGenerationController(
                 modelName = modelId,
                 runId = runId,
                 pass = pass,
+                ownerToken = uiToken,
                 config = config,
                 ctx = genCtx,
                 // The coroutine's own Job -reading state.generationJob here races the caller's

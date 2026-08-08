@@ -16,6 +16,7 @@ import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.RequestTokenUsageAccumulator
 import com.newoether.agora.model.TokenUsage
@@ -284,6 +285,7 @@ class GenerationManager(
         memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider
     )
     private val toolProviders: List<ToolProvider> = builtInToolProviders + additionalToolProviders
+    private val providerPassRunner = ProviderPassRunner()
 
     private fun resolveToolPresentationMetadata(name: String): ToolPresentationMetadata? {
         if (name.isBlank()) return null
@@ -658,6 +660,7 @@ class GenerationManager(
         modelName: String,
         runId: String,
         pass: Int,
+        ownerToken: Long,
         config: GenerationConfig,
         ctx: GenerationContext,
         generationJob: kotlinx.coroutines.Job?,
@@ -832,6 +835,8 @@ class GenerationManager(
             val roundToolSegments = mutableListOf<MessageSegment>()
             val completedToolCalls = linkedMapOf<String, StreamEvent.ToolCallRequest>()
             var toolRoundSegmentCursor = 0
+            var providerRequestOrdinal = 0
+            var expectedProviderPassIdentity: RunEffectIdentity? = null
 
             var lastEmitMs = 0L
             var firstUiPublishPending = true
@@ -1160,7 +1165,6 @@ class GenerationManager(
                             arguments = event.arguments,
                             signature = event.signature,
                         )
-                        completedToolCalls[event.streamKey] = event
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
                         lastEmitMs = System.currentTimeMillis()
@@ -1174,7 +1178,6 @@ class GenerationManager(
                                 arguments = call.arguments,
                                 signature = call.signature,
                             )
-                            completedToolCalls[call.streamKey] = call
                         }
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
@@ -1193,11 +1196,27 @@ class GenerationManager(
             suspend fun collectProviderRequest(
                 messages: List<ChatMessage>,
                 onFirstEvent: (() -> Unit)? = null,
-            ) {
+            ): ProviderPassOutcome {
                 tokenUsageAccumulator.beginRequest()
                 var firstEventPending = onFirstEvent != null
                 try {
-                    provider.generateResponse(messages, providerConfig).collect { event ->
+                    val identity = RunEffectIdentity(
+                        conversationId = conversationId,
+                        ownerToken = ownerToken,
+                        runId = runId,
+                        pass = pass,
+                        effectId = "provider-$pass-${providerRequestOrdinal++}",
+                    )
+                    check(expectedProviderPassIdentity == null) {
+                        "A Provider pass cannot start before the prior outcome is accepted"
+                    }
+                    expectedProviderPassIdentity = identity
+                    return providerPassRunner.run(
+                        identity = identity,
+                        provider = provider,
+                        messages = messages,
+                        config = providerConfig,
+                    ) { event ->
                         if (firstEventPending) {
                             firstEventPending = false
                             onFirstEvent?.invoke()
@@ -1211,15 +1230,41 @@ class GenerationManager(
                 }
             }
 
+            fun acceptProviderPass(outcome: ProviderPassOutcome) {
+                check(expectedProviderPassIdentity == outcome.identity) {
+                    "Stale, duplicate, or unexpected Provider pass outcome"
+                }
+                expectedProviderPassIdentity = null
+                when (outcome) {
+                    is ProviderPassOutcome.CompletedText -> Unit
+                    is ProviderPassOutcome.CompletedToolCalls -> {
+                        check(completedToolCalls.isEmpty()) {
+                            "A Provider pass cannot overlap an unconsumed tool batch"
+                        }
+                        outcome.calls.forEach { call ->
+                            completedToolCalls[call.streamKey] = call
+                        }
+                    }
+                    is ProviderPassOutcome.Truncated,
+                    is ProviderPassOutcome.Failed,
+                    -> check(currentStatus == MessageStatus.ERROR) {
+                        "A failed Provider pass must publish its error before closing"
+                    }
+                    is ProviderPassOutcome.Cancelled -> throw CancellationException(
+                        "Provider pass ${outcome.identity.effectId} was cancelled",
+                    )
+                }
+            }
+
             val projectedPath = projectToolResultImagesToUserMessage(
                 projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages),
                 providerConfig.includeImages,
             )
             val apiPath = applyUserTemplate(projectedPath, config.userPrepend, config.userPostpend)
             requestTrace?.mark("provider_dispatch")
-            collectProviderRequest(apiPath) {
-                    requestTrace?.mark("first_semantic_event")
-            }
+            acceptProviderPass(collectProviderRequest(apiPath) {
+                requestTrace?.mark("first_semantic_event")
+            })
             finishCurrentThoughtTiming()
             if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
             // Publish the final in-memory snapshot without waiting for another Room round trip.
@@ -1356,7 +1401,7 @@ class GenerationManager(
                     providerConfig.includeImages,
                 )
                 val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
-                collectProviderRequest(apiToolPath)
+                acceptProviderPass(collectProviderRequest(apiToolPath))
                 finishCurrentThoughtTiming()
                 if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
                 // Publish the round's final UI state immediately. The next loop boundary or the
