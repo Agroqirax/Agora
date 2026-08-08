@@ -86,6 +86,7 @@ internal class ContextCompactor(
         conversationId: String,
         fallbackModel: String,
         contextLimit: Int,
+        compactRunId: String,
     ): CompactResult {
         if (!settings.contextCompactEnabled.value) return CompactResult.NotNeeded
         return compact(
@@ -96,17 +97,28 @@ internal class ContextCompactor(
                 retainLogicalMessages = settings.contextCompactRetainCount.value,
             ),
             threshold = contextLimit.coerceAtLeast(1),
+            compactRunId = compactRunId,
         )
     }
 
-    suspend fun compactManual(conversationId: String, request: CompactRequest): CompactResult =
-        compact(conversationId, request, threshold = null)
+    suspend fun compactManual(
+        conversationId: String,
+        request: CompactRequest,
+        compactRunId: String,
+    ): CompactResult = compact(
+        conversationId,
+        request,
+        threshold = null,
+        compactRunId = compactRunId,
+    )
 
     private suspend fun compact(
         conversationId: String,
         request: CompactRequest,
         threshold: Int?,
+        compactRunId: String,
     ): CompactResult {
+        require(compactRunId.isNotBlank())
         if (request.model.isBlank()) return CompactResult.Failed("Select a compact model")
         if (request.prompt.isBlank()) return CompactResult.Failed("Compact prompt cannot be empty")
         if (request.retainLogicalMessages < 0) return CompactResult.Failed("Retained messages cannot be negative")
@@ -206,7 +218,7 @@ internal class ContextCompactor(
         val sourceRun = conversations.getRun(source.runId)
             ?: return CompactResult.Failed("Compact source run disappeared")
         val compactId = Constants.COMPACT_MSG_PREFIX + UUID.randomUUID()
-        val runId = "compact_run_${UUID.randomUUID()}"
+        val runId = compactRunId
         val now = System.currentTimeMillis()
         val run = RunEntity(
             id = runId,

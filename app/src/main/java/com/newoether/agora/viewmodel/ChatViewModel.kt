@@ -848,9 +848,6 @@ class ChatViewModel(
                 requestId?.let { switchingCoordinator.complete(it) }
             },
             regenerationTransitions = regenerationTransitions,
-            onCompactingChange = { conversationId, active ->
-                generationRegistry.getOrCreate(conversationId).compacting.value = active
-            },
             pauseConversationTasks = { conversationId -> loopManager.stopLoop(conversationId) },
         )
     }

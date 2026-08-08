@@ -30,7 +30,8 @@ ChatViewModel ── MessageGenerationController ── ConversationStateRegistr
 AppContainer owns process-scoped dependencies. Foreground-open automation bridges into the
 controller and joins the exact generation Job. Headless automation enters the same direct-only
 conversation mailbox and accepted-input graph transaction, while `TaskExecutionEngine` remains a
-bounded adapter for headless request building, Compact, Provider execution, and finalization.
+bounded adapter for headless request building, Provider execution/finalization, and the external
+body of mailbox-approved Compact effects.
 
 The project uses manual dependency injection through `di/AppContainer.kt`. Shared
 providers, repositories, automation coordinators, and the local inference engine are
@@ -117,10 +118,12 @@ still owns normal Run finalization, while
 `GenerationFinalizer` owns durable Stop finalization and its retry path.
 
 The migrated conversation-runtime slice is authoritative for ordinary foreground/headless Send,
-memory-guidance placement, the in-process generation slot, and Stop barriers. Pure
+memory-guidance placement, the in-process generation slot, Stop barriers, tool-round gates, and
+manual/automatic Context Compact admission/result settlement. Pure
 `ConversationCommand`, `RunState`, `RunEffect`, and
-`ConversationRuntimeReducer` types decide `Idle`/`Preparing`/`Active`/`Stopping`, coroutine settlement,
-durable settlement, and slot release. `ConversationGenerationState` retains the legacy per-
+`ConversationRuntimeReducer` types decide
+`Idle`/`Preparing`/`Active`/`Compacting`/`Stopping`, coroutine settlement, durable settlement,
+Compact continuation, and slot release. `ConversationGenerationState` retains the legacy per-
 conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
 `SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
 conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
@@ -155,8 +158,21 @@ non-cancellable once
 accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conversation deletion is
 separate runtime disposal and does not fabricate a durable user-Stop effect.
 
+Manual Compact claims only `Idle` and does not activate the generation registry or Stop button.
+Its short admission check shares the queue-mutation mutex, so it cannot overtake pending-guidance
+lease transfer; pending guidance wins and manual Compact reports busy without changing it.
+Automatic Compact temporarily owns the exact active Run/pass, and only its exact
+`CompactCompleted` result may emit `ResumeAfterCompact`; Stop can instead move that Run directly
+to `Stopping`, making the late Compact result stale. Both foreground and Task executors use the
+same `ContextCompactEffectCoordinator`. The external compactor still performs the existing
+non-destructive selected-graph calculation and one Room Compact-boundary transaction, using the
+durable Compact Run id supplied by the identified effect. A normal Send arriving during Compact
+waits only for that Compact result and then re-enters the mailbox: manual settlement exposes Idle,
+while automatic settlement exposes Active and accepts normal memory guidance. Direct-only
+automation receives busy and creates no input.
+
 This is not yet the final mailbox architecture: Provider outcomes are still first closed/accepted by
-the `GenerationManager` adapter, and Compact, recovery, and Run finalization have not moved into it.
+the `GenerationManager` adapter, and recovery and normal Run finalization have not moved into it.
 Headless request building/Provider execution remains a bounded Task adapter after mailbox admission.
 Guidance storage/lease execution remains a bounded controller adapter, but it has no
 alternative Run-placement or durable append authority: every drain is a fresh mailbox-approved
@@ -337,8 +353,9 @@ same order: `AutomationExecutionGate` first, then the automation-priority
 through a direct-only call and joins its exact Job. Headless Tasks/Loops submit the same
 `SendRequested` -> `PersistAcceptedInput` -> `InputPersisted` contract and share the ordinary
 USER/MODEL/Run graph writer. Busy is a typed no-input/no-Run outcome; no bridge queues or falls back
-to a second writer. `TaskExecutionEngine` still adapts headless Compact, request construction,
-Provider execution, and finalization pending their later runtime-effect migrations.
+to a second writer. Automatic Compact now uses the same mailbox effect/result contract in foreground
+and headless execution. `TaskExecutionEngine` still adapts headless request construction, Provider
+execution, and finalization pending their later runtime-effect migrations.
 
 One-shot schedules preserve explicit past dates so validation can reject them. The
 scheduler must not silently reinterpret an expired date as next year.

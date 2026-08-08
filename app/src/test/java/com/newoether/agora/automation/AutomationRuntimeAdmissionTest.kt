@@ -1,5 +1,6 @@
 package com.newoether.agora.automation
 
+import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.viewmodel.ConversationGenerationState
 import com.newoether.agora.viewmodel.QueuedSend
 import kotlinx.coroutines.runBlocking
@@ -71,5 +72,18 @@ class AutomationRuntimeAdmissionTest {
         assertEquals(listOf("guidance"), state.queuedSends.value.map { it.id })
         state.dispose()
         Unit
+    }
+
+    @Test
+    fun manualCompact_returnsBusyWithoutCreatingAnAutomationRun() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val compact = state.requestManualCompact("compact-run", "compact-effect")!!
+
+        val decision = AutomationRuntimeAdmission.request(state, "new-run", "automation-send")
+
+        assertSame(AutomationRuntimeAdmission.Decision.Busy, decision)
+        assertTrue(state.compacting.value)
+        assertFalse(state.generating.value)
+        assertTrue(state.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED).accepted)
     }
 }

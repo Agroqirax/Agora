@@ -30,12 +30,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -55,6 +53,7 @@ private sealed interface SendPlacement {
         val claim: QueuedDrainClaim,
     ) : SendPlacement
     data object RetryAfterRelease : SendPlacement
+    data object RetryAfterCompact : SendPlacement
 
     /**
      * The slot was busy and the caller asked for a direct-only send, so NOTHING was persisted.
@@ -263,7 +262,6 @@ internal class MessageGenerationController(
         { _, _ -> },
     private val onTreeMutationFailed: (requestId: Long?) -> Unit = {},
     private val regenerationTransitions: RegenerationTransitionCoordinator,
-    private val onCompactingChange: (conversationId: String, active: Boolean) -> Unit = { _, _ -> },
     private val pauseConversationTasks: suspend (String) -> Unit = {},
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
@@ -275,24 +273,24 @@ internal class MessageGenerationController(
         pauseLoop = pauseConversationTasks,
     )
     private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
-    private val manualCompactMutex = Mutex()
+    private val compactEffectCoordinator = ContextCompactEffectCoordinator()
 
     private suspend fun compactBeforeBoundaryIfNeeded(
         genId: String,
         modelId: String,
         contextLimit: Int,
+        state: ConversationGenerationState,
     ) {
         if (!settings.contextCompactEnabled.value) return
-        onCompactingChange(genId, true)
-        try {
-            when (
+        when (
+            val execution = compactEffectCoordinator.executeAutomatic(state) { effect ->
                 val compactResult = contextCompactor.compactAutomatic(
                     conversationId = genId,
                     fallbackModel = modelId,
                     contextLimit = contextLimit,
+                    compactRunId = effect.compactRunId,
                 )
-            ) {
-                is CompactResult.Created -> {
+                if (compactResult is CompactResult.Created) {
                     val all = convRepo.getMessagesForConversationSnapshot(genId)
                     val selected = convRepo.restoreBranchSelections(genId)
                     ifOpenOn(genId) {
@@ -302,13 +300,31 @@ internal class MessageGenerationController(
                         )
                     }
                 }
-                is CompactResult.Failed -> throw IllegalStateException(
-                    "Automatic context compact failed: ${compactResult.message}"
-                )
-                CompactResult.NotNeeded -> Unit
+                compactResult
             }
-        } finally {
-            onCompactingChange(genId, false)
+        ) {
+            is ContextCompactEffectCoordinator.Execution.Settled -> when (
+                val result = execution.result
+            ) {
+                is CompactResult.Failed -> throw IllegalStateException(
+                    "Automatic context compact failed: ${result.message}",
+                )
+                is CompactResult.Created,
+                CompactResult.NotNeeded,
+                -> Unit
+            }
+            ContextCompactEffectCoordinator.Execution.Busy -> {
+                if (state.stopping.value) {
+                    throw CancellationException("Automatic context compact was stopped")
+                }
+                error("Automatic context compact was not admitted for the active Run")
+            }
+            ContextCompactEffectCoordinator.Execution.Superseded -> {
+                if (state.stopping.value) {
+                    throw CancellationException("Automatic context compact was superseded by Stop")
+                }
+                error("Automatic context compact result was superseded")
+            }
         }
     }
 
@@ -368,44 +384,39 @@ internal class MessageGenerationController(
     }
 
     suspend fun compactManual(request: CompactRequest): CompactResult {
-        if (!manualCompactMutex.tryLock()) {
-            return CompactResult.Failed("Context compact is already in progress")
-        }
-        return try {
-            compactManualLocked(request)
-        } finally {
-            manualCompactMutex.unlock()
-        }
-    }
-
-    private suspend fun compactManualLocked(request: CompactRequest): CompactResult {
         val conversationId = currentConversationId.value
             ?: return CompactResult.Failed("Open a conversation first")
         val state = registry.getOrCreate(conversationId)
-        if (state.generating.value || state.stopping.value) {
-            return CompactResult.Failed("Wait for the current generation to finish")
-        }
-        onCompactingChange(conversationId, true)
-        return try {
-            executionCoordinator.withConversationLock(conversationId) {
-                if (convRepo.getLiveRun(conversationId) != null) {
-                    return@withConversationLock CompactResult.Failed("Conversation is busy")
-                }
-                val result = contextCompactor.compactManual(conversationId, request)
-                if (result is CompactResult.Created) {
-                    val all = convRepo.getMessagesForConversationSnapshot(conversationId)
-                    val selected = convRepo.restoreBranchSelections(conversationId)
-                    ifOpenOn(conversationId) {
-                        renderStore.replaceGraph(
-                            allMessages = all.map { it.toUiChatMessage(appContext) },
-                            selectedChildren = selected,
-                        )
+        return when (
+            val execution = compactEffectCoordinator.executeManual(state) { effect ->
+                executionCoordinator.withConversationLock(conversationId) {
+                    if (convRepo.getLiveRun(conversationId) != null) {
+                        return@withConversationLock CompactResult.Failed("Conversation is busy")
                     }
+                    val result = contextCompactor.compactManual(
+                        conversationId = conversationId,
+                        request = request,
+                        compactRunId = effect.compactRunId,
+                    )
+                    if (result is CompactResult.Created) {
+                        val all = convRepo.getMessagesForConversationSnapshot(conversationId)
+                        val selected = convRepo.restoreBranchSelections(conversationId)
+                        ifOpenOn(conversationId) {
+                            renderStore.replaceGraph(
+                                allMessages = all.map { it.toUiChatMessage(appContext) },
+                                selectedChildren = selected,
+                            )
+                        }
+                    }
+                    result
                 }
-                result
             }
-        } finally {
-            onCompactingChange(conversationId, false)
+        ) {
+            is ContextCompactEffectCoordinator.Execution.Settled -> execution.result
+            ContextCompactEffectCoordinator.Execution.Busy ->
+                CompactResult.Failed("Wait for the current generation or context compact to finish")
+            ContextCompactEffectCoordinator.Execution.Superseded ->
+                CompactResult.Failed("Context compact was interrupted")
         }
     }
 
@@ -778,6 +789,7 @@ internal class MessageGenerationController(
                             currentId,
                             modelId,
                             effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
+                            state,
                         )
                     },
                 ),
@@ -1297,6 +1309,7 @@ internal class MessageGenerationController(
                         modelId = modelId,
                         contextLimit = requestBuilder.buildEffectiveConversationSettings(genId)
                             .contextWindow ?: settings.maxContextWindow.value,
+                        state = state,
                     )
                     launchGeneration(
                         genId, modelMessageId, committedPlaceholder.timestamp,
@@ -1342,7 +1355,7 @@ internal class MessageGenerationController(
             // the handoff: onStopSettled may already have observed an empty queue at this edge.
             state.settleGuidanceClaim(claim.lease.id, durable = false)
             state.scope.launch {
-                state.generating.filter { generating -> !generating }.first()
+                state.awaitSendAvailable()
                 val retryClaim = state.queueMutationMutex.withLock {
                     val retryLease = state.claimQueuedSends() ?: return@withLock null
                     claimQueuedDrain(state, retryLease)
@@ -1355,9 +1368,10 @@ internal class MessageGenerationController(
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
      * background send lands in its own conversation). Placement enters the conversation command
-     * mailbox: a bound or preparing Run accepts memory-only guidance, STOPPING waits, and IDLE emits
-     * one identified persistence effect before generation launches. The installed Job's completion
-     * hook releases the slot and requests queue drain; pre-launch failures release via
+     * mailbox: a bound or preparing Run accepts memory-only guidance, Compact waits only for its
+     * exact settlement, STOPPING waits for release, and IDLE emits one identified persistence
+     * effect before generation launches. The installed Job's completion hook releases the slot and
+     * requests queue drain; pre-launch failures release via
      * [releaseUnlaunchedSlotAndDrain].
      */
     private suspend fun sendInto(
@@ -1484,6 +1498,7 @@ internal class MessageGenerationController(
                             }
                         }
                         is RunEffect.AwaitRunRelease -> SendPlacement.RetryAfterRelease
+                        is RunEffect.AwaitCompactSettlement -> SendPlacement.RetryAfterCompact
                         is RunEffect.RejectSendBusy -> SendPlacement.Rejected
                         else -> error(
                             "SendRequested emitted unexpected effect ${effect.javaClass.simpleName}",
@@ -1491,7 +1506,9 @@ internal class MessageGenerationController(
                     }
                 }
                 if (decision == SendPlacement.RetryAfterRelease) {
-                    state.generating.filter { generating -> !generating }.first()
+                    state.awaitSendAvailable()
+                } else if (decision == SendPlacement.RetryAfterCompact) {
+                    state.awaitCompactSettled()
                 } else {
                     placement = decision
                 }
@@ -1646,6 +1663,7 @@ internal class MessageGenerationController(
                             modelId = modelId,
                             contextLimit = requestBuilder.buildEffectiveConversationSettings(genId)
                                 .contextWindow ?: settings.maxContextWindow.value,
+                            state = state,
                         )
                     }
                     launchGeneration(

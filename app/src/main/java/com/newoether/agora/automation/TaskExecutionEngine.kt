@@ -14,6 +14,7 @@ import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.CompactResult
 import com.newoether.agora.viewmodel.AcceptedInputGraphWriter
+import com.newoether.agora.viewmodel.ContextCompactEffectCoordinator
 import com.newoether.agora.viewmodel.ContextCompactor
 import com.newoether.agora.viewmodel.ConversationTitleGenerator
 import com.newoether.agora.viewmodel.GenerationManager
@@ -130,6 +131,7 @@ class TaskExecutionEngine(
         pauseLoop = pauseConversationLoop,
     )
     private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
+    private val compactEffectCoordinator = ContextCompactEffectCoordinator()
 
     /**
      * Task-only post-processing. Loop runs share this engine but never call this method, so a
@@ -327,15 +329,33 @@ class TaskExecutionEngine(
             val persistToken = generationState.nextPersistId()
 
             suspend fun compactAtBoundary(): CompactResult {
-                generationState.compacting.value = true
-                return try {
-                    contextCompactor.compactAutomatic(
-                        conversationId = conversationId,
-                        fallbackModel = effectiveModelId,
-                        contextLimit = contextLimit,
-                    )
-                } finally {
-                    generationState.compacting.value = false
+                return when (
+                    val execution = compactEffectCoordinator.executeAutomatic(
+                        generationState,
+                    ) { effect ->
+                        contextCompactor.compactAutomatic(
+                            conversationId = conversationId,
+                            fallbackModel = effectiveModelId,
+                            contextLimit = contextLimit,
+                            compactRunId = effect.compactRunId,
+                        )
+                    }
+                ) {
+                    is ContextCompactEffectCoordinator.Execution.Settled -> execution.result
+                    ContextCompactEffectCoordinator.Execution.Busy -> {
+                        if (generationState.stopping.value) {
+                            throw CancellationException("Automatic context compact was stopped")
+                        }
+                        error("Automatic context compact was not admitted for the active Run")
+                    }
+                    ContextCompactEffectCoordinator.Execution.Superseded -> {
+                        if (generationState.stopping.value) {
+                            throw CancellationException(
+                                "Automatic context compact was superseded by Stop",
+                            )
+                        }
+                        error("Automatic context compact result was superseded")
+                    }
                 }
             }
             val graphCommit = acceptedInputGraphWriter.commit(

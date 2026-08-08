@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -736,6 +737,164 @@ class ConversationGenerationStateTest {
             state.runtimeTraceSnapshot().takeLast(3).map { it.newState },
         )
         assertTrue(state.endGeneration(token))
+    }
+
+    @Test
+    fun manualCompactIsMailboxOwnedWithoutActivatingGeneration() = runBlocking {
+        var registryActiveCount = 0
+        var registryIdleCount = 0
+        val state = ConversationGenerationState(
+            conversationId = "conversation",
+            onRegistryActive = { registryActiveCount += 1 },
+            onRegistryIdle = { registryIdleCount += 1 },
+        )
+
+        val effect = state.requestManualCompact(
+            compactRunId = "compact-run",
+            effectId = "compact-effect",
+        )!!
+
+        assertTrue(state.compacting.value)
+        assertFalse(state.generating.value)
+        assertNull(state.currentRunId())
+        assertNull(state.requestManualCompact("other-compact", "other-effect"))
+        val waiting = state.requestSend(
+            proposedRunId = "send-run",
+            effectId = "send-effect",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        assertTrue(waiting.effects.single() is RunEffect.AwaitCompactSettlement)
+        val available = CompletableDeferred<Unit>()
+        val waiter = launch {
+            state.awaitCompactSettled()
+            available.complete(Unit)
+        }
+        assertFalse(available.isCompleted)
+
+        val settled = state.finishCompact(effect.identity, CompactOutcome.CREATED)
+
+        assertTrue(settled.accepted)
+        available.await()
+        waiter.join()
+        assertFalse(state.compacting.value)
+        assertFalse(state.generating.value)
+        assertEquals(0, registryActiveCount)
+        assertEquals(0, registryIdleCount)
+        val retried = state.requestSend(
+            proposedRunId = "send-run",
+            effectId = "send-effect",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val input = retried.effects.single() as RunEffect.PersistAcceptedInput
+        assertTrue(state.abandonSendLaunch(input.identity))
+        assertEquals(
+            listOf(
+                "CompactRequested",
+                "CompactRequested",
+                "SendRequested",
+                "CompactCompleted",
+                "SendRequested",
+                "SendLaunchAbandoned",
+            ),
+            state.runtimeTraceSnapshot().map { it.commandType },
+        )
+    }
+
+    @Test
+    fun automaticCompactRetainsGenerationUntilExactResultResumesRun() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 2)
+
+        val effect = state.requestAutomaticCompact(
+            compactRunId = "compact-run",
+            effectId = "compact-effect",
+        )!!
+
+        assertTrue(state.compacting.value)
+        assertTrue(state.generating.value)
+        assertEquals("run", state.currentRunId())
+        val settled = state.finishCompact(effect.identity, CompactOutcome.NOT_NEEDED)
+        assertTrue(settled.accepted)
+        assertEquals(
+            RunEffect.ResumeAfterCompact(effect.identity, CompactOutcome.NOT_NEEDED),
+            settled.effects.single(),
+        )
+        assertFalse(state.compacting.value)
+        assertTrue(state.generating.value)
+        assertEquals("run", state.currentRunId())
+        assertTrue(state.endGeneration(token))
+    }
+
+    @Test
+    fun SendDuringAutomaticCompactReentersAsGuidanceAfterCompactNotRunRelease() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 2)
+        val compact = state.requestAutomaticCompact(
+            compactRunId = "compact-run",
+            effectId = "compact-effect",
+        )!!
+        val requested = state.requestSend(
+            proposedRunId = "unused-send-run",
+            effectId = "guidance-effect",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        assertTrue(requested.effects.single() is RunEffect.AwaitCompactSettlement)
+
+        state.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
+        state.awaitCompactSettled()
+        assertTrue(state.generating.value)
+        val retried = state.requestSend(
+            proposedRunId = "unused-send-run",
+            effectId = "guidance-effect",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+
+        assertEquals(
+            RunEffect.AcceptGuidance(
+                RunEffectIdentity(
+                    conversationId = "conversation",
+                    ownerToken = token,
+                    runId = "run",
+                    pass = 2,
+                    effectId = "guidance-effect",
+                ),
+            ),
+            retried.effects.single(),
+        )
+        assertTrue(state.endGeneration(token))
+    }
+
+    @Test
+    fun StopDuringAutomaticCompactClearsProjectionAndInvalidatesLateResult() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        val settled = CompletableDeferred<Unit>()
+        state.onStopSettled = { settled.complete(Unit) }
+        val effect = state.requestAutomaticCompact(
+            compactRunId = "compact-run",
+            effectId = "compact-effect",
+        )!!
+
+        val stopped = state.stop()
+
+        assertFalse(state.compacting.value)
+        assertTrue(state.stopping.value)
+        assertFalse(state.finishCompact(effect.identity, CompactOutcome.CREATED).accepted)
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
+        active.unwind.complete(Unit)
+        active.job.join()
+        settled.await()
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
     }
 
     @Test

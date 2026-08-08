@@ -1,6 +1,8 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.CompactMode
+import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ConversationRuntimeReducer
 import com.newoether.agora.model.ConversationRuntimeTrace
@@ -21,6 +23,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
@@ -96,7 +100,7 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
-    /** Foreground/headless Send, Stop, and tool-effect lifecycle commands enter here. */
+    /** Foreground/headless Send, Stop, tool-effect, and Compact lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
@@ -219,6 +223,102 @@ class ConversationGenerationState(
                 ConversationCommand.ToolRoundCommitted(commitIdentity, success)
             },
         ).effects.singleOrNull()
+    }
+
+    /** Claim an idle-only manual Compact without presenting it as a generation Run. */
+    suspend fun requestManualCompact(
+        compactRunId: String,
+        effectId: String,
+    ): RunEffect.RunCompact? {
+        require(compactRunId.isNotBlank())
+        require(effectId.isNotBlank())
+        return commandMailbox.submit(
+            commandFactory = ConversationCommandFactory {
+                ConversationCommand.CompactRequested(
+                    identity = RunEffectIdentity(
+                        conversationId = conversationId,
+                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                        runId = compactRunId,
+                        pass = 0,
+                        effectId = effectId,
+                    ),
+                    compactRunId = compactRunId,
+                    mode = CompactMode.MANUAL,
+                )
+            },
+            cancellationCommand = { transition ->
+                transition.effects.filterIsInstance<RunEffect.RunCompact>()
+                    .singleOrNull()
+                    ?.let { effect ->
+                        ConversationCommand.CompactCompleted(
+                            effect.identity,
+                            CompactOutcome.FAILED,
+                        )
+                    }
+            },
+        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
+    }
+
+    /** Claim an automatic Compact for the exact currently-active Run/pass. */
+    suspend fun requestAutomaticCompact(
+        compactRunId: String,
+        effectId: String,
+    ): RunEffect.RunCompact? {
+        require(compactRunId.isNotBlank())
+        require(effectId.isNotBlank())
+        return commandMailbox.submit(
+            commandFactory = ConversationCommandFactory {
+                val currentIdentity = runState.identityOrNull()
+                val effectIdentity = if (currentIdentity?.runId != null) {
+                    currentIdentity.effectIdentity(effectId)
+                } else {
+                    RunEffectIdentity(
+                        conversationId = conversationId,
+                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                        runId = "unbound_$compactRunId",
+                        pass = 0,
+                        effectId = effectId,
+                    )
+                }
+                ConversationCommand.CompactRequested(
+                    identity = effectIdentity,
+                    compactRunId = compactRunId,
+                    mode = CompactMode.AUTOMATIC,
+                )
+            },
+            cancellationCommand = { transition ->
+                transition.effects.filterIsInstance<RunEffect.RunCompact>()
+                    .singleOrNull()
+                    ?.let { effect ->
+                        ConversationCommand.CompactCompleted(
+                            effect.identity,
+                            CompactOutcome.FAILED,
+                        )
+                    }
+            },
+        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
+    }
+
+    /** Settle one exact Compact result; stale, duplicate, and post-Stop results are rejected. */
+    suspend fun finishCompact(
+        identity: RunEffectIdentity,
+        outcome: CompactOutcome,
+    ): Transition = commandMailbox.submit(
+        ConversationCommandFactory {
+            ConversationCommand.CompactCompleted(identity, outcome)
+        },
+    )
+
+    /** Wait until neither a generation nor an idle manual Compact owns this conversation. */
+    suspend fun awaitSendAvailable() {
+        combine(generating, compacting) { isGenerating, isCompacting ->
+            !isGenerating && !isCompacting
+        }.first { available -> available }
+    }
+
+    /** Wait only for Compact settlement, then let the mailbox re-evaluate Idle versus Active. */
+    suspend fun awaitCompactSettled() {
+        compacting.first { isCompacting -> !isCompacting }
     }
 
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
@@ -390,6 +490,7 @@ class ConversationGenerationState(
         isLoading.value = false
         generating.value = false
         stopping.value = false
+        compacting.value = false
         onRegistryIdle(conversationId)
         onIdle?.invoke(conversationId)
     }
@@ -483,7 +584,11 @@ class ConversationGenerationState(
                 duplicateStoppingRequest.set(currentState is RunState.Stopping)
                 stoppedMessage.set(
                     streamingMessage.value
-                        ?.takeUnless { currentState is RunState.Idle }
+                        ?.takeUnless {
+                            currentState is RunState.Idle ||
+                                currentState is RunState.Compacting &&
+                                currentState.resumeIdentity == null
+                        }
                         ?.copy(status = MessageStatus.STOPPED),
                 )
                 val requiresPersistence = identity.runId != null
@@ -652,6 +757,7 @@ class ConversationGenerationState(
         is RunState.Idle -> null
         is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
+        is RunState.Compacting -> resumeIdentity
         is RunState.Stopping -> identity
     }
 
@@ -659,6 +765,7 @@ class ConversationGenerationState(
         is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
         is RunState.Active -> identity.ownerToken == ownerToken
         is RunState.Idle,
+        is RunState.Compacting,
         is RunState.Stopping,
         -> false
     }
@@ -678,6 +785,19 @@ class ConversationGenerationState(
 
     /** Apply only effects whose authority has moved to the mailbox in the current phase. */
     private fun applyMailboxEffectsLocked(transition: Transition) {
+        transition.effects.filterIsInstance<RunEffect.RunCompact>()
+            .singleOrNull()
+            ?.let { effect ->
+                val compactState = runState as? RunState.Compacting
+                    ?: error("RunCompact must enter Compacting")
+                check(compactState.effectIdentity == effect.identity)
+                check(compactState.compactRunId == effect.compactRunId)
+                check(compactState.mode == effect.mode)
+                compacting.value = true
+            }
+        if (runState !is RunState.Compacting && compacting.value) {
+            compacting.value = false
+        }
         transition.effects.filterIsInstance<RunEffect.PersistAcceptedInput>()
             .singleOrNull()
             ?.let { effect ->
@@ -740,6 +860,15 @@ class ConversationGenerationState(
         if (transition.accepted) runState = transition.newState
         return transition
     }
+
+    private fun RuntimeRunIdentity.effectIdentity(effectId: String): RunEffectIdentity =
+        RunEffectIdentity(
+            conversationId = conversationId,
+            ownerToken = ownerToken,
+            runId = requireNotNull(runId),
+            pass = pass,
+            effectId = effectId,
+        )
 
 }
 

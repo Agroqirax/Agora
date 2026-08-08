@@ -76,11 +76,13 @@ Task/Loop
   -> schedule advances only if the occurrence identity is still current
 
 Compact
-  -> serialize through the existing Controller/Task boundary
+  -> mailbox CompactRequested claims manual Idle or exact automatic active Run/pass
+  -> identified RunCompact effect executes through the shared foreground/Task coordinator
   -> read selected graph and nearest Compact
   -> keep complete tool rounds in the verbatim suffix
   -> summarize prefix with an ephemeral final USER instruction
-  -> re-read assumptions and insert a Compact boundary transaction
+  -> re-read assumptions and insert a Compact boundary transaction with the effect Run id
+  -> exact CompactCompleted either returns manual state to Idle or authorizes automatic continuation
   -> never delete original messages
 ```
 
@@ -103,9 +105,10 @@ second test-only Run reducer with competing transition semantics.
 ### 3.2 In-process slot
 
 Pure `ConversationCommand`, `RunState`, `RunEffect`, `Transition`, and
-`ConversationRuntimeReducer` types now own `Idle`, `Preparing`, `Active`, and `Stopping` slot
-transitions, ordinary foreground Send placement/input acceptance, and the coroutine/persistence
-Stop barriers. `ConversationGenerationState` calls the reducer under its
+`ConversationRuntimeReducer` types now own `Idle`, `Preparing`, `Active`, `Compacting`, and
+`Stopping` transitions, ordinary foreground Send placement/input acceptance, Context Compact
+admission/result/continuation, and the coroutine/persistence Stop barriers.
+`ConversationGenerationState` calls the reducer under its
 existing per-conversation monitor and is the only assignment path for this process-slot state.
 The former `SlotPhase`, `stopFinalizationPending`, and `stoppedCoroutineUnwound` authorities were
 deleted. Legacy UI/persistence tokens, Job ownership, streams, and the monitor remain compatibility
@@ -127,13 +130,13 @@ must not collapse into Boolean combinations.
 
 | Current owner | Writes | Current fence | Migration consequence |
 | --- | --- | --- | --- |
-| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative ordinary/fresh-guidance Send placement/input acceptance, slot, Stop barriers, and tool-batch/commit/continuation transitions | conversation + owner + run id + pass + effect id | Extend the real reducer slice one lifecycle boundary at a time. |
-| Per-conversation command mailbox | serial delivery of ordinary/fresh-guidance Send, Stop lifecycle, and tool batch/result/commit commands | one bounded FIFO consumer per conversation | Move Provider outcome delivery, Compact, and recovery here in later commits. |
-| `ConversationGenerationState` adapter | executes mailbox-approved Job/stream cancellation, overlay/token projection, queue/UI projection, and explicit guidance ownership leases | conversation + owner token + guidance lease id; Stop cutoff is reducer-approved | Preserve only until each remaining path moves behind reducer effects. |
-| `MessageGenerationController` | executes accepted-input Room effects, edit/regenerate graph, lease-backed fresh-Run guidance drain, Compact entry, and setup failure | conversation + token + run/effect/lease id | Guidance has no alternate placement or same-Run transaction; its effect executor remains an adapter until final cleanup. |
+| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative ordinary/fresh-guidance Send placement/input acceptance, slot, Stop barriers, tool-batch/commit/continuation, and Compact admission/result transitions | conversation + owner + run id + pass + effect id | Extend the real reducer slice one lifecycle boundary at a time. |
+| Per-conversation command mailbox | serial delivery of ordinary/fresh-guidance Send, Stop lifecycle, tool batch/result/commit, and Compact request/result commands | one bounded FIFO consumer per conversation | Move Provider outcome delivery and recovery here in later commits. |
+| `ConversationGenerationState` adapter | executes mailbox-approved Job/stream cancellation and projects overlay/token/queue/Compact UI plus explicit guidance ownership leases | conversation + owner token + guidance lease id; Stop and Compact cutoffs are reducer-approved | Preserve only until each remaining path moves behind reducer effects. |
+| `MessageGenerationController` | executes accepted-input/Compact effects, edit/regenerate graph, lease-backed fresh-Run guidance drain, and setup failure | conversation + token + run/effect/lease id | Guidance and Compact admission have no alternate state authority; external effect bodies remain adapters until final cleanup. |
 | `GenerationManager` | accepts one closed Provider-pass outcome, executes mailbox-authorized tool/commit effects, stream/checkpoint, terminal messages/Run, notification | conversation + owner + run id + durable pass + per-request effect id | Provider pass is isolated and state-backed tools are effect-gated; move Provider outcome acceptance and Run finalization separately. |
 | `GenerationFinalizer` | executes the mailbox-emitted durable Stop effect and returns `PersistenceSettled` to that mailbox | conversation + owner + run id + pass + effect id | Keep Room execution external; mailbox acceptance and two-barrier release are authoritative. |
-| `TaskExecutionEngine` | executes mailbox-approved headless input, Compact, generation and terminal cleanup | conversation + owner + run id/pass/effect id | Send admission/graph setup is shared; move remaining Compact/finalization adapters in their dedicated phases. |
+| `TaskExecutionEngine` | executes mailbox-approved headless input/Compact effects, generation and terminal cleanup | conversation + owner + run id/pass/effect id | Send and Compact contracts are shared; move request-building/Provider/finalization adapters in their dedicated phases. |
 | `LoopManager` | occurrence claim/revision/cycle/schedule | revision + fire time + count | Preserve replay fencing; trigger normal Send contract. |
 | `TaskManager`/Workers | reservation, execution conversation, occurrence retry/schedule | task + scheduled time + execution id | Preserve deterministic occurrence identity. |
 | Providers + `ProviderPassRunner` | retry and semantic stream termination remain Provider-local; runner normalizes one request into a closed outcome and validates completed tool metadata | conversation + owner + run id + durable pass + per-request effect id | Move closed outcome acceptance into the conversation mailbox without weakening Provider validators. |
@@ -142,9 +145,9 @@ must not collapse into Boolean combinations.
 
 This inventory proves that the current implementation is not yet a process-level single writer.
 The execution coordinator serializes the main generation lease; Send (including fresh-Run guidance
-and headless automation), Stop, and state-backed tool-effect state now have one mailbox transition
-writer. Provider outcome acceptance, the in-memory guidance lease executor, Compact, recovery, Run
-finalization, and graph mutations still retain bounded adapters/legacy authorities.
+and headless automation), Stop, state-backed tool-effect state, and Compact state now have one
+mailbox transition writer. Provider outcome acceptance, the in-memory guidance lease executor,
+recovery, Run finalization, and external/Room graph-effect bodies still retain bounded adapters.
 
 ## 5. Identity and stale-result policy
 
@@ -197,6 +200,14 @@ The live orders that constrain migration are:
    batch → mailbox `ToolBatchCompleted` → conditional Room transaction → mailbox
    `ToolRoundCommitted` → continuation authorization. Remote Shell jobs can outlive one bounded
    wait, so timeout is not synonymous with process termination.
+10. Manual Compact: queue mutex checks there is no pending guidance → mailbox idle claim → release
+    queue mutex → conversation lease → provider summary → Compact Room transaction → exact mailbox
+    result. It never activates generation or overtakes a guidance lease. Automatic Compact runs
+    inside the already-installed generation Job/lease: mailbox exact Run/pass claim → effect →
+    result → continuation authorization. Stop may replace the automatic Compact state and cancel
+    that Job; a late result cannot resume it. A normal Send waits only for Compact settlement and
+    then re-enters the mailbox as an Idle Send or Active memory guidance; direct-only automation
+    reports busy.
 
 Target reducer transitions never suspend. The intended order is:
 
@@ -259,11 +270,11 @@ ownership. No Room schema rewrite is planned.
 | One live durable Run | unique active-slot index and Run invariants | Concurrent transaction/conditional-update tests. |
 | One process writer | not satisfied | Mailbox is sole transition authority. |
 | Cross-conversation parallelism | coordinator supports it | Runtime tests with two conversations. |
-| Stale/duplicate rejection | Stop and state-backed tool effects/results have reducer rejection; each Provider request closes with full identity and exact expected-outcome acceptance in the `GenerationManager` adapter | move Provider outcome delivery into the mailbox and extend identity to Compact effects. |
+| Stale/duplicate rejection | Stop, state-backed tool, and Compact effects/results have reducer rejection; each Provider request closes with full identity and exact expected-outcome acceptance in the `GenerationManager` adapter | move Provider outcome delivery into the mailbox. |
 | Stop two-barrier release | Stop and both settlement results use the mailbox; reducer owns both orders and exact release effect | add real Room failure/process-lifecycle coverage without adding a second state writer. |
 | Tool atomicity | validated outcome → mailbox batch effect → complete result command → expected-pass Room transaction → commit result → continuation; partial/conflicting replay fails closed | add real Room failure/reorder integration tests when the Room test harness is introduced. |
 | Queue FIFO and memory ownership | explicit lease; exact front requeue; normal fresh-Run Send identity; disposal/durable file-owner tests; obsolete durable/same-Run queue APIs removed | end-to-end real Room, Stop/error, process-death, and attachment-reference tests. |
-| Compact graph safety | graph re-read and unit tests | real Room selected-ancestry tests. |
+| Compact graph safety | identified mailbox effect/result; manual/automatic serialization; exact automatic continuation; graph re-read and unit tests | real Room selected-ancestry, Stop-vs-transaction, and process-death tests. |
 | Recovery | orphan terminalization exists | deterministic snapshot-to-command tests. |
 | Notification/title idempotence | partial application guards | explicit delayed/duplicate effect tests. |
 | Privacy-safe trace | 256-entry reducer trace with digested conversation id and metadata-only fields | expose/merge trace through the final mailbox without adding content. |
@@ -296,10 +307,15 @@ Each row is an independent semantic commit and rollback boundary:
 7. Loop and Task reuse the same runtime contract — implemented for direct-only admission, exact
    accepted-input result identity, installed external-Job settlement, and the shared ordinary
    USER/MODEL/Run graph transaction. Busy is a typed no-input/no-Run result, foreground bridge
-   fallback is forbidden, and Task/Loop use one gate → conversation-lease order. Headless Compact,
-   request construction, Provider execution, and finalization remain bounded adapters for their
-   later dedicated migrations rather than a second slot/Run-placement authority.
-8. Manual/automatic Compact become serialized runtime effects.
+   fallback is forbidden, and Task/Loop use one gate → conversation-lease order. Headless request
+   construction, Provider execution, and finalization remain bounded adapters for their later
+   dedicated migrations rather than a second slot/Run-placement authority.
+8. Manual/automatic Compact become serialized runtime effects — implemented: manual claims Idle
+   without generation UI ownership and cannot overtake pending guidance; automatic retains the
+   exact active Run/pass; Stop invalidates
+   late results; foreground and Task paths share one effect coordinator and effect-supplied Compact
+   Run id; ordinary Send waits only for Compact settlement and re-enters the mailbox, while
+   direct-only automation reports busy.
 9. Recovery and Room domain transactions become deterministic/idempotent.
 10. Remove the superseded legacy writer for each migrated path.
 
