@@ -52,6 +52,29 @@ class TaskManagerTest {
         coVerify(exactly = 0) { repository.upsertTask(any()) }
     }
 
+    @Test
+    fun busyConversationIsReturnedAsAReplaySafeDeferredOccurrence() = runTest {
+        val repository = mockk<TaskRepository>()
+        val conversations = mockk<ConversationRepository>()
+        val engine = mockk<TaskExecutionEngine>()
+        val stored = task()
+        every { repository.getAllTasks() } returns MutableStateFlow(listOf(stored))
+        coEvery { repository.getTask(stored.id) } returns stored
+        coEvery { conversations.ensureRunRecovery() } returns Unit
+        coEvery { conversations.getConversation("execution") } returns null
+        coEvery { conversations.upsertConversation(any()) } returns Unit
+        coEvery {
+            engine.runOnce("execution", stored.prompt, stored.modelId, "", true, any())
+        } returns TaskExecutionEngine.Result.Busy()
+        val manager = TaskManager(repository, conversations, engine, backgroundScope)
+
+        val result = manager.executeById(stored.id, "execution")
+
+        val deferred = result as TaskManager.ExecutionResult.Deferred
+        assertEquals("execution", deferred.conversationId)
+        assertEquals("Conversation is already generating", deferred.reason)
+    }
+
     private fun task(
         name: String = "Task",
         prompt: String = "Prompt",

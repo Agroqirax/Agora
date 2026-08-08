@@ -59,6 +59,16 @@ class TaskWorker(
                     }
                     Result.success()
                 }
+                is TaskManager.ExecutionResult.Deferred -> {
+                    // Direct-only runtime admission persisted nothing, so retrying this exact
+                    // deterministic occurrence cannot duplicate a model/tool side effect.
+                    if (runAttemptCount < MAX_RETRY_ATTEMPTS) {
+                        Result.retry()
+                    } else {
+                        container.taskManager.finishScheduledRun(taskId, scheduledAt)
+                        Result.failure(workDataOf(KEY_ERROR to outcome.reason))
+                    }
+                }
                 is TaskManager.ExecutionResult.Failure -> {
                     if (outcome.retryable && runAttemptCount < MAX_RETRY_ATTEMPTS) {
                         Result.retry()

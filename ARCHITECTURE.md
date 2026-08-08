@@ -27,10 +27,10 @@ ChatViewModel ── MessageGenerationController ── ConversationStateRegistr
    └── MemoryManager / attachment files / export and backup files
 ```
 
-AppContainer owns process-scoped dependencies. Foreground-open automation can bridge into the
-controller and join the exact generation Job; headless automation currently shares the same
-providers and repositories but retains a parallel orchestration adapter in
-`TaskExecutionEngine`. Removing that duplication is a staged migration, not current fact.
+AppContainer owns process-scoped dependencies. Foreground-open automation bridges into the
+controller and joins the exact generation Job. Headless automation enters the same direct-only
+conversation mailbox and accepted-input graph transaction, while `TaskExecutionEngine` remains a
+bounded adapter for headless request building, Compact, Provider execution, and finalization.
 
 The project uses manual dependency injection through `di/AppContainer.kt`. Shared
 providers, repositories, automation coordinators, and the local inference engine are
@@ -116,7 +116,7 @@ Provider-specific termination validation and retry. `GenerationManager` executes
 still owns normal Run finalization, while
 `GenerationFinalizer` owns durable Stop finalization and its retry path.
 
-The migrated conversation-runtime slice is authoritative for ordinary foreground Send and
+The migrated conversation-runtime slice is authoritative for ordinary foreground/headless Send,
 memory-guidance placement, the in-process generation slot, and Stop barriers. Pure
 `ConversationCommand`, `RunState`, `RunEffect`, and
 `ConversationRuntimeReducer` types decide `Idle`/`Preparing`/`Active`/`Stopping`, coroutine settlement,
@@ -128,7 +128,8 @@ before either slot or overlay mutation.
 
 Each process-scoped conversation state now also owns a bounded 64-entry sequential command
 mailbox.
-Foreground Send enters as `SendRequested`: `Idle` becomes `Preparing` and emits one identified
+Foreground and headless ordinary Send enter as `SendRequested`: `Idle` becomes `Preparing` and
+emit one identified
 `PersistAcceptedInput`; the Room transaction returns the exact `InputPersisted` command before the
 Run becomes `Active`, while a failed transaction returns `InputPersistenceFailed` and retains
 ownership until its coroutine settles. Cancellation before the controller receives the direct
@@ -155,11 +156,12 @@ accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conver
 separate runtime disposal and does not fabricate a durable user-Stop effect.
 
 This is not yet the final mailbox architecture: Provider outcomes are still first closed/accepted by
-the `GenerationManager` adapter, and Compact, automation, recovery, and Run finalization have not
-moved into it. Guidance storage/lease execution remains a bounded controller adapter, but it has no
+the `GenerationManager` adapter, and Compact, recovery, and Run finalization have not moved into it.
+Headless request building/Provider execution remains a bounded Task adapter after mailbox admission.
+Guidance storage/lease execution remains a bounded controller adapter, but it has no
 alternative Run-placement or durable append authority: every drain is a fresh mailbox-approved
-normal Send. State-backed tool execution/commit authorization uses the mailbox; the registry-less
-headless compatibility adapter remains until automation unification. A bounded 256-entry runtime
+normal Send. State-backed foreground and headless tool execution/commit authorization uses the
+mailbox. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 
@@ -329,12 +331,14 @@ started. A manual rename or a newer generator always wins.
 
 ## 8. Automation
 
-WorkManager and alarms are scheduling entry points. `AutomationExecutionGate` quiesces automation
-during destructive import, and `ConversationExecutionCoordinator` gives automation waiters
-priority while serializing each conversation. A foreground-open Loop delegates to the controller
-through a direct-only call and joins its exact Job; headless Tasks/Loops use
-`TaskExecutionEngine`, which reuses process-scoped dependencies but currently duplicates parts of
-Run setup, Compact, and finalization.
+WorkManager and alarms are scheduling entry points. Both Task and Loop acquire resources in the
+same order: `AutomationExecutionGate` first, then the automation-priority
+`ConversationExecutionCoordinator` lease. A foreground-open Loop delegates to the controller
+through a direct-only call and joins its exact Job. Headless Tasks/Loops submit the same
+`SendRequested` -> `PersistAcceptedInput` -> `InputPersisted` contract and share the ordinary
+USER/MODEL/Run graph writer. Busy is a typed no-input/no-Run outcome; no bridge queues or falls back
+to a second writer. `TaskExecutionEngine` still adapts headless Compact, request construction,
+Provider execution, and finalization pending their later runtime-effect migrations.
 
 One-shot schedules preserve explicit past dates so validation can reject them. The
 scheduler must not silently reinterpret an expired date as next year.

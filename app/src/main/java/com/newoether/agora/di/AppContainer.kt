@@ -207,6 +207,7 @@ class AppContainer(private val appContext: Context) {
             },
             cancelAlarm = { conversationId -> automationScheduler.cancelLoop(conversationId) },
             executionCoordinator = conversationExecutionCoordinator,
+            executionGate = automationExecutionGate,
         )
     }
 

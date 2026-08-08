@@ -32,6 +32,7 @@ class LoopManager(
     private val cancelAlarm: suspend (String) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
     executionCoordinator: ConversationExecutionCoordinator? = null,
+    private val executionGate: AutomationExecutionGate = AutomationExecutionGate(),
 ) {
     /** Production convenience constructor; the primary constructor stays fully JVM-testable. */
     constructor(
@@ -40,12 +41,14 @@ class LoopManager(
         conversationRepository: ConversationRepository,
         engine: TaskExecutionEngine,
         executionCoordinator: ConversationExecutionCoordinator,
+        executionGate: AutomationExecutionGate,
     ) : this(
         taskRepository = taskRepository,
         conversationRepository = conversationRepository,
         engine = engine,
         cancelWork = { conversationId -> LoopWorker.cancel(context, conversationId) },
         executionCoordinator = executionCoordinator,
+        executionGate = executionGate,
     )
 
     sealed interface StartResult {
@@ -190,121 +193,132 @@ class LoopManager(
     suspend fun executeByConversationId(
         conversationId: String,
         expectedFireAt: Long = 0L,
-    ): ExecutionResult =
-        executionCoordinator.withAutomationConversationLock(conversationId) conversationLock@ {
-            val snapshot = stateMutex.withLock {
-                val loop = taskRepository.getLoop(conversationId).first()
-                    ?: return@withLock null
-                if (!loop.active) return@withLock loop
+    ): ExecutionResult = executionGate.withExecution {
+        executionCoordinator.withAutomationConversationLock(conversationId) {
+            executeWithAutomationGuardsHeld(conversationId, expectedFireAt)
+        }
+    }
 
-                val maxCycles = loop.maxCycles ?: LoopPolicy.DEFAULT_MAX_CYCLES
-                if (LoopPolicy.validate(loop.intervalMs, maxCycles) != null || loop.cycleCount >= maxCycles) {
-                    val inactive = loop.copy(
-                        active = false,
-                        maxCycles = maxCycles,
-                        nextFireAt = 0L,
-                        revision = LoopPolicy.nextRevision(loop.revision),
-                    )
-                    taskRepository.upsertLoop(inactive)
-                    return@withLock inactive
-                }
-                if (loop.maxCycles == null) {
-                    loop.copy(maxCycles = maxCycles).also { taskRepository.upsertLoop(it) }
-                } else {
-                    loop
-                }
-            }
+    private suspend fun executeWithAutomationGuardsHeld(
+        conversationId: String,
+        expectedFireAt: Long,
+    ): ExecutionResult {
+        val snapshot = stateMutex.withLock {
+            val loop = taskRepository.getLoop(conversationId).first()
+                ?: return@withLock null
+            if (!loop.active) return@withLock loop
 
-            if (snapshot == null) return@conversationLock ExecutionResult.NotFound
-            if (!snapshot.active) return@conversationLock ExecutionResult.Inactive
-            if (expectedFireAt > 0L && snapshot.nextFireAt != expectedFireAt) {
-                return@conversationLock ExecutionResult.Superseded(snapshot)
-            }
-
-            val now = clock()
-            if (snapshot.nextFireAt > now) {
-                return@conversationLock ExecutionResult.NotDue(snapshot.nextFireAt)
-            }
-
-            val conversation = conversationRepository.getConversation(conversationId)
-            if (conversation == null) {
-                stateMutex.withLock { taskRepository.deleteLoop(conversationId) }
-                return@conversationLock ExecutionResult.NotFound
-            }
-
-            // Persistently claim this cycle *before* any model/tool side effect. If the process
-            // dies after this write, a WorkManager retry sees a different nextFireAt/cycleCount
-            // and cannot replay the same turn. The next alarm is provisionally scheduled now;
-            // successful completion below moves it to one full interval after completion.
-            val claimed = stateMutex.withLock {
-                val latest = taskRepository.getLoop(conversationId).first()
-                if (
-                    latest == null || !latest.active || latest.revision != snapshot.revision ||
-                    latest.cycleCount != snapshot.cycleCount || latest.nextFireAt != snapshot.nextFireAt
-                ) {
-                    return@withLock null
-                }
-                val maxCycles = latest.maxCycles ?: LoopPolicy.DEFAULT_MAX_CYCLES
-                val nextCount = latest.cycleCount + 1
-                val remainsActive = nextCount < maxCycles
-                latest.copy(
+            val maxCycles = loop.maxCycles ?: LoopPolicy.DEFAULT_MAX_CYCLES
+            if (
+                LoopPolicy.validate(loop.intervalMs, maxCycles) != null ||
+                loop.cycleCount >= maxCycles
+            ) {
+                val inactive = loop.copy(
+                    active = false,
                     maxCycles = maxCycles,
-                    cycleCount = nextCount,
-                    active = remainsActive,
-                    nextFireAt = if (remainsActive) {
-                        LoopPolicy.nextFireAt(clock(), latest.intervalMs)
-                    } else {
-                        0L
-                    },
-                ).also { taskRepository.upsertLoop(it) }
-            } ?: return@conversationLock ExecutionResult.Superseded(
-                taskRepository.getLoop(conversationId).first()
-            )
-
-            _runningConversationIds.update { it + conversationId }
-            val generationResult = try {
-                engine.runOnceWithConversationLockHeld(
-                    conversationId = conversationId,
-                    userText = LoopPolicy.promptForExecution(claimed.prompt),
-                    modelId = conversation.modelId,
-                    systemPromptOverride = null,
-                    foregroundServiceManagedExternally = true,
-                    precondition = {
-                        val latest = taskRepository.getLoop(conversationId).first()
-                        latest != null && latest.revision == claimed.revision &&
-                            latest.cycleCount == claimed.cycleCount
-                    },
+                    nextFireAt = 0L,
+                    revision = LoopPolicy.nextRevision(loop.revision),
                 )
-            } catch (e: CancellationException) {
-                throw e
-            } finally {
-                _runningConversationIds.update { it - conversationId }
+                taskRepository.upsertLoop(inactive)
+                return@withLock inactive
             }
-
-            val updated = stateMutex.withLock {
-                val latest = taskRepository.getLoop(conversationId).first()
-                if (
-                    latest == null || latest.revision != claimed.revision ||
-                    latest.cycleCount != claimed.cycleCount
-                ) {
-                    return@withLock null
-                }
-
-                val next = if (latest.active) {
-                    latest.copy(nextFireAt = LoopPolicy.nextFireAt(clock(), latest.intervalMs))
-                } else {
-                    latest
-                }
-                if (next != latest) taskRepository.upsertLoop(next)
-                next
-            }
-
-            if (updated == null) {
-                ExecutionResult.Superseded(taskRepository.getLoop(conversationId).first())
+            if (loop.maxCycles == null) {
+                loop.copy(maxCycles = maxCycles).also { taskRepository.upsertLoop(it) }
             } else {
-                ExecutionResult.Finished(generationResult, updated)
+                loop
             }
         }
+
+        if (snapshot == null) return ExecutionResult.NotFound
+        if (!snapshot.active) return ExecutionResult.Inactive
+        if (expectedFireAt > 0L && snapshot.nextFireAt != expectedFireAt) {
+            return ExecutionResult.Superseded(snapshot)
+        }
+
+        val now = clock()
+        if (snapshot.nextFireAt > now) {
+            return ExecutionResult.NotDue(snapshot.nextFireAt)
+        }
+
+        val conversation = conversationRepository.getConversation(conversationId)
+        if (conversation == null) {
+            stateMutex.withLock { taskRepository.deleteLoop(conversationId) }
+            return ExecutionResult.NotFound
+        }
+
+        // Persistently claim this cycle *before* any model/tool side effect. If the process
+        // dies after this write, a WorkManager retry sees a different nextFireAt/cycleCount
+        // and cannot replay the same turn. The next alarm is provisionally scheduled now;
+        // successful completion below moves it to one full interval after completion.
+        val claimed = stateMutex.withLock {
+            val latest = taskRepository.getLoop(conversationId).first()
+            if (
+                latest == null || !latest.active || latest.revision != snapshot.revision ||
+                latest.cycleCount != snapshot.cycleCount || latest.nextFireAt != snapshot.nextFireAt
+            ) {
+                return@withLock null
+            }
+            val maxCycles = latest.maxCycles ?: LoopPolicy.DEFAULT_MAX_CYCLES
+            val nextCount = latest.cycleCount + 1
+            val remainsActive = nextCount < maxCycles
+            latest.copy(
+                maxCycles = maxCycles,
+                cycleCount = nextCount,
+                active = remainsActive,
+                nextFireAt = if (remainsActive) {
+                    LoopPolicy.nextFireAt(clock(), latest.intervalMs)
+                } else {
+                    0L
+                },
+            ).also { taskRepository.upsertLoop(it) }
+        } ?: return ExecutionResult.Superseded(
+            taskRepository.getLoop(conversationId).first()
+        )
+
+        _runningConversationIds.update { it + conversationId }
+        val generationResult = try {
+            engine.runOnceWithAutomationGuardsHeld(
+                conversationId = conversationId,
+                userText = LoopPolicy.promptForExecution(claimed.prompt),
+                modelId = conversation.modelId,
+                systemPromptOverride = null,
+                foregroundServiceManagedExternally = true,
+                precondition = {
+                    val latest = taskRepository.getLoop(conversationId).first()
+                    latest != null && latest.revision == claimed.revision &&
+                        latest.cycleCount == claimed.cycleCount
+                },
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } finally {
+            _runningConversationIds.update { it - conversationId }
+        }
+
+        val updated = stateMutex.withLock {
+            val latest = taskRepository.getLoop(conversationId).first()
+            if (
+                latest == null || latest.revision != claimed.revision ||
+                latest.cycleCount != claimed.cycleCount
+            ) {
+                return@withLock null
+            }
+
+            val next = if (latest.active) {
+                latest.copy(nextFireAt = LoopPolicy.nextFireAt(clock(), latest.intervalMs))
+            } else {
+                latest
+            }
+            if (next != latest) taskRepository.upsertLoop(next)
+            next
+        }
+
+        return if (updated == null) {
+            ExecutionResult.Superseded(taskRepository.getLoop(conversationId).first())
+        } else {
+            ExecutionResult.Finished(generationResult, updated)
+        }
+    }
 
     /**
      * Ensures a one-shot Loop alarm is never lost when infrastructure fails before a cycle can be

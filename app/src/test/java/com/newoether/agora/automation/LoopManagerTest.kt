@@ -8,7 +8,11 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +20,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class LoopManagerTest {
     private val taskRepository = mockk<TaskRepository>()
     private val conversationRepository = mockk<ConversationRepository>()
@@ -82,7 +87,7 @@ class LoopManagerTest {
     fun successfulCycleAdvancesAndSchedulesFromCompletionTime() = runTest {
         stored.value = loop(maxCycles = 2, revision = 3L)
         coEvery {
-            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithAutomationGuardsHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Success("model-message", "done")
         val manager = manager()
 
@@ -99,7 +104,7 @@ class LoopManagerTest {
     fun modelFailureStillConsumesFinalCycleWithoutImmediateRetry() = runTest {
         stored.value = loop(maxCycles = 1)
         coEvery {
-            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithAutomationGuardsHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Failure("provider failed")
         val manager = manager()
 
@@ -112,10 +117,61 @@ class LoopManagerTest {
     }
 
     @Test
+    fun busyRuntimeAdmissionIsAnExplicitCompletedCycleOutcome() = runTest {
+        stored.value = loop(maxCycles = 2)
+        coEvery {
+            engine.runOnceWithAutomationGuardsHeld(
+                "conversation", "Continue.", "OpenAI:model", null, true, any(),
+            )
+        } returns TaskExecutionEngine.Result.Busy()
+        val manager = manager()
+
+        val result = manager.executeByConversationId("conversation")
+
+        val finished = result as LoopManager.ExecutionResult.Finished
+        assertTrue(finished.generationResult is TaskExecutionEngine.Result.Busy)
+        assertEquals(1, finished.loop.cycleCount)
+    }
+
+    @Test
+    fun loopWaitsAtTheExecutionGateBeforeTakingTheConversationLease() = runTest {
+        stored.value = loop(maxCycles = 2)
+        coEvery {
+            engine.runOnceWithAutomationGuardsHeld(
+                "conversation", "Continue.", "OpenAI:model", null, true, any(),
+            )
+        } returns TaskExecutionEngine.Result.Success("model", "done")
+        val gate = AutomationExecutionGate()
+        val coordinator = ConversationExecutionCoordinator()
+        val importEntered = CompletableDeferred<Unit>()
+        val releaseImport = CompletableDeferred<Unit>()
+        val import = launch {
+            gate.withExclusiveImport {
+                importEntered.complete(Unit)
+                releaseImport.await()
+            }
+        }
+        importEntered.await()
+        val cycle = async {
+            manager(gate, coordinator).executeByConversationId("conversation")
+        }
+
+        runCurrent()
+        assertFalse(coordinator.isExecuting("conversation"))
+        coVerify(exactly = 0) {
+            engine.runOnceWithAutomationGuardsHeld(any(), any(), any(), any(), any(), any())
+        }
+
+        releaseImport.complete(Unit)
+        import.join()
+        assertTrue(cycle.await() is LoopManager.ExecutionResult.Finished)
+    }
+
+    @Test
     fun stopDuringGenerationCannotBeOverwrittenByStaleCompletion() = runTest {
         stored.value = loop(maxCycles = 5, revision = 10L)
         coEvery {
-            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithAutomationGuardsHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } coAnswers {
             stored.value = stored.value!!.copy(active = false, revision = 11L)
             TaskExecutionEngine.Result.Success("model-message", "done")
@@ -137,7 +193,7 @@ class LoopManagerTest {
         val scheduledAt = now
         stored.value = loop(nextFireAt = scheduledAt, maxCycles = 3)
         coEvery {
-            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithAutomationGuardsHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         } returns TaskExecutionEngine.Result.Success("model-message", "done")
         val manager = manager()
 
@@ -148,7 +204,7 @@ class LoopManagerTest {
         assertTrue(retry is LoopManager.ExecutionResult.Superseded)
         assertEquals(1, stored.value!!.cycleCount)
         coVerify(exactly = 1) {
-            engine.runOnceWithConversationLockHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
+            engine.runOnceWithAutomationGuardsHeld("conversation", "Continue.", "OpenAI:model", null, true, any())
         }
     }
 
@@ -172,16 +228,21 @@ class LoopManagerTest {
 
         assertEquals(LoopManager.ExecutionResult.NotDue(now + 5_000L), result)
         coVerify(exactly = 0) {
-            engine.runOnceWithConversationLockHeld(any(), any(), any(), any(), any(), any())
+            engine.runOnceWithAutomationGuardsHeld(any(), any(), any(), any(), any(), any())
         }
     }
 
-    private fun kotlinx.coroutines.test.TestScope.manager() = LoopManager(
+    private fun kotlinx.coroutines.test.TestScope.manager(
+        executionGate: AutomationExecutionGate = AutomationExecutionGate(),
+        executionCoordinator: ConversationExecutionCoordinator? = null,
+    ) = LoopManager(
         taskRepository = taskRepository,
         conversationRepository = conversationRepository,
         engine = engine,
         cancelWork = { cancelled += it },
         clock = { now },
+        executionCoordinator = executionCoordinator,
+        executionGate = executionGate,
     )
 
     private fun loop(

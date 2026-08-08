@@ -69,10 +69,10 @@ Stop
 
 Task/Loop
   -> alarm/WorkManager occurrence fence
-  -> automation execution gate
-  -> task reservation or loop revision/cycle claim
-  -> automation-priority conversation lease
-  -> foreground-open Controller bridge or headless TaskExecutionEngine
+  -> Task: task reservation/lock -> automation execution gate -> conversation lease
+  -> Loop: automation execution gate -> conversation lease -> revision/cycle claim
+  -> foreground-open Controller bridge or headless direct-only mailbox Send
+  -> shared accepted-input Run/USER/MODEL graph transaction
   -> schedule advances only if the occurrence identity is still current
 
 Compact
@@ -133,7 +133,7 @@ must not collapse into Boolean combinations.
 | `MessageGenerationController` | executes accepted-input Room effects, edit/regenerate graph, lease-backed fresh-Run guidance drain, Compact entry, and setup failure | conversation + token + run/effect/lease id | Guidance has no alternate placement or same-Run transaction; its effect executor remains an adapter until final cleanup. |
 | `GenerationManager` | accepts one closed Provider-pass outcome, executes mailbox-authorized tool/commit effects, stream/checkpoint, terminal messages/Run, notification | conversation + owner + run id + durable pass + per-request effect id | Provider pass is isolated and state-backed tools are effect-gated; move Provider outcome acceptance and Run finalization separately. |
 | `GenerationFinalizer` | executes the mailbox-emitted durable Stop effect and returns `PersistenceSettled` to that mailbox | conversation + owner + run id + pass + effect id | Keep Room execution external; mailbox acceptance and two-barrier release are authoritative. |
-| `TaskExecutionEngine` | headless Run setup, Compact, generation and terminal cleanup | conversation + run id/pass | Remove duplication only after Task/Loop parity. |
+| `TaskExecutionEngine` | executes mailbox-approved headless input, Compact, generation and terminal cleanup | conversation + owner + run id/pass/effect id | Send admission/graph setup is shared; move remaining Compact/finalization adapters in their dedicated phases. |
 | `LoopManager` | occurrence claim/revision/cycle/schedule | revision + fire time + count | Preserve replay fencing; trigger normal Send contract. |
 | `TaskManager`/Workers | reservation, execution conversation, occurrence retry/schedule | task + scheduled time + execution id | Preserve deterministic occurrence identity. |
 | Providers + `ProviderPassRunner` | retry and semantic stream termination remain Provider-local; runner normalizes one request into a closed outcome and validates completed tool metadata | conversation + owner + run id + durable pass + per-request effect id | Move closed outcome acceptance into the conversation mailbox without weakening Provider validators. |
@@ -141,10 +141,10 @@ must not collapse into Boolean combinations.
 | Room transactions | durable Run/message/selection/Compact/task/loop state | SQL preconditions vary; tool round requires ACTIVE slot + expected pass | Remain durable source of truth; consolidate remaining domain boundaries. |
 
 This inventory proves that the current implementation is not yet a process-level single writer.
-The execution coordinator serializes the main generation lease; Send (including fresh-Run guidance),
-Stop, and state-backed tool-effect state now have one mailbox transition writer. Provider outcome
-acceptance, the in-memory guidance lease executor, Compact, automation, recovery, Run finalization,
-and graph mutations still retain bounded adapters/legacy authorities.
+The execution coordinator serializes the main generation lease; Send (including fresh-Run guidance
+and headless automation), Stop, and state-backed tool-effect state now have one mailbox transition
+writer. Provider outcome acceptance, the in-memory guidance lease executor, Compact, recovery, Run
+finalization, and graph mutations still retain bounded adapters/legacy authorities.
 
 ## 5. Identity and stale-result policy
 
@@ -178,11 +178,15 @@ The live orders that constrain migration are:
    FIFO ownership lease → mailbox `SendRequested`/`PersistAcceptedInput`; release mutex; Job →
    conversation lease → fresh-Run Room transaction → mailbox `InputPersisted`. Failure before Room
    ownership returns the exact lease batch to the front; disposal deletes only non-durable files.
-4. Automation bridge: automation conversation lease → Controller direct-only Send → join the
+4. Automation bridge: automation execution gate → automation conversation lease → Controller
+   direct-only Send → join the
    exact Job. Busy must reject; waiting or queueing here can deadlock with a foreground slot owner
    waiting for the same lease.
-5. Task execution: task reservation/task lock → conversation lease → Room/provider/tool work.
-6. Loop execution: conversation automation lease → short state mutex/Room claim → generation.
+5. Task execution: task reservation/task lock → automation execution gate → conversation lease →
+   mailbox direct-only admission → shared accepted-input transaction → provider/tool work.
+6. Loop execution: automation execution gate → conversation automation lease → short state
+   mutex/Room occurrence claim → mailbox direct-only admission → generation. The held-guard engine
+   entry never re-enters either non-reentrant guard.
 7. Stop: mailbox `StopRequested` → token/overlay cutoff → stream/Job cancellation. Only the
    installed Job's completion hook can report coroutine settlement; durable Room finalization
    independently returns to the same mailbox. Neither result alone may release the slot, and
@@ -282,14 +286,19 @@ Each row is an independent semantic commit and rollback boundary:
    covered, stale/duplicate identities are rejected, and accepted delivery survives submitter
    cancellation.
 5. Tool batch execution/commit/continuation becomes effects and result commands — implemented for
-   state-backed foreground and production Task execution. The registry-less headless compatibility
-   callback remains permissive until automation unification in step 7.
+   state-backed foreground and production Task/Loop execution; the registry-less headless sentinel
+   and permissive callback mode were removed with automation admission in step 7.
 6. Queued guidance and attachment ownership move through the normal Send contract — implemented:
    guidance stays memory-only until a legal boundary, the origin Run closes, one explicit lease
    enters a fresh `SendRequested`/accepted-input transaction, distinct USER rows remain ordered,
    and failed/disposed ownership is deterministic. Same-Run/durable pending-queue authorities were
    deleted without changing Room v22.
-7. Loop and Task reuse the same runtime contract.
+7. Loop and Task reuse the same runtime contract — implemented for direct-only admission, exact
+   accepted-input result identity, installed external-Job settlement, and the shared ordinary
+   USER/MODEL/Run graph transaction. Busy is a typed no-input/no-Run result, foreground bridge
+   fallback is forbidden, and Task/Loop use one gate → conversation-lease order. Headless Compact,
+   request construction, Provider execution, and finalization remain bounded adapters for their
+   later dedicated migrations rather than a second slot/Run-placement authority.
 8. Manual/automatic Compact become serialized runtime effects.
 9. Recovery and Room domain transactions become deterministic/idempotent.
 10. Remove the superseded legacy writer for each migrated path.

@@ -77,9 +77,9 @@ private data class QueuedDrainClaim(
 /**
  * Result of delegating one automation (Loop) cycle to the foreground send path.
  *
- * [SlotBusy] means nothing was persisted and nothing generated, so the caller must fall back to its
- * headless path or treat the cycle as not-run. It is never a partial success: a direct-only send
- * either owns the slot for the whole turn or does not run at all.
+ * [SlotBusy] means nothing was persisted and nothing generated, so the caller reports a typed busy
+ * cycle outcome. It must not fall back to a second headless writer. It is never a partial success:
+ * a direct-only send either owns the slot for the whole turn or does not run at all.
  */
 internal sealed interface AutomationSendOutcome {
     data object SlotBusy : AutomationSendOutcome
@@ -274,6 +274,7 @@ internal class MessageGenerationController(
         providers = providerRegistry,
         pauseLoop = pauseConversationTasks,
     )
+    private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
     private val manualCompactMutex = Mutex()
 
     private suspend fun compactBeforeBoundaryIfNeeded(
@@ -1534,78 +1535,33 @@ internal class MessageGenerationController(
                         settings.setConversationSettings(genId, pendingSettings)
                         pendingConversationSettings.value = null
                     }
-                    val snapshotEntities = convRepo.getMessagesForConversationSnapshot(genId)
-                    val selectedBeforeSend = convRepo.restoreBranchSelections(genId)
-                    val path = ConversationUiState.resolvePath(
-                        allMessages = snapshotEntities.map { it.toUiChatMessage(appContext) },
-                        streamingMsg = null,
-                        selectedChildren = selectedBeforeSend,
-                    )
-                    val lastMessage = path.lastOrNull()
                     val userMessageId = UUID.randomUUID().toString()
-                    val userEntity = MessageEntity(
-                        id = userMessageId,
-                        conversationId = genId,
-                        parentId = lastMessage?.id,
-                        text = text,
-                        images = payload.allImages,
-                        thoughts = null,
-                        status = MessageStatus.SUCCESS,
-                        participant = Participant.USER,
-                        timestamp = System.currentTimeMillis(),
-                        attachmentMeta = payload.attachmentMeta?.let(Json::encodeToString),
-                        runId = runId,
-                        runSequence = 0,
-                        consumedAtPass = 0,
-                    )
                     val modelMessageId = UUID.randomUUID().toString()
                     setupModelMessageId = modelMessageId
-                    val startTime = userEntity.timestamp + 1
-                    val modelEntity = MessageEntity(
-                        id = modelMessageId,
-                        conversationId = genId,
-                        parentId = userMessageId,
-                        text = "",
-                        thoughts = null,
-                        status = MessageStatus.SENDING,
-                        participant = Participant.MODEL,
-                        timestamp = startTime,
-                        modelName = modelId,
-                        runId = runId,
-                        runSequence = 1,
+                    val graphCommit = acceptedInputGraphWriter.commit(
+                        request = AcceptedInputGraphWriter.Request(
+                            inputEffect = direct.inputEffect,
+                            userMessageId = userMessageId,
+                            modelMessageId = modelMessageId,
+                            userText = text,
+                            images = payload.allImages,
+                            attachmentMeta = payload.attachmentMeta?.let(Json::encodeToString),
+                            modelId = modelId,
+                            userTimestamp = System.currentTimeMillis(),
+                            newConversation = newConversation,
+                        ),
+                        beforeRoomCommit = {
+                            if (!wasNewChat) {
+                                ifOpenOn(genId) {
+                                    roomProjectionFence =
+                                        renderStore.beginRoomMessageProjectionFence()
+                                }
+                            }
+                        },
                     )
-                    val run = RunEntity(
-                        id = runId,
-                        conversationId = genId,
-                        parentRunId = lastMessage?.runId,
-                        status = RunStatus.ACTIVE,
-                        activeSlot = 1,
-                        startedAt = userEntity.timestamp,
-                        lastCheckpointAt = startTime,
-                    )
-                    val messageSelectionUpdates = mapOf(
-                        userEntity.parentId to userEntity.id,
-                        userEntity.id to modelEntity.id,
-                    )
-                    if (!wasNewChat) {
-                        ifOpenOn(genId) {
-                            roomProjectionFence = renderStore.beginRoomMessageProjectionFence()
-                        }
-                    }
-                    val graphCommit = if (newConversation != null) {
-                        convRepo.createConversationRunWithMessages(
-                            conversation = newConversation,
-                            run = run,
-                            messages = listOf(userEntity, modelEntity),
-                            messageSelectionUpdates = messageSelectionUpdates,
-                        )
-                    } else {
-                        convRepo.createRunWithMessages(
-                            run = run,
-                            messages = listOf(userEntity, modelEntity),
-                            messageSelectionUpdates = messageSelectionUpdates,
-                        )
-                    }
+                    val userEntity = graphCommit.userMessage
+                    val modelEntity = graphCommit.modelMessage
+                    val startTime = modelEntity.timestamp
                     inputGraphCommitted = true
                     payloadOwnershipTransferred.set(true)
 

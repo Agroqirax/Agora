@@ -1021,7 +1021,7 @@ class ChatViewModel(
                 )
             ) {
                 AutomationSendOutcome.SlotBusy ->
-                    return@bridge BridgeOutcome.Failed("Conversation is already generating")
+                    return@bridge BridgeOutcome.Busy()
                 is AutomationSendOutcome.Delivered -> outcome
             }
             // Read back the exact row this send created, never the conversation tail: a branch

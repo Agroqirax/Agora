@@ -4,21 +4,18 @@ import android.app.Application
 import android.content.Context
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.data.MemoryManager
-import com.newoether.agora.data.local.MessageEntity
-import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.model.RunStatus
+import com.newoether.agora.model.RunEffect
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.CompactResult
+import com.newoether.agora.viewmodel.AcceptedInputGraphWriter
 import com.newoether.agora.viewmodel.ContextCompactor
-import com.newoether.agora.viewmodel.ConversationUiState
 import com.newoether.agora.viewmodel.ConversationTitleGenerator
-import com.newoether.agora.viewmodel.GenerationCallbacks
 import com.newoether.agora.viewmodel.GenerationManager
 import com.newoether.agora.viewmodel.ConversationStateRegistry
 import com.newoether.agora.viewmodel.GenerationRequestBuilder
@@ -26,6 +23,7 @@ import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
 import com.newoether.agora.viewmodel.ShellConfirmationController
 import com.newoether.agora.viewmodel.fallbackConversationTitle
+import com.newoether.agora.viewmodel.toUiChatMessage
 import com.newoether.agora.tool.McpToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -36,9 +34,6 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.util.UUID
-
-/** Compatibility identity used only by tests/embedders that omit the process generation registry. */
-private const val HEADLESS_PROVIDER_OWNER_TOKEN = Long.MAX_VALUE
 
 /**
  * Headless single-shot generation engine (process-scoped).
@@ -66,12 +61,13 @@ class TaskExecutionEngine(
     private val executionCoordinator: ConversationExecutionCoordinator,
     shellConfirmation: ShellConfirmationController,
     mcpToolProvider: McpToolProvider,
-    private val generationRegistry: ConversationStateRegistry? = null,
+    private val generationRegistry: ConversationStateRegistry,
     private val automationExecutionGate: AutomationExecutionGate = AutomationExecutionGate(),
     private val pauseConversationLoop: suspend (String) -> Unit = {},
 ) {
     sealed interface Result {
         data class Success(val modelMessageId: String, val text: String) : Result
+        data class Busy(val reason: String = "Conversation is already generating") : Result
         data class Failure(val reason: String) : Result
     }
 
@@ -111,6 +107,7 @@ class TaskExecutionEngine(
     /** Outcome of a delegated foreground send. [NotDelegated] means the caller must run headlessly. */
     sealed interface BridgeOutcome {
         data object NotDelegated : BridgeOutcome
+        data class Busy(val reason: String = "Conversation is already generating") : BridgeOutcome
         data class Completed(val modelMessageId: String, val text: String) : BridgeOutcome
         data class Failed(val reason: String) : BridgeOutcome
     }
@@ -132,6 +129,7 @@ class TaskExecutionEngine(
         providers = providerRegistry,
         pauseLoop = pauseConversationLoop,
     )
+    private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
 
     /**
      * Task-only post-processing. Loop runs share this engine but never call this method, so a
@@ -206,27 +204,25 @@ class TaskExecutionEngine(
     }
 
     /**
-     * LoopManager owns the conversation lock across its persistent cycle claim, generation, and
-     * schedule update. Re-entering the non-reentrant coordinator from [runOnce] would self-deadlock,
-     * so this entry point performs the same execution-gate work while trusting that outer owner.
+     * LoopManager owns both automation guards across its persistent cycle claim, generation, and
+     * schedule update. Re-entering either non-reentrant guard from [runOnce] would deadlock, so
+     * this entry point trusts the shared gate -> conversation-lease order already held by Loop.
      */
-    internal suspend fun runOnceWithConversationLockHeld(
+    internal suspend fun runOnceWithAutomationGuardsHeld(
         conversationId: String,
         userText: String,
         modelId: String? = null,
         systemPromptOverride: String? = null,
         foregroundServiceManagedExternally: Boolean = false,
         precondition: suspend () -> Boolean = { true },
-    ): Result = automationExecutionGate.withExecution {
-        runOnceLocked(
-            conversationId = conversationId,
-            userText = userText,
-            modelId = modelId,
-            systemPromptOverride = systemPromptOverride,
-            foregroundServiceManagedExternally = foregroundServiceManagedExternally,
-            precondition = precondition,
-        )
-    }
+    ): Result = runOnceLocked(
+        conversationId = conversationId,
+        userText = userText,
+        modelId = modelId,
+        systemPromptOverride = systemPromptOverride,
+        foregroundServiceManagedExternally = foregroundServiceManagedExternally,
+        precondition = precondition,
+    )
 
     private suspend fun runOnceLocked(
         conversationId: String,
@@ -257,28 +253,14 @@ class TaskExecutionEngine(
             when (val outcome = bridge(conversationId, userText, effectiveModelId)) {
                 is BridgeOutcome.Completed ->
                     return Result.Success(outcome.modelMessageId, outcome.text)
+                is BridgeOutcome.Busy -> return Result.Busy(outcome.reason)
                 is BridgeOutcome.Failed -> return Result.Failure(outcome.reason)
                 BridgeOutcome.NotDelegated -> Unit
             }
         }
 
-        // Production always supplies the process registry. A busy conversation is an explicit
-        // outcome; attempting a second headless Run would violate Room's unique live-Run slot.
-        val generationState = generationRegistry?.getOrCreate(conversationId)
-        val uiToken = generationState?.acquireForSend()
-        if (generationState != null && uiToken == null) {
-            return Result.Failure("Conversation is already generating")
-        }
-        val currentJob = currentCoroutineContext()[Job]
-        if (generationState != null && uiToken != null) {
-            if (currentJob == null || !generationState.attachGenerationJob(uiToken, currentJob)) {
-                if (generationState.endGeneration(uiToken)) {
-                    generationState.onQueueDrainRequested?.invoke(generationState)
-                }
-                return Result.Failure("Conversation generation slot was revoked")
-            }
-        }
-
+        if (effectiveModelId.isBlank()) return Result.Failure("No model selected")
+        val generationState = generationRegistry.getOrCreate(conversationId)
         val now = System.currentTimeMillis()
         val runId = UUID.randomUUID().toString()
         val userMessageId = UUID.randomUUID().toString()
@@ -287,14 +269,9 @@ class TaskExecutionEngine(
         var lastStreamed: ChatMessage? = null
         var runCreated = false
         var runBound = false
-        val persistToken = if (generationState != null && uiToken != null) {
-            generationState.nextPersistId()
-        } else {
-            0L
-        }
+        var inputEffect: RunEffect.PersistAcceptedInput? = null
 
         return try {
-            if (effectiveModelId.isBlank()) return Result.Failure("No model selected")
             val providerName = providerRegistry.providerForModel(effectiveModelId)
             val activeKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() }
                 ?: settings.resolveActiveKey(providerName) ?: ""
@@ -323,8 +300,34 @@ class TaskExecutionEngine(
             }
             val effectiveSettings = builder.buildEffectiveConversationSettings(conversationId)
             val contextLimit = effectiveSettings.contextWindow ?: settings.maxContextWindow.value
+
+            // Headless Task/Loop uses the same direct-only Send command as the foreground bridge.
+            // The queue mutex keeps pending guidance from being overtaken between inspection and
+            // the mailbox decision. Busy is typed and persists no message/Run side effect.
+            val admission = AutomationRuntimeAdmission.request(
+                state = generationState,
+                proposedRunId = runId,
+                effectId = "automation-send-$runId",
+            )
+            val acceptedInputEffect = when (admission) {
+                AutomationRuntimeAdmission.Decision.Busy -> return Result.Busy()
+                is AutomationRuntimeAdmission.Decision.Accepted -> admission.inputEffect
+            }
+            inputEffect = acceptedInputEffect
+            val uiToken = acceptedInputEffect.identity.ownerToken
+            val currentJob = currentCoroutineContext()[Job]
+            if (currentJob == null || !generationState.attachGenerationJob(uiToken, currentJob)) {
+                withContext(NonCancellable) {
+                    if (generationState.abandonSendLaunch(acceptedInputEffect.identity)) {
+                        generationState.onQueueDrainRequested?.invoke(generationState)
+                    }
+                }
+                return Result.Failure("Conversation generation slot was revoked")
+            }
+            val persistToken = generationState.nextPersistId()
+
             suspend fun compactAtBoundary(): CompactResult {
-                generationState?.compacting?.value = true
+                generationState.compacting.value = true
                 return try {
                     contextCompactor.compactAutomatic(
                         conversationId = conversationId,
@@ -332,96 +335,33 @@ class TaskExecutionEngine(
                         contextLimit = contextLimit,
                     )
                 } finally {
-                    generationState?.compacting?.value = false
+                    generationState.compacting.value = false
                 }
             }
-            val snapshot = convRepo.getMessagesForConversationSnapshot(conversationId)
-            val selections = convRepo.restoreBranchSelections(conversationId)
-            val path = ConversationUiState.resolvePath(
-                allMessages = snapshot.map {
-                    ChatMessage(
-                        id = it.id,
-                        parentId = it.parentId,
-                        text = it.text,
-                        participant = it.participant,
-                        timestamp = it.timestamp,
-                        status = it.status,
-                        runId = it.runId,
-                        runSequence = it.runSequence,
-                        consumedAtPass = it.consumedAtPass,
-                    )
-                },
-                streamingMsg = null,
-                selectedChildren = selections,
-            )
-            val leafId = path.lastOrNull()?.id
-            val parentRunId = path.lastOrNull()?.runId
-            val userMessage = MessageEntity(
-                id = userMessageId,
-                conversationId = conversationId,
-                parentId = leafId,
-                text = userText,
-                thoughts = null,
-                status = MessageStatus.SUCCESS,
-                participant = Participant.USER,
-                timestamp = now,
-                runId = runId,
-                runSequence = 0,
-                consumedAtPass = 0,
-            )
-            val modelMessage = MessageEntity(
-                id = modelMessageId,
-                conversationId = conversationId,
-                parentId = userMessageId,
-                text = "",
-                thoughts = null,
-                status = MessageStatus.SENDING,
-                participant = Participant.MODEL,
-                timestamp = startTime,
-                modelName = effectiveModelId,
-                runId = runId,
-                runSequence = 1,
-            )
-            convRepo.createRunWithMessages(
-                RunEntity(
-                    id = runId,
-                    conversationId = conversationId,
-                    parentRunId = parentRunId,
-                    status = RunStatus.ACTIVE,
-                    activeSlot = 1,
-                    startedAt = now,
-                    lastCheckpointAt = startTime,
-                ),
-                listOf(userMessage, modelMessage),
-                messageSelectionUpdates = mapOf(
-                    leafId to userMessageId,
-                    userMessageId to modelMessageId,
+            val graphCommit = acceptedInputGraphWriter.commit(
+                AcceptedInputGraphWriter.Request(
+                    inputEffect = acceptedInputEffect,
+                    userMessageId = userMessageId,
+                    modelMessageId = modelMessageId,
+                    userText = userText,
+                    modelId = effectiveModelId,
+                    userTimestamp = now,
                 ),
             )
             runCreated = true
-            if (generationState != null && uiToken != null) {
-                runBound = generationState.tryBindRun(uiToken, runId)
-                if (!runBound) {
-                    withContext(NonCancellable) {
-                        convRepo.finishStoppedGeneration(emptyList(), runId)
-                    }
-                    currentCoroutineContext().ensureActive()
-                    return Result.Failure("Execution cancelled")
-                }
-                val placeholder = ChatMessage(
-                    id = modelMessageId,
-                    parentId = userMessageId,
-                    text = "",
-                    participant = Participant.MODEL,
-                    timestamp = startTime,
-                    status = MessageStatus.SENDING,
-                    modelName = effectiveModelId,
-                    runId = runId,
-                    runSequence = 1,
-                )
-                generationState.loadingChange(uiToken, true)
-                generationState.streamUpdate(uiToken, placeholder)
+            runBound = withContext(NonCancellable) {
+                generationState.inputPersisted(acceptedInputEffect.identity)
             }
+            if (!runBound) {
+                withContext(NonCancellable) {
+                    convRepo.finishStoppedGeneration(emptyList(), runId)
+                }
+                currentCoroutineContext().ensureActive()
+                return Result.Failure("Execution cancelled")
+            }
+            val placeholder = graphCommit.modelMessage.toUiChatMessage(appContext)
+            generationState.loadingChange(uiToken, true)
+            generationState.streamUpdate(uiToken, placeholder)
 
             // The current user boundary must be durable before eligibility is evaluated. The
             // compactor excludes the empty SENDING placeholder from token accounting while
@@ -448,16 +388,7 @@ class TaskExecutionEngine(
                 foregroundServiceManagedExternally = foregroundServiceManagedExternally,
             )
 
-            val baseCallbacks = if (generationState != null && uiToken != null) {
-                generationState.callbacksFor(uiToken, persistToken)
-            } else {
-                GenerationCallbacks(
-                    onStreamUpdate = {},
-                    onLoadingChange = {},
-                    onStreamClear = {},
-                    isLatestPersist = { true },
-                )
-            }
+            val baseCallbacks = generationState.callbacksFor(uiToken, persistToken)
             generationManager.generate(
                 conversationId = conversationId,
                 modelMessageId = modelMessageId,
@@ -467,7 +398,7 @@ class TaskExecutionEngine(
                 modelName = effectiveModelId,
                 runId = runId,
                 pass = 0,
-                ownerToken = uiToken ?: HEADLESS_PROVIDER_OWNER_TOKEN,
+                ownerToken = uiToken,
                 config = config,
                 ctx = genCtx,
                 generationJob = currentJob,
@@ -488,7 +419,7 @@ class TaskExecutionEngine(
                         }
                     },
                 ),
-                streamScope = generationState?.streamScope,
+                streamScope = generationState.streamScope,
             )
             val finalMsg = convRepo.getMessagesForConversationSnapshot(conversationId)
                 .find { it.id == modelMessageId }
@@ -498,9 +429,15 @@ class TaskExecutionEngine(
                 Result.Failure(finalMsg?.text?.takeIf { it.isNotBlank() } ?: "Generation failed")
             }
         } catch (e: CancellationException) {
+            if (!runCreated && inputEffect != null) {
+                withContext(NonCancellable) {
+                    runCreated = convRepo.getRun(runId) != null
+                    if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
+                }
+            }
             // User Stop has a dedicated finalizer once the Run is bound. Other cancellation owners
             // (Worker/Task teardown or the pre-bind commit edge) must not strand a live Run.
-            if (runCreated && (!runBound || generationState?.stopping?.value != true)) {
+            if (runCreated && (!runBound || !generationState.stopping.value)) {
                 withContext(NonCancellable) {
                     val stopped = lastStreamed?.copy(status = MessageStatus.STOPPED)
                     convRepo.finishStoppedGeneration(stopped?.let(::listOf).orEmpty(), runId)
@@ -510,6 +447,12 @@ class TaskExecutionEngine(
         } catch (e: Exception) {
             DebugLog.e("TaskExecutionEngine", "runOnce failed for conversation=$conversationId", e)
             val reason = e.localizedMessage ?: "Unexpected error"
+            if (!runCreated && inputEffect != null) {
+                withContext(NonCancellable) {
+                    runCreated = convRepo.getRun(runId) != null
+                    if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
+                }
+            }
             if (runCreated) {
                 convRepo.updateStreamingMessageCheckpoint(
                     ChatMessage(

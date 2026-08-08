@@ -50,14 +50,14 @@ import java.util.UUID
  *    Stop transfers terminal-write ownership to [GenerationFinalizer], so the cancelled provider
  *    coroutine cannot race the dedicated STOPPED transaction.
  *
- * ## Slot lifecycle (requestSend / compatibility claims / endGeneration / stop)
+ * ## Slot lifecycle (requestSend / replacement compatibility / endGeneration / stop)
  *
- * Ordinary foreground Send and queued-guidance placement enter [requestSend]'s sequential mailbox.
- * The compatibility [acquireForSend] path remains only for headless Task execution;
- * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration]
- * and [stop] now submit through the same mailbox. [endGeneration] releases token-gated ownership;
- * Stop establishes the terminal cutoff, then cancels only this conversation's [generationJob]
- * and in-flight HTTP streams (via [streamScope]).
+ * Ordinary foreground Send, queued-guidance placement, and headless Task/Loop Send enter
+ * [requestSend]'s sequential mailbox. [acquireForSend] remains only as a legacy test adapter;
+ * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration] and
+ * [stop] submit through the same mailbox. [endGeneration] releases token-gated ownership; Stop
+ * establishes the terminal cutoff, then cancels only this conversation's [generationJob] and
+ * in-flight HTTP streams (via [streamScope]).
  */
 class ConversationGenerationState(
     val conversationId: String,
@@ -96,7 +96,7 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
-    /** Foreground Send, Stop, and tool-effect lifecycle commands enter here. */
+    /** Foreground/headless Send, Stop, and tool-effect lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
@@ -182,6 +182,11 @@ class ConversationGenerationState(
         ConversationCommandFactory { ConversationCommand.InputPersistenceFailed(identity) },
     ).accepted
 
+    /** Release an exact direct-Send claim that could not install any owning coroutine. */
+    suspend fun abandonSendLaunch(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
+        ConversationCommandFactory { ConversationCommand.SendLaunchAbandoned(identity) },
+    ).accepted
+
     /** Authorize one exact validated Provider tool batch. */
     suspend fun requestToolBatch(
         providerOutcomeIdentity: RunEffectIdentity,
@@ -221,7 +226,8 @@ class ConversationGenerationState(
     // one generation owns a conversation's tree at a time.
 
     /**
-     * Compatibility claim for queue/headless paths. If the slot is free, marks this conversation
+     * Legacy test/setup claim. Production Send/Task/Loop paths use [requestSend]. If the slot is
+     * free, marks this conversation
      * generating (advancing the UI token so any just-finished generation's late callbacks are gated
      * out), flips it active in the registry, and returns the captured token. If a generation is
      * already running, returns null → the caller must enqueue instead of launching (fixes the

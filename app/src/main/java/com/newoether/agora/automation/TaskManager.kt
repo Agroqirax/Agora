@@ -63,6 +63,8 @@ class TaskManager(
             val reason: String,
             val retryable: Boolean,
         ) : ExecutionResult
+        /** No input/Run was persisted; a scheduled caller may safely retry this occurrence. */
+        data class Deferred(val conversationId: String, val reason: String) : ExecutionResult
         data class Skipped(val reason: String, val advancesSchedule: Boolean = false) : ExecutionResult
     }
 
@@ -410,6 +412,8 @@ class TaskManager(
                 }
                 ExecutionResult.Success(conversationId, result.text)
             }
+            is TaskExecutionEngine.Result.Busy ->
+                ExecutionResult.Deferred(conversationId, result.reason)
             is TaskExecutionEngine.Result.Failure -> {
                 DebugLog.e("TaskManager", "Task run failed")
                 ExecutionResult.Failure(
