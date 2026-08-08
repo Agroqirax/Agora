@@ -119,7 +119,7 @@ class AutoBackupManager(
 
             // Atomic: rename temp to final
             if (tmpFile.renameTo(file)) {
-                DebugLog.d("AutoBackup", "Backup created: ${file.absolutePath}")
+                DebugLog.d("AutoBackup", "Backup created")
                 file
             } else {
                 // renameTo may fail across filesystems — try direct write as fallback

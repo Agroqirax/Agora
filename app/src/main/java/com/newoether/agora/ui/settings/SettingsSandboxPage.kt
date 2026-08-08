@@ -1,6 +1,5 @@
 package com.newoether.agora.ui.settings
 
-import android.util.Log
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,6 +55,7 @@ import com.newoether.agora.R
 import com.newoether.agora.sandbox.openSandboxRoot
 import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.sandbox.SandboxSharedStorageAccess
+import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -324,7 +324,7 @@ fun SettingsSandboxPage(
                                             try {
                                                 ctx.openSandboxRoot()
                                             } catch (e: Exception) {
-                                                Log.w(
+                                                DebugLog.w(
                                                     "SettingsSandboxPage",
                                                     "Failed to open sandbox root",
                                                     e,

@@ -35,7 +35,7 @@ object LlamaEngine {
                 val start = System.currentTimeMillis()
                 val handle = nativeLoadModel(modelPath)
                 if (handle == 0L) {
-                    DebugLog.e(TAG, "Failed to load model (${System.currentTimeMillis() - start}ms): $modelPath")
+                    DebugLog.e(TAG, "Failed to load model (${System.currentTimeMillis() - start}ms)")
                     return@runBlocking texts.map { null }
                 }
                 DebugLog.d(TAG, "Model loaded in ${System.currentTimeMillis() - start}ms, dim=${nativeGetEmbeddingDim(handle)}, processing ${texts.size} texts")

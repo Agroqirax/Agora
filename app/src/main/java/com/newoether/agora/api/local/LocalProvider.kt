@@ -68,10 +68,12 @@ class LocalProvider(
         // Try native chat template first, fall back to ChatML
         val prompt = engine.applyTemplate(templateMessages, addAss = true)
             ?: buildPrompt(templateMessages)
+        val promptLength = prompt.length
+        val imageCount = imagePaths.size
         if (hasImages) {
-            DebugLog.d(TAG, "Generated multimodal prompt (${prompt.length} chars, ${imagePaths.size} images)")
+            DebugLog.d(TAG, "Generated multimodal prompt ($promptLength chars, $imageCount images)")
         } else {
-            DebugLog.d(TAG, "Generated prompt (${prompt.length} chars): ${prompt.take(200)}...")
+            DebugLog.d(TAG, "Generated prompt ($promptLength chars)")
         }
 
         // Generate tokens with unified thinking parsing
@@ -225,7 +227,7 @@ class LocalProvider(
                 if (engine.load()) {
                     if (model.mmprojPath.isNotBlank()) {
                         val loaded = engine.loadMmproj(model.mmprojPath)
-                        DebugLog.d(TAG, "mmproj load: $loaded for ${model.mmprojPath}")
+                        DebugLog.d(TAG, "mmproj load: $loaded")
                     }
                     currentEngine = engine
                     engine

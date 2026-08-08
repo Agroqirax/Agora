@@ -86,8 +86,8 @@ object HttpClient {
         if (isLocalHost(host)) return
         if (headers.keys.any { it.lowercase() in CREDENTIAL_HEADERS }) {
             throw IOException(
-                "Refusing to send API credentials over cleartext HTTP to \"$host\". " +
-                    "Use an https:// endpoint, or reach the host over LAN/Tailscale."
+                "Refusing to send API credentials over cleartext HTTP to a non-local host. " +
+                    "Use an https:// endpoint, or reach it over LAN/Tailscale."
             )
         }
     }
@@ -189,7 +189,7 @@ object HttpClient {
             private fun mark(stage: String, detail: String = "") {
                 call.request().tag(RequestTrace::class.java)?.mark(stage, detail)
             }
-            override fun dnsStart(call: Call, domainName: String) = mark("dns_start", "host=$domainName")
+            override fun dnsStart(call: Call, domainName: String) = mark("dns_start")
             override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<java.net.InetAddress>) =
                 mark("dns_end", "addresses=${inetAddressList.size}")
             override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) =
@@ -321,12 +321,10 @@ object HttpClient {
         if (scope != null) scope.register(handle)
         liveHandles.add(handle)
         return try {
-            val endpoint = runCatching {
-                java.net.URI(url).let { "${it.host.orEmpty()}${it.path.orEmpty()}" }
-            }.getOrDefault("unknown")
+            val bodyBytes = jsonBody.toByteArray(Charsets.UTF_8).size
             trace?.mark(
                 "http_execute",
-                "endpoint=$endpoint bodyBytes=${jsonBody.toByteArray(Charsets.UTF_8).size}",
+                "bodyBytes=$bodyBytes",
             )
             val response = call.execute()
             handle.attach(response)
@@ -392,7 +390,7 @@ object HttpClient {
         return response.use {
             if (it.isSuccessful) it.body?.string()
             else {
-                DebugLog.e("HttpClient", "POST $url failed: ${it.code} ${it.body?.string()}")
+                DebugLog.e("HttpClient", "POST failed status=${it.code}")
                 null
             }
         }

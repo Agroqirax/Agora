@@ -377,7 +377,10 @@ class GeminiProvider(
                         parts.add(ApiRequestPart(inlineData = ApiInlineData(mimeType = com.newoether.agora.api.util.imageMimeType(imagePath), data = base64)))
                     }
                 } catch (e: Exception) {
-                    DebugLog.e("AgoraAPI", "Failed to encode image: $imagePath", e)
+                    DebugLog.e(
+                        "AgoraAPI",
+                        "[Gemini] failed to encode image exception=${e.javaClass.simpleName}",
+                    )
                 }
             }
             if (parts.isEmpty()) parts.add(ApiRequestPart(text = "[Attachment unavailable]"))
@@ -494,8 +497,11 @@ class GeminiProvider(
                 body = requestJson,
                 requiredArrayFields = setOf("contents"),
             )
-            DebugLog.d("AgoraAPI", "[Gemini] REQ ->$finalUrlString | model=$cleanModelName | msgs=${apiContents.size} | thinking=${config.thinkingEnabled} | tools=${tools.size}")
-            DebugLog.d("AgoraAPI", "[Gemini] BODY: ${requestJson.take(4000)}")
+            DebugLog.d(
+                "AgoraAPI",
+                "[Gemini] request model=$cleanModelName messages=${apiContents.size} " +
+                    "thinking=${config.thinkingEnabled} tools=${tools.size}",
+            )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             val retryableCodes = setOf(429, 500, 502, 503, 504)
             var attempt = 0
@@ -638,7 +644,10 @@ class GeminiProvider(
                                 response.usageMetadata?.let { emit(StreamEvent.UsageUpdate(it.toTokenUsage())) }
                                 if (streamError != null || finishReason != null) break
                             } catch (e: Exception) {
-                                DebugLog.e("AgoraAPI", "[Gemini] Parse error: ${e.message}", e)
+                                DebugLog.e(
+                                    "AgoraAPI",
+                                    "[Gemini] malformed stream payload exception=${e.javaClass.simpleName}",
+                                )
                                 streamError = GenerationError.SseParse(
                                     rawLine = jsonStr.take(512),
                                     cause = e.localizedMessage ?: "Malformed SSE payload",
@@ -665,6 +674,11 @@ class GeminiProvider(
                         }
                     } else {
                         val errorRaw = handle.errorBody ?: "Unknown error (Code: ${handle.code})"
+                        val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
+                        DebugLog.e(
+                            "AgoraAPI",
+                            "[Gemini] HTTP ${handle.code} responseBytes=$responseBytes",
+                        )
                         val retryable = ProviderRetryPolicy.shouldRetryHttp(
                             handle.code,
                             errorRaw,

@@ -236,8 +236,11 @@ class OllamaProvider : LlmProvider {
                 requiredStringFields = setOf("model"),
                 requiredArrayFields = setOf("messages"),
             )
-            DebugLog.d("AgoraAPI", "[Ollama] REQ → $baseUrl/api/chat | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
-            DebugLog.d("AgoraAPI", "[Ollama] BODY: ${requestBodyJson.take(4000)}")
+            DebugLog.d(
+                "AgoraAPI",
+                "[Ollama] request model=${config.modelId} messages=${apiMessages.size} " +
+                    "tools=${config.tools?.size ?: 0}",
+            )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             val retryableCodes = setOf(401, 429, 502, 503, 504)
             var attempt = 0
@@ -383,7 +386,10 @@ class OllamaProvider : LlmProvider {
                                 }
                                 if (streamError != null || sawDone) break
                             } catch (e: Exception) {
-                                DebugLog.e("AgoraAPI", "Parse error: ${e.message}")
+                                DebugLog.e(
+                                    "AgoraAPI",
+                                    "[Ollama] malformed stream payload exception=${e.javaClass.simpleName}",
+                                )
                                 streamError = GenerationError.SseParse(
                                     rawLine = line.take(512),
                                     cause = e.localizedMessage ?: "Malformed Ollama stream payload",
@@ -417,7 +423,11 @@ class OllamaProvider : LlmProvider {
                         }
                     } else {
                         val errorRaw = handle.errorBody ?: "Unknown error"
-                        DebugLog.e("AgoraAPI", "[Ollama] ERR ${handle.code}: $errorRaw")
+                        val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
+                        DebugLog.e(
+                            "AgoraAPI",
+                            "[Ollama] HTTP ${handle.code} responseBytes=$responseBytes",
+                        )
 
                         if (
                             ProviderRetryPolicy.shouldRetryHttp(

@@ -719,8 +719,11 @@ class AnthropicProvider(
                 requiredStringFields = setOf("model"),
                 requiredArrayFields = setOf("messages"),
             )
-            DebugLog.d("AgoraAPI", "[Anthropic] REQ → $baseUrl/messages | model=$modelName | msgs=${apiMessages.size} | thinking=${thinking != null} | tools=${anthropicTools?.size ?: 0}")
-            DebugLog.d("AgoraAPI", "[Anthropic] BODY: ${requestBodyJson.take(4000)}")
+            DebugLog.d(
+                "AgoraAPI",
+                "[Anthropic] request model=$modelName messages=${apiMessages.size} " +
+                    "thinking=${thinking != null} tools=${anthropicTools?.size ?: 0}",
+            )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             val retryableCodes = setOf(429, 502, 503, 504)
             var attempt = 0
@@ -801,7 +804,10 @@ class AnthropicProvider(
                                     emitRecovered(routed)
                                 }
                             } catch (e: Exception) {
-                                DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
+                                DebugLog.e(
+                                    "AgoraAPI",
+                                    "[Anthropic] malformed stream payload exception=${e.javaClass.simpleName}",
+                                )
                                 eventRouter.captureParseError(
                                     rawLine = jsonStr,
                                     cause = e.localizedMessage ?: "Malformed SSE payload",
@@ -858,7 +864,11 @@ class AnthropicProvider(
                     }
                 } else {
                     val errorRaw = handle.errorBody ?: "Unknown error"
-                    DebugLog.e("AgoraAPI", "[Anthropic] ERR ${handle.code}: $errorRaw")
+                    val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
+                    DebugLog.e(
+                        "AgoraAPI",
+                        "[Anthropic] HTTP ${handle.code} responseBytes=$responseBytes",
+                    )
 
                     if (
                         ProviderRetryPolicy.shouldRetryHttp(

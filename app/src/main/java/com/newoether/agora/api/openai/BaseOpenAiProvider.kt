@@ -152,7 +152,11 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 requiredStringFields = setOf("model"),
                 requiredArrayFields = setOf("messages"),
             )
-            DebugLog.d("AgoraAPI", "[$name] REQ -> ${endpointUrls.first()} | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
+            DebugLog.d(
+                "AgoraAPI",
+                "[$name] request model=${config.modelId} messages=${apiMessages.size} " +
+                    "tools=${config.tools?.size ?: 0}",
+            )
 
             val headers = mutableMapOf("Content-Type" to "application/json")
             if (config.apiKey.isNotBlank()) headers["Authorization"] = "Bearer ${config.apiKey}"
@@ -183,7 +187,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
                             DebugLog.w(
                                 "AgoraAPI",
-                                "[$name] Transport failure opening $endpointUrl on attempt " +
+                                "[$name] Transport failure opening stream on attempt " +
                                     "$attempt/$maxAttempts (${e.javaClass.simpleName}), " +
                                     "retrying in ${retryDelayMs}ms",
                             )
@@ -225,12 +229,20 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             val errorRaw = handle.errorBody ?: "Unknown error"
                             val hasV1Fallback = endpointIndex + 1 < endpointUrls.size
                             if (hasV1Fallback) {
-                                DebugLog.w("AgoraAPI", "[$name] ${handle.code} at $endpointUrl, retrying with ${endpointUrls[endpointIndex + 1]}")
+                                DebugLog.w(
+                                    "AgoraAPI",
+                                    "[$name] HTTP ${handle.code}; trying endpoint candidate " +
+                                        "${endpointIndex + 2}/${endpointUrls.size}",
+                                )
                                 endpointIndex++
                                 continue
                             }
 
-                            DebugLog.e("AgoraAPI", "[$name] ERR ${handle.code} at $endpointUrl: $errorRaw")
+                            val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
+                            DebugLog.e(
+                                "AgoraAPI",
+                                "[$name] HTTP ${handle.code} responseBytes=$responseBytes",
+                            )
 
                             if (
                                 ProviderRetryPolicy.shouldRetryHttp(
@@ -554,7 +566,10 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             )
                 }
             } catch (e: Exception) {
-                DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
+                DebugLog.e(
+                    "AgoraAPI",
+                    "[$name] malformed stream payload exception=${e.javaClass.simpleName}",
+                )
                 streamError = GenerationError.SseParse(
                     rawLine = jsonStr.take(512),
                     cause = e.localizedMessage ?: "Malformed SSE payload",
@@ -703,7 +718,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
             if (!seenCursors.add(cursor)) {
                 DebugLog.w(
                     "AgoraAPI",
-                    "$name model list repeated cursor '$cursor'; " +
+                    "$name model list repeated a cursor; " +
                         "returning ${modelIds.size} models",
                 )
                 return modelIds.sorted()
@@ -742,15 +757,18 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 if (index < endpointUrls.lastIndex) {
                     DebugLog.w(
                         "AgoraAPI",
-                        "Failed to fetch $name models from $endpointUrl; " +
-                            "retrying ${endpointUrls[index + 1]}",
+                        "Failed to fetch $name models; trying endpoint candidate " +
+                            "${index + 2}/${endpointUrls.size}",
                     )
                 }
             }
         }
 
         val failure = lastFailure ?: ModelFetchEmptyResultException()
-        DebugLog.e("AgoraAPI", "Failed to fetch $name models", failure)
+        DebugLog.e(
+            "AgoraAPI",
+            "Failed to fetch $name models exception=${failure.javaClass.simpleName}",
+        )
         throw failure
     }
 

@@ -143,7 +143,7 @@ class TaskExecutionEngine(
                 is ConversationTitleGenerator.Result.Failure ->
                     DebugLog.w(
                         "TaskExecutionEngine",
-                        "Task title generation failed; using response fallback: ${result.reason}",
+                        "Task title generation failed; using response fallback",
                     )
             }
         }

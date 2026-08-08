@@ -57,17 +57,17 @@ class LlamaChatEngine(
 
     fun load(): Boolean {
         if (!File(modelPath).exists()) {
-            DebugLog.e(TAG, "Model file not found: $modelPath")
+            DebugLog.e(TAG, "Model file not found")
             return false
         }
         lock.writeLock().lock()
         try {
             nativeHandle = nativeChatLoadModel(modelPath, nCtx)
             if (nativeHandle == 0L) {
-                DebugLog.e(TAG, "Failed to load model: $modelPath")
+                DebugLog.e(TAG, "Failed to load model")
                 return false
             }
-            DebugLog.d(TAG, "Model loaded: $modelPath, nCtx=$nCtx")
+            DebugLog.d(TAG, "Model loaded, nCtx=$nCtx")
             return true
         } finally {
             lock.writeLock().unlock()
@@ -118,7 +118,7 @@ class LlamaChatEngine(
             }
 
             override fun onError(message: String) {
-                DebugLog.e(TAG, "Generation error: $message")
+                DebugLog.e(TAG, "Generation error reported by native backend")
                 close(RuntimeException(message))
             }
         }
@@ -154,7 +154,7 @@ class LlamaChatEngine(
 
     fun loadMmproj(mmprojPath: String): Boolean {
         if (!File(mmprojPath).exists()) {
-            DebugLog.e(TAG, "mmproj file not found: $mmprojPath")
+            DebugLog.e(TAG, "mmproj file not found")
             return false
         }
         lock.readLock().lock()
@@ -202,7 +202,7 @@ class LlamaChatEngine(
             override fun onToken(token: String) { trySend(token) }
             override fun onDone() { close() }
             override fun onError(message: String) {
-                DebugLog.e(TAG, "Generation error: $message")
+                DebugLog.e(TAG, "Generation error reported by native backend")
                 close(RuntimeException(message))
             }
         }
@@ -274,7 +274,7 @@ class LlamaChatEngine(
             if (nativeHandle != 0L) {
                 nativeChatFreeModel(nativeHandle)
                 nativeHandle = 0L
-                DebugLog.d(TAG, "Model closed: $modelPath")
+                DebugLog.d(TAG, "Model closed")
             }
         } finally {
             lock.writeLock().unlock()

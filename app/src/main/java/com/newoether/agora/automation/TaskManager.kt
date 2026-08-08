@@ -411,7 +411,7 @@ class TaskManager(
                 ExecutionResult.Success(conversationId, result.text)
             }
             is TaskExecutionEngine.Result.Failure -> {
-                DebugLog.e("TaskManager", "Task '${task.name}' run failed: ${result.reason}")
+                DebugLog.e("TaskManager", "Task run failed")
                 ExecutionResult.Failure(
                     conversationId = conversationId,
                     reason = result.reason,

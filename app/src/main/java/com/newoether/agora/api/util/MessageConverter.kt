@@ -43,7 +43,10 @@ fun encodeImageToBase64(imagePath: String): Pair<String, String>? {
         val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
         imageMimeType(imagePath) to base64
     } catch (e: Exception) {
-        DebugLog.e("AgoraAPI", "Failed to encode image: $imagePath", e)
+        DebugLog.e(
+            "AgoraAPI",
+            "Failed to encode image exception=${e.javaClass.simpleName}",
+        )
         null
     }
 }
