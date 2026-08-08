@@ -25,7 +25,10 @@ class MessagePayloadBuilder(
 ) {
     data class MessagePayload(
         val allImages: List<String>,
-        val attachmentMeta: AttachmentMeta?
+        val attachmentMeta: AttachmentMeta?,
+        /** Files created by payload preparation itself. Delete only if ownership never reaches
+         * either a queued guidance entry or a durable MessageEntity. */
+        val preparedOwnedPaths: List<String> = emptyList(),
     )
 
     suspend fun buildMessagePayload(
@@ -39,6 +42,7 @@ class MessagePayloadBuilder(
         val directPaths = mutableListOf<String>()
         val sliceConfigs = mutableMapOf<String, VideoSliceConfig>()
         val metaItems = mutableListOf<AttachmentItem>()
+        val preparedOwnedPaths = linkedSetOf<String>()
         var nextImageIndex = 0
 
         // Process legacy images list (backward compatibility)
@@ -67,15 +71,21 @@ class MessagePayloadBuilder(
                         else -> "mp4"
                     }
                     val videoFile = java.io.File(app.filesDir, "vid_original_${java.util.UUID.randomUUID()}.$videoExt")
-                    var localVideoUri: String? = null
-                    try {
-                        app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
+                    val localVideoUri = try {
+                        val copied = app.contentResolver.openInputStream(android.net.Uri.parse(att.uri))?.use { input ->
                             videoFile.outputStream().use { input.copyTo(it) }
+                            true
+                        } ?: false
+                        if (copied && videoFile.isFile) {
+                            preparedOwnedPaths += videoFile.absolutePath
+                            "file://${videoFile.absolutePath}"
+                        } else {
+                            att.uri
                         }
-                        localVideoUri = "file://${videoFile.absolutePath}"
                     } catch (_: Exception) {
+                        runCatching { videoFile.delete() }
                         // Fallback: keep original content URI (may expire)
-                        localVideoUri = att.uri
+                        att.uri
                     }
 
                     if (att.processedFrames != null && att.processedFrames.isNotEmpty()) {
@@ -124,9 +134,11 @@ class MessagePayloadBuilder(
                     ))
                 }
                 "pdf" -> {
-                    val pagePaths = if (att.preRenderedPaths != null && att.preRenderedPaths.isNotEmpty()) {
-                        val sel = att.selectedPages ?: att.preRenderedPaths.indices.toSet()
-                        att.preRenderedPaths.filterIndexed { i, _ -> i in sel }
+                    val preparedPages = att.preRenderedPaths.orEmpty()
+                    val usesPreparedPages = preparedPages.isNotEmpty()
+                    val pagePaths = if (usesPreparedPages) {
+                        val sel = att.selectedPages ?: preparedPages.indices.toSet()
+                        preparedPages.filterIndexed { i, _ -> i in sel }
                     } else {
                         PdfPageRenderer.renderAsImages(app, Uri.parse(att.uri), att.selectedPages)
                     }
@@ -134,6 +146,7 @@ class MessagePayloadBuilder(
                         onSnackbar(app.getString(R.string.pdf_render_failed))
                         continue
                     }
+                    if (!usesPreparedPages) preparedOwnedPaths += pagePaths
                     metaItems.add(AttachmentItem(
                         originalUri = att.uri, type = "pdf",
                         fileName = att.fileName, mimeType = "application/pdf",
@@ -146,6 +159,7 @@ class MessagePayloadBuilder(
         }
 
         val processedImages = if (mediaUris.isNotEmpty()) generationManager.processImages(mediaUris, sliceConfigs) else emptyList()
+        preparedOwnedPaths += processedImages
         val allImages = processedImages + directPaths
 
         // Recalculate imageIndex for all meta items based on final allImages positions.
@@ -188,6 +202,6 @@ class MessagePayloadBuilder(
         val attachmentMeta = if (adjustedMetaItems.isNotEmpty()) {
             AttachmentMeta(items = adjustedMetaItems)
         } else null
-        MessagePayload(allImages, attachmentMeta)
+        MessagePayload(allImages, attachmentMeta, preparedOwnedPaths.toList())
     }
 }

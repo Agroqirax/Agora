@@ -198,8 +198,8 @@ class ProviderRegistry(
         settings.addCustomProvider(config, baseUrl)
     }
 
-    fun renameCustom(oldName: String, newName: String) {
-        if (!CustomProviderNamePolicy.isAllowed(oldName)) return
+    fun renameCustom(oldName: String, newName: String): Boolean {
+        if (!CustomProviderNamePolicy.isAllowed(oldName)) return false
         val normalizedNewName = newName.trim()
         if (
             CustomProviderNamePolicy.hasConflict(
@@ -207,17 +207,19 @@ class ProviderRegistry(
                 existingNames = settings.customProviders.value.map { it.name },
                 currentName = oldName,
             )
-        ) return
-        val url = settings.providerBaseUrls.value[oldName] ?: return
-        val oldConfig = settings.customProviders.value.firstOrNull { it.name == oldName } ?: return
+        ) return false
+        val url = settings.providerBaseUrls.value[oldName].orEmpty()
+        val oldConfig = settings.customProviders.value.firstOrNull { it.name == oldName }
+            ?: return false
         val newConfig = oldConfig.copy(name = normalizedNewName)
-        val provider = createCustomProvider(newConfig, url) ?: return
+        val provider = createCustomProvider(newConfig, url)
         providers.remove(oldName)
-        providers[normalizedNewName] = provider
+        if (provider != null) providers[normalizedNewName] = provider
         runtimeEndpointResolutions.remove(oldName)?.let {
             runtimeEndpointResolutions[normalizedNewName] = it
         }
         settings.renameCustomProvider(oldName, normalizedNewName)
+        return true
     }
 
     fun updateCustomProtocol(name: String, protocol: CustomEndpointProtocol) {

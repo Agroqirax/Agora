@@ -13,6 +13,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ConversationSettings
+import com.newoether.agora.model.ContextBudget
 import java.util.Locale
 
 @Composable
@@ -53,11 +54,11 @@ fun AdvancedSettingsDialog(
                 // Context Window
                 AdvancedParamRow(
                     label = stringResource(R.string.context_window),
-                    value = contextWindow?.toFloat(),
-                    defaultVal = gDefaults.contextWindow?.toFloat(),
-                    valueRange = 5f..100f,
-                    format = { it.toInt().toString() },
-                    onChange = { contextWindow = it.toInt() },
+                    value = contextWindow?.let(ContextBudget::normalize),
+                    defaultVal = gDefaults.contextWindow?.let(ContextBudget::normalize),
+                    presets = ContextBudget.PRESETS,
+                    format = ContextBudget::compactLabel,
+                    onChange = { contextWindow = it },
                     onReset = { contextWindow = null }
                 )
                 // Temperature

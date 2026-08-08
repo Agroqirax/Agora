@@ -3,6 +3,12 @@ package com.newoether.agora.api
 import okhttp3.MediaType.Companion.toMediaType
 import com.newoether.agora.util.DebugLog
 import okhttp3.OkHttpClient
+import okhttp3.Call
+import okhttp3.EventListener
+import okhttp3.Handshake
+import okhttp3.Protocol
+import java.net.InetSocketAddress
+import java.net.Proxy
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSource
@@ -178,8 +184,30 @@ object HttpClient {
         }
     }
 
+    private val traceEventListenerFactory = EventListener.Factory { call ->
+        object : EventListener() {
+            private fun mark(stage: String, detail: String = "") {
+                call.request().tag(RequestTrace::class.java)?.mark(stage, detail)
+            }
+            override fun dnsStart(call: Call, domainName: String) = mark("dns_start", "host=$domainName")
+            override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<java.net.InetAddress>) =
+                mark("dns_end", "addresses=${inetAddressList.size}")
+            override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) =
+                mark("connect_start", "proxy=${proxy.type()}")
+            override fun secureConnectStart(call: Call) = mark("tls_start")
+            override fun secureConnectEnd(call: Call, handshake: Handshake?) =
+                mark("tls_end", "version=${handshake?.tlsVersion}")
+            override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) =
+                mark("connect_end", "protocol=$protocol")
+            override fun requestBodyStart(call: Call) = mark("request_body_start")
+            override fun requestBodyEnd(call: Call, byteCount: Long) = mark("request_body_end", "bytes=$byteCount")
+            override fun responseHeadersStart(call: Call) = mark("response_headers_start")
+        }
+    }
+
     val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
+        .eventListenerFactory(traceEventListenerFactory)
         .readTimeout(5, TimeUnit.MINUTES)
         .writeTimeout(30, TimeUnit.SECONDS)
         .proxySelector(proxySelector)
@@ -282,8 +310,11 @@ object HttpClient {
         val body = jsonBody.toRequestBody(JSON)
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val call = client.newCall(requestBuilder.build())
         val trace = boundRequestTrace()
+        val request = requestBuilder.build().newBuilder()
+            .tag(RequestTrace::class.java, trace)
+            .build()
+        val call = client.newCall(request)
         val handle = StreamHandle(call, scope, trace)
         // Register before execute(): Stop must be able to cancel DNS, connect, TLS, request upload,
         // and response-header wait rather than only an already-open response body.

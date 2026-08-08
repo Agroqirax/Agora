@@ -75,7 +75,7 @@ class AnthropicStreamEventRouterTest {
         assertEquals("""{"b":2}""", second.arguments)
         assertEquals("call-1", first.id)
         assertEquals("""{"a":1}""", first.arguments)
-        assertTrue(router.finish().isEmpty())
+        assertTrue(router.reportIncompleteBlocks().isEmpty())
     }
 
     @Test

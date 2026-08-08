@@ -49,6 +49,7 @@ internal fun ComposerSendButton(
     textFieldState: TextFieldState,
     composer: ChatComposerState,
     isLoading: Boolean,
+    isCompacting: Boolean = false,
     isSwitching: Boolean,
     /** A Stop was pressed and the generation is still unwinding. The FAB goes gray + spinner:
      *  the send form returning is the contract that the next message launches immediately. */
@@ -81,7 +82,7 @@ internal fun ComposerSendButton(
             ) {
                 // Confirm the durable handoff, not the initial tap. Attachment-backed sends can
                 // spend noticeable time processing before this point.
-                haptics.confirm()
+                // haptics now unified in ChatApp via ChatViewModel.onSendAccepted
                 if (composer.selectedAttachments.map { it.localId } == submittedAttachmentIds) {
                     composer.clearAttachments()
                 }
@@ -113,9 +114,9 @@ internal fun ComposerSendButton(
     // Keep the draft untouched until the slot has fully released and the send form returns.
     val showStop = isLoading && !isStopping && textIsEmpty && attachmentsIsEmpty
 
-    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching && !isStopping && !isSubmitting
+    val canSend = (textFieldState.text.isNotBlank() || composer.selectedAttachments.isNotEmpty()) && isModelValid && !isSwitching && !isStopping && !isCompacting && !isSubmitting
             && composer.selectedAttachments.none { it.localPath == null && (it.type == "image" || it.type == "file") }
-    val isBusy = isStopping || isSubmitting || composer.pendingSend
+    val isBusy = isStopping || isCompacting || isSubmitting || composer.pendingSend
     val isActionable = (isLoading || canSend) && !isSwitching && !isBusy
     val containerColor by animateColorAsState(
         targetValue = if (isActionable) {
@@ -162,7 +163,7 @@ internal fun ComposerSendButton(
         elevation = FloatingActionButtonDefaults.elevation(0.dp, 0.dp, 0.dp, 0.dp)
     ) {
         val fabIcon = when {
-            isStopping || isSubmitting -> ComposerActionIcon.STOPPING
+            isStopping || isCompacting || isSubmitting -> ComposerActionIcon.STOPPING
             composer.pendingSend -> ComposerActionIcon.PENDING
             showStop -> ComposerActionIcon.STOP
             else -> ComposerActionIcon.SEND

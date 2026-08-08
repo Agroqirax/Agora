@@ -74,6 +74,17 @@ object ToolExecutionStates {
     val TERMINAL = setOf(SUCCEEDED, EMPTY, FAILED, STOPPED, BACKGROUND_RUNNING)
 }
 
+object ThinkingSegmentDisplayModes {
+    const val CARD = "card"
+    const val BOTTOM_SHEET = "bottom_sheet"
+    const val DEFAULT = CARD
+
+    fun normalize(value: String?): String = when (value) {
+        BOTTOM_SHEET -> BOTTOM_SHEET
+        else -> CARD
+    }
+}
+
 object ToolCallDisplayModes {
     const val TIMELINE = "timeline"
     const val GROUPED_TIMELINE = "grouped_timeline"
@@ -132,6 +143,9 @@ data class ChatConversation(
     val graduated: Boolean = false,
     val hasUnreadGeneration: Boolean = false,
 )
+
+fun ChatMessage.isContextCompact(): Boolean =
+    id.startsWith(com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX)
 
 @Immutable
 data class StableMessageList(val list: List<ChatMessage> = emptyList())

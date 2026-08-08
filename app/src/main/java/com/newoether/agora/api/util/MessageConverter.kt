@@ -161,7 +161,7 @@ fun convertToOpenAiMessages(
     return apiMessages
 }
 
-fun limitContext(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMessage> {
+fun limitContext(messages: List<ChatMessage>, contextTokenBudget: Int): List<ChatMessage> {
     if (messages.isEmpty()) return emptyList()
 
     // A tool call and all of its results are one protocol unit. Truncating the flat list can leave
@@ -187,14 +187,25 @@ fun limitContext(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMe
     }
 
     val selected = ArrayDeque<List<ChatMessage>>()
-    var normalTurnCount = 0
-    val turnLimit = maxUserMessages.coerceAtLeast(1)
+    var estimatedTokens = 0L
+    var hasNormalUserAnchor = false
+    val tokenBudget = contextTokenBudget.coerceAtLeast(1).toLong()
     for (unit in units.asReversed()) {
+        val unitCost = ContextTokenEstimator.estimate(unit).toLong()
+        if (
+            selected.isNotEmpty() &&
+            hasNormalUserAnchor &&
+            estimatedTokens + unitCost > tokenBudget
+        ) break
         selected.addFirst(unit)
-        if (unit.size == 1 && !unit.single().isToolProtocolMessage()) {
-            normalTurnCount++
-        }
-        if (normalTurnCount >= turnLimit) break
+        estimatedTokens = (estimatedTokens + unitCost).coerceAtMost(Int.MAX_VALUE.toLong())
+        if (unit.any {
+                it.participant == Participant.USER && !it.isToolProtocolMessage()
+            }
+        ) hasNormalUserAnchor = true
+        // Always retain a legal user anchor and at least the newest complete protocol unit, even
+        // when that single input already exceeds the configured estimate.
+        if (hasNormalUserAnchor && estimatedTokens >= tokenBudget) break
     }
 
     val flattened = selected.flatten()

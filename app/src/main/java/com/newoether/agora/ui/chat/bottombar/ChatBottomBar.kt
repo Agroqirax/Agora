@@ -5,6 +5,7 @@ import com.newoether.agora.ui.components.DialogWindowEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import com.newoether.agora.model.apiModelName
+import com.newoether.agora.model.ContextBudget
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.AttachFile
@@ -59,6 +61,7 @@ import com.newoether.agora.ui.common.ThinkingControlPanel
 import com.newoether.agora.ui.common.openAiServiceTierShortLabel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
+import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import com.newoether.agora.ui.motion.MotionAwareModalBottomSheet as ModalBottomSheet
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
@@ -84,6 +87,7 @@ fun ChatBottomBar(
     ) -> SendAcceptance?,
     onStopGeneration: () -> Unit = {},
     isLoading: Boolean,
+    isCompacting: Boolean = false,
     isSwitching: Boolean = false,
     enabledModels: Set<String>,
     selectedModel: String,
@@ -132,6 +136,15 @@ fun ChatBottomBar(
     showWebSearch: Boolean = true,
     showShell: Boolean = true,
     onAdvancedClick: () -> Unit = {},
+    compactDefaultModel: String? = null,
+    compactDefaultPrompt: String = "",
+    compactDefaultRetainCount: Int = 6,
+    contextEstimatedTokens: Int = 0,
+    contextLogicalMessageCount: Int = 0,
+    contextTokenBudget: Int = ContextBudget.DEFAULT_TOKENS,
+    hasCompactBoundary: Boolean = false,
+    canCompact: Boolean = false,
+    onCompactClick: () -> Unit = {},
     queuedSends: List<QueuedSend> = emptyList(),
     onRemoveQueuedSend: (String) -> Unit = {},
     isStopping: Boolean = false,
@@ -425,6 +438,7 @@ fun ChatBottomBar(
                 }
                 var activeMenu by remember { mutableStateOf<String?>(null) }
                 var lastModelDismissTime by remember { mutableLongStateOf(0L) }
+                var lastContextDismissTime by remember { mutableLongStateOf(0L) }
                 var lastToolsDismissTime by remember { mutableLongStateOf(0L) }
 
                 val parsed = com.newoether.agora.model.ModelId.parse(selectedModel)
@@ -515,6 +529,90 @@ fun ChatBottomBar(
                     }
                 }
                 
+                ExposedDropdownMenuBox(
+                    expanded = activeMenu == "context",
+                    onExpandedChange = { },
+                ) {
+                    IconButton(
+                        onClick = {
+                            val now = System.currentTimeMillis()
+                            if (activeMenu == "context") {
+                                activeMenu = null
+                            } else if (now - lastContextDismissTime > 200) {
+                                activeMenu = "context"
+                            }
+                        },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .menuAnchor(
+                                type = ExposedDropdownMenuAnchorType.PrimaryNotEditable,
+                                enabled = true,
+                            ),
+                    ) {
+                        CircularProgressIndicator(
+                            progress = {
+                                if (contextTokenBudget <= 0) 0f else
+                                    (contextEstimatedTokens.toFloat() / contextTokenBudget)
+                                        .coerceIn(0f, 1f)
+                            },
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.5.dp,
+                            color = if (contextEstimatedTokens >= contextTokenBudget) {
+                                MaterialTheme.colorScheme.error
+                            } else MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    ExposedDropdownMenu(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        expanded = activeMenu == "context",
+                        onDismissRequest = {
+                            if (activeMenu == "context") {
+                                activeMenu = null
+                                lastContextDismissTime = System.currentTimeMillis()
+                            }
+                        },
+                        matchTextFieldWidth = false,
+                        shape = RoundedCornerShape(16.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.context_title),
+                                style = MaterialTheme.typography.titleSmall,
+                            )
+                            CircularProgressIndicator(
+                                progress = {
+                                    if (contextTokenBudget <= 0) 0f else
+                                        (contextEstimatedTokens.toFloat() / contextTokenBudget)
+                                            .coerceIn(0f, 1f)
+                                },
+                                modifier = Modifier.size(36.dp).align(Alignment.CenterHorizontally),
+                                strokeWidth = 4.dp,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.context_usage_messages,
+                                    ContextBudget.compactLabel(contextEstimatedTokens),
+                                    ContextBudget.compactLabel(contextTokenBudget),
+                                    contextLogicalMessageCount,
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                text = if (hasCompactBoundary) {
+                                    stringResource(R.string.context_boundary_active)
+                                } else {
+                                    stringResource(R.string.context_boundary_none)
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
                 ExposedDropdownMenuBox(
                     expanded = activeMenu == "tools",
                     onExpandedChange = { }
@@ -695,6 +793,17 @@ fun ChatBottomBar(
                         DropdownMenuItem(
                             text = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Compress, null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(stringResource(R.string.context_compact))
+                                }
+                            },
+                            enabled = canCompact && !isCompacting,
+                            onClick = { activeMenu = null; onCompactClick() },
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Tune, null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(12.dp))
                                     Text(stringResource(R.string.advanced_settings))
@@ -710,6 +819,7 @@ fun ChatBottomBar(
                 textFieldState = textFieldState,
                 composer = composer,
                 isLoading = isLoading,
+                isCompacting = isCompacting,
                 isSwitching = isSwitching,
                 isStopping = isStopping,
                 isModelValid = isModelValid,

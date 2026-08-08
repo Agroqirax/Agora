@@ -6,12 +6,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.filled.Compress
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.input.*
 
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -23,9 +26,12 @@ import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.chat.ConversationSearchMatch
 import com.newoether.agora.ui.chat.conversationSearchMatchRanges
 import com.newoether.agora.ui.common.LocalAgoraHaptics
@@ -51,6 +57,7 @@ internal fun MessageItem(
     modelAliases: StableModelAliases = StableModelAliases(),
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
+    thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
     detailedTokenUsage: Boolean = false,
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController =
@@ -83,10 +90,12 @@ internal fun MessageItem(
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var showSegmentDetail by remember { mutableStateOf(false) }
+    var showThinkingSegmentsSheet by rememberSaveable(message.id) { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var selectedSegmentIndices by remember { mutableStateOf<List<Int>>(emptyList()) }
     var showInfoDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showCompactDetail by remember(message.id) { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
     val motionPolicy = LocalAgoraMotionPolicy.current
 
@@ -199,7 +208,11 @@ internal fun MessageItem(
                 } else {
                     Modifier
                 }
-                if (message.participant == Participant.USER) {
+                if (message.isContextCompact()) {
+                    ContextCompactPill(
+                        onClick = { showCompactDetail = true },
+                    )
+                } else if (message.participant == Participant.USER) {
                     UserMessageBubble(
                         message = message,
                         shape = shape,
@@ -238,7 +251,10 @@ internal fun MessageItem(
                         actionCopyText = actionCopyText,
                         showBranchSelector = showBranchSelector,
                         toolCallDisplayMode = toolCallDisplayMode,
-                        autoExpandActiveGroup = autoExpandActiveGroup,
+                        thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
+                        autoExpandActiveGroup = autoExpandActiveGroup &&
+                            ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
+                                ThinkingSegmentDisplayModes.CARD,
                         detailedTokenUsage = detailedTokenUsage,
                         groupedSegmentAutoExpansionController =
                             groupedSegmentAutoExpansionController,
@@ -256,7 +272,14 @@ internal fun MessageItem(
                         onSegmentSelected = { indices ->
                             selectedSegmentIndices = indices
                             selectedSegmentIndex = indices.firstOrNull() ?: -1
-                            showSegmentDetail = true
+                            if (
+                                ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
+                                    ThinkingSegmentDisplayModes.BOTTOM_SHEET
+                            ) {
+                                showThinkingSegmentsSheet = true
+                            } else {
+                                showSegmentDetail = true
+                            }
                         },
                         onLayoutMutationStarted = onLayoutMutationStarted,
                         onLayoutMutationSettled = onLayoutMutationSettled,
@@ -275,6 +298,43 @@ internal fun MessageItem(
         }
     }
 
+    if (showCompactDetail) {
+        val compactDetailMessage = remember(message.id, message.text) {
+            message.copy(
+                segments = listOf(MessageSegment(type = "thought", content = message.text)),
+            )
+        }
+        SegmentDetailSheet(
+            message = compactDetailMessage,
+            selectedSegmentIndex = 0,
+            selectedSegmentIndices = listOf(0),
+            isStreaming = false,
+            markdownRenderContext = thoughtMarkdownRenderContext,
+            onMediaClick = onMediaClick,
+            titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
+            detailFooter = {
+                TextButton(
+                    onClick = { showCompactDetail = false; showDeleteConfirm = true },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    modifier = Modifier.padding(top = 18.dp),
+                ) {
+                    Text(stringResource(com.newoether.agora.R.string.delete))
+                }
+            },
+            onDismiss = { showCompactDetail = false },
+        )
+    }
+
+    if (showThinkingSegmentsSheet) {
+        ThinkingSegmentsSheet(
+            message = message,
+            initialSegmentIndex = -1,
+            isStreaming = isStreaming,
+            markdownRenderContext = thoughtMarkdownRenderContext,
+            onMediaClick = onMediaClick,
+            onDismiss = { showThinkingSegmentsSheet = false },
+        )
+    }
     // Segment detail bottom sheet (self-contained draggable sheet + FSM).
     if (showSegmentDetail && selectedSegmentIndex >= 0) {
         SegmentDetailSheet(
@@ -289,3 +349,43 @@ internal fun MessageItem(
     }
 }
 
+
+
+@Composable
+internal fun ContextCompactPill(
+    inProgress: Boolean = false,
+    onClick: (() -> Unit)? = null,
+) {
+    Surface(
+        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+        shape = RoundedCornerShape(100.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            if (inProgress) {
+                com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                )
+            } else {
+                Icon(
+                    imageVector = androidx.compose.material.icons.Icons.Default.Compress,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Text(
+                stringResource(
+                    if (inProgress) com.newoether.agora.R.string.context_compacting
+                    else com.newoether.agora.R.string.context_compact,
+                ),
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+    }
+}

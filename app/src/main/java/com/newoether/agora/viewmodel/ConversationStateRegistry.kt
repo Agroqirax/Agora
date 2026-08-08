@@ -3,7 +3,10 @@ package com.newoether.agora.viewmodel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -64,7 +67,15 @@ class ConversationStateRegistry {
         synchronized(uiCallbackLock) {
             uiCallbackOwner = owner
             uiCallbackBinder = binder
-            states.values.forEach(binder)
+            states.values.forEach { state ->
+                binder(state)
+                // A prior UI may have detached after a headless owner released the slot but before
+                // its queue callback ran. Rebinding is a lifecycle boundary that must resume that
+                // accepted memory batch; the queue mutex makes this idempotent with any old handoff.
+                if (!state.generating.value && state.queuedSends.value.isNotEmpty()) {
+                    state.onQueueDrainRequested?.invoke(state)
+                }
+            }
         }
     }
 
@@ -72,9 +83,25 @@ class ConversationStateRegistry {
         synchronized(uiCallbackLock) {
             if (uiCallbackOwner !== owner) return
             states.values.forEach { state ->
+                val pendingDrain = state.onQueueDrainRequested
+                if (pendingDrain != null && state.queuedSends.value.isNotEmpty()) {
+                    // Foreground controller jobs drain from their own finally. This fallback is for
+                    // a headless Task/Loop whose final callback would otherwise be erased here.
+                    // Capture only the bounded handoff closure until the active slot settles, then
+                    // release the old ViewModel graph once the batch has been claimed.
+                    state.scope.launch {
+                        state.generating.filter { active -> !active }.first()
+                        if (state.queuedSends.value.isNotEmpty()) pendingDrain(state)
+                    }
+                }
                 state.onActive = null
                 state.onIdle = null
                 state.onStreamCommit = null
+                state.onQueueDrainRequested = null
+                // onStopSettled captures the ViewModel's controller. Leaving it bound would keep a
+                // dead ViewModel (and its object graph) alive in this process-scoped map, and a
+                // later Stop would drain the queue through a controller with a cancelled scope.
+                state.onStopSettled = null
             }
             uiCallbackOwner = null
             uiCallbackBinder = null
@@ -101,10 +128,11 @@ class ConversationStateRegistry {
             // severs this conversation's in-flight streams immediately.
             it.stop()
             it.cancelScope()
-            // Queue entries mirror already-persisted intervention rows. Conversation deletion
-            // owns their attachment cleanup; dropping the in-memory mirror must not delete files
-            // independently of Room.
-            it.takeQueuedSends()
+            // Pending guidance has no Room row yet, so state destruction owns its private files.
+            it.takeQueuedSends().forEach { queued ->
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
+                queued.preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
+            }
         }
         markIdle(conversationId)
     }
@@ -124,6 +152,10 @@ class ConversationStateRegistry {
         states.values.forEach {
             it.streamScope.cancelAll()
             it.cancelScope()
+            it.takeQueuedSends().forEach { queued ->
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
+                queued.preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
+            }
         }
         states.clear()
         _activeConversationIds.value = emptySet()

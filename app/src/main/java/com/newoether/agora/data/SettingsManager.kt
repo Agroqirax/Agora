@@ -3,6 +3,8 @@ package com.newoether.agora.data
 import android.content.Context
 import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.ThinkingLevels
+import com.newoether.agora.model.ContextBudget
+import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
@@ -91,6 +93,7 @@ data class SystemPromptEntry(
 
 @Serializable
 data class ConversationSettings(
+    /** Provider-visible conversation token budget. Values <=100 are legacy message windows. */
     val contextWindow: Int? = null,
     val temperature: Float? = null,
     val maxTokens: Int? = null,
@@ -131,8 +134,14 @@ class SettingsManager(private val context: Context) {
         val SYSTEM_PROMPTS_JSON = stringPreferencesKey("system_prompts_json")
         val ACTIVE_SYSTEM_PROMPT_ID = stringPreferencesKey("active_system_prompt_id")
         val MODEL_ALIASES_JSON = stringPreferencesKey("model_aliases_json")
+        val CONTEXT_TOKEN_BUDGET = stringPreferencesKey("context_token_budget")
+        /** Legacy logical-message window, retained only as a migration source. */
         val MAX_CONTEXT_WINDOW = stringPreferencesKey("max_context_window")
         val VISUALIZE_CONTEXT_ROLLOUT = booleanPreferencesKey("visualize_context_rollout")
+        val CONTEXT_COMPACT_ENABLED = booleanPreferencesKey("context_compact_enabled")
+        val CONTEXT_COMPACT_MODEL = stringPreferencesKey("context_compact_model")
+        val CONTEXT_COMPACT_PROMPT = stringPreferencesKey("context_compact_prompt")
+        val CONTEXT_COMPACT_RETAIN_COUNT = intPreferencesKey("context_compact_retain_count")
         val CODE_EXECUTION_ENABLED = booleanPreferencesKey("code_execution_enabled")
         val GOOGLE_SEARCH_ENABLED = booleanPreferencesKey("google_search_enabled")
         val THINKING_ENABLED = booleanPreferencesKey("thinking_enabled")
@@ -207,6 +216,7 @@ class SettingsManager(private val context: Context) {
         val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
         val DETAILED_TOKEN_USAGE = booleanPreferencesKey("detailed_token_usage")
         val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
+        val THINKING_SEGMENT_DISPLAY_MODE = stringPreferencesKey("thinking_segment_display_mode")
         val AUTO_EXPAND_ACTIVE_GROUP = booleanPreferencesKey("auto_expand_active_group")
         val SCHEME_STYLE = stringPreferencesKey("scheme_style")
         val FONT_PREFERENCE = stringPreferencesKey("font_preference")
@@ -284,8 +294,21 @@ class SettingsManager(private val context: Context) {
     
     val activeSystemPromptId: Flow<String?> = context.dataStore.data.map { it[ACTIVE_SYSTEM_PROMPT_ID] }
 
-    val maxContextWindow: Flow<Int> = context.dataStore.data.map { it[MAX_CONTEXT_WINDOW]?.toIntOrNull() ?: 20 }
+    val maxContextWindow: Flow<Int> = context.dataStore.data.map { preferences ->
+        ContextBudget.normalize(
+            preferences[CONTEXT_TOKEN_BUDGET]?.toIntOrNull()
+                ?: preferences[MAX_CONTEXT_WINDOW]?.toIntOrNull()
+        )
+    }
     val visualizeContextRollout: Flow<Boolean> = context.dataStore.data.map { it[VISUALIZE_CONTEXT_ROLLOUT] ?: false }
+    val contextCompactEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTEXT_COMPACT_ENABLED] ?: false }
+    val contextCompactModel: Flow<String?> = context.dataStore.data.map { it[CONTEXT_COMPACT_MODEL] }
+    val contextCompactPrompt: Flow<String> = context.dataStore.data.map { pref ->
+        pref[CONTEXT_COMPACT_PROMPT]?.takeIf { it.isNotBlank() } ?: BuiltInPrompts.CONTEXT_COMPACT_SYSTEM
+    }
+    val contextCompactRetainCount: Flow<Int> = context.dataStore.data.map {
+        it[CONTEXT_COMPACT_RETAIN_COUNT] ?: 6
+    }
     val codeExecutionEnabled: Flow<Boolean> = context.dataStore.data.map { it[CODE_EXECUTION_ENABLED] ?: false }
     val googleSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[GOOGLE_SEARCH_ENABLED] ?: false }
     val thinkingEnabled: Flow<Boolean> = context.dataStore.data.map { it[THINKING_ENABLED] ?: true }
@@ -426,6 +449,9 @@ class SettingsManager(private val context: Context) {
     val detailedTokenUsage: Flow<Boolean> =
         context.dataStore.data.map { it[DETAILED_TOKEN_USAGE] ?: false }
     val toolCallDisplayMode: Flow<String> = context.dataStore.data.map { ToolCallDisplayModes.normalize(it[TOOL_CALL_DISPLAY_MODE]) }
+    val thinkingSegmentDisplayMode: Flow<String> = context.dataStore.data.map {
+        ThinkingSegmentDisplayModes.normalize(it[THINKING_SEGMENT_DISPLAY_MODE])
+    }
     val autoExpandActiveGroup: Flow<Boolean> =
         context.dataStore.data.map { it[AUTO_EXPAND_ACTIVE_GROUP] ?: true }
     val schemeStyle: Flow<String> = context.dataStore.data.map { it[SCHEME_STYLE] ?: "TONAL_SPOT" }
@@ -627,6 +653,7 @@ class SettingsManager(private val context: Context) {
             replaceNullableReference(TITLE_GENERATION_MODEL)
             replaceNullableReference(IMAGE_TRANSCRIPTION_MODEL)
             replaceNullableReference(IMAGE_GEN_MODEL)
+            replaceNullableReference(CONTEXT_COMPACT_MODEL)
         }
     }
 
@@ -658,6 +685,41 @@ class SettingsManager(private val context: Context) {
             val map = try { json.decodeFromString<MutableMap<String, String>>(current) } catch (e: Exception) { mutableMapOf() }
             if (id == null) map.remove(provider) else map[provider] = id
             prefs[ACTIVE_API_KEY_IDS_JSON] = json.encodeToString(map)
+        }
+    }
+
+    /**
+     * Atomically rename the provider field on every API key entry for [oldProvider] to
+     * [newProvider] and remap the active-key-id in the same DataStore edit. Decryption or
+     * parse failures leave the raw encrypted blobs completely untouched (fail-preserving),
+     * so a rename can never wipe keys due to a transient Keystore error.
+     */
+    suspend fun renameApiKeyProvider(oldProvider: String, newProvider: String) {
+        context.dataStore.edit { prefs ->
+            val rawKeys = prefs[API_KEYS_JSON] ?: return@edit
+            val decrypted = runCatching {
+                com.newoether.agora.util.SecretCrypto.decrypt(rawKeys)
+            }.getOrDefault(rawKeys)
+            val keys = runCatching {
+                json.decodeFromString<List<ApiKeyEntry>>(decrypted)
+            }.getOrNull() ?: return@edit
+            val renamed = keys.map { entry ->
+                if (entry.provider == oldProvider) entry.copy(provider = newProvider) else entry
+            }
+            if (renamed != keys) {
+                prefs[API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(
+                    json.encodeToString(renamed)
+                )
+            }
+            // Remap active-key-id in the same edit so the active key follows the rename.
+            val rawIds = prefs[ACTIVE_API_KEY_IDS_JSON] ?: "{}"
+            val ids = runCatching {
+                json.decodeFromString<MutableMap<String, String>>(rawIds)
+            }.getOrNull()
+            if (ids != null && ids.containsKey(oldProvider)) {
+                ids[newProvider] = ids.remove(oldProvider)!!
+                prefs[ACTIVE_API_KEY_IDS_JSON] = json.encodeToString(ids)
+            }
         }
     }
 
@@ -754,7 +816,45 @@ class SettingsManager(private val context: Context) {
     }
 
     suspend fun saveMaxContextWindow(window: Int) {
-        context.dataStore.edit { it[MAX_CONTEXT_WINDOW] = window.toString() }
+        context.dataStore.edit {
+            it[CONTEXT_TOKEN_BUDGET] = ContextBudget.normalize(window).toString()
+        }
+    }
+
+    /** Remaps every configured model reference whose provider component was renamed. */
+    suspend fun renameProviderModelReferences(oldProvider: String, newProvider: String) {
+        val oldPrefix = "$oldProvider:"
+        val newPrefix = "$newProvider:"
+        fun String.remapProvider(): String =
+            if (startsWith(oldPrefix)) newPrefix + removePrefix(oldPrefix) else this
+
+        context.dataStore.edit { prefs ->
+            prefs[CUSTOM_MODELS] = (prefs[CUSTOM_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
+                it.remapProvider()
+            }
+            prefs[ENABLED_MODELS] = (prefs[ENABLED_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
+                it.remapProvider()
+            }
+            prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] =
+                (prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
+                    it.remapProvider()
+                }
+            val aliases = runCatching {
+                json.decodeFromString<Map<String, String>>(prefs[MODEL_ALIASES_JSON] ?: "{}")
+            }.getOrDefault(emptyMap())
+            prefs[MODEL_ALIASES_JSON] = json.encodeToString(
+                aliases.mapKeys { (modelId, _) -> modelId.remapProvider() }
+            )
+            listOf(
+                SELECTED_MODEL,
+                TITLE_GENERATION_MODEL,
+                IMAGE_TRANSCRIPTION_MODEL,
+                IMAGE_GEN_MODEL,
+                CONTEXT_COMPACT_MODEL,
+            ).forEach { key ->
+                prefs[key]?.let { modelId -> prefs[key] = modelId.remapProvider() }
+            }
+        }
     }
 
     suspend fun saveVisualizeContextRollout(enabled: Boolean) {
@@ -953,6 +1053,27 @@ class SettingsManager(private val context: Context) {
         }
     }
 
+    suspend fun saveContextCompactEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[CONTEXT_COMPACT_ENABLED] = enabled }
+    }
+
+    suspend fun saveContextCompactModel(model: String?) {
+        context.dataStore.edit { prefs ->
+            if (model == null) prefs.remove(CONTEXT_COMPACT_MODEL) else prefs[CONTEXT_COMPACT_MODEL] = model
+        }
+    }
+
+    suspend fun saveContextCompactPrompt(prompt: String) {
+        context.dataStore.edit { prefs ->
+            if (prompt.isBlank()) prefs.remove(CONTEXT_COMPACT_PROMPT) else prefs[CONTEXT_COMPACT_PROMPT] = prompt
+        }
+    }
+
+    suspend fun saveContextCompactRetainCount(count: Int) {
+        require(count >= 0)
+        context.dataStore.edit { it[CONTEXT_COMPACT_RETAIN_COUNT] = count }
+    }
+
     suspend fun saveTitleGenerationModel(model: String?) {
         context.dataStore.edit {
             if (model == null) it.remove(TITLE_GENERATION_MODEL)
@@ -1069,6 +1190,12 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[TOOL_CALL_DISPLAY_MODE] = ToolCallDisplayModes.normalize(mode) }
     }
 
+    suspend fun saveThinkingSegmentDisplayMode(mode: String) {
+        context.dataStore.edit {
+            it[THINKING_SEGMENT_DISPLAY_MODE] = ThinkingSegmentDisplayModes.normalize(mode)
+        }
+    }
+
     suspend fun saveAutoExpandActiveGroup(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_EXPAND_ACTIVE_GROUP] = enabled }
     }
@@ -1150,8 +1277,13 @@ class SettingsManager(private val context: Context) {
             prefs.remove(ENABLED_MODELS)
             prefs.remove(ACTIVE_SYSTEM_PROMPT_ID)
             prefs.remove(MODEL_ALIASES_JSON)
+            prefs.remove(CONTEXT_TOKEN_BUDGET)
             prefs.remove(MAX_CONTEXT_WINDOW)
             prefs.remove(VISUALIZE_CONTEXT_ROLLOUT)
+            prefs.remove(CONTEXT_COMPACT_ENABLED)
+            prefs.remove(CONTEXT_COMPACT_MODEL)
+            prefs.remove(CONTEXT_COMPACT_PROMPT)
+            prefs.remove(CONTEXT_COMPACT_RETAIN_COUNT)
             prefs.remove(CODE_EXECUTION_ENABLED)
             prefs.remove(GOOGLE_SEARCH_ENABLED)
             prefs.remove(THINKING_ENABLED)
@@ -1208,6 +1340,7 @@ class SettingsManager(private val context: Context) {
             prefs.remove(HAPTICS_ENABLED)
             prefs.remove(DETAILED_TOKEN_USAGE)
             prefs.remove(TOOL_CALL_DISPLAY_MODE)
+            prefs.remove(THINKING_SEGMENT_DISPLAY_MODE)
             prefs.remove(AUTO_EXPAND_ACTIVE_GROUP)
             prefs.remove(SCHEME_STYLE)
             prefs.remove(FONT_PREFERENCE)

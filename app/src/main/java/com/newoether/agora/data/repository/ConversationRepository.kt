@@ -112,6 +112,11 @@ class ConversationRepository(
         newModelId: String?,
     ) = chatDao.replaceConfiguredModelReferences(oldModelId, newModelId)
 
+    suspend fun renameConfiguredProviderModelReferences(
+        oldProvider: String,
+        newProvider: String,
+    ) = chatDao.renameConfiguredProviderModelReferences(oldProvider, newProvider)
+
     suspend fun updateConversationTitleIfUnchanged(
         id: String,
         expectedTitle: String,
@@ -279,6 +284,21 @@ class ConversationRepository(
         )
     }
 
+    suspend fun appendGuidanceBatchAndClaimPass(
+        runId: String,
+        inputs: List<MessageEntity>,
+        placeholder: MessageEntity,
+        at: Long = System.currentTimeMillis(),
+    ): ClaimedRunPassCommit? {
+        ensureRunRecovery()
+        return chatDao.appendGuidanceBatchAndClaimPass(
+            runId = runId,
+            inputs = inputs,
+            placeholder = placeholder,
+            at = at,
+        )
+    }
+
     suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? =
         chatDao.removePendingRunInput(messageId)
 
@@ -368,6 +388,22 @@ class ConversationRepository(
     }
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
+
+    suspend fun insertContextCompactBeforeSuffix(
+        run: RunEntity,
+        message: MessageEntity,
+        suffixRootId: String?,
+        selections: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ) = chatDao.insertContextCompactBeforeSuffix(
+        run,
+        message,
+        suffixRootId,
+        Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
+        at,
+    )
+
+    suspend fun removeContextCompact(messageId: String): Boolean = chatDao.removeContextCompact(messageId)
 
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity> =
         chatDao.getMessagesByIds(ids)

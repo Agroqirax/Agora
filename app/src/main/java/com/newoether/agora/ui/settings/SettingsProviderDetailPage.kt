@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -53,7 +54,7 @@ import kotlinx.coroutines.withContext
 fun SettingsProviderDetailPage(
     providerName: String,
     viewModel: ChatViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
 ) {
     val apiKeys by viewModel.settings.apiKeys.collectAsState()
     val activeApiKeyIds by viewModel.settings.activeApiKeyIds.collectAsState()
@@ -61,8 +62,10 @@ fun SettingsProviderDetailPage(
     val customProviders by viewModel.settings.customProviders.collectAsState()
     val localChatModels by viewModel.settings.localChatModels.collectAsState()
 
-    val isLocal = providerName == Constants.PROVIDER_LOCAL
-    val customConfig = customProviders.firstOrNull { it.name == providerName }
+    var currentName by rememberSaveable(providerName) { mutableStateOf(providerName) }
+
+    val isLocal = currentName == Constants.PROVIDER_LOCAL
+    val customConfig = customProviders.firstOrNull { it.name == currentName }
     val isCustom = customConfig != null
 
     val context = LocalContext.current
@@ -157,7 +160,7 @@ fun SettingsProviderDetailPage(
     }
 
     CollapsingSettingsScaffold(
-        title = if (isLocal) stringResource(R.string.local_title) else providerName,
+        title = if (isLocal) stringResource(R.string.local_title) else currentName,
         onBack = onBack,
         actions = {
             if (isCustom) {
@@ -176,8 +179,8 @@ fun SettingsProviderDetailPage(
                 if (!isLocal) {
                 // Nullable: after deleting a custom provider this page recomposes once more
                 // before navigation pops it — render with an empty placeholder, don't crash.
-                val providerInstance = viewModel.getProviderInstanceOrNull(providerName)
-                val savedUrl = providerBaseUrls[providerName]
+                val providerInstance = viewModel.getProviderInstanceOrNull(currentName)
+                val savedUrl = providerBaseUrls[currentName]
                 val defaultUrl = providerInstance?.defaultBaseUrl.orEmpty()
                 val displayedUrl = savedUrl?.takeIf(String::isNotBlank) ?: defaultUrl
                 // Don't key remember on savedUrl — that causes TextFieldState to be recreated
@@ -201,11 +204,11 @@ fun SettingsProviderDetailPage(
                 LaunchedEffect(baseUrlState.text) {
                     delay(500)
                     val text = baseUrlState.text.toString()
-                    val stored = providerBaseUrls[providerName] ?: ""
+                    val stored = providerBaseUrls[currentName] ?: ""
                     val isUneditedImplicitDefault =
                         stored.isBlank() && text == defaultUrl
                     if (!isUneditedImplicitDefault && text != stored) {
-                        viewModel.settings.setProviderBaseUrl(providerName, text)
+                        viewModel.settings.setProviderBaseUrl(currentName, text)
                     }
                 }
                 SettingsGroup(
@@ -247,7 +250,7 @@ fun SettingsProviderDetailPage(
                                         selected = config.protocol,
                                         onSelected = { protocol ->
                                             if (protocol != config.protocol) {
-                                                viewModel.updateCustomProviderProtocol(providerName, protocol)
+                                                viewModel.updateCustomProviderProtocol(currentName, protocol)
                                             }
                                         },
                                     )
@@ -365,14 +368,14 @@ fun SettingsProviderDetailPage(
 
             // API Keys (non-Local)
             if (!isLocal) {
-                val providerKeys = apiKeys.filter { it.provider == providerName }
+                val providerKeys = apiKeys.filter { it.provider == currentName }
                 if (providerKeys.isEmpty()) {
                     SettingsGroup(
                         title = stringResource(R.string.provider_api_keys),
                         items = buildList {
                             add {
                                 SettingsItem(
-                                    headlineContent = { Text(stringResource(R.string.provider_no_keys, providerName), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                    headlineContent = { Text(stringResource(R.string.provider_no_keys, currentName), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     leadingContent = { Icon(Icons.Default.Key, null, tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)) },
                                     modifier = Modifier.heightIn(min = 64.dp)
                                 )
@@ -384,7 +387,7 @@ fun SettingsProviderDetailPage(
                                         showKeyDialog = ApiKeyEntry(
                                             name = "",
                                             key = "",
-                                            provider = providerName,
+                                            provider = currentName,
                                         )
                                     },
                                 )
@@ -397,12 +400,12 @@ fun SettingsProviderDetailPage(
                         items = buildList {
                             providerKeys.forEach { entry ->
                                 var showMenu by remember { mutableStateOf(false) }
-                                val isCurrentActive = entry.id == activeApiKeyIds[providerName]
+                                val isCurrentActive = entry.id == activeApiKeyIds[currentName]
                                 add {
                                     SettingsItem(
                                         headlineContent = { Text(entry.name, fontWeight = FontWeight.Medium) },
                                         supportingContent = { Text(entry.key.take(4) + "••••••••" + entry.key.takeLast(4)) },
-                                        leadingContent = { Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) { RadioButton(selected = isCurrentActive, onClick = { viewModel.settings.setActiveApiKey(providerName, entry.id) }, modifier = Modifier.size(20.dp)) } },
+                                        leadingContent = { Box(modifier = Modifier.size(24.dp), contentAlignment = Alignment.Center) { RadioButton(selected = isCurrentActive, onClick = { viewModel.settings.setActiveApiKey(currentName, entry.id) }, modifier = Modifier.size(20.dp)) } },
                                         trailingContent = {
                                             Box {
                                                 IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) { Icon(Icons.Default.MoreVert, stringResource(R.string.options), modifier = Modifier.size(18.dp)) }
@@ -413,7 +416,7 @@ fun SettingsProviderDetailPage(
                                             }
                                         },
                                         modifier = Modifier
-                                            .clickable { viewModel.settings.setActiveApiKey(providerName, entry.id) }
+                                            .clickable { viewModel.settings.setActiveApiKey(currentName, entry.id) }
                                     )
                                 }
                             }
@@ -424,7 +427,7 @@ fun SettingsProviderDetailPage(
                                         showKeyDialog = ApiKeyEntry(
                                             name = "",
                                             key = "",
-                                            provider = providerName,
+                                            provider = currentName,
                                         )
                                     },
                                 )
@@ -593,9 +596,9 @@ fun SettingsProviderDetailPage(
             Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text(stringResource(R.string.provider_key_name_hint)) }, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth().noOpBringIntoView())
                 Spacer(modifier = Modifier.height(8.dp))
-                Box(modifier = Modifier.noOpBringIntoView()) { OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("${providerName} API Key") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) }
+                Box(modifier = Modifier.noOpBringIntoView()) { OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("${currentName} API Key") }, visualTransformation = PasswordVisualTransformation(), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) }
             }
-        }, confirmButton = { TextButton(onClick = { if (name.isNotBlank() && key.isNotBlank()) { if (isEdit) viewModel.settings.updateApiKey(entry.id, name, key) else viewModel.settings.addApiKey(name, key, providerName); showKeyDialog = null } }) { Text(if (isEdit) stringResource(R.string.provider_save) else stringResource(R.string.provider_add)) } }, dismissButton = { TextButton(onClick = { showKeyDialog = null }) { Text(stringResource(R.string.cancel)) } })
+        }, confirmButton = { TextButton(onClick = { if (name.isNotBlank() && key.isNotBlank()) { if (isEdit) viewModel.settings.updateApiKey(entry.id, name, key) else viewModel.settings.addApiKey(name, key, currentName); showKeyDialog = null } }) { Text(if (isEdit) stringResource(R.string.provider_save) else stringResource(R.string.provider_add)) } }, dismissButton = { TextButton(onClick = { showKeyDialog = null }) { Text(stringResource(R.string.cancel)) } })
     }
 
     // Delete key confirm
@@ -605,7 +608,7 @@ fun SettingsProviderDetailPage(
 
     // Rename custom provider
     if (showRenameProvider) {
-        var renameValue by remember { mutableStateOf(providerName) }
+        var renameValue by remember(currentName) { mutableStateOf(currentName) }
         var renameError by remember { mutableStateOf(false) }
         AlertDialog(modifier = Modifier.clearFocusOnTap(), containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showRenameProvider = false }, title = { Text(stringResource(R.string.custom_provider_rename_title), fontWeight = FontWeight.Bold) }, text = {
             OutlinedTextField(value = renameValue, onValueChange = { renameValue = it; renameError = false }, label = { Text(stringResource(R.string.custom_provider_name_label)) }, isError = renameError, supportingText = if (renameError) {{ Text(stringResource(R.string.custom_provider_name_error)) }} else null, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth(), singleLine = true)
@@ -614,14 +617,18 @@ fun SettingsProviderDetailPage(
             renameError = CustomProviderNamePolicy.hasConflict(
                 name = trimmed,
                 existingNames = customProviders.map { it.name },
-                currentName = providerName,
+                currentName = currentName,
             )
-            if (!renameError) { viewModel.renameCustomProvider(providerName, trimmed); showRenameProvider = false; onBack() }
+            if (!renameError) {
+                viewModel.renameCustomProvider(currentName, trimmed)
+                showRenameProvider = false
+                if (trimmed != currentName) currentName = trimmed
+            }
         }) { Text(stringResource(R.string.custom_provider_rename)) } }, dismissButton = { TextButton(onClick = { showRenameProvider = false }) { Text(stringResource(R.string.cancel)) } })
     }
 
     // Delete custom provider
     if (showDeleteProvider) {
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteProvider = false }, title = { Text(stringResource(R.string.custom_provider_delete_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.custom_provider_delete_text, providerName)) }, confirmButton = { TextButton(onClick = { viewModel.deleteCustomProvider(providerName); showDeleteProvider = false; onBack() }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.provider_delete)) } }, dismissButton = { TextButton(onClick = { showDeleteProvider = false }) { Text(stringResource(R.string.cancel)) } })
+        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteProvider = false }, title = { Text(stringResource(R.string.custom_provider_delete_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.custom_provider_delete_text, currentName)) }, confirmButton = { TextButton(onClick = { viewModel.deleteCustomProvider(currentName); showDeleteProvider = false; onBack() }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.provider_delete)) } }, dismissButton = { TextButton(onClick = { showDeleteProvider = false }) { Text(stringResource(R.string.cancel)) } })
     }
 }

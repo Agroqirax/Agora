@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -34,11 +35,15 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ContextBudget
+import com.newoether.agora.api.util.contextWindowRetainedMessageIds
+import com.newoether.agora.api.util.expandSelectedToolProtocolRows
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunMessagePresentation
@@ -46,8 +51,10 @@ import com.newoether.agora.model.RunUiProjection
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.chat.message.GroupedSegmentAutoExpansionController
 import com.newoether.agora.ui.chat.message.MessageItem
+import com.newoether.agora.ui.chat.message.ContextCompactPill
 import com.newoether.agora.ui.chat.message.REGENERATION_ABORT_RESTORE_DURATION_MS
 import com.newoether.agora.ui.chat.message.REGENERATION_EXIT_DURATION_MS
 import com.newoether.agora.ui.chat.message.SegmentAppearanceRegistry
@@ -356,6 +363,7 @@ internal fun MessageList(
     state: LazyListState = rememberLazyListState(),
     userScrollEnabled: Boolean = true,
     isLoading: Boolean = false,
+    isCompacting: Boolean = false,
     isStopping: Boolean = false,
     isSwitching: Boolean = false,
     streamingAutoFollowEnabled: Boolean = isLoading && !isSwitching,
@@ -368,9 +376,10 @@ internal fun MessageList(
     onRegenerationFadeOutFinished: (Long) -> Unit = {},
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
+    thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
     detailedTokenUsage: Boolean = false,
-    maxContextWindow: Int = 20,
+    maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
     modelAliases: StableModelAliases = StableModelAliases(),
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
     viewportHeight: Int = 0,
@@ -498,11 +507,11 @@ internal fun MessageList(
     val allProjectionKey = remember(allMessages) {
         allMessages.list.map(ChatMessage::toRunProjectionKey)
     }
-    val inContextIds = remember(visibleProjectionKey, maxContextWindow) {
-        val currentPath = visibleProjectionKey.filter { it.participant != Participant.ERROR }
-        val contextStartIndex =
-            (currentPath.size - maxContextWindow).coerceAtLeast(0)
-        currentPath.drop(contextStartIndex).mapTo(linkedSetOf()) { it.id }
+    val inContextIds = remember(messages, allMessages, maxContextWindow) {
+        contextWindowRetainedMessageIds(
+            expandSelectedToolProtocolRows(messages.list, allMessages.list),
+            maxContextWindow,
+        )
     }
 
     val activeMessageIds = remember(messages) {
@@ -971,6 +980,7 @@ internal fun MessageList(
             modelAliases = modelAliases,
             visualizeContextRollout = visualizeContextRollout,
             toolCallDisplayMode = toolCallDisplayMode,
+            thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
             autoExpandActiveGroup = autoExpandActiveGroup,
             detailedTokenUsage = detailedTokenUsage,
             groupedSegmentAutoExpansionController =
@@ -1142,6 +1152,18 @@ internal fun MessageList(
                                         visible =
                                             streamingIndicatorVisible && answeringTailVisible,
                                     )
+                                }
+                            }
+                        }
+                        if (isCompacting && turn.key == turns.lastOrNull()?.key) {
+                            key("agora:context-compact-progress:$conversationId") {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 8.dp),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    ContextCompactPill(inProgress = true)
                                 }
                             }
                         }

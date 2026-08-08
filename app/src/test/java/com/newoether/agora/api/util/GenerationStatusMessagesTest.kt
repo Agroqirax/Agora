@@ -71,7 +71,7 @@ class GenerationStatusMessagesTest {
         assertTrue(projected.single().text.endsWith("continue"))
         assertEquals(
             listOf("follow-up"),
-            prepareMessages(projected, maxUserMessages = 1).map { it.id },
+            prepareMessages(projected, contextTokenBudget = 1).map { it.id },
         )
     }
 

@@ -307,6 +307,7 @@
     <string name="generation_title">생성</string>
     <string name="context_window">컨텍스트 창</string>
     <string name="context_window_default">기본 컨텍스트 창</string>
+    <string name="context_token_budget_value">예상 토큰 %1$s개</string>
     <string name="context_retain">최근 메시지 %1$d개 유지</string>
     <string name="context_visualize">컨텍스트 전개 시각화</string>
     <string name="context_visualize_desc">컨텍스트 창 밖의 메시지를 흐리게 표시</string>
@@ -1044,4 +1045,27 @@
     <string name="openai_service_tier_default">기본</string>
     <string name="openai_service_tier_flex">유연</string>
     <string name="openai_service_tier_fast">빠름</string>
+    <string name="context_title">Context</string>
+    <string name="context_desc">Context management</string>
+    <string name="context_compact">Context compact</string>
+    <string name="context_compact_auto">Automatic compact</string>
+    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
+    <string name="context_compact_model">Compact model</string>
+    <string name="context_compact_prompt">Compact prompt</string>
+    <string name="context_compact_prompt_desc">Summary instructions</string>
+    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_manual">Compact context</string>
+    <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_select_available_model">Select an available model</string>
+    <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
+    <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="thinking_segment_display_mode">Thinking segments</string>
+    <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
+    <string name="thinking_segment_display_card">Card</string>
+    <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
+    <string name="thinking_segments_title">Thinking segments</string>
+    <string name="context_usage_messages">약 %1$s / %2$s tokens · 논리 메시지 %3$d개</string>
+    <string name="context_boundary_active">컴팩트 경계 활성화됨</string>
+    <string name="context_boundary_none">컴팩트 경계 없음</string>
 </resources>

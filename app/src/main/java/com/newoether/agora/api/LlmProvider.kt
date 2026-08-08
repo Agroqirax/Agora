@@ -1,6 +1,7 @@
 package com.newoether.agora.api
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerialName
@@ -52,8 +53,8 @@ sealed class StreamEvent {
         val streamKey: String = id,
     ) : StreamEvent()
     data class ToolCallsRequest(val calls: List<ToolCallRequest>) : StreamEvent()
-    /** Emitted when the provider is retrying after a transient error (401, 429, 5xx).
-     *  [attempt] is 1-based and always < [maxAttempts] (the final attempt does not emit). */
+    /** Emitted before one provider retry. [attempt] is the 1-based retry number, while
+     *  [maxAttempts] is the retry budget and excludes the initial request. */
     data class Retrying(val attempt: Int, val maxAttempts: Int) : StreamEvent()
 }
 
@@ -61,7 +62,8 @@ data class ProviderConfig(
     val apiKey: String,
     val modelId: String,
     val systemPrompt: String? = null,
-    val maxContextWindow: Int = 20,
+    /** Estimated provider-visible conversation token budget. */
+    val maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
     val codeExecutionEnabled: Boolean = false,
     val googleSearchEnabled: Boolean = false,
     val thinkingEnabled: Boolean = true,
@@ -196,6 +198,12 @@ data class OpenAiFunction(
 data class OpenAiStreamResponse(
     val id: String? = null,
     val choices: List<OpenAiChoice>? = null,
+    /** Non-standard relay outcome. Some gateways return `failed to generate` here on HTTP 200. */
+    val outcome: String? = null,
+    // Relays deliver a mid-stream failure as a bare {"error":{...}} chunk on an HTTP 200 response.
+    // Without this field `ignoreUnknownKeys` discarded it, choices stayed null, and the generation
+    // simply stopped with no diagnostic at all.
+    val error: OpenAiError? = null,
     val usage: OpenAiUsage? = null
 )
 
@@ -311,7 +319,10 @@ class PendingToolCall(
     val streamKey: String = "call_stream_${java.util.UUID.randomUUID()}",
     var id: String = "",
     var name: String = "",
-    val args: StringBuilder = StringBuilder()
+    /** Snapshot-tolerant accumulator: a relay that resends the whole value in every delta, or
+     *  interleaves empty placeholder deltas, must not corrupt or erase the arguments. */
+    val args: com.newoether.agora.api.util.ToolArgumentAccumulator =
+        com.newoether.agora.api.util.ToolArgumentAccumulator()
 )
 
 interface LlmProvider {

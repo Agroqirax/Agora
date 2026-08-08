@@ -282,6 +282,7 @@ data class PendingRunInputCommit(
 
 data class ClaimedRunPassCommit(
     val claimedPass: ClaimedRunPass,
+    val inputs: List<MessageEntity> = emptyList(),
     val placeholder: MessageEntity,
     val messageSelections: Map<String?, String>,
 )
@@ -780,6 +781,17 @@ interface ChatDao {
         at: Long,
     ): Int
 
+    @Query(
+        """
+        UPDATE messages
+        SET status = 'STOPPED'
+        WHERE runId = :runId
+          AND participant = 'MODEL'
+          AND status IN ('SENDING', 'THINKING', 'TOOL_CALLING', 'TRANSCRIBING')
+        """
+    )
+    suspend fun stopInFlightModelMessages(runId: String): Int
+
     /**
      * Normal/error provider completion is one durable boundary: the model row and its Run become
      * terminal together. The update counts are returned as a boolean for diagnostics, but a
@@ -816,6 +828,7 @@ interface ChatDao {
         at: Long,
     ): Boolean {
         checkpoints.forEach { updateMessageCheckpoint(it) }
+        if (runId != null) stopInFlightModelMessages(runId)
         return runId == null || terminalizeLiveRun(
             runId,
             RunStatus.STOPPED,
@@ -998,6 +1011,77 @@ interface ChatDao {
         )
     }
 
+    /**
+     * Publishes a memory-only guidance batch and claims its next provider Pass in one transaction.
+     * Until this method commits, none of the user rows, selection edges, or placeholder exist.
+     */
+    @Transaction
+    suspend fun appendGuidanceBatchAndClaimPass(
+        runId: String,
+        inputs: List<MessageEntity>,
+        placeholder: MessageEntity,
+        at: Long,
+    ): ClaimedRunPassCommit? {
+        require(inputs.isNotEmpty())
+        require(inputs.all { input ->
+            input.runId == runId &&
+                input.participant == Participant.USER &&
+                input.consumedAtPass == null
+        })
+        require(inputs.zipWithNext().all { (previous, next) -> next.parentId == previous.id })
+        require(placeholder.runId == runId)
+        require(placeholder.participant == Participant.MODEL)
+        require(placeholder.parentId == inputs.last().id)
+
+        val run = getRun(runId) ?: return null
+        if (run.status != RunStatus.ACTIVE || run.activeSlot != 1) return null
+        check(getPendingRunInputs(runId).isEmpty()) {
+            "Run $runId already has durable pending inputs before guidance publication"
+        }
+
+        val pass = run.currentPass + 1
+        val firstSequence = nextRunSequence(runId)
+        val assignedInputs = inputs.mapIndexed { index, input ->
+            input.copy(runSequence = firstSequence + index, consumedAtPass = pass)
+        }
+        assignedInputs.forEach { insertMessage(it) }
+        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
+        val assignedPlaceholder = placeholder.copy(
+            runSequence = firstSequence + assignedInputs.size,
+        )
+        insertMessage(assignedPlaceholder)
+        touchRun(
+            runId,
+            maxOf(
+                run.lastCheckpointAt,
+                assignedInputs.maxOf { it.timestamp },
+                assignedPlaceholder.timestamp,
+                at,
+            ),
+        )
+
+        val conversation = checkNotNull(getConversation(run.conversationId)) {
+            "Conversation ${run.conversationId} disappeared during guidance publication"
+        }
+        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
+            assignedInputs.forEach { input -> put(input.parentId, input.id) }
+            put(assignedPlaceholder.parentId, assignedPlaceholder.id)
+        }
+        check(
+            updateMessageSelectionsAfterPendingRemoval(
+                conversationId = run.conversationId,
+                selectedBranchesJson = encodeSelectionMap(selections),
+                at = at,
+            ) == 1
+        )
+        return ClaimedRunPassCommit(
+            claimedPass = ClaimedRunPass(runId, pass, assignedInputs.map { it.id }),
+            inputs = assignedInputs,
+            placeholder = assignedPlaceholder,
+            messageSelections = selections,
+        )
+    }
+
     @Query(
         """
         UPDATE runs
@@ -1068,6 +1152,94 @@ interface ChatDao {
 
     @Query("DELETE FROM messages WHERE id IN (:ids)")
     suspend fun deleteMessagesByIds(ids: List<String>)
+    @Query("UPDATE messages SET parentId = :replacementParentId WHERE parentId = :removedMessageId")
+    suspend fun reparentMessageChildren(removedMessageId: String, replacementParentId: String?): Int
+
+    @Query("UPDATE runs SET parentRunId = :replacementParentRunId WHERE parentRunId = :removedRunId")
+    suspend fun reparentRunChildren(removedRunId: String, replacementParentRunId: String?): Int
+
+    @Query("UPDATE runs SET parentRunId = :newParentRunId WHERE id = :runId")
+    suspend fun updateRunParent(runId: String, newParentRunId: String?): Int
+
+    @Query("UPDATE messages SET parentId = :newParentId WHERE id = :messageId")
+    suspend fun updateMessageParent(messageId: String, newParentId: String?): Int
+
+    @Transaction
+    suspend fun insertContextCompactBeforeSuffix(
+        run: RunEntity,
+        message: MessageEntity,
+        suffixRootId: String?,
+        selectedBranchesJson: String,
+        at: Long,
+    ) {
+        val conversation = checkNotNull(getConversation(message.conversationId)) {
+            "Conversation ${message.conversationId} disappeared during Compact insertion"
+        }
+        val suffixRun = suffixRootId?.let { getMessage(it) }?.let { getRun(it.runId) }
+        insertRun(run)
+        insertMessage(message)
+        if (suffixRootId != null) check(updateMessageParent(suffixRootId, message.id) == 1)
+        val runSelections = decodeSelectionMap(conversation.selectedRunBranchesJson).apply {
+            put(run.parentRunId, run.id)
+            if (suffixRun != null && suffixRun.id != run.parentRunId) {
+                check(suffixRun.parentRunId == run.parentRunId) {
+                    "Compact suffix Run ${suffixRun.id} is not a child of ${run.parentRunId}"
+                }
+                check(updateRunParent(suffixRun.id, run.id) == 1)
+                put(run.id, suffixRun.id)
+            }
+        }
+        check(
+            updateSelectionsForRunDeletion(
+                conversationId = message.conversationId,
+                selectedBranchesJson = selectedBranchesJson,
+                selectedRunBranchesJson = encodeSelectionMap(runSelections),
+                at = at,
+            ) == 1
+        )
+    }
+
+    @Transaction
+    suspend fun removeContextCompact(messageId: String): Boolean {
+        val message = getMessage(messageId) ?: return false
+        require(message.id.startsWith(com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX))
+        val conversation = getConversation(message.conversationId) ?: return false
+        val compactRun = getRun(message.runId) ?: return false
+        reparentMessageChildren(message.id, message.parentId)
+        deleteMessagesByIds(listOf(message.id))
+        val selections = decodeSelectionMap(conversation.selectedBranchesJson)
+        val selectedCompact = selections[message.parentId] == message.id
+        // The selected suffix child is already encoded in the normal branch-selection map. Capture
+        // it before removing the compact key; choosing the newest reparented sibling would silently
+        // switch branches when another child of the prefix has a later timestamp.
+        val selectedSuffixChildId = selections[message.id]
+        selections.remove(message.id)
+        if (selectedCompact) {
+            if (selectedSuffixChildId == null) selections.remove(message.parentId)
+            else selections[message.parentId] = selectedSuffixChildId
+        }
+        val runSelections = decodeSelectionMap(conversation.selectedRunBranchesJson)
+        val selectedCompactRun = runSelections[compactRun.parentRunId] == compactRun.id
+        val selectedCompactRunChild = runSelections.remove(compactRun.id)
+        if (selectedCompactRun) {
+            if (selectedCompactRunChild == null) runSelections.remove(compactRun.parentRunId)
+            else runSelections[compactRun.parentRunId] = selectedCompactRunChild
+        }
+        check(
+            updateSelectionsForRunDeletion(
+                conversationId = message.conversationId,
+                selectedBranchesJson = encodeSelectionMap(selections),
+                selectedRunBranchesJson = encodeSelectionMap(runSelections),
+                at = System.currentTimeMillis(),
+            ) == 1
+        )
+        // A zero-retention Compact can be the last visible node. Subsequent Runs then reference
+        // its synthetic Run as their parent; deleting it directly would cascade-delete the entire
+        // future conversation. Splice those Run children back to the Compact Run's parent first.
+        reparentRunChildren(compactRun.id, compactRun.parentRunId)
+        check(deleteRun(compactRun.id) == 1)
+        return true
+    }
 
     @Query("DELETE FROM embeddings WHERE messageId IN (SELECT id FROM messages WHERE conversationId = :conversationId)")
     suspend fun deleteEmbeddingsByConversation(conversationId: String)
@@ -1275,6 +1447,36 @@ interface ChatDao {
     ) {
         replaceConversationModelReferences(oldModelId, newModelId)
         replaceTaskModelReferences(oldModelId, newModelId)
+    }
+
+    @Query(
+        """
+        UPDATE conversations
+        SET modelId = :newProvider || substr(modelId, length(:oldProvider) + 1)
+        WHERE modelId LIKE :oldProvider || ':%'
+        """
+    )
+    suspend fun renameConversationProviderModelReferences(
+        oldProvider: String,
+        newProvider: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE tasks
+        SET modelId = :newProvider || substr(modelId, length(:oldProvider) + 1)
+        WHERE modelId LIKE :oldProvider || ':%'
+        """
+    )
+    suspend fun renameTaskProviderModelReferences(
+        oldProvider: String,
+        newProvider: String,
+    ): Int
+
+    @Transaction
+    suspend fun renameConfiguredProviderModelReferences(oldProvider: String, newProvider: String) {
+        renameConversationProviderModelReferences(oldProvider, newProvider)
+        renameTaskProviderModelReferences(oldProvider, newProvider)
     }
 
     /** Clock-change CAS: never overwrite a concurrent edit/disable/execution advancement. */

@@ -37,8 +37,6 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
-    val maxContextWindow by viewModel.settings.maxContextWindow.collectAsState()
-    val visualizeContextRollout by viewModel.settings.visualizeContextRollout.collectAsState()
     val defaultTemperature by viewModel.settings.defaultTemperature.collectAsState()
     val defaultMaxTokens by viewModel.settings.defaultMaxTokens.collectAsState()
     val defaultTopP by viewModel.settings.defaultTopP.collectAsState()
@@ -59,80 +57,7 @@ fun SettingsGenerationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         floatingActionButton = { if (showDocFab) DocumentationFab("generation.md") }
     ) {
             SettingsGroupColumn {
-                // ── Section 1: Default Context Window ──
-                SettingsGroup(
-                    title = stringResource(R.string.context_window_default),
-                    items = listOf(
-                        {
-                            val persistedContextWindow = maxContextWindow.toFloat()
-                            var contextWindowDraft by remember { mutableFloatStateOf(persistedContextWindow) }
-                            LaunchedEffect(persistedContextWindow) {
-                                contextWindowDraft = persistedContextWindow
-                            }
-                            val contextWindowValue = contextWindowDraft.toInt().coerceIn(5, 100)
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    Icon(
-                                        Icons.Default.Memory,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(top = 2.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = stringResource(R.string.context_window),
-                                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Text(
-                                            text = stringResource(R.string.context_retain, contextWindowValue),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                        Slider(
-                                            value = contextWindowDraft,
-                                            onValueChange = { contextWindowDraft = it },
-                                            onValueChangeFinished = {
-                                                val committed = contextWindowDraft.toInt().coerceIn(5, 100)
-                                                contextWindowDraft = committed.toFloat()
-                                                if (committed != maxContextWindow) {
-                                                    viewModel.settings.setMaxContextWindow(committed)
-                                                }
-                                            },
-                                            valueRange = 5f..100f,
-                                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                                        )
-                                        Spacer(modifier = Modifier.height(12.dp))
-                                    }
-                                }
-                            }
-                        },
-                        {
-                            SettingsItem(
-                                headlineContent = { Text(stringResource(R.string.context_visualize)) },
-                                supportingContent = { Text(stringResource(R.string.context_visualize_desc)) },
-                                leadingContent = {
-                                    Icon(Icons.Default.Visibility, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                },
-                                trailingContent = {
-                                    Switch(checked = visualizeContextRollout, onCheckedChange = { viewModel.settings.setVisualizeContextRollout(it) })
-                                },
-                                modifier = Modifier.clickable { viewModel.settings.setVisualizeContextRollout(!visualizeContextRollout) }
-                            )
-                        }
-                    )
-                )
-
-                // ── Section 2: Default Thinking ──
+                // Default Thinking
                 SettingsGroup(
                     title = stringResource(R.string.default_thinking),
                     items = listOf(

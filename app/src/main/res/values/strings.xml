@@ -345,6 +345,7 @@
     <string name="context_window">Context Window</string>
     <string name="context_window_default">Default Context Window</string>
     <string name="context_retain">Retain %1$d recent messages</string>
+    <string name="context_token_budget_value">%1$s estimated tokens</string>
     <string name="context_visualize">Visualize Context Roll-Out</string>
     <string name="context_visualize_desc">Dim messages outside the context window</string>
     <string name="gen_temperature">Temperature</string>
@@ -1045,4 +1046,27 @@
     <string name="openai_service_tier_default">Default</string>
     <string name="openai_service_tier_flex">Flex</string>
     <string name="openai_service_tier_fast">Fast</string>
+    <string name="context_title">Context</string>
+    <string name="context_desc">Context management</string>
+    <string name="context_compact">Context compact</string>
+    <string name="context_compact_auto">Automatic compact</string>
+    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
+    <string name="context_compact_model">Compact model</string>
+    <string name="context_compact_prompt">Compact prompt</string>
+    <string name="context_compact_prompt_desc">Summary instructions</string>
+    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_manual">Compact context</string>
+    <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_select_available_model">Select an available model</string>
+    <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
+    <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">~%1$s / %2$s tokens · %3$d logical messages</string>
+    <string name="context_boundary_active">Compact boundary active</string>
+    <string name="context_boundary_none">No compact boundary</string>
+    <string name="thinking_segment_display_mode">Thinking segments</string>
+    <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
+    <string name="thinking_segment_display_card">Card</string>
+    <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
+    <string name="thinking_segments_title">Thinking segments</string>
 </resources>

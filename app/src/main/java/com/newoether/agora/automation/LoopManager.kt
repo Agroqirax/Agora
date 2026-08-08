@@ -133,14 +133,34 @@ class LoopManager(
         }
     }
 
+    /**
+     * Stops the timer, and only the timer.
+     *
+     * A Loop is a scheduler: its sole job is deciding *when* a cycle fires. Stopping it must
+     * therefore (a) prevent all future cycles and (b) leave any generation already in flight
+     * completely untouched, exactly as if the user had sent that turn by hand.
+     *
+     * Persisting `active=false` with a bumped revision is what actually stops the schedule: the
+     * revision guard makes every in-flight and queued cycle claim fail, and AutomationScheduler
+     * observes the Room write and drops the alarm.
+     *
+     * Cancelling WorkManager is a *separate* concern and is deliberately conditional.
+     * [LoopWorker.cancel] uses `cancelAllWorkByTag`, which cannot distinguish a queued worker from
+     * the one currently hosting a generation, so cancelling while a cycle runs would kill that
+     * generation. When a cycle is in flight the revision bump alone is sufficient, and the running
+     * worker is left to finish; the durable state already says inactive, so it schedules nothing.
+     */
     suspend fun stopLoop(conversationId: String): StopResult = stateMutex.withLock {
         val existing = taskRepository.getLoop(conversationId).first()
             ?: return@withLock StopResult.NotFound
+        // A generation belonging to this conversation is mid-flight. Cancelling tagged work would
+        // terminate it, which Stop must never do.
+        val generationInFlight = conversationId in _runningConversationIds.value
         if (!existing.active) {
-            // The final cycle is claimed by persisting active=false before generation starts.
-            // It can therefore still own a live LoopWorker even though its durable state already
-            // looks stopped. Always cancel tagged work so Stop/Delete remains effective then too.
-            cancelWorkBestEffort(conversationId)
+            // The final cycle claims itself by persisting active=false *before* generation starts,
+            // so an inactive Loop can still own a queued worker. Clean it up, unless a generation
+            // is currently running under that same tag.
+            if (!generationInFlight) cancelWorkBestEffort(conversationId)
             return@withLock StopResult.AlreadyStopped
         }
 
@@ -150,8 +170,10 @@ class LoopManager(
                 revision = LoopPolicy.nextRevision(existing.revision),
             )
         )
-        // Cancellation is best effort; the revision change is the correctness boundary.
-        cancelWorkBestEffort(conversationId)
+        // Drop the worker that would host the *next* cycle. Skipped while a generation is in
+        // flight because the tag cannot separate the two; the revision bump already neutralizes
+        // any queued claim in that case.
+        if (!generationInFlight) cancelWorkBestEffort(conversationId)
         StopResult.Stopped
     }
 

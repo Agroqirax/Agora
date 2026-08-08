@@ -10,6 +10,7 @@ import com.newoether.agora.data.MemoryManager
 
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
@@ -149,7 +150,7 @@ data class GenerationConfig(
     val modelId: String,
     val apiKey: String,
     val effectiveSystemPrompt: String?,
-    val maxContextWindow: Int,
+    val maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
     val codeExecutionEnabled: Boolean,
     val googleSearchEnabled: Boolean,
     val thinkingEnabled: Boolean,
@@ -250,6 +251,7 @@ data class GenerationCallbacks(
      *  each round boundary and ends the generation there so the queue can flush immediately
      *  (steering) instead of waiting out the entire loop. Headless runs keep the default. */
     val hasQueuedSends: () -> Boolean = { false },
+    val onToolRoundPersisted: suspend () -> Unit = {},
 )
 
 class GenerationManager(
@@ -527,6 +529,7 @@ class GenerationManager(
         while (currId != null) {
             val msg = messagesById[currId] ?: break
             pathEntities.add(0, msg)
+            if (msg.id.startsWith(Constants.COMPACT_MSG_PREFIX)) break
             currId = msg.parentId
         }
         // Inject each persisted tool protocol row exactly once. A queued intervention may have a
@@ -1128,13 +1131,9 @@ class GenerationManager(
                                 )
                             }
                         }
-                        if (
-                            toolCallData == null &&
-                            toolCallDataList.isEmpty() &&
-                            completedToolCalls.isEmpty()
-                        ) {
+                        currentStatus = MessageStatus.ERROR
+                        if (totalText.isBlank()) {
                             totalText = event.message
-                            currentStatus = MessageStatus.ERROR
                         }
                     }
                     is StreamEvent.ToolCallUpdate -> {
@@ -1222,7 +1221,7 @@ class GenerationManager(
                     requestTrace?.mark("first_semantic_event")
             }
             finishCurrentThoughtTiming()
-            executeCompletedToolCalls()
+            if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
             // Publish the final in-memory snapshot without waiting for another Room round trip.
             // The terminal transaction below persists this exact state after fencing the
             // checkpoint writer, while genuine tool lifecycle boundaries remain forced.
@@ -1327,6 +1326,15 @@ class GenerationManager(
                     }
                 }
                 conversations.appendToolRoundToRun(toolRoundEntities)
+                callbacks.onToolRoundPersisted()
+                toolPath = buildApiPath(
+                    resultMsgs.last().first,
+                    conversationId,
+                    false,
+                    null,
+                    config,
+                    ctx,
+                ).first
 
                 toolCallData = null
                 toolCallDataList = emptyList()
@@ -1350,7 +1358,7 @@ class GenerationManager(
                 val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
                 collectProviderRequest(apiToolPath)
                 finishCurrentThoughtTiming()
-                executeCompletedToolCalls()
+                if (currentStatus != MessageStatus.ERROR) executeCompletedToolCalls()
                 // Publish the round's final UI state immediately. The next loop boundary or the
                 // terminal transaction supplies durability, so blocking here would only duplicate
                 // I/O and visibly delay the transition out of generating.
@@ -1457,10 +1465,10 @@ class GenerationManager(
                                         RunStatus.STOPPED,
                                         RunEndReason.USER_STOPPED,
                                     )
-                                // A queue-steered successful pass keeps this Run ACTIVE for the
-                                // next pass in the same generation cycle.
-                                callbacks.hasQueuedSends() ->
-                                    conversations.updateStreamingMessageCheckpoint(finalMessage)
+                                // Failure is a terminal generation boundary even when guidance is
+                                // waiting. The controller migrates that memory batch into a fresh
+                                // child Run; keeping the failed origin live would block the unique
+                                // active-Run slot forever.
                                 currentStatus == MessageStatus.ERROR ->
                                     conversations.finishGeneration(
                                         finalMessage,
@@ -1469,6 +1477,10 @@ class GenerationManager(
                                         RunStatus.FAILED,
                                         RunEndReason.PROVIDER_ERROR,
                                     )
+                                // A queue-steered successful pass keeps this Run ACTIVE for the
+                                // next pass in the same generation cycle.
+                                callbacks.hasQueuedSends() ->
+                                    conversations.updateStreamingMessageCheckpoint(finalMessage)
                                 else ->
                                     conversations.finishGeneration(
                                         finalMessage,
@@ -1516,7 +1528,19 @@ class GenerationManager(
             if (foregroundLeaseAcquired) {
                 AgoraForegroundService.release(modelMessageId)
             }
-            if (!AppForegroundTracker.isInForeground && currentStatus == MessageStatus.SUCCESS && totalText.isNotBlank()) {
+            // A queued user intervention ends this provider pass but not the generation cycle.
+            // The controller immediately drains that queue into the next pass. Notify only after
+            // the final pass, otherwise accepting a steering message produces a false "response
+            // ready" notification while Agora is still generating its actual answer.
+            val generationCycleComplete =
+                currentStatus == MessageStatus.SUCCESS &&
+                    !interruptedForQueuedSend &&
+                    !callbacks.hasQueuedSends()
+            if (
+                !AppForegroundTracker.isInForeground &&
+                generationCycleComplete &&
+                totalText.isNotBlank()
+            ) {
                 AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
             }
         }

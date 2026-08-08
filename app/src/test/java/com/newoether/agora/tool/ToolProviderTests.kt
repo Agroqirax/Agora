@@ -80,7 +80,7 @@ class ShellToolProviderTest {
             )
         )
         val defs = provider.definitions(ctx)
-        assertEquals(11, defs.size)
+        assertEquals(12, defs.size)
         val names = defs.map { it.function.name }.toSet()
         assertEquals(
             setOf(
@@ -88,6 +88,7 @@ class ShellToolProviderTest {
                 "execute_shell_command",
                 "list_shell_jobs",
                 "get_shell_job",
+                "wait_for_job",
                 "stop_shell_job",
                 "file_read",
                 "file_write",
@@ -116,7 +117,49 @@ class ShellToolProviderTest {
         val defs = provider.definitions(ctx)
         val cmdTool = defs.find { it.function.name == "execute_shell_command" }
         assertNotNull(cmdTool)
-        assertEquals(listOf("command", "server"), cmdTool!!.function.parameters.required)
+        assertEquals(
+            listOf("command", "server", "timeout_ms"),
+            cmdTool!!.function.parameters.required,
+        )
+    }
+
+    @Test
+    fun definitions_singleDevice_commandRequiresTimeout() {
+        val ctx = GenerationContext(
+            shellEnabled = true,
+            shellDevices = listOf(
+                com.newoether.agora.data.ShellDeviceConfig(name = "s1", serverUrl = "http://a"),
+            ),
+        )
+        val defs = provider.definitions(ctx)
+        val cmdTool = defs.single { it.function.name == "execute_shell_command" }
+        assertEquals(listOf("command", "timeout_ms"), cmdTool.function.parameters.required)
+        assertTrue(
+            cmdTool.function.parameters.properties.getValue("timeout_ms").description
+                .contains("never killed or restarted")
+        )
+        val waitTool = defs.single { it.function.name == "wait_for_job" }
+        assertTrue(waitTool.function.parameters.required.contains("timeout_ms"))
+        assertTrue(waitTool.function.parameters.required.contains("job_id"))
+        assertTrue(
+            waitTool.function.parameters.properties.getValue("timeout_ms").description
+                .contains("295000ms")
+        )
+        assertEquals(295_000, ShellToolProvider.maxWaitMs(ctx))
+    }
+
+    @Test
+    fun executeShellCommand_missingTimeout_returnsError() = kotlinx.coroutines.test.runTest {
+        val ctx = GenerationContext(
+            shellEnabled = true,
+            shellDevices = listOf(
+                com.newoether.agora.data.ShellDeviceConfig(name = "s1", serverUrl = "http://a"),
+            ),
+        )
+        val result = provider.execute(
+            "execute_shell_command", """{"command":"echo hi","server":"s1"}""", ctx,
+        )
+        assertTrue(result.contains("timeout_ms is required"))
     }
 
     @Test
@@ -125,6 +168,7 @@ class ShellToolProviderTest {
         assertTrue(provider.handles("execute_shell_command"))
         assertTrue(provider.handles("list_shell_jobs"))
         assertTrue(provider.handles("get_shell_job"))
+        assertTrue(provider.handles("wait_for_job"))
         assertTrue(provider.handles("stop_shell_job"))
         assertTrue(provider.handles("file_read"))
         assertTrue(provider.handles("file_write"))

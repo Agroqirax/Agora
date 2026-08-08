@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -112,7 +113,47 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun stop_suppressesOnlyTheNextQueueDrainDecision() {
+    fun stopCancelsAnExternallyOwnedBackgroundGenerationJob() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        val started = CompletableDeferred<Unit>()
+        val externalJob = launch {
+            started.complete(Unit)
+            awaitCancellation()
+        }
+        assertTrue(state.attachGenerationJob(token, externalJob))
+        state.bindRun(token, "background-run")
+        started.await()
+
+        val stopped = state.stop()
+        externalJob.join()
+
+        assertTrue(externalJob.isCancelled)
+        assertEquals("background-run", stopped.runId)
+        // The coroutine half settled, but the durable Run half still owns STOPPING.
+        assertTrue(state.generating.value)
+        assertTrue(state.finishStopFinalization(success = true))
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun normalExternalCompletionRequestsQueueDrainExactlyOnce() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        val externalJob = Job()
+        var drainRequests = 0
+        state.onQueueDrainRequested = { drainRequests += 1 }
+
+        assertTrue(state.attachGenerationJob(token, externalJob))
+        externalJob.complete()
+        externalJob.join()
+
+        assertEquals(1, drainRequests)
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun stopPreservesQueueDrainPermission() {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
@@ -120,8 +161,61 @@ class ConversationGenerationStateTest {
         val stopped = state.stop()
 
         assertEquals("run", stopped.runId)
-        assertFalse(state.consumeQueueDrainPermission())
+        // Stop no longer suppresses queue drain. The existing queue consumption logic
+        // naturally takes over after the stop state settles.
         assertTrue(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
+    }
+
+    /**
+     * The Stop barrier has two halves (coroutine unwind, durable terminal write) that can complete
+     * in either order, and whichever finishes LAST performs the release.
+     *
+     * These two tests pin both orders against the same requirement: the releaser must announce the
+     * settle through onStopSettled, because that is the only path which migrates the still-pending
+     * queued inputs onto a fresh Run. A release that instead just reported "you may drain" would
+     * look correct in isolation while handing the drain a terminalized Run, which fails deep inside
+     * and strands durably-accepted user messages with no answer.
+     */
+    @Test
+    fun stopSettledByDurableWriteLast_announcesSettle() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        var settledCount = 0
+        state.onStopSettled = { settledCount += 1 }
+
+        state.stop()
+        active.unwind.complete(Unit)
+        active.job.join()
+        // Coroutine unwound first, so it must not have settled anything on its own.
+        assertEquals(0, settledCount)
+
+        assertTrue(state.finishStopFinalization(success = true))
+
+        assertEquals(1, settledCount)
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
+    }
+
+    @Test
+    fun stopSettledByCoroutineUnwindLast_announcesSettle() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        val settled = CompletableDeferred<Unit>()
+        state.onStopSettled = { settled.complete(Unit) }
+
+        state.stop()
+        // Durable half lands first; it cannot release while the coroutine still owns the slot.
+        assertFalse(state.finishStopFinalization(success = true))
+        assertFalse(settled.isCompleted)
+
+        active.unwind.complete(Unit)
+        active.job.join()
+
+        // The coroutine released, so it owes the announcement.
+        settled.await()
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
     }
 
     @Test
@@ -187,6 +281,53 @@ class ConversationGenerationStateTest {
         state.streamClear(token)
 
         assertEquals(stopped, state.streamingMessage.value)
+    }
+
+    @Test
+    fun queuedGuidanceRemainsMemoryOnlyAndPreservesOrder() {
+        val state = ConversationGenerationState("conversation")
+        val first = QueuedSend("one", "first", "model", emptyList(), "run")
+        val second = QueuedSend("two", "second", "model", emptyList(), "run")
+
+        state.enqueueSend(first)
+        state.enqueueSend(second)
+
+        assertEquals(listOf("one", "two"), state.queuedSends.value.map { it.id })
+        assertEquals(listOf(first, second), state.takeQueuedSends())
+        assertTrue(state.queuedSends.value.isEmpty())
+    }
+
+    @Test
+    fun removingQueuedGuidanceTransfersOwnershipExactlyOnce() {
+        val state = ConversationGenerationState("conversation")
+        val queued = QueuedSend("one", "first", "model", emptyList(), "run")
+        state.enqueueSend(queued)
+
+        assertEquals(queued, state.removeQueuedSend("one"))
+        assertNull(state.removeQueuedSend("one"))
+        assertTrue(state.queuedSends.value.isEmpty())
+    }
+
+    @Test
+    fun failedBoundaryDrainRestoresWholeBatchAtFront() {
+        val state = ConversationGenerationState("conversation")
+        val older = QueuedSend("older", "a", "model", emptyList(), "run")
+        val newer = QueuedSend("newer", "b", "model", emptyList(), "run")
+        state.enqueueSend(newer)
+
+        state.requeueFront(listOf(older))
+
+        assertEquals(listOf("older", "newer"), state.queuedSends.value.map { it.id })
+    }
+
+    @Test
+    fun failedBoundaryDrainDefersOnlyImmediateAutomaticRetry() {
+        val state = ConversationGenerationState("conversation")
+
+        state.deferNextQueueDrain()
+
+        assertFalse(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
     }
 
     private fun activeStateWithStreamingMessage(): ActiveGeneration {

@@ -1,5 +1,8 @@
 package com.newoether.agora.data.repository
 
+import com.newoether.agora.model.ThinkingSegmentDisplayModes
+import com.newoether.agora.model.ContextBudget
+
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
@@ -88,8 +91,13 @@ class SettingsRepository(
     val activeApiKeyIds: StateFlow<Map<String, String>> = hot(settingsManager.activeApiKeyIds, emptyMap())
     val systemPrompts: StateFlow<List<SystemPromptEntry>> = hot(settingsManager.systemPrompts, emptyList())
     val activeSystemPromptId: StateFlow<String?> = hot(settingsManager.activeSystemPromptId, null)
-    val maxContextWindow: StateFlow<Int> = hot(settingsManager.maxContextWindow, 20)
+    val maxContextWindow: StateFlow<Int> =
+        hot(settingsManager.maxContextWindow, ContextBudget.DEFAULT_TOKENS)
     val visualizeContextRollout: StateFlow<Boolean> = hot(settingsManager.visualizeContextRollout, false)
+    val contextCompactEnabled: StateFlow<Boolean> = hot(settingsManager.contextCompactEnabled, false)
+    val contextCompactModel: StateFlow<String?> = hot(settingsManager.contextCompactModel, null)
+    val contextCompactPrompt: StateFlow<String> = hot(settingsManager.contextCompactPrompt, BuiltInPrompts.CONTEXT_COMPACT_SYSTEM)
+    val contextCompactRetainCount: StateFlow<Int> = hot(settingsManager.contextCompactRetainCount, 6)
     val codeExecutionEnabled: StateFlow<Boolean> = hot(settingsManager.codeExecutionEnabled, false)
     val googleSearchEnabled: StateFlow<Boolean> = hot(settingsManager.googleSearchEnabled, false)
     val thinkingEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingEnabled, true)
@@ -166,6 +174,10 @@ class SettingsRepository(
     val detailedTokenUsage: StateFlow<Boolean> =
         hot(settingsManager.detailedTokenUsage, false)
     val toolCallDisplayMode: StateFlow<String> = hot(settingsManager.toolCallDisplayMode, ToolCallDisplayModes.DEFAULT)
+    val thinkingSegmentDisplayMode: StateFlow<String> = hot(
+        settingsManager.thinkingSegmentDisplayMode,
+        ThinkingSegmentDisplayModes.DEFAULT,
+    )
     val autoExpandActiveGroup: StateFlow<Boolean> =
         hot(settingsManager.autoExpandActiveGroup, true)
     val schemeStyle: StateFlow<String> = hot(settingsManager.schemeStyle, "TONAL_SPOT")
@@ -342,7 +354,10 @@ class SettingsRepository(
                 currentName = oldName,
             )
         ) return
-        val url = providerBaseUrls.value[oldName] ?: return
+        // A malformed/legacy custom provider may have no explicit URL entry. Renaming is still a
+        // name-only operation and must not silently no-op after the dialog closes; preserve the
+        // missing value as missing while remapping every other provider-keyed reference.
+        val url = providerBaseUrls.value[oldName].orEmpty()
         scope.launch {
             val updated = customProviders.value.toMutableList()
             val idx = updated.indexOfFirst { it.name == oldName }
@@ -356,24 +371,8 @@ class SettingsRepository(
                 models[newName] = models.remove(oldName) ?: emptyList()
                 settingsManager.saveAvailableModels(newName, models[newName] ?: emptyList())
                 settingsManager.saveAvailableModels(oldName, emptyList())
-                settingsManager.saveCustomModels(
-                    customModels.value.mapTo(linkedSetOf()) { model ->
-                        val parsed = ModelId.parse(model)
-                        if (parsed.providerName == oldName) {
-                            ModelId(newName, parsed.modelName).prefixed
-                        } else {
-                            model
-                        }
-                    }
-                )
-                val newEnabled = enabledModels.value.map { if (it.startsWith("$oldName:")) it.replace("$oldName:", "$newName:") else it }.toSet()
-                settingsManager.saveEnabledModels(newEnabled)
-                val newAliases = modelAliases.value.mapKeys { if (it.key.startsWith("$oldName:")) it.key.replace("$oldName:", "$newName:") else it.key }
-                settingsManager.saveModelAliases(newAliases)
-                settingsManager.setActiveApiKeyId(oldName, null)
-                val newKeys = apiKeys.value.map { if (it.provider == oldName) it.copy(provider = newName) else it }
-                settingsManager.saveApiKeys(newKeys)
-                activeApiKeyIds.value[oldName]?.let { settingsManager.setActiveApiKeyId(newName, it) }
+                settingsManager.renameProviderModelReferences(oldName, newName)
+                settingsManager.renameApiKeyProvider(oldName, newName)
             }
         }
     }
@@ -429,6 +428,11 @@ class SettingsRepository(
     fun setTitleGenerationEnabled(enabled: Boolean) = scope.launch { settingsManager.saveTitleGenerationEnabled(enabled) }
     fun setTitleGenerationNotificationsEnabled(enabled: Boolean) =
         scope.launch { settingsManager.saveTitleGenerationNotificationsEnabled(enabled) }
+    fun setContextCompactEnabled(enabled: Boolean) = scope.launch { settingsManager.saveContextCompactEnabled(enabled) }
+    fun setContextCompactModel(model: String?) = scope.launch { settingsManager.saveContextCompactModel(model) }
+    fun setContextCompactPrompt(prompt: String) = scope.launch { settingsManager.saveContextCompactPrompt(prompt) }
+    fun setContextCompactRetainCount(count: Int) = scope.launch { settingsManager.saveContextCompactRetainCount(count) }
+
     fun setTitleGenerationModel(model: String?) = scope.launch { settingsManager.saveTitleGenerationModel(model) }
     fun setTitleGenerationPrompt(prompt: String) = scope.launch { settingsManager.saveTitleGenerationPrompt(prompt) }
     fun setImageTranscriptionEnabled(enabled: Boolean) =
@@ -490,6 +494,9 @@ class SettingsRepository(
     fun setDetailedTokenUsage(enabled: Boolean) =
         scope.launch { settingsManager.saveDetailedTokenUsage(enabled) }
     fun setToolCallDisplayMode(mode: String) = scope.launch { settingsManager.saveToolCallDisplayMode(mode) }
+    fun setThinkingSegmentDisplayMode(mode: String) =
+        scope.launch { settingsManager.saveThinkingSegmentDisplayMode(mode) }
+
     fun setAutoExpandActiveGroup(enabled: Boolean) =
         scope.launch { settingsManager.saveAutoExpandActiveGroup(enabled) }
     fun setSchemeStyle(style: String) = scope.launch { settingsManager.saveSchemeStyle(style) }

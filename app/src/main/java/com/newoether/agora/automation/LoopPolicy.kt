@@ -2,7 +2,7 @@ package com.newoether.agora.automation
 
 /** Cost and cadence guardrails shared by the Loop domain layer and model-facing tools. */
 object LoopPolicy {
-    const val MIN_INTERVAL_SECONDS = 60L
+    const val MIN_INTERVAL_SECONDS = 10L
     const val MAX_INTERVAL_SECONDS = 604_800L // 7 days
     const val MIN_INTERVAL_MS = MIN_INTERVAL_SECONDS * 1_000L
     const val MAX_INTERVAL_MS = MAX_INTERVAL_SECONDS * 1_000L

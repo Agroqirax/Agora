@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.util.Constants
 
 /**
@@ -59,9 +60,16 @@ internal object ApiPathAssembler {
             toolRoots.forEach { emitProtocolSubtree(it, entity.runId, entity.modelName) }
 
             if (emittedIds.add(entity.id)) {
-                // The visible model row aggregates its tool segments for UI rendering. Once the
-                // corresponding protocol rows have been emitted, replay only its normal content.
-                result += if (toolRoots.isEmpty()) entity else entity.copy(toolCallJson = null)
+                // The visible model row aggregates every tool round for UI rendering. During the
+                // live tool loop that row is still the in-progress output placeholder; replaying
+                // it after the just-persisted result would make the next request end in assistant
+                // output instead of tool input. Terminal rows, however, contain the completed
+                // answer after those tool rounds and remain part of later historical requests.
+                val isInProgressToolAggregate =
+                    toolRoots.isNotEmpty() && entity.status.isGenerationInProgress()
+                if (!isInProgressToolAggregate) {
+                    result += if (toolRoots.isEmpty()) entity else entity.copy(toolCallJson = null)
+                }
             }
         }
         return result
@@ -75,4 +83,14 @@ internal object ApiPathAssembler {
     private fun MessageEntity.isToolProtocolRow(): Boolean =
         id.startsWith(Constants.TOOL_MSG_PREFIX) ||
             id.startsWith(Constants.RESULT_MSG_PREFIX)
+
+    private fun MessageStatus.isGenerationInProgress(): Boolean = when (this) {
+        MessageStatus.TRANSCRIBING,
+        MessageStatus.SENDING,
+        MessageStatus.THINKING,
+        MessageStatus.TOOL_CALLING -> true
+        MessageStatus.SUCCESS,
+        MessageStatus.STOPPED,
+        MessageStatus.ERROR -> false
+    }
 }

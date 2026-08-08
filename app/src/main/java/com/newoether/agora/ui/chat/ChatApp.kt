@@ -32,6 +32,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -61,9 +62,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.newoether.agora.R
 import com.newoether.agora.data.isOpenAiProtocolProvider
+import com.newoether.agora.api.util.contextWindowUsage
+import com.newoether.agora.api.util.expandSelectedToolProtocolRows
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
@@ -416,6 +420,12 @@ fun ChatApp(
     val messagesState = viewModel.messages.collectAsState()
     val allMessagesState = viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val isCompacting by viewModel.isCompacting.collectAsState()
+    val compactModel by viewModel.settings.contextCompactModel.collectAsState()
+    val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
+    val compactRetainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
+    var showManualCompactDialog by rememberSaveable { mutableStateOf(false) }
+    var manualCompactError by remember { mutableStateOf<String?>(null) }
     val queuedSends by viewModel.queuedSends.collectAsState()
     val isStopping by viewModel.isStopping.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
@@ -451,6 +461,7 @@ fun ChatApp(
     val globalShell by viewModel.settings.shellEnabled.collectAsState()
     val shellDevices by viewModel.settings.shellDevices.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
+    val thinkingSegmentDisplayMode by viewModel.settings.thinkingSegmentDisplayMode.collectAsState()
     val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
     val detailedTokenUsage by viewModel.settings.detailedTokenUsage.collectAsState()
     val conversationSettings by viewModel.settings.conversationSettings.collectAsState()
@@ -475,11 +486,25 @@ fun ChatApp(
     // Web Search and Shell: global switch OFF → always false, regardless of override
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
-    val contextWindow = convOverride?.contextWindow ?: maxContextWindow
+    val contextWindow = ContextBudget.normalize(convOverride?.contextWindow ?: maxContextWindow)
+    val contextUsage = remember(messagesState.value, allMessagesState.value, contextWindow) {
+        contextWindowUsage(
+            expandSelectedToolProtocolRows(messagesState.value, allMessagesState.value),
+            contextWindow,
+        )
+    }
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val reduceMotion = motionPolicy.reduceMotion
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val haptics = rememberAgoraHaptics(hapticsEnabled)
+    // The three send paths (manual Send, queue drain, loop cycle) converge in the Controller at
+    // notifySendAccepted, the single choke point for Direct + Queued send acceptances. Wiring the
+    // haptics there gives every accepted send exactly one confirm(), independent of which path
+    // triggered it or which scroll policy applies.
+    DisposableEffect(haptics) {
+        viewModel.onSendAccepted = { _, _ -> haptics.confirm() }
+        onDispose { viewModel.onSendAccepted = null }
+    }
 
 
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
@@ -1406,7 +1431,15 @@ fun ChatApp(
                     targetCommitted &&
                     request.conversationId == currentConversationId
                 ) {
-                    requestAbsoluteBottomScroll(feedbackSpec = SEND_FEEDBACK_SCROLL_SPEC)
+                    // ATTACHED_ONLY (loop cycles) skips scrolling when the user has scrolled
+                    // away so automated messages never steal the scroll position. The one-shot
+                    // bubble entrance animation still plays because the request was active
+                    // during target commitment.
+                    val shouldScroll =
+                        !request.attachedOnly || isWithinAbsoluteBottomAttachThreshold
+                    if (shouldScroll) {
+                        requestAbsoluteBottomScroll(feedbackSpec = SEND_FEEDBACK_SCROLL_SPEC)
+                    }
                 } else if (!targetCommitted) {
                     DebugLog.e(
                         "AgoraUI",
@@ -1662,6 +1695,7 @@ fun ChatApp(
                                 // gates on current == id), so message actions freeze while THIS
                                 // conversation generates — background conversations don't affect it.
                                 isLoading = isLoading,
+                                isCompacting = isCompacting,
                                 isStopping = isStopping,
                                 isSwitching = isSwitching,
                                 streamingAutoFollowEnabled =
@@ -1683,6 +1717,7 @@ fun ChatApp(
                                     viewModel::acknowledgeRegenerationFade,
                                 visualizeContextRollout = visualizeContextRollout,
                                 toolCallDisplayMode = toolCallDisplayMode,
+                                thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
                                 autoExpandActiveGroup = autoExpandActiveGroup,
                                 detailedTokenUsage = detailedTokenUsage,
                                 maxContextWindow = contextWindow,
@@ -2027,6 +2062,7 @@ fun ChatApp(
                             viewModel.stopGeneration()
                         },
                         isLoading = isLoading,
+                        isCompacting = isCompacting,
                         isSwitching = isSwitching,
                         enabledModels = enabledModels,
                         selectedModel = selectedModel,
@@ -2089,6 +2125,18 @@ fun ChatApp(
                         onTogglePdfSelection = onTogglePdfSelection,
                         onInitPdfSelection = onInitPdfSelection,
                         fullScreenViewerUrls = fullScreenViewerUrls,
+                        compactDefaultModel = compactModel,
+                        compactDefaultPrompt = compactPrompt,
+                        compactDefaultRetainCount = compactRetainCount,
+                        contextEstimatedTokens = contextUsage.estimatedTokenCount,
+                        contextLogicalMessageCount = contextUsage.logicalMessageCount,
+                        contextTokenBudget = contextUsage.tokenBudget,
+                        hasCompactBoundary = contextUsage.hasCompactBoundary,
+                        canCompact = currentConversationId != null && !isLoading && !isSwitching && !isStopping,
+                        onCompactClick = {
+                            manualCompactError = null
+                            showManualCompactDialog = true
+                        },
                         onAdvancedClick = { showAdvancedDialog = true },
                         queuedSends = queuedSends,
                         onRemoveQueuedSend = viewModel::removeQueuedSend,
@@ -2131,5 +2179,135 @@ fun ChatApp(
 
     if (showAdvancedDialog) {
         ChatAdvancedSettingsDialog(viewModel = viewModel, onDismiss = { showAdvancedDialog = false })
+    }
+
+    if (showManualCompactDialog) {
+        var model by remember(compactModel, selectedModel) {
+            mutableStateOf(compactModel ?: selectedModel)
+        }
+        var prompt by remember(compactPrompt) { mutableStateOf(compactPrompt) }
+        var retain by remember(compactRetainCount) { mutableStateOf(compactRetainCount.toString()) }
+        var modelMenu by remember { mutableStateOf(false) }
+        val unavailableModelError = stringResource(R.string.context_compact_select_available_model)
+        val emptyPromptError = stringResource(R.string.context_compact_prompt_empty)
+        val invalidRetainError = stringResource(R.string.context_compact_retain_invalid)
+        AlertDialog(
+            modifier = Modifier.clearFocusOnTap(),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            onDismissRequest = { if (!isCompacting) showManualCompactDialog = false },
+            title = {
+                Text(
+                    stringResource(R.string.context_compact_manual),
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    ExposedDropdownMenuBox(
+                        expanded = modelMenu,
+                        onExpandedChange = { if (!isCompacting) modelMenu = it },
+                    ) {
+                        OutlinedTextField(
+                            value = modelAliases[model] ?: model,
+                            onValueChange = {},
+                            readOnly = true,
+                            enabled = !isCompacting,
+                            singleLine = true,
+                            label = { Text(stringResource(R.string.context_compact_model)) },
+                            trailingIcon = {
+                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu)
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(
+                                    type = ExposedDropdownMenuAnchorType.PrimaryNotEditable,
+                                    enabled = !isCompacting,
+                                ),
+                        )
+                        ExposedDropdownMenu(
+                            expanded = modelMenu,
+                            onDismissRequest = { modelMenu = false },
+                        ) {
+                            enabledModels.sorted().forEach { candidate ->
+                                DropdownMenuItem(
+                                    text = { Text(modelAliases[candidate] ?: candidate) },
+                                    onClick = {
+                                        model = candidate
+                                        modelMenu = false
+                                        manualCompactError = null
+                                    },
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = prompt,
+                        onValueChange = { prompt = it; manualCompactError = null },
+                        label = { Text(stringResource(R.string.context_compact_prompt)) },
+                        enabled = !isCompacting,
+                        minLines = 3,
+                        maxLines = 7,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    OutlinedTextField(
+                        value = retain,
+                        onValueChange = { retain = it.filter(Char::isDigit); manualCompactError = null },
+                        label = { Text(stringResource(R.string.context_compact_retain)) },
+                        enabled = !isCompacting,
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    manualCompactError?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showManualCompactDialog = false },
+                    enabled = !isCompacting,
+                ) { Text(stringResource(R.string.provider_cancel)) }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isCompacting,
+                    onClick = {
+                        val count = retain.toIntOrNull()
+                        when {
+                            model !in enabledModels -> manualCompactError = unavailableModelError
+                            prompt.isBlank() -> manualCompactError = emptyPromptError
+                            count == null -> manualCompactError = invalidRetainError
+                            else -> scope.launch {
+                                when (val result = viewModel.compactContextManual(model, prompt, count)) {
+                                    is com.newoether.agora.viewmodel.CompactResult.Failed -> {
+                                        manualCompactError = result.message
+                                    }
+                                    else -> showManualCompactDialog = false
+                                }
+                            }
+                        }
+                    },
+                ) {
+                    if (isCompacting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(stringResource(R.string.context_compact))
+                    }
+                }
+            },
+        )
     }
 }

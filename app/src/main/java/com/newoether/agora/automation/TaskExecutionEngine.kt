@@ -14,10 +14,13 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
+import com.newoether.agora.viewmodel.CompactResult
+import com.newoether.agora.viewmodel.ContextCompactor
 import com.newoether.agora.viewmodel.ConversationUiState
 import com.newoether.agora.viewmodel.ConversationTitleGenerator
 import com.newoether.agora.viewmodel.GenerationCallbacks
 import com.newoether.agora.viewmodel.GenerationManager
+import com.newoether.agora.viewmodel.ConversationStateRegistry
 import com.newoether.agora.viewmodel.GenerationRequestBuilder
 import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
@@ -26,7 +29,10 @@ import com.newoether.agora.viewmodel.fallbackConversationTitle
 import com.newoether.agora.tool.McpToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
 import java.util.UUID
@@ -34,12 +40,11 @@ import java.util.UUID
 /**
  * Headless single-shot generation engine (process-scoped).
  *
- * Phase 0b skeleton: drives one complete generation (including the agentic tool
- * loop) for a conversation WITHOUT any ViewModel / Compose state, by reusing the
- * exact same [GenerationManager] pipeline the foreground path runs. Background
- * Task/Loop runners call [runOnce]; the foreground [com.newoether.agora.viewmodel.ChatViewModel]
- * keeps its own driving path for now — the full ViewModel→engine delegation is a
- * later phase (see `.claude/AUTOMATION_DESIGN.md` §3).
+ * Drives one complete generation (including the agentic tool loop) for a conversation without
+ * depending on a ViewModel or Compose state, while reusing the same [GenerationManager] pipeline
+ * as foreground generation. Background Task/Loop runners call [runOnce]; when the conversation is
+ * open, the engine attaches to its shared generation state so Stop and queued guidance retain the
+ * same ownership semantics as the foreground path.
  *
  * Collaborators are the process-scoped singletons from `AppContainer`, so the
  * background engine shares the live provider map, the on-device llama engine, and
@@ -58,11 +63,53 @@ class TaskExecutionEngine(
     private val executionCoordinator: ConversationExecutionCoordinator,
     shellConfirmation: ShellConfirmationController,
     mcpToolProvider: McpToolProvider,
+    private val generationRegistry: ConversationStateRegistry? = null,
     private val automationExecutionGate: AutomationExecutionGate = AutomationExecutionGate(),
+    private val pauseConversationLoop: suspend (String) -> Unit = {},
 ) {
     sealed interface Result {
         data class Success(val modelMessageId: String, val text: String) : Result
         data class Failure(val reason: String) : Result
+    }
+
+    /**
+     * Optional bridge that redirects loop cycles on the foreground-open conversation through the
+     * regular MessageGenerationController send path (with attached-only scroll) instead of the
+     * headless engine path. Set by ChatViewModel when it is constructed; cleared on dispose.
+     *
+     * Contract: the bridge SUSPENDS until the delegated turn finishes and reports the durable
+     * outcome. It must not return as soon as the send is accepted, otherwise the caller's
+     * conversation lease would be released while the generation is still running, and the Loop
+     * would record the cycle as complete before it produced anything.
+     */
+    private val foregroundBridgeLock = Any()
+    private var foregroundBridgeOwner: Any? = null
+    private var foregroundSendBridge: (suspend (conversationId: String, userText: String, modelId: String) -> BridgeOutcome)? = null
+
+    /** Owner-token binding prevents an older ViewModel's late onCleared from erasing a newer one. */
+    fun attachForegroundSendBridge(
+        owner: Any,
+        bridge: suspend (conversationId: String, userText: String, modelId: String) -> BridgeOutcome,
+    ) = synchronized(foregroundBridgeLock) {
+        foregroundBridgeOwner = owner
+        foregroundSendBridge = bridge
+    }
+
+    fun detachForegroundSendBridge(owner: Any) = synchronized(foregroundBridgeLock) {
+        if (foregroundBridgeOwner !== owner) return@synchronized
+        foregroundBridgeOwner = null
+        foregroundSendBridge = null
+    }
+
+    private fun currentForegroundSendBridge() = synchronized(foregroundBridgeLock) {
+        foregroundSendBridge
+    }
+
+    /** Outcome of a delegated foreground send. [NotDelegated] means the caller must run headlessly. */
+    sealed interface BridgeOutcome {
+        data object NotDelegated : BridgeOutcome
+        data class Completed(val modelMessageId: String, val text: String) : BridgeOutcome
+        data class Failed(val reason: String) : BridgeOutcome
     }
 
     /** Embedding subsystem powering RAG/semantic-search context during generation.
@@ -76,6 +123,12 @@ class TaskExecutionEngine(
         emitSnackbar = {},
     )
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
+    private val contextCompactor = ContextCompactor(
+        conversations = convRepo,
+        settings = settings,
+        providers = providerRegistry,
+        pauseLoop = pauseConversationLoop,
+    )
 
     /**
      * Task-only post-processing. Loop runs share this engine but never call this method, so a
@@ -180,110 +233,70 @@ class TaskExecutionEngine(
         foregroundServiceManagedExternally: Boolean,
         precondition: suspend () -> Boolean,
     ): Result {
-        // A Worker may construct the process from an alarm while every StateFlow still exposes
-        // its eager default. Wait for the real DataStore snapshot, then synchronously materialize
-        // custom providers before resolving either the model or request configuration.
         settings.awaitInitialLoad()
         providerRegistry.awaitInitialSync()
-        // Process-death recovery is a startup barrier, not a best-effort background cleanup.
-        // A Worker must never inspect/reuse an orphaned live Run before that barrier commits.
         convRepo.ensureRunRecovery()
-        if (!precondition()) {
-            return Result.Failure("Execution cancelled")
-        }
+        if (!precondition()) return Result.Failure("Execution cancelled")
         val conversation = convRepo.getConversation(conversationId)
             ?: return Result.Failure("Conversation not found: $conversationId")
         val effectiveModelId = modelId?.takeIf { it.isNotBlank() }
             ?: conversation.modelId?.takeIf { it.isNotBlank() }
             ?: settings.selectedModel.value
 
-        // Resolve the conversation leaf via the single source of truth used by the UI.
-        val snapshot = convRepo.getMessagesForConversationSnapshot(conversationId)
-        val path = ConversationUiState.resolvePath(
-            allMessages = snapshot.map {
-                ChatMessage(
-                    id = it.id, parentId = it.parentId, text = it.text,
-                    participant = it.participant, timestamp = it.timestamp, status = it.status,
-                    runId = it.runId, runSequence = it.runSequence,
-                    consumedAtPass = it.consumedAtPass,
-                )
-            },
-            streamingMsg = null,
-            selectedChildren = convRepo.restoreBranchSelections(conversationId),
-        )
-        val leafId = path.lastOrNull()?.id
-        val parentRunId = path.lastOrNull()?.runId
+        // If the conversation is open in the foreground, delegate the send to the regular
+        // controller path so the loop cycle gets bubble animation, scroll, and haptics.
+        // The controller manages its own slot; do NOT acquire it here before the bridge check.
+        // The bridge only returns once the delegated turn is durably finished, so the caller's
+        // conversation lease still spans the whole generation and the Result reflects what
+        // actually happened rather than merely "the send was accepted".
+        val bridge = currentForegroundSendBridge()
+        if (bridge != null) {
+            when (val outcome = bridge(conversationId, userText, effectiveModelId)) {
+                is BridgeOutcome.Completed ->
+                    return Result.Success(outcome.modelMessageId, outcome.text)
+                is BridgeOutcome.Failed -> return Result.Failure(outcome.reason)
+                BridgeOutcome.NotDelegated -> Unit
+            }
+        }
+
+        // Production always supplies the process registry. A busy conversation is an explicit
+        // outcome; attempting a second headless Run would violate Room's unique live-Run slot.
+        val generationState = generationRegistry?.getOrCreate(conversationId)
+        val uiToken = generationState?.acquireForSend()
+        if (generationState != null && uiToken == null) {
+            return Result.Failure("Conversation is already generating")
+        }
+        val currentJob = currentCoroutineContext()[Job]
+        if (generationState != null && uiToken != null) {
+            if (currentJob == null || !generationState.attachGenerationJob(uiToken, currentJob)) {
+                generationState.endGeneration(uiToken)
+                return Result.Failure("Conversation generation slot was revoked")
+            }
+        }
 
         val now = System.currentTimeMillis()
         val runId = UUID.randomUUID().toString()
         val userMessageId = UUID.randomUUID().toString()
-        val userMessage = MessageEntity(
-            id = userMessageId, conversationId = conversationId, parentId = leafId,
-            text = userText, thoughts = null, status = MessageStatus.SUCCESS,
-            participant = Participant.USER, timestamp = now,
-            runId = runId, runSequence = 0, consumedAtPass = 0,
-        )
         val modelMessageId = UUID.randomUUID().toString()
         val startTime = now + 1
-        val modelMessage = MessageEntity(
-            id = modelMessageId, conversationId = conversationId, parentId = userMessageId,
-            text = "", thoughts = null, status = MessageStatus.SENDING,
-            participant = Participant.MODEL, timestamp = startTime,
-            modelName = effectiveModelId.takeIf { it.isNotBlank() },
-            runId = runId, runSequence = 1,
-        )
-        convRepo.createRunWithMessages(
-            RunEntity(
-                id = runId,
-                conversationId = conversationId,
-                parentRunId = parentRunId,
-                status = RunStatus.ACTIVE,
-                activeSlot = 1,
-                startedAt = now,
-                lastCheckpointAt = startTime,
-            ),
-            listOf(userMessage, modelMessage),
-            messageSelectionUpdates = mapOf(
-                leafId to userMessageId,
-                userMessageId to modelMessageId,
-            ),
-        )
+        var lastStreamed: ChatMessage? = null
+        var runCreated = false
+        var runBound = false
+        val persistToken = if (generationState != null && uiToken != null) {
+            generationState.nextPersistId()
+        } else {
+            0L
+        }
 
         return try {
-            suspend fun fail(reason: String): Result.Failure {
-                convRepo.updateStreamingMessageCheckpoint(
-                    ChatMessage(
-                        id = modelMessageId,
-                        parentId = userMessageId,
-                        text = reason,
-                        thoughts = null,
-                        status = MessageStatus.ERROR,
-                        participant = Participant.MODEL,
-                        timestamp = startTime,
-                        modelName = effectiveModelId.takeIf { it.isNotBlank() },
-                        runId = runId,
-                        runSequence = 1,
-                    )
-                )
-                convRepo.failRun(runId)
-                convRepo.getConversation(conversationId)?.let { conv ->
-                    convRepo.upsertConversation(conv.copy(lastUpdated = System.currentTimeMillis()))
-                }
-                return Result.Failure(reason)
-            }
-
-            if (effectiveModelId.isBlank()) return fail("No model selected")
+            if (effectiveModelId.isBlank()) return Result.Failure("No model selected")
             val providerName = providerRegistry.providerForModel(effectiveModelId)
-            // Re-resolve against on-disk settings (DataStore may not have loaded yet), with
-            // the synchronous value as a fallback — same fresh-key logic the foreground uses.
             val activeKey = settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() }
                 ?: settings.resolveActiveKey(providerName) ?: ""
             if (!providerRegistry.isConfigured(providerName, activeKey)) {
-                return fail("Provider not configured: $providerName")
+                return Result.Failure("Provider not configured: $providerName")
             }
 
-            // Build the request headlessly through the same builder the ViewModel uses,
-            // so prompt resolution / config / context stay a single source of truth.
             val builder = GenerationRequestBuilder(
                 settings = settings,
                 convRepo = convRepo,
@@ -304,6 +317,120 @@ class TaskExecutionEngine(
                 builder.buildEffectiveSystemPrompt(conversationId, effectiveModelId)
             }
             val effectiveSettings = builder.buildEffectiveConversationSettings(conversationId)
+            val contextLimit = effectiveSettings.contextWindow ?: settings.maxContextWindow.value
+            suspend fun compactAtBoundary(): CompactResult {
+                generationState?.compacting?.value = true
+                return try {
+                    contextCompactor.compactAutomatic(
+                        conversationId = conversationId,
+                        fallbackModel = effectiveModelId,
+                        contextLimit = contextLimit,
+                    )
+                } finally {
+                    generationState?.compacting?.value = false
+                }
+            }
+            val snapshot = convRepo.getMessagesForConversationSnapshot(conversationId)
+            val selections = convRepo.restoreBranchSelections(conversationId)
+            val path = ConversationUiState.resolvePath(
+                allMessages = snapshot.map {
+                    ChatMessage(
+                        id = it.id,
+                        parentId = it.parentId,
+                        text = it.text,
+                        participant = it.participant,
+                        timestamp = it.timestamp,
+                        status = it.status,
+                        runId = it.runId,
+                        runSequence = it.runSequence,
+                        consumedAtPass = it.consumedAtPass,
+                    )
+                },
+                streamingMsg = null,
+                selectedChildren = selections,
+            )
+            val leafId = path.lastOrNull()?.id
+            val parentRunId = path.lastOrNull()?.runId
+            val userMessage = MessageEntity(
+                id = userMessageId,
+                conversationId = conversationId,
+                parentId = leafId,
+                text = userText,
+                thoughts = null,
+                status = MessageStatus.SUCCESS,
+                participant = Participant.USER,
+                timestamp = now,
+                runId = runId,
+                runSequence = 0,
+                consumedAtPass = 0,
+            )
+            val modelMessage = MessageEntity(
+                id = modelMessageId,
+                conversationId = conversationId,
+                parentId = userMessageId,
+                text = "",
+                thoughts = null,
+                status = MessageStatus.SENDING,
+                participant = Participant.MODEL,
+                timestamp = startTime,
+                modelName = effectiveModelId,
+                runId = runId,
+                runSequence = 1,
+            )
+            convRepo.createRunWithMessages(
+                RunEntity(
+                    id = runId,
+                    conversationId = conversationId,
+                    parentRunId = parentRunId,
+                    status = RunStatus.ACTIVE,
+                    activeSlot = 1,
+                    startedAt = now,
+                    lastCheckpointAt = startTime,
+                ),
+                listOf(userMessage, modelMessage),
+                messageSelectionUpdates = mapOf(
+                    leafId to userMessageId,
+                    userMessageId to modelMessageId,
+                ),
+            )
+            runCreated = true
+            if (generationState != null && uiToken != null) {
+                runBound = generationState.tryBindRun(uiToken, runId)
+                if (!runBound) {
+                    withContext(NonCancellable) {
+                        convRepo.finishStoppedGeneration(emptyList(), runId)
+                    }
+                    currentCoroutineContext().ensureActive()
+                    return Result.Failure("Execution cancelled")
+                }
+                val placeholder = ChatMessage(
+                    id = modelMessageId,
+                    parentId = userMessageId,
+                    text = "",
+                    participant = Participant.MODEL,
+                    timestamp = startTime,
+                    status = MessageStatus.SENDING,
+                    modelName = effectiveModelId,
+                    runId = runId,
+                    runSequence = 1,
+                )
+                generationState.loadingChange(uiToken, true)
+                generationState.streamUpdate(uiToken, placeholder)
+            }
+
+            // The current user boundary must be durable before eligibility is evaluated. The
+            // compactor excludes the empty SENDING placeholder from token accounting while
+            // retaining it as the graph suffix below a newly inserted Compact boundary.
+            when (
+                val compactResult = compactAtBoundary()
+            ) {
+                is CompactResult.Failed -> error(
+                    "Automatic context compact failed: ${compactResult.message}"
+                )
+                is CompactResult.Created,
+                CompactResult.NotNeeded -> Unit
+            }
+
             val (config, baseGenCtx) = builder.buildGenerationPair(
                 providerName, effectiveModelId, activeKey,
                 resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
@@ -316,13 +443,16 @@ class TaskExecutionEngine(
                 foregroundServiceManagedExternally = foregroundServiceManagedExternally,
             )
 
-            // No global slot: local model work is serialized inside LocalProvider via
-            // LocalModelSerializer; remote generations run concurrently. A headless turn
-            // therefore starts immediately and a Stop releases it without waiting on a
-            // process-wide mutex.
-            // GenerationManager owns ordered, throttled Room checkpoints for both foreground and
-            // headless runs. The callback remains UI-only, which avoids an asynchronous writer
-            // racing a stale SENDING snapshot over the manager's terminal upsert.
+            val baseCallbacks = if (generationState != null && uiToken != null) {
+                generationState.callbacksFor(uiToken, persistToken)
+            } else {
+                GenerationCallbacks(
+                    onStreamUpdate = {},
+                    onLoadingChange = {},
+                    onStreamClear = {},
+                    isLatestPersist = { true },
+                )
+            }
             generationManager.generate(
                 conversationId = conversationId,
                 modelMessageId = modelMessageId,
@@ -334,13 +464,25 @@ class TaskExecutionEngine(
                 pass = 0,
                 config = config,
                 ctx = genCtx,
-                generationJob = null,
-                callbacks = GenerationCallbacks(
-                    onStreamUpdate = {},
-                    onLoadingChange = {},
-                    onStreamClear = {},
-                    isLatestPersist = { true },
+                generationJob = currentJob,
+                callbacks = baseCallbacks.copy(
+                    onStreamUpdate = { message ->
+                        lastStreamed = message
+                        baseCallbacks.onStreamUpdate(message)
+                    },
+                    onToolRoundPersisted = {
+                        when (
+                            val compactResult = compactAtBoundary()
+                        ) {
+                            is CompactResult.Failed -> error(
+                                "Automatic context compact failed: ${compactResult.message}"
+                            )
+                            is CompactResult.Created,
+                            CompactResult.NotNeeded -> Unit
+                        }
+                    },
                 ),
+                streamScope = generationState?.streamScope,
             )
             val finalMsg = convRepo.getMessagesForConversationSnapshot(conversationId)
                 .find { it.id == modelMessageId }
@@ -350,45 +492,40 @@ class TaskExecutionEngine(
                 Result.Failure(finalMsg?.text?.takeIf { it.isNotBlank() } ?: "Generation failed")
             }
         } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                if (convRepo.getConversation(conversationId) != null) {
-                    convRepo.updateStreamingMessageCheckpoint(
-                        ChatMessage(
-                            id = modelMessageId,
-                            parentId = userMessageId,
-                            text = "Execution cancelled",
-                            thoughts = null,
-                            status = MessageStatus.STOPPED,
-                            participant = Participant.MODEL,
-                            timestamp = startTime,
-                            modelName = effectiveModelId.takeIf { it.isNotBlank() },
-                            runId = runId,
-                            runSequence = 1,
-                        )
-                    )
-                    convRepo.finishRunStopped(runId)
+            // User Stop has a dedicated finalizer once the Run is bound. Other cancellation owners
+            // (Worker/Task teardown or the pre-bind commit edge) must not strand a live Run.
+            if (runCreated && (!runBound || generationState?.stopping?.value != true)) {
+                withContext(NonCancellable) {
+                    val stopped = lastStreamed?.copy(status = MessageStatus.STOPPED)
+                    convRepo.finishStoppedGeneration(stopped?.let(::listOf).orEmpty(), runId)
                 }
             }
             throw e
         } catch (e: Exception) {
             DebugLog.e("TaskExecutionEngine", "runOnce failed for conversation=$conversationId", e)
             val reason = e.localizedMessage ?: "Unexpected error"
-            convRepo.updateStreamingMessageCheckpoint(
-                ChatMessage(
-                    id = modelMessageId,
-                    parentId = userMessageId,
-                    text = reason,
-                    thoughts = null,
-                    status = MessageStatus.ERROR,
-                    participant = Participant.MODEL,
-                    timestamp = startTime,
-                    modelName = effectiveModelId.takeIf { it.isNotBlank() },
-                    runId = runId,
-                    runSequence = 1,
+            if (runCreated) {
+                convRepo.updateStreamingMessageCheckpoint(
+                    ChatMessage(
+                        id = modelMessageId,
+                        parentId = userMessageId,
+                        text = reason,
+                        thoughts = null,
+                        status = MessageStatus.ERROR,
+                        participant = Participant.MODEL,
+                        timestamp = startTime,
+                        modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                        runId = runId,
+                        runSequence = 1,
+                    )
                 )
-            )
-            convRepo.failRun(runId)
+                convRepo.failRun(runId)
+            }
             Result.Failure(reason)
+        } finally {
+            if (generationState != null && uiToken != null && generationState.endGeneration(uiToken)) {
+                generationState.onQueueDrainRequested?.invoke(generationState)
+            }
         }
     }
 }

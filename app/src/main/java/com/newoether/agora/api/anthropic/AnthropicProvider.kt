@@ -13,6 +13,14 @@ import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.adaptToolRoundsForProvider
 import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.api.util.requireValidSerializedRequest
+import com.newoether.agora.api.util.StreamTermination
+import com.newoether.agora.api.util.ToolArgumentAccumulator
+import com.newoether.agora.api.util.TextToolCallRecovery
+import com.newoether.agora.api.util.asRetryableTransportError
+import com.newoether.agora.api.util.carriesModelOutput
+import com.newoether.agora.api.util.ProviderRetryPolicy
+import com.newoether.agora.api.util.safeWireToolName
+import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
@@ -98,7 +106,19 @@ internal data class AnthropicStreamEvent(
     @SerialName("content_block") val contentBlock: AnthropicContentBlock? = null,
     val message: AnthropicMessageInfo? = null,
     val usage: AnthropicUsage? = null,
-    val index: Int? = null
+    val index: Int? = null,
+    /** Non-standard relay outcome. `failed to generate` is a transient upstream failure. */
+    val outcome: String? = null,
+    // `event: error` is delivered INSIDE a 200 stream (overloaded_error, upstream 5xx, quota).
+    // Without this field the event decoded to an all-null object, matched no `when` branch, and
+    // the failure was silently discarded: the user only saw the generation "stop".
+    val error: AnthropicStreamError? = null,
+)
+
+@Serializable
+internal data class AnthropicStreamError(
+    val type: String? = null,
+    val message: String? = null,
 )
 
 @Serializable
@@ -107,7 +127,14 @@ internal data class AnthropicDelta(
     val thinking: String? = null,
     val signature: String? = null,
     @SerialName("partial_json") val partialJson: String? = null,
-    val type: String? = null
+    val type: String? = null,
+    // Protocol location of the terminal reason:
+    //   {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{...}}
+    // It is NOT on `message`, and `message_stop` carries no fields at all. Reading it off
+    // `message` (what the previous code did) always yielded null, which is why the
+    // premature-stop diagnostics never produced a single usable data point.
+    @SerialName("stop_reason") val stopReason: String? = null,
+    @SerialName("stop_sequence") val stopSequence: String? = null,
 )
 
 @Serializable
@@ -123,7 +150,8 @@ internal data class AnthropicContentBlock(
 
 @Serializable
 internal data class AnthropicMessageInfo(
-    val usage: AnthropicUsage? = null
+    val usage: AnthropicUsage? = null,
+    @SerialName("stop_reason") val stopReason: String? = null,
 )
 
 @Serializable
@@ -137,23 +165,59 @@ internal data class AnthropicUsage(
 /**
  * Routes Anthropic SSE deltas by protocol content-block identity. A block is exclusively text,
  * thinking, or tool-use, so a field carried by a tool block can never enter the answer channel.
+ *
+ * The router also owns terminal-state proof for the stream: whether a semantic end marker arrived,
+ * what `stop_reason` the provider reported, whether a tool block was still open, and whether the
+ * provider reported an in-band error. The transport layer cannot answer any of those from socket
+ * state alone.
  */
 internal class AnthropicStreamEventRouter {
     private data class ToolBlock(
         val streamKey: String,
         val id: String?,
         val name: String,
-        val arguments: StringBuilder,
+        val arguments: ToolArgumentAccumulator,
     )
 
     private val blockTypes = mutableMapOf<Int, String>()
     private val toolBlocks = mutableMapOf<Int, ToolBlock>()
     private val thinkingSignatures = mutableMapOf<Int, String?>()
+    private val completedToolCallIds = mutableSetOf<String>()
     private var lastBlockIndex = -1
     private var syntheticIndex = 0
     private var inputTokens: Int? = null
     private var cacheCreationInputTokens = 0
     private var cacheReadInputTokens = 0
+
+    /** A `message_stop` event was received. */
+    internal var messageStopReceived = false
+        private set
+
+    /** Normalized `stop_reason`, read from `message_delta.delta` per protocol. */
+    internal var stopReason: String? = null
+        private set
+
+    internal var toolUseBlockStarts = 0
+        private set
+
+    /** Failure the provider reported inside the 200 stream. */
+    internal var streamError: GenerationError? = null
+        private set
+
+    /** True once the router has already emitted a fatal [StreamEvent.Error] itself. */
+    internal var reportedError = false
+        private set
+
+    /**
+     * Either terminal signal proves the message ended semantically rather than the socket merely
+     * closing. Non-compliant relays sometimes omit `message_stop` but still report `stop_reason`.
+     */
+    internal val sawTerminalMarker: Boolean
+        get() = messageStopReceived || stopReason != null
+
+    /** A `tool_use` block was opened and never closed. */
+    internal val toolCallInFlight: Boolean
+        get() = toolBlocks.isNotEmpty()
 
     fun route(event: AnthropicStreamEvent): List<StreamEvent> = buildList {
         when (event.type) {
@@ -184,6 +248,7 @@ internal class AnthropicStreamEventRouter {
                     }
 
                     "tool_use" -> {
+                        toolUseBlockStarts++
                         val initialArguments = block.input
                             ?.takeUnless { it.isEmpty() }
                             ?.toString()
@@ -192,7 +257,7 @@ internal class AnthropicStreamEventRouter {
                             streamKey = block.id ?: "call_stream_${java.util.UUID.randomUUID()}",
                             id = block.id,
                             name = block.name.orEmpty(),
-                            arguments = StringBuilder(initialArguments),
+                            arguments = ToolArgumentAccumulator(initialArguments),
                         )
                         toolBlocks[index] = tool
                         // Tool identity is complete at block start; the UI segment must exist
@@ -208,7 +273,7 @@ internal class AnthropicStreamEventRouter {
                 when (delta.type) {
                     "input_json_delta" -> {
                         val tool = toolBlocks[index] ?: return@buildList
-                        delta.partialJson?.let(tool.arguments::append)
+                        tool.arguments.append(delta.partialJson)
                         add(tool.updateEvent())
                     }
 
@@ -245,13 +310,35 @@ internal class AnthropicStreamEventRouter {
             "content_block_stop" -> {
                 val index = indexForContinuation(event.index)
                 toolBlocks.remove(index)?.let { tool ->
-                    if (tool.name.isNotBlank()) add(tool.completeEvent())
+                    val invalidCause = tool.invalidCompletionCause()
+                    if (invalidCause == null) {
+                        completedToolCallIds += tool.id ?: tool.streamKey
+                        add(tool.completeEvent())
+                    } else {
+                        // A closed block is executable only when BOTH identity and arguments are
+                        // complete. A stop marker cannot turn truncated JSON into a valid call.
+                        reportedError = true
+                        add(
+                            StreamEvent.Error(
+                                GenerationError.SseParse(
+                                    rawLine = "content_block_stop",
+                                    cause = invalidCause,
+                                )
+                            )
+                        )
+                    }
                 }
                 blockTypes.remove(index)
                 thinkingSignatures.remove(index)
             }
 
-            "message_delta" -> event.usage?.let { usage ->
+            "message_delta" -> {
+                // stop_reason lives on `delta`, not on `message`. This is the only event that
+                // carries it, so getting the location wrong disabled all stop diagnostics.
+                (event.delta?.stopReason ?: event.message?.stopReason)
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { stopReason = it.lowercase() }
+                event.usage?.let { usage ->
                 // Relay/non-standard endpoints report the real input & cache counts only in
                 // this terminal event (message_start carries all-zero placeholders); standard
                 // Anthropic reports them in message_start and omits them here. Adopt any value
@@ -285,18 +372,69 @@ internal class AnthropicStreamEventRouter {
                     )
                 )
             }
+            }
+
+            "message_stop" -> {
+                messageStopReceived = true
+                // Spec-compliant message_stop is field-less. A relay that attaches the reason
+                // here anyway is still honored rather than ignored.
+                (event.delta?.stopReason ?: event.message?.stopReason)
+                    ?.takeIf(String::isNotBlank)
+                    ?.let { stopReason = it.lowercase() }
+            }
+
+            "error" -> {
+                streamError = event.error.toGenerationError()
+            }
+        }
+
+        // A relay may send the error payload without the `error` event type, or attach it to an
+        // otherwise-unknown event. Capture it wherever it appears rather than discarding it.
+        if (streamError == null && event.error != null && event.type != "error") {
+            streamError = event.error.toGenerationError()
+        }
+        if (streamError == null && ProviderRetryPolicy.isFailedToGenerateOutcome(event.outcome)) {
+            streamError = GenerationError.Api(
+                code = null,
+                type = "failed_to_generate",
+                message = event.outcome.orEmpty(),
+            )
         }
     }
 
-    /** Complete only blocks that were actually opened as tool_use if a gateway closes at EOF. */
-    fun finish(): List<StreamEvent> = buildList {
-        toolBlocks.toSortedMap().values.forEach { tool ->
-            if (tool.name.isNotBlank()) add(tool.completeEvent())
+    /**
+     * Surface malformed open blocks without turning any unclosed block into an executable call.
+     * A name alone does not prove that the streamed JSON arguments were complete.
+     */
+    fun reportIncompleteBlocks(): List<StreamEvent> = buildList {
+        // One attempt owns one terminal diagnostic. Named open blocks are represented by
+        // toolCallInFlight in StreamTermination; report at most one additional identity error.
+        toolBlocks.toSortedMap().values.firstOrNull { !it.name.matches(safeWireToolName) }?.let {
+            reportedError = true
+            add(
+                StreamEvent.Error(
+                    GenerationError.SseParse(
+                        rawLine = "stream_end",
+                        cause = "Provider ended before the tool name was complete",
+                    )
+                )
+            )
         }
-        toolBlocks.clear()
-        blockTypes.clear()
-        thinkingSignatures.clear()
     }
+
+    fun captureParseError(rawLine: String, cause: String) {
+        if (streamError == null) {
+            streamError = GenerationError.SseParse(rawLine.take(512), cause)
+        }
+    }
+
+    private fun AnthropicStreamError?.toGenerationError(): GenerationError =
+        GenerationError.Api(
+            code = null,
+            type = this?.type,
+            message = this?.message?.takeIf(String::isNotBlank)
+                ?: "Provider reported an error in the response stream",
+        )
 
     private fun routeUntypedDelta(
         index: Int,
@@ -306,7 +444,7 @@ internal class AnthropicStreamEventRouter {
         when (blockTypes[index]) {
             "tool_use" -> {
                 val tool = toolBlocks[index] ?: return
-                delta.partialJson?.let(tool.arguments::append)
+                tool.arguments.append(delta.partialJson)
                 output += tool.updateEvent()
             }
 
@@ -347,9 +485,32 @@ internal class AnthropicStreamEventRouter {
     private fun ToolBlock.completeEvent() = StreamEvent.ToolCallRequest(
         id = id ?: streamKey,
         name = name,
-        arguments = arguments.toString(),
+        arguments = arguments.toString().ifBlank { "{}" },
         streamKey = streamKey,
     )
+
+    private fun ToolBlock.invalidCompletionCause(): String? {
+        val effectiveId = id ?: streamKey
+        if (!effectiveId.matches(safeWireToolCallId)) {
+            return "Provider returned an invalid tool call id"
+        }
+        if (effectiveId in completedToolCallIds) {
+            return "Provider returned a duplicate tool call id"
+        }
+        if (!name.matches(safeWireToolName)) {
+            return "Provider ended before the tool name was complete"
+        }
+        val rawArguments = arguments.toString().ifBlank { "{}" }
+        val completeObject = runCatching {
+            ROUTER_JSON.parseToJsonElement(rawArguments) is JsonObject
+        }.getOrDefault(false)
+        return if (completeObject) null
+        else "Provider ended before the tool arguments formed a complete JSON object"
+    }
+
+    private companion object {
+        val ROUTER_JSON = Json { ignoreUnknownKeys = true }
+    }
 }
 
 /** Request-shape generations of the Claude model line. Only the LEGACY sets are enumerated;
@@ -530,10 +691,15 @@ class AnthropicProvider(
             // On always-on/adaptive-thinking models max_tokens caps thinking + answer TOGETHER,
             // so the legacy 4096 default truncates mid-answer once the model thinks. Streaming is
             // always on here, so a generous default costs nothing (it is a cap, not a target).
+            //
+            // The answer headroom above the thinking budget must also leave room for a tool_use
+            // block: with only ~1KB of slack, a thinking model routinely exhausts the cap exactly
+            // where the tool call would begin, which surfaces as "the tool call vanished".
             maxTokens = config.maxTokens ?: when {
-                thinking?.budgetTokens != null -> maxOf(thinking.budgetTokens + 1024, 4096)
-                thinking?.type == "adaptive" -> 16384
-                else -> 4096
+                thinking?.budgetTokens != null ->
+                    maxOf(thinking.budgetTokens + ANSWER_HEADROOM_TOKENS, 16384)
+                thinking?.type == "adaptive" -> 32768
+                else -> 8192
             },
             tools = anthropicTools,
             temperature = config.temperature.takeIf { allowsSamplingParams },
@@ -555,19 +721,58 @@ class AnthropicProvider(
             )
             DebugLog.d("AgoraAPI", "[Anthropic] REQ → $baseUrl/messages | model=$modelName | msgs=${apiMessages.size} | thinking=${thinking != null} | tools=${anthropicTools?.size ?: 0}")
             DebugLog.d("AgoraAPI", "[Anthropic] BODY: ${requestBodyJson.take(4000)}")
-            val maxAttempts = 3
+            val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             val retryableCodes = setOf(429, 502, 503, 504)
             var attempt = 0
             var done = false
 
             while (attempt < maxAttempts && !done) {
                 attempt++
-                val handle = HttpClient.streamPost(url, requestBodyJson, headers)
+                // Opening the request can fail before any response headers exist (connect
+                // timeout, TLS failure, reset). Those escaped the retry loop entirely before, so a
+                // single flaky connection became a hard failure. Nothing has streamed at this
+                // point, so replaying is always safe.
+                val handle = try {
+                    HttpClient.streamPost(url, requestBodyJson, headers)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val retryable = e.asRetryableTransportError()
+                    if (retryable != null && attempt < maxAttempts) {
+                        DebugLog.w(
+                            "AgoraAPI",
+                            "[Anthropic] Transport failure opening the stream on attempt " +
+                                "$attempt/$maxAttempts (${e.javaClass.simpleName}), retrying",
+                        )
+                        val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                        emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                        delay(retryDelayMs)
+                        continue
+                    }
+                    throw e
+                }
                 try {
                 if (handle.code == 200) {
-                    done = true
                     var line: String? = null
                     val eventRouter = AnthropicStreamEventRouter()
+                    // HTTP 200 only proves the request was accepted. Whether the MESSAGE completed
+                    // is decided below from semantic markers, so a relay that cuts the stream at a
+                    // block boundary can no longer masquerade as a finished answer.
+                    var producedContent = false
+                    var timedOut = false
+                    var recoveryReportedError = false
+                    // Native Anthropic tool_use blocks are preferred. This only recovers gateways
+                    // that incorrectly put <invoke>/<tool_call>/JSON tool syntax in text content.
+                    val textToolRecovery = TextToolCallRecovery(
+                        enabled = !anthropicTools.isNullOrEmpty(),
+                    )
+                    suspend fun emitRecovered(event: StreamEvent) {
+                        textToolRecovery.route(event) {
+                            if (it.carriesModelOutput()) producedContent = true
+                            if (it is StreamEvent.Error) recoveryReportedError = true
+                            emit(it)
+                        }
+                    }
 
                     // Tolerate long thinking pauses, but not a silently-dead connection:
                     // 3 consecutive read timeouts (~15 min without a byte) → give up.
@@ -580,7 +785,7 @@ class AnthropicProvider(
                         } catch (e: java.net.SocketTimeoutException) {
                             if (!currentCoroutineContext().isActive) break
                             if (++consecutiveReadTimeouts >= 3) {
-                                emit(StreamEvent.Error(GenerationError.Timeout))
+                                timedOut = true
                                 break
                             }
                             continue
@@ -589,25 +794,85 @@ class AnthropicProvider(
                             val jsonStr = line.substring(6).trim()
                             try {
                                 val event = json.decodeFromString<AnthropicStreamEvent>(jsonStr)
-                                eventRouter.route(event).forEach { emit(it) }
+                                eventRouter.route(event).forEach { routed ->
+                                    // A native tool block proves the provider is using the protocol
+                                    // correctly. It never passes through text recovery; only ordinary
+                                    // text chunks are inspected for relay-flattened calls.
+                                    emitRecovered(routed)
+                                }
                             } catch (e: Exception) {
                                 DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
+                                eventRouter.captureParseError(
+                                    rawLine = jsonStr,
+                                    cause = e.localizedMessage ?: "Malformed SSE payload",
+                                )
+                                break
                             }
                         }
+                        // An in-band error ends the message; keeping the socket open only stalls
+                        // until the read timeout.
+                        if (
+                            eventRouter.streamError != null ||
+                            eventRouter.reportedError ||
+                            recoveryReportedError
+                        ) break
+                        // message_stop is the semantic end. Some gateways then hold the connection
+                        // open, so stop reading rather than waiting for a close that may never come.
+                        if (eventRouter.messageStopReceived) break
                     }
-                    eventRouter.finish().forEach { emit(it) }
+                    eventRouter.reportIncompleteBlocks().forEach { emitRecovered(it) }
+                    textToolRecovery.finish {
+                        if (it.carriesModelOutput()) producedContent = true
+                        if (it is StreamEvent.Error) recoveryReportedError = true
+                        emit(it)
+                    }
                     if (!currentCoroutineContext().isActive) {
                         throw kotlinx.coroutines.CancellationException("Stream cancelled")
+                    }
+
+                    val termination = StreamTermination(
+                        sawTerminalMarker = eventRouter.sawTerminalMarker,
+                        stopReason = eventRouter.stopReason,
+                        producedContent = producedContent,
+                        toolCallInFlight = eventRouter.toolCallInFlight,
+                        streamError = eventRouter.streamError,
+                        alreadyReportedError = eventRouter.reportedError || recoveryReportedError,
+                        timedOut = timedOut,
+                    )
+                    DebugLog.d("AgoraSSE",
+                        "[Anthropic] stream_end ${termination.describe()} " +
+                        "tool_use_blocks=${eventRouter.toolUseBlockStarts} " +
+                        "attempt=$attempt/$maxAttempts"
+                    )
+
+                    if (termination.isRetryable && attempt < maxAttempts) {
+                        // Nothing was surfaced yet, so replaying cannot duplicate visible output.
+                        DebugLog.w("AgoraAPI",
+                            "[Anthropic] Incomplete stream on attempt $attempt/$maxAttempts, retrying")
+                        val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                        emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                        delay(retryDelayMs)
+                    } else {
+                        done = true
+                        termination.toError(name)?.let { emit(StreamEvent.Error(it)) }
                     }
                 } else {
                     val errorRaw = handle.errorBody ?: "Unknown error"
                     DebugLog.e("AgoraAPI", "[Anthropic] ERR ${handle.code}: $errorRaw")
 
-                    if (handle.code in retryableCodes && attempt < maxAttempts) {
-                        DebugLog.w("AgoraAPI", "[Anthropic] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${1000 * attempt}ms...")
-                        emit(StreamEvent.Retrying(attempt, maxAttempts))
-                        delay(1000L * attempt)
+                    if (
+                        ProviderRetryPolicy.shouldRetryHttp(
+                            handle.code,
+                            errorRaw,
+                            retryableCodes,
+                        ) && attempt < maxAttempts
+                    ) {
+                        val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                        DebugLog.w("AgoraAPI", "[Anthropic] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${retryDelayMs}ms...")
+                        emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                        delay(retryDelayMs)
                     } else {
+                        done = true
                         val genError = try {
                             val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
                             GenerationError.Api(code = errorJson.error.code ?: handle.code.toString(), type = errorJson.error.type, message = errorJson.error.message)
@@ -736,6 +1001,15 @@ class AnthropicProvider(
         }
         if (all.isEmpty()) throw ModelFetchEmptyResultException()
         all
+    }
+
+    private companion object {
+        /**
+         * Headroom reserved above the thinking budget for the answer AND any tool_use block.
+         * Anthropic's max_tokens covers thinking + output together, so this slack is what keeps a
+         * tool call from being cut off at the block boundary.
+         */
+        const val ANSWER_HEADROOM_TOKENS = 8192
     }
 }
 

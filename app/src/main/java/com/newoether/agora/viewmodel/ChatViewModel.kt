@@ -13,6 +13,7 @@ import com.newoether.agora.api.gemini.*
 import com.newoether.agora.api.local.*
 import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
+import com.newoether.agora.automation.TaskExecutionEngine.BridgeOutcome
 import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ClaudeChatImporter
@@ -80,6 +81,7 @@ data class AnimatedScrollRequest(
     val conversationId: String,
     val targetMessageId: String?,
     val destination: AnimatedScrollDestination = AnimatedScrollDestination.MESSAGE,
+    val attachedOnly: Boolean = false,
 )
 
 data class LoadedComposerDraft(
@@ -100,6 +102,7 @@ private data class PersistedComposerDraft(
     val revision: Long,
 )
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(
     application: Application,
     // [chatDao] and [settingsManager] are retained ONLY to pass to ImportExportManager,
@@ -128,6 +131,7 @@ class ChatViewModel(
     private val shellConfirmation: ShellConfirmationController,
     private val mcpRegistry: com.newoether.agora.mcp.McpRegistry,
     private val mcpToolProvider: com.newoether.agora.tool.McpToolProvider,
+    private val taskExecutionEngine: com.newoether.agora.automation.TaskExecutionEngine,
 ) : AndroidViewModel(application) {
 
     companion object {
@@ -412,6 +416,9 @@ class ChatViewModel(
 
     override fun onCleared() {
         super.onCleared()
+        // The engine and the registry are process-scoped while this ViewModel is not, so every
+        // reference either of them holds must be released here or the whole graph leaks.
+        taskExecutionEngine.detachForegroundSendBridge(generationCallbackOwner)
         sandboxManager?.close()
         generationRegistry.detachUiCallbacks(generationCallbackOwner)
         autoBackupManager.destroy()
@@ -424,6 +431,10 @@ class ChatViewModel(
 
 
     private val animatedScrollIds = AtomicLong(0L)
+
+    /** Callback invoked when any send path (manual/queue/loop) accepts a message.
+     *  ChatApp wires this to trigger a single haptics.confirm() for all three paths. */
+    @Volatile var onSendAccepted: ((conversationId: String, messageId: String) -> Unit)? = null
     private val _animatedScrollRequest = MutableStateFlow<AnimatedScrollRequest?>(null)
     val animatedScrollRequest: StateFlow<AnimatedScrollRequest?> =
         _animatedScrollRequest.asStateFlow()
@@ -454,6 +465,16 @@ class ChatViewModel(
             conversationId = conversationId,
             targetMessageId = messageId,
             destination = AnimatedScrollDestination.ABSOLUTE_BOTTOM,
+        )
+    }
+
+    fun triggerScrollToAttachedBottomAfter(conversationId: String, messageId: String) {
+        _animatedScrollRequest.value = AnimatedScrollRequest(
+            id = animatedScrollIds.incrementAndGet(),
+            conversationId = conversationId,
+            targetMessageId = messageId,
+            destination = AnimatedScrollDestination.ABSOLUTE_BOTTOM,
+            attachedOnly = true,
         )
     }
 
@@ -527,11 +548,15 @@ class ChatViewModel(
                 combine(
                     loopManager.loopForConversation(id),
                     loopManager.runningConversationIds,
-                ) { loop, runningIds ->
-                    // A final cycle claims its durable slot by setting active=false before the
-                    // model call. Keep its control bar visible while the Worker is still alive so
-                    // the user can stop it instead of losing the only cancellation affordance.
-                    loop?.takeIf { it.active || id in runningIds }
+                ) { loop, _ ->
+                    // Visibility tracks the TIMER only. The card is a schedule indicator, so once
+                    // the schedule is inactive it must disappear at once, even mid-cycle.
+                    //
+                    // It deliberately does not stay up for a running worker: an in-flight
+                    // generation is already stoppable through the composer's Stop button, so
+                    // keeping the card alive for that would make one control appear to own two
+                    // unrelated lifetimes.
+                    loop?.takeIf { it.active }
                 }
             }
         }
@@ -578,6 +603,13 @@ class ChatViewModel(
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
     val conversationShareText = _conversationShareText.asSharedFlow()
+
+    private val _firstMessageCommitted = MutableSharedFlow<String>(
+        replay = 0,
+        extraBufferCapacity = 1,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
+    )
+    val firstMessageCommitted = _firstMessageCommitted.asSharedFlow()
 
     private val _updateDialogData = MutableStateFlow<UpdateInfo?>(null)
     val updateDialogData: StateFlow<UpdateInfo?> = _updateDialogData.asStateFlow()
@@ -644,6 +676,18 @@ class ChatViewModel(
                     // handoff as Stop. Independent updates let a queued Room SENDING projection
                     // land between them and leave the row stuck in Answering after loading exits.
                     renderStore.commitTerminalStreamingMessage(message)
+                }
+            }
+            state.onQueueDrainRequested = { settledState ->
+                settledState.scope.launch {
+                    generationController.drainQueuedAfterGeneration(settledState)
+                }
+            }
+            state.onStopSettled = { settledState ->
+                // After a Stop cleanly settles (STOPPED row persisted, slot released), drain
+                // any queued sends into a fresh Run so accepted interventions are never dropped.
+                settledState.scope.launch {
+                    generationController.drainQueuedAfterStop(settledState)
                 }
             }
         }
@@ -715,6 +759,13 @@ class ChatViewModel(
     }
 
     private val _pendingConversationSettings = MutableStateFlow<ConversationSettings?>(null)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val isCompacting: StateFlow<Boolean> = _currentConversationId
+        .flatMapLatest { conversationId ->
+            if (conversationId == null) flowOf(false)
+            else generationRegistry.getOrCreate(conversationId).compacting
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val pendingConversationSettings: StateFlow<ConversationSettings?> = _pendingConversationSettings.asStateFlow()
 
     fun setPendingConversationSettings(settings: ConversationSettings?) {
@@ -762,9 +813,24 @@ class ChatViewModel(
             messages = messages,
             onScrollToMessage = { id -> triggerScrollToMessage(id) },
             onScrollToAbsoluteBottomAfter = ::triggerScrollToAbsoluteBottomAfter,
+            onScrollToAttachedBottomAfter = ::triggerScrollToAttachedBottomAfter,
+            onSendAcceptedEvent = { convId, msgId ->
+                // Feedback belongs to the conversation on screen. A send from the new-chat page
+                // qualifies because that page becomes this very conversation, but its id is only
+                // published after acceptance, so it is matched via isNewChatMode rather than by id.
+                // Background automation on another conversation stays silent: from the user's point
+                // of view nothing happened on screen.
+                val currentId = _currentConversationId.value
+                val targetsOpenConversation = currentId == convId ||
+                    (currentId == null && isNewChatMode.value)
+                if (targetsOpenConversation) onSendAccepted?.invoke(convId, msgId)
+            },
             onSnackbar = { msg -> emitSnackbar(msg) },
             onSnackbarSuspend = { msg -> _snackbarMessage.emit(SnackbarEvent(msg)) },
-            onConversationCreatedBySend = { suppressNextOpenScroll = true },
+            onConversationCreatedBySend = { conversationId ->
+                suppressNextOpenScroll = true
+                _firstMessageCommitted.tryEmit(conversationId)
+            },
             onUserMessagePersisted = ragManager::indexMessageForRag,
             onTreeMutationStart = {
                 val request = _currentConversationId.value?.let {
@@ -782,6 +848,10 @@ class ChatViewModel(
                 requestId?.let { switchingCoordinator.complete(it) }
             },
             regenerationTransitions = regenerationTransitions,
+            onCompactingChange = { conversationId, active ->
+                generationRegistry.getOrCreate(conversationId).compacting.value = active
+            },
+            pauseConversationTasks = { conversationId -> loopManager.stopLoop(conversationId) },
         )
     }
 
@@ -936,7 +1006,37 @@ class ChatViewModel(
                 }
             }
         }
-        
+
+        // Register the foreground-send bridge so loop cycles on this open conversation
+        // go through the controller's regular send path (bubble animation + scroll + haptics).
+        taskExecutionEngine.attachForegroundSendBridge(generationCallbackOwner) bridge@{ convId, text, modelId ->
+            if (_currentConversationId.value != convId) return@bridge BridgeOutcome.NotDelegated
+            // The Loop already holds this conversation's automation lease. Falling back to the
+            // headless path while a manual send owns the generation slot recreates the lock/slot
+            // deadlock this direct-only bridge exists to prevent. Busy therefore ends this cycle as
+            // an explicit failure without persisting another user turn.
+            val delivered = when (
+                val outcome = generationController.sendMessageFromAutomationAwaitingCompletion(
+                    convId, text, modelId,
+                )
+            ) {
+                AutomationSendOutcome.SlotBusy ->
+                    return@bridge BridgeOutcome.Failed("Conversation is already generating")
+                is AutomationSendOutcome.Delivered -> outcome
+            }
+            // Read back the exact row this send created, never the conversation tail: a branch
+            // switch or a queue drain could otherwise make an unrelated turn look like this result.
+            val modelMsg = convRepo.getMessagesForConversationSnapshot(convId)
+                .find { it.id == delivered.modelMessageId }
+            when {
+                modelMsg == null -> BridgeOutcome.Failed("Generation row disappeared")
+                modelMsg.status == MessageStatus.SUCCESS ->
+                    BridgeOutcome.Completed(modelMsg.id, modelMsg.text)
+                else -> BridgeOutcome.Failed(
+                    modelMsg.text.takeIf { it.isNotBlank() } ?: "Generation failed",
+                )
+            }
+        }
     }
 
     // ── Custom providers ──────────────────────────────────────
@@ -948,7 +1048,12 @@ class ChatViewModel(
         protocol: com.newoether.agora.data.CustomEndpointProtocol =
             com.newoether.agora.data.CustomEndpointProtocol.OPENAI,
     ) = providerRegistry.addCustom(name, baseUrl, protocol)
-    fun renameCustomProvider(oldName: String, newName: String) = providerRegistry.renameCustom(oldName, newName)
+    fun renameCustomProvider(oldName: String, newName: String) {
+        if (!providerRegistry.renameCustom(oldName, newName)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            convRepo.renameConfiguredProviderModelReferences(oldName, newName.trim())
+        }
+    }
     fun updateCustomProviderProtocol(
         name: String,
         protocol: com.newoether.agora.data.CustomEndpointProtocol,
@@ -1311,6 +1416,14 @@ class ChatViewModel(
      * Attachments, embeddings, and branch selections are cleaned up.
      * Returns the count of deleted messages (for the confirmation dialog).
      */
+    suspend fun compactContextManual(
+        model: String,
+        prompt: String,
+        retainLogicalMessages: Int,
+    ): CompactResult = generationController.compactManual(
+        CompactRequest(model, prompt, retainLogicalMessages),
+    )
+
     fun deleteMessage(messageId: String): Int {
         if (isSwitching.value) return 0
         return generationController.deleteMessage(messageId)
@@ -1340,22 +1453,12 @@ class ChatViewModel(
         val state = generationRegistry.getOrCreate(conversationId)
         viewModelScope.launch(Dispatchers.IO) {
             state.queueMutationMutex.withLock {
-                val queued = state.queuedSends.value.firstOrNull { it.id == id } ?: return@withLock
-                val removed = convRepo.removePendingRunInput(queued.id)
-                try {
-                    if (
-                        removed != null &&
-                        _currentConversationId.value == conversationId
-                    ) {
-                        renderStore.setSelectedChildren(removed.repairedSelections)
-                    }
-                } finally {
-                    state.removeQueuedSend(queued.id)
-                    if (removed != null) {
-                        convRepo.deleteMessageFiles(listOf(removed.message))
-                    } else {
-                        com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
-                    }
+                val queued = state.removeQueuedSend(id) ?: return@withLock
+                // Guidance has not entered Room or the message tree yet. Removing it therefore
+                // only releases the prepared files owned by this in-memory pending input.
+                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
+                queued.preparedOwnedPaths.forEach { path ->
+                    runCatching { java.io.File(path).delete() }
                 }
             }
         }
@@ -1492,16 +1595,17 @@ class ChatViewModel(
         onAccepted: suspend () -> Unit = {},
     ): SendAcceptance? =
         generationController.sendMessage(text, images, attachments) { acceptance ->
-            // Durable message acceptance transfers attachment ownership before the composer
-            // clears. Invalidate older draft revisions, clear the exact submitted UI, and only
-            // then let the Controller publish the bubble and its scroll request.
+            // Acceptance transfers attachment ownership before the composer clears. Direct sends
+            // are already Room-owned; queued guidance remains memory-owned until its later drain.
+            // Invalidate older draft revisions, clear the exact submitted UI, and only then let
+            // the Controller publish the bubble/banner and its scroll request.
             val attachmentsToReclaim = withContext(NonCancellable) {
                 clearAcceptedComposerDraft(acceptance.conversationId)
             }
             withContext(Dispatchers.Main.immediate + NonCancellable) {
                 onAccepted()
             }
-            if (attachmentsToReclaim.isNotEmpty()) {
+            if (attachmentsToReclaim.isNotEmpty() && acceptance.hasDurableAttachmentOwner()) {
                 // Reclamation is no longer part of the visible Send handshake. The durable
                 // MessageEntity already owns these paths, and repository cleanup rechecks every
                 // remaining message/draft reference before deleting anything.
@@ -1712,8 +1816,9 @@ class ChatViewModel(
     }
 
     /**
-     * A successfully accepted send owns the submitted files through its durable MessageEntity.
-     * Force-clearing advances the revision, invalidating every older UI tail-flush.
+     * A successfully accepted send owns the submitted files through either its durable
+     * MessageEntity or its in-memory queued-guidance entry. Force-clearing advances the revision,
+     * invalidating every older UI tail-flush.
      */
     private suspend fun clearAcceptedComposerDraft(
         conversationId: String,

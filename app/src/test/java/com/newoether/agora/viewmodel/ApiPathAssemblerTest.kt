@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -47,17 +48,57 @@ class ApiPathAssemblerTest {
         )
     }
 
+    @Test
+    fun activeToolContinuationEndsAtDurableToolResult() {
+        val user = message("u", null, Participant.USER, 0)
+        val model = message(
+            "m",
+            "u",
+            Participant.MODEL,
+            1,
+            toolJson = "aggregated",
+            status = MessageStatus.SENDING,
+        )
+        val tool = message("tool_round", "m", Participant.MODEL, 2)
+        val result = message("result_round", "tool_round", Participant.USER, 3)
+
+        val assembled = ApiPathAssembler.assemble(
+            ancestorPath = listOf(user, model, tool, result),
+            allMessages = listOf(user, model, tool, result),
+        )
+
+        assertEquals(listOf("u", "tool_round", "result_round"), assembled.map { it.id })
+        assertEquals("result_round", assembled.last().id)
+    }
+
+    @Test
+    fun guidancePublishedAtResponseBoundaryEndsAtNewUserInput() {
+        val user = message("u", null, Participant.USER, 0)
+        val completedModel = message("m", "u", Participant.MODEL, 1)
+        val guidance = message("guidance", "m", Participant.USER, 2)
+
+        val assembled = ApiPathAssembler.assemble(
+            ancestorPath = listOf(user, completedModel, guidance),
+            allMessages = listOf(user, completedModel, guidance),
+        )
+
+        assertEquals(listOf("u", "m", "guidance"), assembled.map { it.id })
+        assertEquals(Participant.USER, assembled.last().participant)
+    }
+
     private fun message(
         id: String,
         parentId: String?,
         participant: Participant,
         sequence: Long,
         toolJson: String? = null,
+        status: MessageStatus = MessageStatus.SUCCESS,
     ) = MessageEntity(
         id = id,
         conversationId = "conversation",
         parentId = parentId,
         text = if (participant == Participant.USER) id else "",
+        status = status,
         participant = participant,
         timestamp = sequence,
         modelName = "claude-sonnet-5",

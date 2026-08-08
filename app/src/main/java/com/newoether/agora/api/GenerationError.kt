@@ -31,6 +31,31 @@ sealed class GenerationError {
         val cause: String
     ) : GenerationError()
 
+    /**
+     * The stream ended without a semantic terminal marker (`message_stop` / `finish_reason` /
+     * `[DONE]`), so the response is provably incomplete rather than merely finished.
+     *
+     * The common shape is a relay closing the connection at a content-block boundary — right
+     * where a `tool_use` block was about to begin — which stays invisible if HTTP 200 response
+     * headers are treated as proof of success.
+     */
+    data class IncompleteStream(
+        val provider: String,
+        val stopReason: String?,
+        val toolCallInFlight: Boolean,
+        val producedContent: Boolean,
+    ) : GenerationError()
+
+    /**
+     * The provider stopped because the output token cap was reached (`max_tokens` / `length`).
+     * On thinking models that cap covers reasoning and answer together, so a large reasoning
+     * budget can exhaust it exactly where a tool call would have started.
+     */
+    data class OutputTruncated(
+        val provider: String,
+        val stopReason: String?,
+    ) : GenerationError()
+
     /** A tool execution failed (memory, web search, shell, RAG). */
     data class ToolExecution(
         val toolName: String,
@@ -92,6 +117,21 @@ sealed class GenerationError {
             append(message)
         }
         is SseParse -> "Failed to parse server response."
+        is IncompleteStream -> buildString {
+            append("$provider ended the response early")
+            if (toolCallInFlight) append(" while a tool call was still being written")
+            append(". ")
+            append(
+                if (stopReason == null) {
+                    "No completion signal arrived, so the reply is incomplete."
+                } else {
+                    "The stream closed after stop_reason=$stopReason with no completion signal."
+                }
+            )
+        }
+        is OutputTruncated ->
+            "Response hit the output token limit (stop_reason=${stopReason ?: "max_tokens"}) " +
+                "and was cut off. Raise Max Tokens, or lower the thinking budget, then retry."
         is ToolExecution -> "Tool '$toolName' failed: $message"
         is Transcription -> "Image transcription failed: $message"
         is Embedding -> "Embedding failed: $message"

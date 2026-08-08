@@ -64,7 +64,7 @@ fun SettingsProviderPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsProviderDetailPage(
                     providerName = provider,
                     viewModel = viewModel,
-                    onBack = { selectedProvider = null }
+                    onBack = { selectedProvider = null },
                 )
             } else {
                 val builtInNames = listOf(Constants.PROVIDER_GOOGLE, Constants.PROVIDER_OPENAI, Constants.PROVIDER_ANTHROPIC, Constants.PROVIDER_DEEPSEEK, Constants.PROVIDER_QWEN, Constants.PROVIDER_GROQ, Constants.PROVIDER_OLLAMA, Constants.PROVIDER_OPEN_ROUTER)

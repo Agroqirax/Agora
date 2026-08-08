@@ -91,6 +91,8 @@ internal fun SegmentDetailSheet(
     isStreaming: Boolean,
     markdownRenderContext: ChatMarkdownRenderContext,
     onMediaClick: (List<String>, Int) -> Unit,
+    titleOverride: String? = null,
+    detailFooter: (@Composable () -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val liveSegs = remember(message.segments) {
@@ -115,7 +117,8 @@ internal fun SegmentDetailSheet(
             selectedSegs.size == 1 &&
                 seg.type != "tool" &&
                 !(seg.type == "transcription" && seg.content.isBlank()) &&
-                !isStreaming
+                !isStreaming &&
+                detailFooter == null
 
         val PARTIAL = 0.45f
         val FULL = 0.94f
@@ -360,7 +363,7 @@ internal fun SegmentDetailSheet(
 
                             // Fixed title
                             Text(
-                                text = if (selectedSegs.size > 1) compactSegmentTitle(selectedSegs, message, useLiveStatus = false)
+                                text = titleOverride ?: if (selectedSegs.size > 1) compactSegmentTitle(selectedSegs, message, useLiveStatus = false)
                                     else if (seg.type == "tool") toolDisplayName(seg)
                                     else if (seg.type == "transcription") transcriptionLabel(liveSegs, selectedSegmentIndex)
                                     else stringResource(R.string.tool_thinking),
@@ -480,6 +483,7 @@ internal fun SegmentDetailSheet(
                                         renderContext = markdownRenderContext,
                                     )
                                 }
+                                detailFooter?.invoke()
                             }
                         }
                     }

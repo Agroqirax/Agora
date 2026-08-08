@@ -236,6 +236,8 @@ internal fun CompactSegmentBlock(
     topPaddingExtra: Dp = 0.dp,
     bottomPaddingExtra: Dp = 6.dp,
     onSegmentClick: (Int) -> Unit,
+    onHeaderClick: (() -> Unit)? = null,
+    opensDetailSheet: Boolean = false,
     onExpansionStarted: (String) -> Unit = {},
     onExpansionSettled: (String) -> Unit = {},
     onBlockHeightChanged: (Int) -> Unit = {}
@@ -359,8 +361,12 @@ internal fun CompactSegmentBlock(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .clickable {
-                        currentOnExpansionStarted(expansionKey)
-                        expandedStates[expansionKey] = !isExpanded
+                        if (onHeaderClick != null) {
+                            onHeaderClick()
+                        } else {
+                            currentOnExpansionStarted(expansionKey)
+                            expandedStates[expansionKey] = !isExpanded
+                        }
                     }
                     .padding(10.dp)
             ) {
@@ -416,7 +422,13 @@ internal fun CompactSegmentBlock(
                     )
                 }
                 Icon(
-                    if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    if (opensDetailSheet) {
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight
+                    } else if (isExpanded) {
+                        Icons.Default.KeyboardArrowUp
+                    } else {
+                        Icons.Default.KeyboardArrowDown
+                    },
                     null,
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)

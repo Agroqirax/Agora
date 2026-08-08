@@ -31,18 +31,19 @@ class MessageConverterTest {
     }
 
     @Test
-    fun limitContext_respectsMaxUserMessages() {
+    fun limitContext_respectsEstimatedTokenBudget() {
         val msgs = (1..10).map { i ->
             ChatMessage(
                 id = "msg$i",
                 parentId = null,
-                text = "msg $i",
+                text = "message-$i " + "payload ".repeat(40),
                 participant = if (i % 2 == 0) Participant.MODEL else Participant.USER
             )
         }
-        val result = limitContext(msgs, 3)
+        val result = limitContext(msgs, 140)
         val userCount = result.count { it.participant == Participant.USER }
-        assertTrue(userCount <= 3)
+        assertEquals(1, userCount)
+        assertEquals(listOf("msg9", "msg10"), result.map { it.id })
     }
 
     @Test
@@ -58,10 +59,7 @@ class MessageConverterTest {
             ChatMessage(id = "u2", parentId = "m2", text = "user2", participant = Participant.USER),
             ChatMessage(id = "m3", parentId = "u2", text = "resp3", participant = Participant.MODEL)
         )
-        // maxUserMessages=2: reversed iteration processes m3→u2→m2→r1→t1→m1→u1
-        // m3 (non-tool, count=1), u2 (non-tool, count=2, break)
-        // result = [u2, m3]
-        val result = limitContext(msgs, 2)
+        val result = limitContext(msgs, 20)
         assertEquals(2, result.size)
         assertEquals("u2", result[0].id)
         assertEquals("m3", result[1].id)

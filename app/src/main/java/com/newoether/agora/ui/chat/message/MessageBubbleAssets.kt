@@ -675,14 +675,11 @@ private fun SearchHighlightedMarkdownCode(
         fadeTargetOffset != null &&
             fadeTargetOffset > model.node.startOffset &&
             fadeTargetOffset <= model.node.endOffset
-    if (spec == null && !fadeThisNode) {
-        if (fenced) {
-            MarkdownCodeFence(model.content, model.node, model.typography.code)
-        } else {
-            MarkdownCodeBlock(model.content, model.node, model.typography.code)
-        }
-        return
-    }
+    // Every state — idle, streaming (fade), and search — renders through the header-bearing
+    // [SearchHighlightedMarkdownCodeText] path so the copy button is always present. Falling back
+    // to the library's plain fence at terminal is what made the button vanish once the streaming
+    // fade stopped. With spec == null and no fade the highlight is a no-op, so the idle block is
+    // just plain code text under the same copy header.
 
     val sourceRange = if (spec == null) {
         null

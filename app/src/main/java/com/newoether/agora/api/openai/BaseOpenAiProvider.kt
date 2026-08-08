@@ -8,6 +8,12 @@ import com.newoether.agora.api.util.convertToOpenAiMessages
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.api.util.requireValidSerializedRequest
+import com.newoether.agora.api.util.StreamTermination
+import com.newoether.agora.api.util.asRetryableTransportError
+import com.newoether.agora.api.util.carriesModelOutput
+import com.newoether.agora.api.util.ProviderRetryPolicy
+import com.newoether.agora.api.util.safeWireToolCallId
+import com.newoether.agora.api.util.safeWireToolName
 import com.newoether.agora.model.ChatMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -98,8 +104,6 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
     protected open val retryMissingV1BaseUrl: Boolean = false
 
-    protected open fun retryDelayMillis(statusCode: Int, attempt: Int): Long = 1000L * attempt
-
     /**
      * OpenAI normally follows `finish_reason` with an optional usage-only event and `[DONE]`.
      * Compatible gateways sometimes omit `[DONE]` or keep the HTTP connection alive. Once the
@@ -139,8 +143,6 @@ abstract class BaseOpenAiProvider : LlmProvider {
         )
         request = customizeRequest(request, config)
 
-        val thinkParser = StreamingThinkTagParser()
-
         try {
             request.requireValidWireFormat(name)
             val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), request)
@@ -156,7 +158,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
             if (config.apiKey.isNotBlank()) headers["Authorization"] = "Bearer ${config.apiKey}"
             for ((key, value) in getExtraHeaders(config)) headers[key] = value
 
-            val maxAttempts = 3
+            val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             var attempt = 0
             var finished = false
 
@@ -167,11 +169,58 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
                 while (endpointIndex < endpointUrls.size && !finished && !retryScheduled) {
                     val endpointUrl = endpointUrls[endpointIndex]
-                    val handle = HttpClient.streamPost(endpointUrl, requestBodyJson, headers)
+                    // Opening the request can fail before any response headers exist (connect
+                    // timeout, TLS failure, reset). Those escaped the retry loop entirely before,
+                    // so a single flaky connection became a hard failure. Nothing has streamed at
+                    // this point, so replaying is always safe.
+                    val handle = try {
+                        HttpClient.streamPost(endpointUrl, requestBodyJson, headers)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        val retryable = e.asRetryableTransportError()
+                        if (retryable != null && attempt < maxAttempts) {
+                            val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                            DebugLog.w(
+                                "AgoraAPI",
+                                "[$name] Transport failure opening $endpointUrl on attempt " +
+                                    "$attempt/$maxAttempts (${e.javaClass.simpleName}), " +
+                                    "retrying in ${retryDelayMs}ms",
+                            )
+                            emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                            delay(retryDelayMs)
+                            retryScheduled = true
+                            continue
+                        }
+                        throw e
+                    }
                     try {
                         if (handle.code == 200) {
-                            consumeSuccessfulStream(handle, config, thinkParser) { emit(it) }
-                            finished = true
+                            // HTTP 200 only proves the request was accepted. Whether the MESSAGE
+                            // completed is decided from semantic markers below, so a relay that
+                            // cuts the stream at a content-block boundary can no longer pass as a
+                            // finished answer.
+                            val termination =
+                                consumeSuccessfulStream(handle, config) { emit(it) }
+                            DebugLog.d(
+                                "AgoraSSE",
+                                "[$name] stream_end ${termination.describe()} " +
+                                    "attempt=$attempt/$maxAttempts",
+                            )
+                            if (termination.isRetryable && attempt < maxAttempts) {
+                                // Nothing was surfaced yet, so a replay cannot duplicate output.
+                                DebugLog.w(
+                                    "AgoraAPI",
+                                    "[$name] Incomplete stream on attempt $attempt/$maxAttempts, retrying",
+                                )
+                                val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                                emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                                delay(retryDelayMs)
+                                retryScheduled = true
+                            } else {
+                                termination.toError(name)?.let { emit(StreamEvent.Error(it)) }
+                                finished = true
+                            }
                         } else {
                             val errorRaw = handle.errorBody ?: "Unknown error"
                             val hasV1Fallback = endpointIndex + 1 < endpointUrls.size
@@ -183,10 +232,16 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
                             DebugLog.e("AgoraAPI", "[$name] ERR ${handle.code} at $endpointUrl: $errorRaw")
 
-                            if (handle.code in retryableStatusCodes && attempt < maxAttempts) {
-                                val retryDelayMs = retryDelayMillis(handle.code, attempt)
+                            if (
+                                ProviderRetryPolicy.shouldRetryHttp(
+                                    handle.code,
+                                    errorRaw,
+                                    retryableStatusCodes,
+                                ) && attempt < maxAttempts
+                            ) {
+                                val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
                                 DebugLog.w("AgoraAPI", "[$name] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${retryDelayMs}ms...")
-                                emit(StreamEvent.Retrying(attempt, maxAttempts))
+                                emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                                 delay(retryDelayMs)
                                 retryScheduled = true
                             } else {
@@ -217,19 +272,41 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
     }.flowOn(Dispatchers.IO)
 
+    /**
+     * Consume one 200 SSE stream and report HOW it ended.
+     *
+     * The returned [StreamTermination] is the only evidence that the message actually completed:
+     * socket EOF is produced identically by a clean finish and by a relay cutting the connection
+     * between content blocks. Fatal errors the consumer itself raises are flagged so the caller
+     * does not report a second, contradictory diagnostic.
+     */
     private suspend fun consumeSuccessfulStream(
         handle: HttpClient.StreamHandle,
         config: ProviderConfig,
-        thinkParser: StreamingThinkTagParser,
         emit: suspend (StreamEvent) -> Unit
-    ) {
+    ): StreamTermination {
+        // Parser state belongs to one transport attempt. An empty/incomplete response may be
+        // replayed, and carrying a partial `<think` prefix into the next attempt would corrupt the
+        // successful retry even though no output from the failed attempt was surfaced.
+        val thinkParser = StreamingThinkTagParser()
         val pendingToolCalls = mutableMapOf<Int, PendingToolCall>()
         // Accumulate answer content so that, if the server emits tool calls as content text rather
         // than as structured delta.tool_calls (#33 path B), we can recover them at stream end.
         val contentBuf = StringBuilder()
+        var producedContent = false
+        var reportedError = false
+        var streamError: GenerationError? = null
+        var finishReason: String? = null
+        var sawDone = false
+        var timedOut = false
+        val emitTracked: suspend (StreamEvent) -> Unit = { event ->
+            if (event.carriesModelOutput()) producedContent = true
+            if (event is StreamEvent.Error) reportedError = true
+            emit(event)
+        }
         val emitAndAccumulate: suspend (StreamEvent) -> Unit = { event ->
             if (event is StreamEvent.TextChunk) contentBuf.append(event.text)
-            emit(event)
+            emitTracked(event)
         }
         var structuredToolCallsEmitted = false
         var textToolCallsEmitted = false
@@ -242,30 +319,50 @@ abstract class BaseOpenAiProvider : LlmProvider {
             if (pendingToolCalls.isEmpty()) return
             val pending = pendingToolCalls.values.toList()
             pendingToolCalls.clear()
-            val calls = pending
-                .filter { it.name.isNotEmpty() }
-                .map {
-                    StreamEvent.ToolCallRequest(
-                        id = it.id.ifBlank { it.streamKey },
-                        name = it.name,
-                        arguments = it.args.toString(),
-                        streamKey = it.streamKey,
-                    )
-                }
-            if (calls.isEmpty()) {
-                emit(
+            val incomplete = pending.firstOrNull { candidate ->
+                val callId = candidate.id.ifBlank { candidate.streamKey }
+                !callId.matches(safeWireToolCallId) ||
+                    !candidate.name.matches(safeWireToolName) || runCatching {
+                    json.parseToJsonElement(candidate.args.toString().ifBlank { "{}" }) is
+                        kotlinx.serialization.json.JsonObject
+                }.getOrDefault(false).not()
+            }
+            val callIds = pending.map { candidate ->
+                candidate.id.ifBlank { candidate.streamKey }
+            }
+            if (incomplete != null || callIds.distinct().size != callIds.size) {
+                emitTracked(
                     StreamEvent.Error(
                         GenerationError.SseParse(
                             rawLine = "tool_calls",
-                            cause = "Provider ended before the tool name was complete",
+                            cause = when {
+                                callIds.distinct().size != callIds.size ->
+                                    "Provider returned duplicate tool call ids"
+                                incomplete == null -> "Provider returned incomplete tool metadata"
+                                !incomplete.name.matches(safeWireToolName) ->
+                                    "Provider ended before the tool name was complete"
+                                !incomplete.id.ifBlank { incomplete.streamKey }
+                                    .matches(safeWireToolCallId) ->
+                                    "Provider returned an invalid tool call id"
+                                else ->
+                                    "Provider ended before the tool arguments formed a complete JSON object"
+                            },
                         )
                     )
                 )
                 return
             }
+            val calls = pending.map {
+                    StreamEvent.ToolCallRequest(
+                        id = it.id.ifBlank { it.streamKey },
+                        name = it.name,
+                        arguments = it.args.toString().ifBlank { "{}" },
+                        streamKey = it.streamKey,
+                    )
+                }
             structuredToolCallsEmitted = true
-            if (calls.size == 1) emit(calls.first())
-            else emit(StreamEvent.ToolCallsRequest(calls))
+            if (calls.size == 1) emitTracked(calls.first())
+            else emitTracked(StreamEvent.ToolCallsRequest(calls))
         }
 
         suspend fun emitFilteredText(text: String) {
@@ -278,7 +375,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
 
         suspend fun emitTextToolUpdate(snapshot: StreamingTextToolCallParser.Snapshot) {
-            emit(
+            emitTracked(
                 StreamEvent.ToolCallUpdate(
                     streamKey = snapshot.streamKey,
                     id = null,
@@ -290,7 +387,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
         suspend fun emitCompletedTextTool(call: StreamingTextToolCallParser.CompletedCall) {
             textToolCallsEmitted = true
-            emit(
+            emitTracked(
                 StreamEvent.ToolCallRequest(
                     id = syntheticToolCallId(),
                     name = call.name,
@@ -301,7 +398,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
         }
 
         suspend fun emitMalformedTextTool(cause: String) {
-            emit(
+            emitTracked(
                 StreamEvent.Error(
                     GenerationError.SseParse(
                         rawLine = "tool_call",
@@ -356,7 +453,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 // only closes its optional usage/[DONE] grace tail and is therefore success.
                 if (terminalDeadlineNanos != null) break
                 if (++consecutiveReadTimeouts >= 3) {
-                    emit(StreamEvent.Error(GenerationError.Timeout))
+                    timedOut = true
                     break
                 }
                 continue
@@ -366,12 +463,37 @@ abstract class BaseOpenAiProvider : LlmProvider {
             if (!line.startsWith("data: ")) continue
             val jsonStr = line.substring(6).trim()
             if (jsonStr == "[DONE]") {
+                sawDone = true
                 emitPendingStructuredToolCalls()
                 break
             }
 
             try {
                 val response = json.decodeFromString<OpenAiStreamResponse>(jsonStr)
+
+                // A relay signals a mid-stream failure as a bare {"error":{...}} chunk on a 200
+                // response. Previously ignoreUnknownKeys discarded it and the generation just
+                // stopped with no diagnostic at all.
+                response.error?.let { error ->
+                    streamError = GenerationError.Api(
+                        code = error.code,
+                        type = error.type,
+                        message = error.message.ifBlank {
+                            "Provider reported an error in the response stream"
+                        },
+                    )
+                }
+                if (
+                    streamError == null &&
+                    ProviderRetryPolicy.isFailedToGenerateOutcome(response.outcome)
+                ) {
+                    streamError = GenerationError.Api(
+                        code = null,
+                        type = "failed_to_generate",
+                        message = response.outcome.orEmpty(),
+                    )
+                }
+
                 val choice = response.choices?.firstOrNull()
 
                 choice?.delta?.let { delta ->
@@ -389,9 +511,14 @@ abstract class BaseOpenAiProvider : LlmProvider {
                         if (tc.id != null) pending.id = tc.id
                         tc.function?.name?.let { if (it.isNotEmpty()) pending.name = it }
                         tc.function?.arguments?.let {
-                            pending.args.append(if (it is JsonPrimitive) it.content else it.toString())
+                            // Snapshot-tolerant: a relay that resends the whole argument string in
+                            // every delta must not produce `{"a":1}{"a":1}`, and an empty
+                            // placeholder delta must not erase what was already accumulated.
+                            pending.args.append(
+                                if (it is JsonPrimitive) it.content else it.toString()
+                            )
                         }
-                        emit(
+                        emitTracked(
                             StreamEvent.ToolCallUpdate(
                                 streamKey = pending.streamKey,
                                 id = pending.id.ifBlank { null },
@@ -402,6 +529,10 @@ abstract class BaseOpenAiProvider : LlmProvider {
                     }
                 }
 
+                choice?.finishReason?.takeIf(String::isNotBlank)?.let {
+                    finishReason = it.lowercase()
+                }
+
                 if (!choice?.finishReason.isNullOrBlank()) {
                     // Several OpenAI-compatible gateways return "stop" (or close directly)
                     // after streaming a perfectly valid structured tool call. The accumulated
@@ -410,8 +541,10 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 }
 
                 response.usage?.let { usage ->
-                    emit(StreamEvent.UsageUpdate(usage.toTokenUsage()))
+                    emitTracked(StreamEvent.UsageUpdate(usage.toTokenUsage()))
                 }
+
+                if (streamError != null) break
 
                 if (!choice?.finishReason.isNullOrBlank() && terminalDeadlineNanos == null) {
                     terminalDeadlineNanos =
@@ -422,12 +555,17 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 }
             } catch (e: Exception) {
                 DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
+                streamError = GenerationError.SseParse(
+                    rawLine = jsonStr.take(512),
+                    cause = e.localizedMessage ?: "Malformed SSE payload",
+                )
+                break
             }
         }
 
-        // EOF without [DONE]/finish_reason is common on self-hosted compatible endpoints. If a
-        // structured call started, complete that same live segment instead of silently ending.
-        emitPendingStructuredToolCalls()
+        // Do not promote an open structured call at transport EOF. Only [DONE] or finish_reason
+        // can prove that its metadata is complete; leaving it pending makes the termination error
+        // carry toolCallInFlight=true and prevents execution of a truncated invocation.
 
         textToolParser?.flush(
             onText = { emitFilteredText(it) },
@@ -455,9 +593,9 @@ abstract class BaseOpenAiProvider : LlmProvider {
         ) {
             val parsed = ToolCallTextParser.parse(contentBuf.toString())
             if (parsed.size == 1) {
-                emit(StreamEvent.ToolCallRequest(syntheticToolCallId(), parsed[0].name, parsed[0].arguments))
+                emitTracked(StreamEvent.ToolCallRequest(syntheticToolCallId(), parsed[0].name, parsed[0].arguments))
             } else if (parsed.size > 1) {
-                emit(StreamEvent.ToolCallsRequest(parsed.map {
+                emitTracked(StreamEvent.ToolCallsRequest(parsed.map {
                     StreamEvent.ToolCallRequest(syntheticToolCallId(), it.name, it.arguments)
                 }))
             }
@@ -466,6 +604,18 @@ abstract class BaseOpenAiProvider : LlmProvider {
         if (!currentCoroutineContext().isActive) {
             throw CancellationException("Stream cancelled")
         }
+
+        return StreamTermination(
+            // Either signal proves the message ended semantically. Many gateways omit one of them,
+            // so requiring both would report false truncations.
+            sawTerminalMarker = sawDone || finishReason != null,
+            stopReason = finishReason,
+            producedContent = producedContent,
+            toolCallInFlight = pendingToolCalls.isNotEmpty(),
+            streamError = streamError,
+            alreadyReportedError = reportedError,
+            timedOut = timedOut,
+        )
     }
 
     private fun endpointCandidates(baseUrl: String, path: String): List<String> {

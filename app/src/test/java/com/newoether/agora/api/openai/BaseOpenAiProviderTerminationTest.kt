@@ -172,6 +172,46 @@ class BaseOpenAiProviderTerminationTest {
     }
 
     @Test
+    fun invalidStructuredToolMetadataProducesOneErrorAndNoExecutableCall() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bad name","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""
+            )
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config).toList()
+            }
+        }
+
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest })
+        assertEquals(1, events.filterIsInstance<StreamEvent.Error>().size)
+    }
+
+    @Test
+    fun duplicateStructuredToolIdsRejectTheWholeBatch() = withServer(
+        terminalGraceMillis = 100L,
+        response = { socket, release ->
+            socket.writeSse(
+                """{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_same","type":"function","function":{"name":"file_read","arguments":"{}"}},{"index":1,"id":"call_same","type":"function","function":{"name":"file_write","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"""
+            )
+            release.await()
+        },
+    ) { provider, config ->
+        val events = runBlocking {
+            withTimeout(2_000L) {
+                provider.generateResponse(messages(), config).toList()
+            }
+        }
+
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest || it is StreamEvent.ToolCallsRequest })
+        assertEquals(1, events.filterIsInstance<StreamEvent.Error>().size)
+    }
+
+    @Test
     fun taggedTextToolCall_streamsIntoOneSegmentWithoutFlashingMarkupAsAnswer() = withServer(
         terminalGraceMillis = 100L,
         response = { socket, release ->

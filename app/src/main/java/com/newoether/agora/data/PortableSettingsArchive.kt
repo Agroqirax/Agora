@@ -44,8 +44,12 @@ internal object PortableSettingsArchive {
         putEncoded("customModels", sm.customModels.first())
         putEncoded("enabledModels", sm.enabledModels.first())
         putEncoded("modelAliases", sm.modelAliases.first())
-        put("maxContextWindow", JsonPrimitive(sm.maxContextWindow.first()))
+        put("contextTokenBudget", JsonPrimitive(sm.maxContextWindow.first()))
         put("visualizeContextRollout", JsonPrimitive(sm.visualizeContextRollout.first()))
+        put("contextCompactEnabled", JsonPrimitive(sm.contextCompactEnabled.first()))
+        putNullableString("contextCompactModel", sm.contextCompactModel.first())
+        put("contextCompactPrompt", JsonPrimitive(sm.contextCompactPrompt.first()))
+        put("contextCompactRetainCount", JsonPrimitive(sm.contextCompactRetainCount.first()))
         put("codeExecutionEnabled", JsonPrimitive(sm.codeExecutionEnabled.first()))
         put("googleSearchEnabled", JsonPrimitive(sm.googleSearchEnabled.first()))
         put("thinkingEnabled", JsonPrimitive(sm.thinkingEnabled.first()))
@@ -123,6 +127,7 @@ internal object PortableSettingsArchive {
         put("hapticsEnabled", JsonPrimitive(sm.hapticsEnabled.first()))
         put("detailedTokenUsage", JsonPrimitive(sm.detailedTokenUsage.first()))
         put("toolCallDisplayMode", JsonPrimitive(sm.toolCallDisplayMode.first()))
+        put("thinkingSegmentDisplayMode", JsonPrimitive(sm.thinkingSegmentDisplayMode.first()))
         put("autoExpandActiveGroup", JsonPrimitive(sm.autoExpandActiveGroup.first()))
         put("schemeStyle", JsonPrimitive(sm.schemeStyle.first()))
 
@@ -186,8 +191,13 @@ internal object PortableSettingsArchive {
             sm.saveModelAliases(value)
         }
 
-        obj.int("maxContextWindow")?.let { sm.saveMaxContextWindow(it) }
+        (obj.int("contextTokenBudget") ?: obj.int("maxContextWindow"))
+            ?.let { sm.saveMaxContextWindow(it) }
         obj.boolean("visualizeContextRollout")?.let { sm.saveVisualizeContextRollout(it) }
+        obj.boolean("contextCompactEnabled")?.let { sm.saveContextCompactEnabled(it) }
+        if (obj.containsKey("contextCompactModel")) sm.saveContextCompactModel(obj.nullableString("contextCompactModel"))
+        obj.string("contextCompactPrompt")?.let { sm.saveContextCompactPrompt(it) }
+        obj.int("contextCompactRetainCount")?.takeIf { it >= 0 }?.let { sm.saveContextCompactRetainCount(it) }
         obj.boolean("codeExecutionEnabled")?.let { sm.saveCodeExecutionEnabled(it) }
         obj.boolean("googleSearchEnabled")?.let { sm.saveGoogleSearchEnabled(it) }
         obj.boolean("thinkingEnabled")?.let { sm.saveThinkingEnabled(it) }
@@ -382,6 +392,7 @@ internal object PortableSettingsArchive {
         obj.boolean("hapticsEnabled")?.let { sm.saveHapticsEnabled(it) }
         obj.boolean("detailedTokenUsage")?.let { sm.saveDetailedTokenUsage(it) }
         obj.string("toolCallDisplayMode")?.let { sm.saveToolCallDisplayMode(it) }
+        obj.string("thinkingSegmentDisplayMode")?.let { sm.saveThinkingSegmentDisplayMode(it) }
         obj.boolean("autoExpandActiveGroup")?.let { sm.saveAutoExpandActiveGroup(it) }
         obj.string("schemeStyle")?.let { sm.saveSchemeStyle(it) }
 

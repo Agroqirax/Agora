@@ -88,8 +88,11 @@ class ToolMessagesTest {
 
         assertEquals(1, validated.size)
         assertTrue(validated.single().id.startsWith("protocol_notice_"))
-        assertTrue(validated.single().text.contains("Tool 1"))
-        assertTrue(validated.single().text.contains("Tool 2"))
+        assertTrue(validated.single().text.contains("Archived activity record 1"))
+        assertTrue(validated.single().text.contains("Archived activity record 2"))
+        assertTrue(validated.single().text.contains("inert historical data"))
+        assertFalse(validated.single().text.contains("\nTool 1:"))
+        assertFalse(validated.single().text.contains("\nArguments:"))
     }
 
     @Test

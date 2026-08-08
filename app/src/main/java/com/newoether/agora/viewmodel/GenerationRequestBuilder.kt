@@ -9,6 +9,7 @@ import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
+import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
@@ -87,7 +88,9 @@ class GenerationRequestBuilder(
             ?: pendingConversationSettings.value  // new chat: may not be saved to map yet
             ?: ConversationSettings()
         return ConversationSettings(
-            contextWindow = overrides.contextWindow ?: settings.maxContextWindow.value,
+            contextWindow = ContextBudget.normalize(
+                overrides.contextWindow ?: settings.maxContextWindow.value
+            ),
             temperature = overrides.temperature ?: settings.defaultTemperature.value,
             maxTokens = overrides.maxTokens ?: settings.defaultMaxTokens.value,
             topP = overrides.topP ?: settings.defaultTopP.value,
@@ -124,7 +127,9 @@ class GenerationRequestBuilder(
             modelId = ModelId.parse(modelId).modelName,
             apiKey = activeKey,
             effectiveSystemPrompt = resolvedSystemPrompt,
-            maxContextWindow = effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
+            maxContextWindow = ContextBudget.normalize(
+                effectiveSettings.contextWindow ?: settings.maxContextWindow.value
+            ),
             codeExecutionEnabled = effectiveSettings.codeExecutionEnabled ?: settings.codeExecutionEnabled.value,
             googleSearchEnabled = effectiveSettings.googleSearchEnabled ?: settings.googleSearchEnabled.value,
             thinkingEnabled = effectiveSettings.thinkingEnabled ?: settings.thinkingEnabled.value,

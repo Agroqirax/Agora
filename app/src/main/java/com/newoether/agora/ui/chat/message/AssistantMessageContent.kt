@@ -44,6 +44,7 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.model.ToolCallDisplayModes
+import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.theme.ChatType
 
@@ -168,6 +169,7 @@ internal fun AssistantMessageContent(
     actionCopyText: String?,
     showBranchSelector: Boolean,
     toolCallDisplayMode: String,
+    thinkingSegmentDisplayMode: String,
     autoExpandActiveGroup: Boolean,
     detailedTokenUsage: Boolean,
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController,
@@ -322,8 +324,12 @@ internal fun AssistantMessageContent(
                     mergeAdjacentSegments(segmentsOrNull.orEmpty())
                 }
                 val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
+                val useThinkingSheet =
+                    ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
+                        ThinkingSegmentDisplayModes.BOTTOM_SHEET
                 val groupAdjacentTimelineTools = normalizedToolCallDisplayMode == ToolCallDisplayModes.GROUPED_TIMELINE
                 val useTimelineSegments =
+                    !useThinkingSheet &&
                     normalizedToolCallDisplayMode != ToolCallDisplayModes.COMPACT &&
                         (
                             mergedSegments.any { it.type == "answer" } ||
@@ -336,6 +342,9 @@ internal fun AssistantMessageContent(
                     mergedSegments.filter { it.type != "answer" }
                 }
                 val compactVisible = !useTimelineSegments && detailSegments.isNotEmpty()
+                val sheetCollapsedStates = remember(message.id) {
+                    mutableStateMapOf<String, Boolean>()
+                }
                 val compactAppearanceKey = compactSegmentBlockAppearanceKey(message.id)
                 val compactCardAppearanceKey = "$compactAppearanceKey:card"
                 val latestVisibleAnswerIndex =
@@ -385,13 +394,22 @@ internal fun AssistantMessageContent(
                             message = message,
                             isStreaming = isStreaming,
                             useLiveStatus = true,
-                            expandedStates = thoughtExpandedStates,
+                            expandedStates = if (useThinkingSheet) sheetCollapsedStates else thoughtExpandedStates,
                             expansionKey = message.id,
                             cardAppearanceKey = compactCardAppearanceKey,
                             segmentAppearanceRegistry = segmentAppearanceRegistry,
                             onExpansionStarted = onLayoutMutationStarted,
                             onExpansionSettled = onLayoutMutationSettled,
-                            onSegmentClick = { index -> onSegmentSelected(listOf(index)) },
+                            onSegmentClick = { index ->
+                                if (useThinkingSheet) onSegmentSelected(detailSegments.indices.toList())
+                                else onSegmentSelected(listOf(index))
+                            },
+                            onHeaderClick = if (useThinkingSheet) {
+                                { onSegmentSelected(detailSegments.indices.toList()) }
+                            } else {
+                                null
+                            },
+                            opensDetailSheet = useThinkingSheet,
                             onBlockHeightChanged = setThoughtBlockHeight,
                         )
                     }

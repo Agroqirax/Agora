@@ -173,6 +173,8 @@ class AppContainer(private val appContext: Context) {
             shellConfirmation = shellConfirmationController,
             automationExecutionGate = automationExecutionGate,
             mcpToolProvider = mcpToolProvider,
+            generationRegistry = conversationStateRegistry,
+            pauseConversationLoop = { conversationId -> loopManager.stopLoop(conversationId) },
         )
     }
 
@@ -233,6 +235,6 @@ class AppContainer(private val appContext: Context) {
             autoBackupManager, conversationRepository, settingsRepository, localProvider, providerRegistry,
             taskManager, loopManager, automationToolProvider, conversationExecutionCoordinator,
             automationExecutionGate, conversationStateRegistry, shellConfirmationController,
-            mcpRegistry, mcpToolProvider,
+            mcpRegistry, mcpToolProvider, taskExecutionEngine,
         )
 }

@@ -14,7 +14,7 @@ class RequestPipelineRobustnessTest {
     @Test
     fun everyMalformedStoredToolSequenceBecomesAValidOpenAiRequest() {
         malformedHistories().forEachIndexed { index, history ->
-            val prepared = prepareMessages(history, maxUserMessages = 20)
+            val prepared = prepareMessages(history, contextTokenBudget = 32_768)
             val request = OpenAiChatRequest(
                 model = "test-model",
                 messages = convertToOpenAiMessages(prepared),
@@ -33,7 +33,7 @@ class RequestPipelineRobustnessTest {
                 result("result_a", "call-a"),
                 user("u1"),
             ),
-            maxUserMessages = 20,
+            contextTokenBudget = 32_768,
         )
 
         val adapted = adaptToolRoundsForProvider(
@@ -43,7 +43,8 @@ class RequestPipelineRobustnessTest {
         )
 
         assertFalse(adapted.any(ChatMessage::isToolProtocolMessage))
-        assertTrue(adapted.any { it.text.contains("Replayed as plain context") })
+        assertTrue(adapted.any { it.text.contains("inert historical data") })
+        assertFalse(adapted.any { it.text.contains("\nArguments:") })
         OpenAiChatRequest(
             model = "test-model",
             messages = convertToOpenAiMessages(adapted),

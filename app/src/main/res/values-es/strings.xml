@@ -307,6 +307,7 @@
     <string name="generation_title">Generación</string>
     <string name="context_window">Ventana de contexto</string>
     <string name="context_window_default">Ventana de contexto predeterminada</string>
+    <string name="context_token_budget_value">Aproximadamente %1$s tokens</string>
     <string name="context_retain">Conservar %1$d mensajes recientes</string>
     <string name="context_visualize">Visualizar el despliegue del contexto</string>
     <string name="context_visualize_desc">Atenuar los mensajes fuera de la ventana de contexto</string>
@@ -1044,4 +1045,27 @@
     <string name="openai_service_tier_default">Predeterminado</string>
     <string name="openai_service_tier_flex">Flexible</string>
     <string name="openai_service_tier_fast">Rápido</string>
+    <string name="context_title">Context</string>
+    <string name="context_desc">Context management</string>
+    <string name="context_compact">Context compact</string>
+    <string name="context_compact_auto">Automatic compact</string>
+    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
+    <string name="context_compact_model">Compact model</string>
+    <string name="context_compact_prompt">Compact prompt</string>
+    <string name="context_compact_prompt_desc">Summary instructions</string>
+    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_manual">Compact context</string>
+    <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_select_available_model">Select an available model</string>
+    <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
+    <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="thinking_segment_display_mode">Thinking segments</string>
+    <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
+    <string name="thinking_segment_display_card">Card</string>
+    <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
+    <string name="thinking_segments_title">Thinking segments</string>
+    <string name="context_usage_messages">~%1$s / %2$s tokens · %3$d mensajes lógicos</string>
+    <string name="context_boundary_active">Límite de compactación activo</string>
+    <string name="context_boundary_none">Sin límite de compactación</string>
 </resources>

@@ -12,6 +12,8 @@ import com.newoether.agora.util.SshClient
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.Flow
@@ -198,6 +200,15 @@ class ShellToolProvider(
                 val output = StringBuilder()
                 var exitCode: Int? = null
                 var errorMessage: String? = null
+                // Conch's structured discriminator for "the deadline killed the process".
+                // Never infer this from the message text: a command's OWN timeout (curl's
+                // "Operation timed out", a Go "i/o timeout") reads identically and would cause a
+                // non-idempotent command to be silently re-run as a background job.
+                var timedOut = false
+                // Non-fatal degradation (currently output truncation). Kept apart from
+                // errorMessage so a truncated line still reports the command's real exit code
+                // instead of relabelling a successful command as execution_error.
+                var warningMessage: String? = null
                 var currentEvent: String? = null
                 val aesKey = client.getSessionKey()
                 stream@ while (currentCoroutineContext().isActive) {
@@ -227,15 +238,28 @@ class ShellToolProvider(
                                     }
                                 }
                                 "result" -> exitCode = (dataJson["exit_code"] as? JsonPrimitive)?.content?.toIntOrNull()
-                                "error" -> errorMessage = (dataJson["message"] as? JsonPrimitive)?.content
+                                "warning" -> {
+                                    if (warningMessage == null) {
+                                        warningMessage =
+                                            (dataJson["message"] as? JsonPrimitive)?.content
+                                    }
+                                }
+                                "error" -> {
+                                    errorMessage = (dataJson["message"] as? JsonPrimitive)?.content
+                                    timedOut = (dataJson["timed_out"] as? JsonPrimitive)
+                                        ?.content?.toBooleanStrictOrNull() == true
+                                }
                             }
                         }
                     }
                 }
                 buildJsonObject {
                     put("type", "execute_shell_command"); put("server", deviceName); put("command", cmd)
-                    if (errorMessage != null) { put("error", "execution_error"); put("message", errorMessage) }
+                    if (errorMessage != null) { put("error", "execution_error"); put("message", errorMessage); if (timedOut) put("timed_out", true) }
                     else { put("exit_code", exitCode ?: -1) }
+                    // Emitted alongside a normal exit code on purpose: the output is incomplete but
+                    // the command itself succeeded or failed on its own terms.
+                    warningMessage?.let { put("warning", it) }
                     put("output", output.toString().trimEnd())
                 }.toString()
             } catch (e: Exception) {
@@ -413,7 +437,12 @@ class ShellToolProvider(
         } else {
             "The shell server name. Use list_shells to see available servers: $deviceNamesStr."
         }
-        val shellRequiredParams = if (allDeviceNames.size == 1) listOf("command") else listOf("command", "server")
+        // timeout_ms is REQUIRED: the model must decide how long the tool call should wait. Conch
+        // foreground execution is durable from the start, so expiry returns its job id without
+        // killing or restarting the command.
+        val shellRequiredParams =
+            if (allDeviceNames.size == 1) listOf("command", "timeout_ms")
+            else listOf("command", "server", "timeout_ms")
 
         val conchDeviceNames = ctx.shellDevices
             .filter { it.type != "ssh" }
@@ -431,7 +460,7 @@ class ShellToolProvider(
                     properties = mapOf(
                         "command" to ToolProperty("string", "The shell command to execute."),
                         "server" to ToolProperty("string", serverPropDesc),
-                        "timeout_ms" to ToolProperty("integer", "Timeout in milliseconds (optional; defaults to 300s, foreground max 300s, background is bounded by Conch policy)."),
+                        "timeout_ms" to ToolProperty("integer", "Required. Foreground wait budget in milliseconds (hard ceiling 295000ms inside the tool call). On Conch, a command still running at that point continues as the same durable job and returns its job_id; it is never killed or restarted. With background=true this instead bounds the durable job's runtime (up to Conch policy)."),
                         "workdir" to ToolProperty("string", "Working directory (optional)."),
                         "background" to ToolProperty("boolean", "Start a durable background job on Conch and return its job_id immediately (optional, default false)."),
                     ),
@@ -461,13 +490,25 @@ class ShellToolProvider(
                 )))
                 add(ToolDefinition(function = ToolFunction(
                     name = "get_shell_job",
-                    description = "Get status and bounded output for a durable Conch shell job.",
+                    description = "Get status and bounded output for a durable Conch shell job. Prefer wait_for_job for blocking use.",
                     parameters = ToolParameters(
                         properties = mapOf(
                             "job_id" to ToolProperty("string", "The Conch job id."),
                             "server" to ToolProperty("string", jobServerDescription),
                         ),
                         required = listOf("job_id") + jobRequired,
+                    ),
+                )))
+                add(ToolDefinition(function = ToolFunction(
+                    name = "wait_for_job",
+                    description = "Block until a durable Conch shell job finishes or timeout_ms elapses, then return its final output. Preferred over polling get_shell_job. If it returns timed_out=true the job is still running — call wait_for_job again to keep waiting.",
+                    parameters = ToolParameters(
+                        properties = mapOf(
+                            "job_id" to ToolProperty("string", "The Conch job id."),
+                            "timeout_ms" to ToolProperty("integer", "Required. Maximum time to block in milliseconds before returning (whether or not the job finished). The hard ceiling for a single call is ${maxWaitMs(ctx)}ms; larger values are clamped to it and the result says so. To wait longer, call wait_for_job again."),
+                            "server" to ToolProperty("string", jobServerDescription),
+                        ),
+                        required = listOf("job_id", "timeout_ms") + jobRequired,
                     ),
                 )))
                 add(ToolDefinition(function = ToolFunction(
@@ -602,6 +643,7 @@ class ShellToolProvider(
             "execute_shell_command" -> executeShellCommand(arguments, ctx)
             "list_shell_jobs" -> listShellJobs(arguments, ctx)
             "get_shell_job" -> getShellJob(arguments, ctx)
+            "wait_for_job" -> waitForShellJob(arguments, ctx)
             "stop_shell_job" -> stopShellJob(arguments, ctx)
             "file_read" -> executeFileRead(arguments, ctx)
             "file_write" -> executeFileWrite(arguments, ctx)
@@ -629,7 +671,7 @@ class ShellToolProvider(
 
     override fun handles(name: String): Boolean = name in setOf(
         "list_shells", "execute_shell_command",
-        "list_shell_jobs", "get_shell_job", "stop_shell_job",
+        "list_shell_jobs", "get_shell_job", "wait_for_job", "stop_shell_job",
         "file_read", "file_write", "file_edit", "file_glob", "file_grep", "view_image"
     )
 
@@ -671,12 +713,19 @@ class ShellToolProvider(
         if (command.isBlank()) return jsonError("execute_shell_command", "no_command")
         val serverName = arg(args, "server")
         val background = boolArg(args, "background")
-        val defaultTimeoutMs = Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
-        val timeoutMax = if (background) 86_400_000 else defaultTimeoutMs
-        val timeoutMs = (
-            arg(args, "timeout_ms").toIntOrNull()
-                ?: defaultTimeoutMs
-            ).coerceIn(1000, timeoutMax)
+        val foregroundMaxMs = Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
+        val timeoutMax = if (background) BACKGROUND_JOB_MAX_MS else foregroundMaxMs
+        val rawTimeout = arg(args, "timeout_ms")
+        if (rawTimeout.isBlank()) return jsonError(
+            "execute_shell_command", "timeout_ms is required", server = serverName, command = command,
+        )
+        val timeoutMs = (rawTimeout.toIntOrNull()
+            ?: return jsonError(
+                "execute_shell_command",
+                "timeout_ms must be an integer, got \"$rawTimeout\"",
+                server = serverName,
+                command = command,
+            )).coerceIn(1000, timeoutMax)
         val workdir = arg(args, "workdir")
 
         if (background) {
@@ -709,7 +758,7 @@ class ShellToolProvider(
 
         val backend = getBackend(serverName, ctx)
             ?: return jsonError("execute_shell_command", serverNotFoundMessage(serverName, ctx))
-        try {
+        return try {
             // Gate on the backend's ACTUAL target: with a blank server name the sandbox wins
             // resolution, while resolveShellDevice() would name an unrelated remote device.
             if (!confirmTarget(
@@ -721,10 +770,135 @@ class ShellToolProvider(
             ) {
                 return jsonError("execute_shell_command", "denied_by_user: the user declined to run this command", server = serverName, command = command)
             }
-            return backend.executeCommand(command, workdir, timeoutMs)
+            if (backend is ConchBackend) {
+                executeDurableForeground(
+                    backend = backend,
+                    command = command,
+                    workdir = workdir,
+                    waitMs = timeoutMs.coerceAtMost(maxWaitMs(ctx)),
+                )
+            } else {
+                backend.executeCommand(command, workdir, timeoutMs)
+            }
         } finally {
             backend.close()
         }
+    }
+
+    /**
+     * Starts a Conch command as a durable job, then treats foreground execution as a bounded wait
+     * on that same process. A wait expiry returns ownership to the model through job_id; it never
+     * kills or replays the command.
+     */
+    private suspend fun executeDurableForeground(
+        backend: ConchBackend,
+        command: String,
+        workdir: String,
+        waitMs: Int,
+    ): String {
+        val startResult = try {
+            backend.startJob(command, workdir, BACKGROUND_JOB_MAX_MS)
+        } catch (e: Exception) {
+            return jsonError(
+                "execute_shell_command",
+                e.message ?: "Failed to start durable foreground job",
+                server = backend.device.name,
+                command = command,
+            )
+        }
+        val startObj = try {
+            Json.parseToJsonElement(startResult).jsonObject
+        } catch (_: Exception) {
+            return startResult
+        }
+        if (startObj["error"] != null) return startResult
+        val jobId = (startObj["job_id"] as? JsonPrimitive)?.content
+            ?.takeIf(String::isNotBlank)
+            ?: return jsonError(
+                "execute_shell_command",
+                "Conch started a job without returning job_id",
+                server = backend.device.name,
+                command = command,
+            )
+
+        val start = System.currentTimeMillis()
+        var pollIntervalMs = INITIAL_WAIT_POLL_MS
+        var consecutiveFailures = 0
+        var lastFailure: String? = null
+        try {
+        while (currentCoroutineContext().isActive) {
+            val raw = try {
+                backend.getJob(jobId).also { consecutiveFailures = 0 }
+            } catch (e: Exception) {
+                consecutiveFailures++
+                lastFailure = e.message ?: e.javaClass.simpleName
+                if (consecutiveFailures >= MAX_WAIT_POLL_FAILURES) {
+                    return buildJsonObject {
+                        put("type", "execute_shell_command")
+                        put("error", "poll_failed")
+                        put(
+                            "message",
+                            "Durable job could not be polled $consecutiveFailures times: " +
+                                lastFailure,
+                        )
+                        put("server", backend.device.name)
+                        put("command", command)
+                        put("job_id", jobId)
+                        put("durable", true)
+                        put("state", "unknown")
+                        put(
+                            "note",
+                            "The command may still be running. Keep this job_id and retry with " +
+                                "wait_for_job or get_shell_job; it was not killed or restarted.",
+                        )
+                    }.toString()
+                }
+                null
+            }
+            if (raw != null && isTerminalJobPayload(raw)) {
+                val result = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
+                return buildJsonObject {
+                    put("type", "execute_shell_command")
+                    put("server", backend.device.name)
+                    put("command", command)
+                    put("job_id", jobId)
+                    put("durable", true)
+                    if (result != null) put("result", result) else put("result_raw", raw)
+                }.toString()
+            }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed >= waitMs) {
+                return buildJsonObject {
+                    put("type", "execute_shell_command")
+                    put("server", backend.device.name)
+                    put("command", command)
+                    put("job_id", jobId)
+                    put("background", true)
+                    put("state", "running")
+                    put("waited_ms", elapsed)
+                    put(
+                        "note",
+                        "Foreground wait expired; the same durable job is still running. Use " +
+                            "wait_for_job to await it. The command was not killed or restarted.",
+                    )
+                }.toString()
+            }
+            val remaining = (waitMs - elapsed).toInt()
+            kotlinx.coroutines.delay(pollIntervalMs.coerceAtMost(remaining).toLong())
+            pollIntervalMs = (pollIntervalMs * 2).coerceAtMost(MAX_WAIT_POLL_MS)
+        }
+        } catch (cancelled: CancellationException) {
+            // A wait expiry intentionally leaves the durable job running. An explicit generation
+            // Stop is different: it revokes this tool execution and stops the remote process tree.
+            withContext(NonCancellable) { runCatching { backend.stopJob(jobId) } }
+            throw cancelled
+        }
+        return jsonError(
+            "execute_shell_command",
+            "cancelled while durable job $jobId continues on ${backend.device.name}",
+            server = backend.device.name,
+            command = command,
+        )
     }
 
     private fun executeShellCommandEvents(
@@ -739,8 +913,8 @@ class ShellToolProvider(
         }
         val serverName = arg(args, "server")
         if (boolArg(args, "background")) {
-            val backend = getConchBackend(serverName, ctx)
-            if (backend == null) {
+            val device = resolveShellDevice(serverName, ctx)?.takeIf { it.type != "ssh" }
+            if (device == null) {
                 emit(
                     ToolExecutionEvent.Completed(
                         jsonError(
@@ -753,15 +927,39 @@ class ShellToolProvider(
                 )
                 return@flow
             }
-            emit(ToolExecutionEvent.TargetResolved(backend.device.name))
+            emit(ToolExecutionEvent.TargetResolved(device.name))
             emit(ToolExecutionEvent.Progress("Starting durable background job"))
+            // executeShellCommand owns the one confirmation and backend lifecycle.
             emit(ToolExecutionEvent.Completed(executeShellCommand(arguments, ctx)))
             return@flow
         }
-        val timeoutMs = (
-            arg(args, "timeout_ms").toIntOrNull()
-                ?: Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
-            ).coerceIn(1000, Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt())
+        val foregroundMaxMs = Constants.TOOL_EXECUTION_TIMEOUT_MS.toInt()
+        val rawTimeout = arg(args, "timeout_ms")
+        if (rawTimeout.isBlank()) {
+            emit(
+                ToolExecutionEvent.Completed(
+                    jsonError(
+                        "execute_shell_command", "timeout_ms is required",
+                        server = serverName, command = command,
+                    ),
+                ),
+            )
+            return@flow
+        }
+        val timeoutMs = (rawTimeout.toIntOrNull()
+            ?: run {
+                emit(
+                    ToolExecutionEvent.Completed(
+                        jsonError(
+                            "execute_shell_command",
+                            "timeout_ms must be an integer, got \"$rawTimeout\"",
+                            server = serverName,
+                            command = command,
+                        ),
+                    ),
+                )
+                return@flow
+            }).coerceIn(1000, foregroundMaxMs)
         val workdir = arg(args, "workdir")
         val backend = getBackend(serverName, ctx)
         if (backend == null) {
@@ -797,8 +995,22 @@ class ShellToolProvider(
                 )
                 return@flow
             }
-            emit(ToolExecutionEvent.Progress("Running command"))
-            backend.executeCommandEvents(command, workdir, timeoutMs).collect { emit(it) }
+            if (backend is ConchBackend) {
+                emit(ToolExecutionEvent.Progress("Running as a durable foreground job"))
+                emit(
+                    ToolExecutionEvent.Completed(
+                        executeDurableForeground(
+                            backend = backend,
+                            command = command,
+                            workdir = workdir,
+                            waitMs = timeoutMs.coerceAtMost(maxWaitMs(ctx)),
+                        )
+                    )
+                )
+            } else {
+                emit(ToolExecutionEvent.Progress("Running command"))
+                backend.executeCommandEvents(command, workdir, timeoutMs).collect { emit(it) }
+            }
         } finally {
             backend.close()
         }
@@ -871,6 +1083,128 @@ class ShellToolProvider(
                 server = backend.device.name,
             )
         }
+    }
+
+    private suspend fun waitForShellJob(arguments: String, ctx: GenerationContext): String {
+        val args = parseToolArgs(arguments)
+        val jobId = arg(args, "job_id")
+        if (jobId.isBlank()) return jsonError("wait_for_job", "job_id is required")
+        val serverName = arg(args, "server")
+        val backend = getConchBackend(serverName, ctx)
+            ?: return jsonError(
+                "wait_for_job",
+                conchServerNotFoundMessage(serverName, ctx),
+                server = serverName,
+            )
+        val rawTimeout = arg(args, "timeout_ms")
+        if (rawTimeout.isBlank()) return jsonError(
+            "wait_for_job", "timeout_ms is required", server = backend.device.name,
+        )
+        val requestedMs = rawTimeout.toIntOrNull()
+            ?: return jsonError(
+                "wait_for_job",
+                "timeout_ms must be an integer, got \"$rawTimeout\"",
+                server = backend.device.name,
+            )
+        // The whole tool call runs under GenerationManager's withTimeout(ctx.toolTimeoutMs). A wait
+        // that reaches that outer ceiling is killed as a generic tool timeout, so its graceful
+        // "still running, call again" note never fires. Cap the effective wait strictly below the
+        // outer budget (leaving a margin to emit the note) so the structured result always wins.
+        val ceilingMs = maxWaitMs(ctx)
+        val timeoutMs = requestedMs.coerceIn(MIN_WAIT_JOB_MS, ceilingMs)
+        // Report silent clamping. Otherwise a model that asked for 10 minutes reads timed_out=true
+        // after ~5 and concludes the job hung for the full budget it never actually waited.
+        val clampedFrom = requestedMs.takeIf { it > ceilingMs }
+        val start = System.currentTimeMillis()
+        // A transient poll failure must not abort the wait: the job keeps running on the device.
+        // Only a sustained run of failures is fatal.
+        var consecutiveFailures = 0
+        var lastFailure: String? = null
+        var pollIntervalMs = INITIAL_WAIT_POLL_MS
+        while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+            val raw = try {
+                backend.getJob(jobId).also { consecutiveFailures = 0 }
+            } catch (e: Exception) {
+                consecutiveFailures++
+                lastFailure = e.message ?: e.javaClass.simpleName
+                if (consecutiveFailures >= MAX_WAIT_POLL_FAILURES) {
+                    return buildJsonObject {
+                        put("type", "wait_for_job")
+                        put("error", "poll_failed")
+                        put(
+                            "message",
+                            "Failed to poll job $consecutiveFailures times in a row: $lastFailure",
+                        )
+                        put("server", backend.device.name)
+                        put("job_id", jobId)
+                        put("durable", true)
+                        put("state", "unknown")
+                        put(
+                            "note",
+                            "The job may still be running. Retry with the same job_id; it was not " +
+                                "stopped by this wait failure.",
+                        )
+                    }.toString()
+                }
+                null
+            }
+            if (raw != null && isTerminalJobPayload(raw)) {
+                val result = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
+                return buildJsonObject {
+                    put("type", "wait_for_job")
+                    put("job_id", jobId)
+                    put("waited_ms", System.currentTimeMillis() - start)
+                    if (result != null) put("result", result) else put("result_raw", raw)
+                }.toString()
+            }
+            val elapsed = System.currentTimeMillis() - start
+            if (elapsed >= timeoutMs) {
+                val clampNote = clampedFrom?.let {
+                    " The requested timeout_ms=$it exceeded this tool call's ceiling of ${ceilingMs}ms and was clamped, so the job has only been waited on for that long."
+                } ?: ""
+                return buildJsonObject {
+                    put("type", "wait_for_job")
+                    put("job_id", jobId)
+                    put("waited_ms", elapsed)
+                    put("timed_out", true)
+                    put(
+                        "note",
+                        "Job still running. Call wait_for_job again to keep waiting, or " +
+                            "get_shell_job for a one-shot look.$clampNote",
+                    )
+                }.toString()
+            }
+            // Back off so a long wait does not hammer the device, but never overshoot the deadline.
+            val remaining = (timeoutMs - elapsed).toInt()
+            kotlinx.coroutines.delay(pollIntervalMs.coerceAtMost(remaining).toLong())
+            pollIntervalMs = (pollIntervalMs * 2).coerceAtMost(MAX_WAIT_POLL_MS)
+        }
+        return jsonError("wait_for_job", "cancelled", server = backend.device.name)
+    }
+
+    /**
+     * Decides whether a raw `/jobs/get` payload represents a finished job.
+     *
+     * Conch reports lifecycle in the **`state`** field (see conch shell/jobs.go): `running` and
+     * `stopping` are live; `succeeded`, `failed`, `stopped` and `interrupted` are terminal. An
+     * explicit server-side `error` (e.g. "job not found") is also terminal, because polling again
+     * cannot change it. An unparseable or field-less payload is deliberately NOT terminal: a
+     * transport hiccup must never be reported to the model as "the job finished".
+     */
+    private fun isTerminalJobPayload(raw: String): Boolean {
+        if (raw.isBlank()) return false
+        val obj = try {
+            kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                .parseToJsonElement(raw).jsonObject
+        } catch (_: Exception) {
+            return false
+        }
+        if (obj["error"] != null) return true
+        val state = (obj["state"] as? kotlinx.serialization.json.JsonPrimitive)
+            ?.content
+            ?.lowercase()
+            ?: return false
+        return state in TERMINAL_JOB_STATES
     }
 
     private suspend fun stopShellJob(arguments: String, ctx: GenerationContext): String {
@@ -1140,5 +1474,41 @@ class ShellToolProvider(
         } finally {
             backend.close()
         }
+    }
+
+    companion object {
+        /** Conch's durable-job runtime ceiling (24h). The single source for both promotion paths. */
+        private const val BACKGROUND_JOB_MAX_MS = 86_400_000
+
+        private const val MIN_WAIT_JOB_MS = 1_000
+
+        /** Headroom below the outer per-tool budget so the "still running" note can be emitted
+         *  before GenerationManager's withTimeout would otherwise kill the wait. */
+        private const val WAIT_JOB_OUTER_MARGIN_MS = 5_000L
+
+        /**
+         * The real ceiling for one `wait_for_job` call, derived from the enclosing per-tool budget.
+         *
+         * There is no independent constant on purpose. Any larger literal would be dead code: the
+         * outer `withTimeout(ctx.toolTimeoutMs)` kills the call first, and the tool description
+         * would then advertise a wait the tool cannot perform.
+         */
+        internal fun maxWaitMs(ctx: GenerationContext): Int =
+            (ctx.toolTimeoutMs - WAIT_JOB_OUTER_MARGIN_MS)
+                .coerceAtLeast(MIN_WAIT_JOB_MS.toLong())
+                .toInt()
+
+        /** Poll cadence for wait_for_job: starts tight for short jobs, backs off for long ones. */
+        private const val INITIAL_WAIT_POLL_MS = 500
+        private const val MAX_WAIT_POLL_MS = 5_000
+        private const val MAX_WAIT_POLL_FAILURES = 5
+
+        /** Terminal `state` values reported by conch's job manager (shell/jobs.go). */
+        private val TERMINAL_JOB_STATES = setOf(
+            "succeeded",
+            "failed",
+            "stopped",
+            "interrupted",
+        )
     }
 }

@@ -310,6 +310,7 @@
     <string name="generation_title">Tạo nội dung</string>
     <string name="context_window">Cửa sổ ngữ cảnh</string>
     <string name="context_window_default">Cửa sổ ngữ cảnh mặc định</string>
+    <string name="context_token_budget_value">Ước tính %1$s token</string>
     <string name="context_retain">Giữ lại %1$d tin nhắn gần đây</string>
     <string name="context_visualize">Trực quan hóa ngữ cảnh bị loại bỏ</string>
     <string name="context_visualize_desc">Làm mờ tin nhắn nằm ngoài cửa sổ ngữ cảnh</string>
@@ -1050,4 +1051,27 @@
     <string name="openai_service_tier_default">Mặc định</string>
     <string name="openai_service_tier_flex">Linh hoạt</string>
     <string name="openai_service_tier_fast">Nhanh</string>
+    <string name="context_title">Context</string>
+    <string name="context_desc">Context management</string>
+    <string name="context_compact">Context compact</string>
+    <string name="context_compact_auto">Automatic compact</string>
+    <string name="context_compact_auto_desc">Summarize older context before overflow</string>
+    <string name="context_compact_model">Compact model</string>
+    <string name="context_compact_prompt">Compact prompt</string>
+    <string name="context_compact_prompt_desc">Summary instructions</string>
+    <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_manual">Compact context</string>
+    <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_select_available_model">Select an available model</string>
+    <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
+    <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="thinking_segment_display_mode">Thinking segments</string>
+    <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
+    <string name="thinking_segment_display_card">Card</string>
+    <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
+    <string name="thinking_segments_title">Thinking segments</string>
+    <string name="context_usage_messages">~%1$s / %2$s token · %3$d tin nhắn logic</string>
+    <string name="context_boundary_active">Ranh giới thu gọn đang hoạt động</string>
+    <string name="context_boundary_none">Không có ranh giới thu gọn</string>
 </resources>

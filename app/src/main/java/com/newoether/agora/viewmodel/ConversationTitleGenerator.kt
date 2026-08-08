@@ -107,7 +107,7 @@ class ConversationTitleGenerator(
             systemPrompt = settings.titleGenerationPrompt.value.ifBlank {
                 BuiltInPrompts.TITLE_GENERATION_SYSTEM
             },
-            maxContextWindow = 1,
+            maxContextWindow = com.newoether.agora.model.ContextBudget.MIN_TOKENS,
             thinkingEnabled = false,
             baseUrl = providers.getEffectiveBaseUrl(providerName),
         )

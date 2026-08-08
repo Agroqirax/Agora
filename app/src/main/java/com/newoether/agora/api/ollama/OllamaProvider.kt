@@ -7,7 +7,13 @@ import com.newoether.agora.api.util.StreamingThinkTagParser
 import com.newoether.agora.api.util.buildToolCallId
 import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.ProviderRetryPolicy
+import com.newoether.agora.api.util.StreamTermination
+import com.newoether.agora.api.util.asRetryableTransportError
+import com.newoether.agora.api.util.carriesModelOutput
 import com.newoether.agora.api.util.requireValidSerializedRequest
+import com.newoether.agora.api.util.safeWireToolCallId
+import com.newoether.agora.api.util.safeWireToolName
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
@@ -48,9 +54,27 @@ internal data class OllamaMessage(
 internal data class OllamaStreamResponse(
     val model: String? = null,
     val message: OllamaMessage? = null,
-    val done: Boolean,
+    val done: Boolean = false,
+    @SerialName("done_reason") val doneReason: String? = null,
+    val error: String? = null,
     @SerialName("prompt_eval_count") val promptEvalCount: Int? = null,
     @SerialName("eval_count") val evalCount: Int? = null
+)
+
+internal fun ollamaStreamTermination(
+    sawDone: Boolean,
+    doneReason: String?,
+    producedContent: Boolean,
+    toolCallInFlight: Boolean = false,
+    streamError: GenerationError? = null,
+    timedOut: Boolean = false,
+): StreamTermination = StreamTermination(
+    sawTerminalMarker = sawDone,
+    stopReason = doneReason?.trim()?.lowercase(),
+    producedContent = producedContent,
+    toolCallInFlight = toolCallInFlight,
+    streamError = streamError,
+    timedOut = timedOut,
 )
 
 internal fun OllamaStreamResponse.toTokenUsage(): TokenUsage {
@@ -214,127 +238,207 @@ class OllamaProvider : LlmProvider {
             )
             DebugLog.d("AgoraAPI", "[Ollama] REQ → $baseUrl/api/chat | model=${config.modelId} | msgs=${apiMessages.size} | tools=${config.tools?.size ?: 0}")
             DebugLog.d("AgoraAPI", "[Ollama] BODY: ${requestBodyJson.take(4000)}")
-            val maxAttempts = 3
+            val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
             val retryableCodes = setOf(401, 429, 502, 503, 504)
             var attempt = 0
-            var done = false
+            var completed = false
 
-            while (attempt < maxAttempts && !done) {
+            while (attempt < maxAttempts && !completed) {
                 attempt++
-                val handle = HttpClient.streamPost(url, requestBodyJson, headers)
+                val handle = try {
+                    HttpClient.streamPost(url, requestBodyJson, headers)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val retryable = e.asRetryableTransportError()
+                    if (retryable != null && attempt < maxAttempts) {
+                        emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                        delay(ProviderRetryPolicy.delayMillis(attempt))
+                        continue
+                    }
+                    throw e
+                }
                 try {
-                if (handle.code == 200) {
-                    done = true
-                    var line: String? = null
-                    val thinkParser = StreamingThinkTagParser()
-                    var receivedStructuredThinking = false
+                    if (handle.code == 200) {
+                        val thinkParser = StreamingThinkTagParser()
+                        var receivedStructuredThinking = false
+                        var producedContent = false
+                        var sawDone = false
+                        var doneReason: String? = null
+                        var timedOut = false
+                        var streamError: GenerationError? = null
+                        var toolCallInFlight = false
 
-                    // Tolerate long thinking pauses, but not a silently-dead connection:
-                    // 3 consecutive read timeouts (~15 min without a byte) → give up.
-                    var consecutiveReadTimeouts = 0
-                    while (currentCoroutineContext().isActive) {
-                        try {
-                            line = handle.readLine()
-                            if (line == null) break
-                            consecutiveReadTimeouts = 0
-                        } catch (e: java.net.SocketTimeoutException) {
-                            if (!currentCoroutineContext().isActive) break
-                            if (++consecutiveReadTimeouts >= 3) {
-                                emit(StreamEvent.Error(GenerationError.Timeout))
-                                break
-                            }
-                            continue
+                        suspend fun emitTracked(event: StreamEvent) {
+                            if (event.carriesModelOutput()) producedContent = true
+                            emit(event)
                         }
-                        try {
-                            val response = json.decodeFromString<OllamaStreamResponse>(line)
-                            response.message?.let { msg ->
-                                // 1. Handle explicit thinking field (Ollama 0.5.4+)
-                                msg.thinking?.let { thinking ->
-                                    if (thinking.isNotEmpty() && config.thinkingEnabled) {
-                                        emit(StreamEvent.ThoughtChunk(thinking, null))
-                                        receivedStructuredThinking = true
-                                    }
-                                }
 
-                                // 2. Handle tool calls
-                                msg.toolCalls?.let { toolCalls ->
-                                    val calls = toolCalls.mapNotNull { tc ->
-                                        val streamKey = "call_stream_${java.util.UUID.randomUUID()}"
-                                        val id = tc.id ?: "${Constants.TOOL_CALL_ID_PREFIX}${java.util.UUID.randomUUID()}"
-                                        val name = tc.function?.name ?: ""
-                                        val args = tc.function?.arguments?.let { if (it is kotlinx.serialization.json.JsonPrimitive) it.content else it.toString() } ?: ""
-                                        if (name.isEmpty()) {
-                                            null
-                                        } else {
-                                            emit(
+                        // Tolerate long thinking pauses, but not a silently-dead connection:
+                        // 3 consecutive read timeouts (~15 min without a byte) → give up.
+                        var consecutiveReadTimeouts = 0
+                        while (currentCoroutineContext().isActive) {
+                            val line = try {
+                                handle.readLine()
+                            } catch (e: java.net.SocketTimeoutException) {
+                                if (!currentCoroutineContext().isActive) break
+                                if (++consecutiveReadTimeouts >= 3) {
+                                    timedOut = true
+                                    break
+                                }
+                                continue
+                            } ?: break
+                            consecutiveReadTimeouts = 0
+                            try {
+                                val response = json.decodeFromString<OllamaStreamResponse>(line)
+                                response.error?.takeIf(String::isNotBlank)?.let { message ->
+                                    streamError = GenerationError.Api(
+                                        code = null,
+                                        type = "ollama_stream_error",
+                                        message = message,
+                                    )
+                                }
+                                response.message?.let { msg ->
+                                    // 1. Handle explicit thinking field (Ollama 0.5.4+)
+                                    msg.thinking?.let { thinking ->
+                                        if (thinking.isNotEmpty() && config.thinkingEnabled) {
+                                            emitTracked(StreamEvent.ThoughtChunk(thinking, null))
+                                            receivedStructuredThinking = true
+                                        }
+                                    }
+
+                                    // 2. Ollama tool calls are complete snapshots in one NDJSON
+                                    // message. Reject the whole batch if any call lacks a name or a
+                                    // complete JSON-object argument payload.
+                                    msg.toolCalls?.takeIf { it.isNotEmpty() }?.let { toolCalls ->
+                                        val parsed = toolCalls.map { tc ->
+                                            val streamKey = "call_stream_${java.util.UUID.randomUUID()}"
+                                            val id = tc.id
+                                                ?: "${Constants.TOOL_CALL_ID_PREFIX}${java.util.UUID.randomUUID()}"
+                                            val name = tc.function?.name.orEmpty()
+                                            val args = tc.function?.arguments?.let {
+                                                if (it is kotlinx.serialization.json.JsonPrimitive && it.isString) {
+                                                    it.content
+                                                } else {
+                                                    it.toString()
+                                                }
+                                            }.orEmpty().ifBlank { "{}" }
+                                            Triple(
                                                 StreamEvent.ToolCallUpdate(
                                                     streamKey = streamKey,
                                                     id = id,
                                                     name = name,
                                                     arguments = args,
-                                                )
+                                                ),
+                                                StreamEvent.ToolCallRequest(
+                                                    id = id,
+                                                    name = name,
+                                                    arguments = args,
+                                                    streamKey = streamKey,
+                                                ),
+                                                runCatching {
+                                                    name.matches(safeWireToolName) &&
+                                                        id.matches(safeWireToolCallId) &&
+                                                        json.parseToJsonElement(args) is JsonObject
+                                                }.getOrDefault(false),
                                             )
-                                            StreamEvent.ToolCallRequest(
-                                                id = id,
-                                                name = name,
-                                                arguments = args,
-                                                streamKey = streamKey,
+                                        }
+                                        val callIds = parsed.map { it.second.id }
+                                        if (
+                                            parsed.any { !it.third } ||
+                                            callIds.distinct().size != callIds.size
+                                        ) {
+                                            toolCallInFlight = true
+                                            streamError = GenerationError.SseParse(
+                                                rawLine = "tool_calls",
+                                                cause = "Ollama returned incomplete tool metadata",
+                                            )
+                                        } else {
+                                            parsed.forEach { emitTracked(it.first) }
+                                            val calls = parsed.map { it.second }
+                                            if (calls.size == 1) emitTracked(calls.single())
+                                            else emitTracked(StreamEvent.ToolCallsRequest(calls))
+                                        }
+                                    }
+
+                                    // 3. Handle content: if structured thinking was received, emit
+                                    // content directly. Otherwise parse inline tags for old models.
+                                    if (msg.content.isNotEmpty()) {
+                                        if (receivedStructuredThinking) {
+                                            emitTracked(StreamEvent.TextChunk(msg.content))
+                                        } else {
+                                            thinkParser.feed(
+                                                content = msg.content,
+                                                thinkingEnabled = config.thinkingEnabled,
+                                                onText = { emitTracked(StreamEvent.TextChunk(it)) },
+                                                onThought = { emitTracked(StreamEvent.ThoughtChunk(it)) },
                                             )
                                         }
                                     }
-                                    if (calls.size == 1) emit(calls.first())
-                                    else if (calls.size > 1) emit(StreamEvent.ToolCallsRequest(calls))
                                 }
-
-                                // 3. Handle content: if structured thinking was received, emit content
-                                // directly (any <think> tags in content are literal, not semantic).
-                                // Otherwise, parse <think> tags as a fallback for older models.
-                                if (msg.content.isNotEmpty()) {
-                                    if (receivedStructuredThinking) {
-                                        emit(StreamEvent.TextChunk(msg.content))
-                                    } else {
-                                        thinkParser.feed(
-                                            content = msg.content,
-                                            thinkingEnabled = config.thinkingEnabled,
-                                            onText = { emit(StreamEvent.TextChunk(it)) },
-                                            onThought = { emit(StreamEvent.ThoughtChunk(it)) }
-                                        )
-                                    }
+                                if (response.done) {
+                                    sawDone = true
+                                    doneReason = response.doneReason
+                                    emit(StreamEvent.UsageUpdate(response.toTokenUsage()))
                                 }
-                            }
-                            if (response.done) {
-                                thinkParser.flush(
-                                    onText = { emit(StreamEvent.TextChunk(it)) },
-                                    onThought = { emit(StreamEvent.ThoughtChunk(it)) },
-                                    thinkingEnabled = config.thinkingEnabled
+                                if (streamError != null || sawDone) break
+                            } catch (e: Exception) {
+                                DebugLog.e("AgoraAPI", "Parse error: ${e.message}")
+                                streamError = GenerationError.SseParse(
+                                    rawLine = line.take(512),
+                                    cause = e.localizedMessage ?: "Malformed Ollama stream payload",
                                 )
-                                emit(StreamEvent.UsageUpdate(response.toTokenUsage()))
+                                break
                             }
-                        } catch (e: Exception) {
-                            DebugLog.e("AgoraAPI", "Parse error: ${e.message}")
                         }
-                    }
-                    if (!currentCoroutineContext().isActive) {
-                        throw kotlinx.coroutines.CancellationException("Stream cancelled")
-                    }
-                } else {
-                    val errorRaw = handle.errorBody ?: "Unknown error"
-                    DebugLog.e("AgoraAPI", "[Ollama] ERR ${handle.code}: $errorRaw")
-
-                    if (handle.code in retryableCodes && attempt < maxAttempts) {
-                        DebugLog.w("AgoraAPI", "[Ollama] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${1000 * attempt}ms...")
-                        emit(StreamEvent.Retrying(attempt, maxAttempts))
-                        delay(1000L * attempt)
+                        thinkParser.flush(
+                            onText = { emitTracked(StreamEvent.TextChunk(it)) },
+                            onThought = { emitTracked(StreamEvent.ThoughtChunk(it)) },
+                            thinkingEnabled = config.thinkingEnabled,
+                        )
+                        if (!currentCoroutineContext().isActive) {
+                            throw kotlinx.coroutines.CancellationException("Stream cancelled")
+                        }
+                        val termination = ollamaStreamTermination(
+                            sawDone = sawDone,
+                            doneReason = doneReason,
+                            producedContent = producedContent,
+                            toolCallInFlight = toolCallInFlight,
+                            streamError = streamError,
+                            timedOut = timedOut,
+                        )
+                        DebugLog.d("AgoraSSE", "[Ollama] ${termination.describe()}")
+                        if (termination.isRetryable && attempt < maxAttempts) {
+                            emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                            delay(ProviderRetryPolicy.delayMillis(attempt))
+                        } else {
+                            termination.toError("Ollama")?.let { emit(StreamEvent.Error(it)) }
+                            completed = true
+                        }
                     } else {
-                        val genError = try {
-                            val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
-                            GenerationError.Api(code = errorJson.error.code ?: handle.code.toString(), type = errorJson.error.type, message = errorJson.error.message)
-                        } catch (_: Exception) {
-                            GenerationError.Network(statusCode = handle.code, message = errorRaw)
+                        val errorRaw = handle.errorBody ?: "Unknown error"
+                        DebugLog.e("AgoraAPI", "[Ollama] ERR ${handle.code}: $errorRaw")
+
+                        if (
+                            ProviderRetryPolicy.shouldRetryHttp(
+                                handle.code,
+                                errorRaw,
+                                retryableCodes,
+                            ) && attempt < maxAttempts
+                        ) {
+                            emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                            delay(ProviderRetryPolicy.delayMillis(attempt))
+                        } else {
+                            val genError = try {
+                                val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
+                                GenerationError.Api(code = errorJson.error.code ?: handle.code.toString(), type = errorJson.error.type, message = errorJson.error.message)
+                            } catch (_: Exception) {
+                                GenerationError.Network(statusCode = handle.code, message = errorRaw)
+                            }
+                            emit(StreamEvent.Error(genError))
+                            completed = true
                         }
-                        emit(StreamEvent.Error(genError))
                     }
-                }
                 } finally { handle.close() }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {

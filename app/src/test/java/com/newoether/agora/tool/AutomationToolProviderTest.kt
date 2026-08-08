@@ -191,7 +191,7 @@ class AutomationToolProviderTest {
     @Test
     fun startLoop_rejectsUnsafeRangesWithoutCallingManager() = runTest {
         val shortInterval = provider.execute(
-            "start_loop", """{"interval_seconds":59}""", enabledContext,
+            "start_loop", """{"interval_seconds":5}""", enabledContext,
         )
         val tooManyCycles = provider.execute(
             "start_loop", """{"interval_seconds":60,"max_cycles":101}""", enabledContext,

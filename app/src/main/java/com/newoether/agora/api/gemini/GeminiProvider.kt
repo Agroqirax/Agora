@@ -10,6 +10,12 @@ import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.api.util.adaptToolRoundsForProvider
 import com.newoether.agora.api.util.RequestFormatException
 import com.newoether.agora.api.util.requireValidSerializedRequest
+import com.newoether.agora.api.util.ProviderRetryPolicy
+import com.newoether.agora.api.util.StreamTermination
+import com.newoether.agora.api.util.asRetryableTransportError
+import com.newoether.agora.api.util.carriesModelOutput
+import com.newoether.agora.api.util.safeWireToolName
+import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
@@ -173,11 +179,16 @@ internal data class ApiCodeExecutionResult(val outcome: String, val output: Stri
 @Serializable
 internal data class ApiStreamResponse(
     val candidates: List<ApiCandidate>? = null,
-    @SerialName("usageMetadata") val usageMetadata: ApiUsageMetadata? = null
+    @SerialName("usageMetadata") val usageMetadata: ApiUsageMetadata? = null,
+    val error: ApiError? = null,
+    val outcome: String? = null,
 )
 
 @Serializable
-internal data class ApiCandidate(val content: ApiResponseContent? = null)
+internal data class ApiCandidate(
+    val content: ApiResponseContent? = null,
+    @SerialName("finishReason") val finishReason: String? = null,
+)
 
 @Serializable
 internal data class ApiUsageMetadata(
@@ -231,6 +242,29 @@ internal data class ModelListResponse(val models: List<ModelInfo>)
 
 @Serializable
 internal data class ModelInfo(val name: String, val displayName: String, val supportedGenerationMethods: List<String>)
+
+internal fun normalizeGeminiFinishReason(raw: String): String = when (
+    raw.trim().lowercase().replace('-', '_')
+) {
+    "max_tokens", "max_output_tokens" -> "max_output_tokens"
+    else -> raw.trim().lowercase().replace('-', '_')
+}
+
+internal fun geminiStreamTermination(
+    sawDone: Boolean,
+    finishReason: String?,
+    producedContent: Boolean,
+    streamError: GenerationError? = null,
+    timedOut: Boolean = false,
+    toolCallInFlight: Boolean = false,
+): StreamTermination = StreamTermination(
+    sawTerminalMarker = sawDone || finishReason != null,
+    stopReason = finishReason,
+    producedContent = producedContent,
+    toolCallInFlight = toolCallInFlight,
+    streamError = streamError,
+    timedOut = timedOut,
+)
 
 class GeminiProvider(
     override val name: String = Constants.PROVIDER_GOOGLE,
@@ -460,157 +494,203 @@ class GeminiProvider(
                 body = requestJson,
                 requiredArrayFields = setOf("contents"),
             )
-            DebugLog.d("AgoraAPI", "[Gemini] REQ → $finalUrlString | model=$cleanModelName | msgs=${apiContents.size} | thinking=${config.thinkingEnabled} | tools=${tools.size}")
+            DebugLog.d("AgoraAPI", "[Gemini] REQ ->$finalUrlString | model=$cleanModelName | msgs=${apiContents.size} | thinking=${config.thinkingEnabled} | tools=${tools.size}")
             DebugLog.d("AgoraAPI", "[Gemini] BODY: ${requestJson.take(4000)}")
-            val maxAttempts = 3
-            val retryableCodes = setOf(401, 429, 502, 503, 504)
+            val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
+            val retryableCodes = setOf(429, 500, 502, 503, 504)
             var attempt = 0
             var done = false
 
             while (attempt < maxAttempts && !done) {
                 attempt++
-                val handle = HttpClient.streamPost(finalUrlString, requestJson, headers)
+                val handle = try {
+                    HttpClient.streamPost(finalUrlString, requestJson, headers)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    val retryable = e.asRetryableTransportError()
+                    if (retryable != null && attempt < maxAttempts) {
+                        emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                        delay(ProviderRetryPolicy.delayMillis(attempt))
+                        continue
+                    }
+                    throw e
+                }
                 try {
-                if (handle.code == 200) {
-                    done = true
-                    var line: String? = null
-                    var currentThoughtSignature: String? = null
-                    var inThoughtBlock = false
-                    // Tolerate long thinking pauses, but not a silently-dead connection:
-                    // 3 consecutive read timeouts (~15 min without a byte) → give up.
-                    var consecutiveReadTimeouts = 0
-                    while (currentCoroutineContext().isActive) {
-                        try {
-                            line = handle.readLine()
-                            if (line == null) break
+                    if (handle.code == 200) {
+                        var currentThoughtSignature: String? = null
+                        var inThoughtBlock = false
+                        var consecutiveReadTimeouts = 0
+                        var producedContent = false
+                        var finishReason: String? = null
+                        var sawDone = false
+                        var timedOut = false
+                        var streamError: GenerationError? = null
+                        var toolCallInFlight = false
+                        val completedToolCallIds = mutableSetOf<String>()
+
+                        suspend fun emitTracked(event: StreamEvent) {
+                            if (event.carriesModelOutput()) producedContent = true
+                            emit(event)
+                        }
+
+                        while (currentCoroutineContext().isActive) {
+                            val line = try {
+                                handle.readLine()
+                            } catch (e: java.net.SocketTimeoutException) {
+                                if (!currentCoroutineContext().isActive) break
+                                if (++consecutiveReadTimeouts >= 3) {
+                                    timedOut = true
+                                    break
+                                }
+                                continue
+                            } ?: break
                             consecutiveReadTimeouts = 0
-                        } catch (e: java.net.SocketTimeoutException) {
-                            if (!currentCoroutineContext().isActive) break
-                            if (++consecutiveReadTimeouts >= 3) {
-                                emit(StreamEvent.Error(GenerationError.Timeout))
+                            if (!line.startsWith("data: ")) continue
+                            val jsonStr = line.substring(6).trim()
+                            if (jsonStr == "[DONE]") {
+                                sawDone = true
                                 break
                             }
-                            continue
-                        }
-                        if (line.startsWith("data: ")) {
-                            val jsonStr = line.substring(6).trim()
-                            if (jsonStr != "[DONE]") {
-                                try {
-                                    val response = json.decodeFromString<ApiStreamResponse>(jsonStr)
-
-                                    inThoughtBlock = false
-                                    response.candidates?.firstOrNull()?.content?.parts?.forEach { part ->
-                                        var isPartOfThought = false
-
-                                        part.thought?.let { thoughtElement ->
-                                            if (thoughtElement is JsonPrimitive) {
-                                                if (thoughtElement.isString) {
-                                                    val content = thoughtElement.content
-                                                    emit(StreamEvent.ThoughtChunk(content, extractThoughtTitle(content), currentThoughtSignature))
-                                                    isPartOfThought = true
-                                                    inThoughtBlock = true
-                                                } else if (thoughtElement.content == "true") {
-                                                    isPartOfThought = true
-                                                    inThoughtBlock = true
-                                                }
+                            try {
+                                val response = json.decodeFromString<ApiStreamResponse>(jsonStr)
+                                response.error?.let { error ->
+                                    streamError = GenerationError.Api(
+                                        code = error.code?.toString(),
+                                        type = error.status,
+                                        message = error.message?.ifBlank {
+                                            "Gemini reported an error in the response stream"
+                                        } ?: "Gemini reported an error in the response stream",
+                                    )
+                                }
+                                if (streamError == null && ProviderRetryPolicy.isFailedToGenerateOutcome(response.outcome)) {
+                                    streamError = GenerationError.Api(null, "failed_to_generate", response.outcome.orEmpty())
+                                }
+                                val candidate = response.candidates?.firstOrNull()
+                                candidate?.finishReason?.takeIf(String::isNotBlank)?.let {
+                                    finishReason = normalizeGeminiFinishReason(it)
+                                }
+                                inThoughtBlock = false
+                                candidate?.content?.parts?.forEach { part ->
+                                    var isPartOfThought = false
+                                    part.thought?.let { thoughtElement ->
+                                        if (thoughtElement is JsonPrimitive) {
+                                            if (thoughtElement.isString) {
+                                                val content = thoughtElement.content
+                                                emitTracked(StreamEvent.ThoughtChunk(content, extractThoughtTitle(content), currentThoughtSignature))
+                                                isPartOfThought = true
+                                                inThoughtBlock = true
+                                            } else if (thoughtElement.content == "true") {
+                                                isPartOfThought = true
+                                                inThoughtBlock = true
                                             }
                                         }
-
-                                        part.reasoningContent?.let {
-                                            emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
-                                            isPartOfThought = true
-                                            inThoughtBlock = true
-                                        }
-
-                                        part.thoughtSignature?.let { sig ->
-                                            currentThoughtSignature = sig
-                                            isPartOfThought = true
-                                            inThoughtBlock = true
-                                        }
-
-                                        part.text?.let {
-                                            // isPartOfThought: explicit marker on this part (thought, thoughtSignature, reasoningContent)
-                                            // inThoughtBlock: carry-over from a preceding boolean {thought: true} part in an earlier event
-                                            val inThought = isPartOfThought || inThoughtBlock
-                                            if (inThought) {
-                                                emit(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
-                                                inThoughtBlock = false
-                                            } else {
-                                                emit(StreamEvent.TextChunk(it))
-                                            }
-                                        }
-
-                                        part.executableCode?.let {
-                                            emit(StreamEvent.TextChunk("\n```${it.language}\n${it.code}\n```\n"))
-                                        }
-
-                                        part.codeExecutionResult?.let {
-                                            emit(StreamEvent.TextChunk("\n> Output: ${it.output}\n"))
-                                        }
-
-                                        part.functionCall?.let { fc ->
-                                            val argsJson = fc.args?.let { Json.encodeToString(JsonObject.serializer(), it) } ?: "{}"
-                                            val sig = part.thoughtSignature ?: fc.thoughtSignature ?: currentThoughtSignature
+                                    }
+                                    part.reasoningContent?.let {
+                                        emitTracked(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
+                                        isPartOfThought = true
+                                        inThoughtBlock = true
+                                    }
+                                    part.thoughtSignature?.let { sig ->
+                                        currentThoughtSignature = sig
+                                        isPartOfThought = true
+                                        inThoughtBlock = true
+                                    }
+                                    part.text?.takeIf(String::isNotEmpty)?.let {
+                                        if (isPartOfThought || inThoughtBlock) {
+                                            emitTracked(StreamEvent.ThoughtChunk(it, extractThoughtTitle(it), currentThoughtSignature))
+                                            inThoughtBlock = false
+                                        } else emitTracked(StreamEvent.TextChunk(it))
+                                    }
+                                    part.executableCode?.let {
+                                        emitTracked(StreamEvent.TextChunk("\n```${it.language}\n${it.code}\n```\n"))
+                                    }
+                                    part.codeExecutionResult?.let {
+                                        emitTracked(StreamEvent.TextChunk("\n> Output: ${it.output}\n"))
+                                    }
+                                    part.functionCall?.let { fc ->
+                                        val callId = fc.id ?: "call_${UUID.randomUUID()}"
+                                        if (
+                                            !fc.name.matches(safeWireToolName) ||
+                                            !callId.matches(safeWireToolCallId) ||
+                                            !completedToolCallIds.add(callId)
+                                        ) {
+                                            toolCallInFlight = true
+                                            streamError = GenerationError.SseParse(
+                                                rawLine = "functionCall",
+                                                cause = "Gemini returned invalid or duplicate tool metadata",
+                                            )
+                                        } else {
+                                            val argsJson = fc.args?.let {
+                                                Json.encodeToString(JsonObject.serializer(), it)
+                                            } ?: "{}"
+                                            val signature = part.thoughtSignature
+                                                ?: fc.thoughtSignature
+                                                ?: currentThoughtSignature
                                             val streamKey = "call_stream_${UUID.randomUUID()}"
-                                            val callId = fc.id ?: "call_${UUID.randomUUID()}"
-                                            emit(
-                                                StreamEvent.ToolCallUpdate(
-                                                    streamKey = streamKey,
-                                                    id = callId,
-                                                    name = fc.name,
-                                                    arguments = argsJson,
-                                                    signature = sig,
-                                                )
-                                            )
-                                            emit(
-                                                StreamEvent.ToolCallRequest(
-                                                    id = callId,
-                                                    name = fc.name,
-                                                    arguments = argsJson,
-                                                    signature = sig,
-                                                    streamKey = streamKey,
-                                                )
-                                            )
-                                            // A separately-streamed signature belongs to the next function call only.
+                                            emitTracked(StreamEvent.ToolCallUpdate(streamKey, callId, fc.name, argsJson, signature))
+                                            emitTracked(StreamEvent.ToolCallRequest(callId, fc.name, argsJson, signature, streamKey))
                                             currentThoughtSignature = null
                                             inThoughtBlock = false
                                         }
                                     }
-                                    response.usageMetadata?.let { metadata ->
-                                        emit(StreamEvent.UsageUpdate(metadata.toTokenUsage()))
-                                    }
-                                } catch (e: Exception) {
-                                    DebugLog.e("AgoraAPI", "Parse error: ${e.message}", e)
                                 }
+                                response.usageMetadata?.let { emit(StreamEvent.UsageUpdate(it.toTokenUsage())) }
+                                if (streamError != null || finishReason != null) break
+                            } catch (e: Exception) {
+                                DebugLog.e("AgoraAPI", "[Gemini] Parse error: ${e.message}", e)
+                                streamError = GenerationError.SseParse(
+                                    rawLine = jsonStr.take(512),
+                                    cause = e.localizedMessage ?: "Malformed SSE payload",
+                                )
+                                break
                             }
                         }
-                    }
-                    if (!currentCoroutineContext().isActive) {
-                        throw kotlinx.coroutines.CancellationException("Stream cancelled")
-                    }
-                } else {
-                    val errorRaw = handle.errorBody ?: "Unknown error (Code: ${handle.code})"
-                    DebugLog.e("AgoraAPI", "[Gemini] ERR ${handle.code}: $errorRaw")
-
-                    if (handle.code in retryableCodes && attempt < maxAttempts) {
-                        DebugLog.w("AgoraAPI", "[Gemini] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${1000 * attempt}ms...")
-                        emit(StreamEvent.Retrying(attempt, maxAttempts))
-                        delay(1000L * attempt)
-                    } else {
-                        val genError = try {
-                            val errorJson = json.decodeFromString<ApiErrorResponse>(errorRaw)
-                            GenerationError.Api(
-                                code = (errorJson.error.code ?: handle.code).toString(),
-                                type = errorJson.error.status,
-                                message = errorJson.error.message ?: "No error message provided"
-                            )
-                        } catch (e: Exception) {
-                            GenerationError.Network(statusCode = handle.code, message = errorRaw)
+                        if (!currentCoroutineContext().isActive) throw kotlinx.coroutines.CancellationException("Stream cancelled")
+                        val termination = geminiStreamTermination(
+                            sawDone,
+                            finishReason,
+                            producedContent,
+                            streamError,
+                            timedOut,
+                            toolCallInFlight,
+                        )
+                        DebugLog.d("AgoraSSE", "[Gemini] ${termination.describe()}")
+                        if (termination.isRetryable && attempt < maxAttempts) {
+                            emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                            delay(ProviderRetryPolicy.delayMillis(attempt))
+                        } else {
+                            termination.toError("Gemini")?.let { emit(StreamEvent.Error(it)) }
+                            done = true
                         }
-                        emit(StreamEvent.Error(genError))
+                    } else {
+                        val errorRaw = handle.errorBody ?: "Unknown error (Code: ${handle.code})"
+                        val retryable = ProviderRetryPolicy.shouldRetryHttp(
+                            handle.code,
+                            errorRaw,
+                            retryableCodes,
+                        )
+                        if (retryable && attempt < maxAttempts) {
+                            emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
+                            delay(ProviderRetryPolicy.delayMillis(attempt))
+                        } else {
+                            val genError = try {
+                                val errorJson = json.decodeFromString<ApiErrorResponse>(errorRaw)
+                                GenerationError.Api(
+                                    code = (errorJson.error.code ?: handle.code).toString(),
+                                    type = errorJson.error.status,
+                                    message = errorJson.error.message ?: "No error message provided",
+                                )
+                            } catch (_: Exception) {
+                                GenerationError.Network(handle.code, errorRaw)
+                            }
+                            emit(StreamEvent.Error(genError))
+                            done = true
+                        }
                     }
+                } finally {
+                    handle.close()
                 }
-                } finally { handle.close() }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e

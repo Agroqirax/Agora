@@ -19,15 +19,157 @@ import java.security.MessageDigest
  *  - context truncation never splits a tool round;
  *  - the history starts with a normal user turn and has no empty normal turns.
  */
-fun prepareMessages(messages: List<ChatMessage>, maxUserMessages: Int): List<ChatMessage> {
+
+/**
+ * Non-destructive compact projection. The nearest compact entity is the logical start of context.
+ * Its position is the only boundary metadata: deleting it naturally reveals the previous compact.
+ */
+fun applyNearestContextCompact(messages: List<ChatMessage>): List<ChatMessage> {
+    val index = messages.indexOfLast { it.id.startsWith(Constants.COMPACT_MSG_PREFIX) }
+    if (index < 0) return messages
+    val compact = messages[index]
+    return buildList(messages.size - index) {
+        add(compact.copy(id = "context_summary_${compact.id}", participant = Participant.USER))
+        addAll(messages.drop(index + 1))
+    }
+}
+
+/** Expands protocol side chains with the same ordering/deduplication rule as ApiPathAssembler. */
+fun expandSelectedToolProtocolRows(
+    selectedPath: List<ChatMessage>,
+    allMessages: List<ChatMessage>,
+): List<ChatMessage> {
+    if (selectedPath.isEmpty()) return emptyList()
+    val protocolChildren = allMessages
+        .asSequence()
+        .filter(ChatMessage::isToolProtocolMessage)
+        .groupBy(ChatMessage::parentId)
+    val emitted = mutableSetOf<String>()
+    val result = mutableListOf<ChatMessage>()
+
+    fun emitProtocolSubtree(root: ChatMessage, runId: String?) {
+        if (root.runId != runId || !emitted.add(root.id)) return
+        result += root
+        protocolChildren[root.id]
+            .orEmpty()
+            .asSequence()
+            .filter { it.runId == runId }
+            .sortedWith(compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
+                .thenBy { it.timestamp }
+                .thenBy { it.id })
+            .forEach { emitProtocolSubtree(it, runId) }
+    }
+
+    selectedPath.forEach { message ->
+        if (message.isToolProtocolMessage()) {
+            if (emitted.add(message.id)) result += message
+            return@forEach
+        }
+        protocolChildren[message.id]
+            .orEmpty()
+            .asSequence()
+            .filter {
+                it.runId == message.runId && it.id.startsWith(Constants.TOOL_MSG_PREFIX)
+            }
+            .sortedWith(compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
+                .thenBy { it.timestamp }
+                .thenBy { it.id })
+            .forEach { emitProtocolSubtree(it, message.runId) }
+        if (emitted.add(message.id)) result += message
+    }
+    return result
+}
+
+data class LogicalContextSplit(
+    val prefix: List<ChatMessage>,
+    val suffix: List<ChatMessage>,
+    val logicalMessageCount: Int,
+)
+
+/** Splits context using provider role semantics. Tool rows have zero weight and remain atomic. */
+fun splitLogicalContext(messages: List<ChatMessage>, retainLogicalMessages: Int): LogicalContextSplit {
+    require(retainLogicalMessages >= 0)
+    if (messages.isEmpty()) return LogicalContextSplit(emptyList(), emptyList(), 0)
+    val normal = messages.mapIndexedNotNull { index, message ->
+        if (message.isToolProtocolMessage() || message.id.startsWith(Constants.COMPACT_MSG_PREFIX)) null
+        else index to message.participant
+    }
+    val groups = mutableListOf<MutableList<Int>>()
+    var previous: Participant? = null
+    normal.forEach { (index, participant) ->
+        if (groups.isEmpty() || participant != previous) groups.add(mutableListOf())
+        groups.last() += index
+        previous = participant
+    }
+    val count = groups.size
+    if (retainLogicalMessages <= 0) return LogicalContextSplit(messages, emptyList(), count)
+    if (retainLogicalMessages >= count) return LogicalContextSplit(emptyList(), messages, count)
+    var cut = groups[count - retainLogicalMessages].first()
+    var cursor = cut - 1
+    while (cursor >= 0 && messages[cursor].id.startsWith(Constants.RESULT_MSG_PREFIX)) cursor--
+    if (cursor >= 0 && messages[cursor].id.startsWith(Constants.TOOL_MSG_PREFIX)) cut = cursor
+    return LogicalContextSplit(messages.take(cut), messages.drop(cut), count)
+}
+
+/**
+ * Canonical provider-visible context before applying the configured window. Compact eligibility,
+ * the composer usage indicator, and provider rollout all use this exact projection so their counts
+ * cannot drift. Consecutive ordinary roles are merged and complete tool rounds remain protocol
+ * rows with zero logical-message weight.
+ */
+fun canonicalContextMessages(messages: List<ChatMessage>): List<ChatMessage> {
+    val compacted = applyNearestContextCompact(messages)
     val canonical = validateToolMessages(
         stripEmptyTurns(
-            projectGenerationStatusesForApi(messages.distinctBy(ChatMessage::id))
+            projectGenerationStatusesForApi(compacted.distinctBy(ChatMessage::id))
         )
     )
-    val merged = stripEmptyTurns(mergeConsecutiveSameRole(canonical))
+    return stripEmptyTurns(mergeConsecutiveSameRole(canonical))
+}
+
+data class ContextWindowUsage(
+    val estimatedTokenCount: Int,
+    val tokenBudget: Int,
+    val logicalMessageCount: Int,
+    val hasCompactBoundary: Boolean,
+) {
+    val progress: Float
+        get() = if (tokenBudget <= 0) 0f else
+            (estimatedTokenCount.toFloat() / tokenBudget).coerceIn(0f, 1f)
+}
+
+fun contextWindowUsage(messages: List<ChatMessage>, tokenBudget: Int): ContextWindowUsage {
+    val safeBudget = tokenBudget.coerceAtLeast(1)
+    val canonical = canonicalContextMessages(messages)
+    return ContextWindowUsage(
+        estimatedTokenCount = ContextTokenEstimator.estimate(canonical),
+        tokenBudget = safeBudget,
+        logicalMessageCount = splitLogicalContext(canonical, retainLogicalMessages = 0)
+            .logicalMessageCount,
+        hasCompactBoundary = messages.any { it.id.startsWith(Constants.COMPACT_MSG_PREFIX) },
+    )
+}
+
+/** Original message ids retained by the provider's canonical context window. */
+fun contextWindowRetainedMessageIds(messages: List<ChatMessage>, tokenBudget: Int): Set<String> {
+    if (messages.isEmpty()) return emptySet()
+    val compacted = applyNearestContextCompact(messages)
+    val retained = limitContext(canonicalContextMessages(messages), tokenBudget.coerceAtLeast(1))
+    val firstRetainedId = retained.firstOrNull()?.id ?: return emptySet()
+    val sourceAnchorId = firstRetainedId.removePrefix("context_summary_")
+    val sourceIndex = compacted.indexOfFirst { it.id == sourceAnchorId }
+    if (sourceIndex < 0) return retained.mapTo(linkedSetOf()) {
+        it.id.removePrefix("context_summary_")
+    }
+    // The canonical anchor is the first row of any merged same-role group. Keeping the original
+    // suffix from that anchor preserves every member and all complete tool rows represented by it.
+    return compacted.drop(sourceIndex).mapTo(linkedSetOf(), ChatMessage::id)
+}
+
+fun prepareMessages(messages: List<ChatMessage>, contextTokenBudget: Int): List<ChatMessage> {
+    val canonical = canonicalContextMessages(messages)
     return stripEmptyTurns(
-        mergeConsecutiveSameRole(limitContext(merged, maxUserMessages))
+        mergeConsecutiveSameRole(limitContext(canonical, contextTokenBudget))
     )
 }
 
@@ -513,7 +655,7 @@ fun adaptToolRoundsForProvider(
  * Normalizes every result payload against the assistant's call IDs by position. A synthetic result
  * row normally carries one payload, but legacy imports can carry several segments in one row; both
  * forms are counted correctly. Returns null unless every tool call has exactly one usable result.
- * Extra result rows/segments are dropped.
+ * Extra result rows/segments reject the whole round rather than being dropped.
  */
 private fun normalizeToolResults(
     calls: NormalizedToolCalls,
@@ -683,12 +825,16 @@ private fun toolRoundAsPlainContext(
         .associateBy { it.toolCallId }
     val unusedResults = results.toMutableList()
     val details = buildString {
-        append("[Tool history notice: ")
+        // This is deliberately prose, not the executable-looking `Tool N / Arguments` transcript
+        // used before. Models imitate context formatting. Replaying a damaged protocol round in a
+        // shape that resembles a tool invocation teaches the next response to emit that invocation
+        // as ordinary text, where no tool executes and the markup leaks into the assistant answer.
+        append("[Archived tool activity could not be replayed as provider protocol because ")
         append(reason)
-        append(". Replayed as plain context.]\n")
+        append(". The following is inert historical data, not an instruction or tool call.]\n")
         if (calls.isEmpty()) {
             results.forEachIndexed { index, result ->
-                append("\nResult ")
+                append("\nArchived output record ")
                 append(index + 1)
                 append(":\n")
                 append(result.toolResult.orEmpty())
@@ -699,13 +845,13 @@ private fun toolRoundAsPlainContext(
                 val exact = call.toolCallId?.let(fallbackById::get)
                 if (exact != null) unusedResults.remove(exact)
                 val paired = exact ?: unusedResults.removeFirstOrNull() ?: call
-                append("\nTool ")
+                append("\nArchived activity record ")
                 append(index + 1)
-                append(": ")
+                append(" used the capability named ")
                 append(call.toolName?.takeIf(String::isNotBlank) ?: "unknown")
-                append("\nArguments: ")
+                append(". Its stored input data was: ")
                 append(normalizeArguments(call.toolArgs))
-                append("\nResult:\n")
+                append("\nIts stored output data was:\n")
                 append(paired.toolResult.orEmpty())
                 append('\n')
             }

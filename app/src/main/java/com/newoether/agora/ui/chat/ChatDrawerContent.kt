@@ -48,6 +48,7 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -153,6 +154,13 @@ internal fun ChatDrawerContent(
             }
     ) {
         val drawerListState = rememberLazyListState()
+        LaunchedEffect(viewModel, drawerListState) {
+            viewModel.firstMessageCommitted.collect { conversationId ->
+                if (viewModel.currentConversationId.value == conversationId) {
+                    drawerListState.scrollToItem(0)
+                }
+            }
+        }
         val atTop by remember {
             derivedStateOf {
                 drawerListState.firstVisibleItemIndex == 0 &&
