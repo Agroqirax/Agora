@@ -89,15 +89,19 @@ Compact
 | `STOPPED` | null | late events ignored | `USER_STOPPED` or `PROCESS_RECOVERED` |
 | `FAILED` | null | late events ignored | provider/setup error reason |
 
-`RunLifecycle.reduce` models part of this table, but it is not the authoritative process
-orchestrator. It must be incorporated into or explicitly replaced by the new reducer; a second
-long-lived shadow model is forbidden.
+The passive `RunLifecycle.reduce` model has been removed. Durable status remains represented by
+`RunStatus`; the first authoritative process slice is the reducer described below. There is no
+second test-only Run reducer with competing transition semantics.
 
 ### 3.2 In-process slot
 
-`ConversationGenerationState` currently has `IDLE`, `ACTIVE`, and `STOPPING` slot phases.
-The slot is fenced by UI/persistence tokens and a bound Run id. These guards remain compatibility
-protection until the mailbox has taken authority for the corresponding path.
+Pure `ConversationCommand`, `RunState`, `RunEffect`, `Transition`, and
+`ConversationRuntimeReducer` types now own `Idle`, `Active`, and `Stopping` slot transitions and
+the coroutine/persistence Stop barriers. `ConversationGenerationState` calls the reducer under its
+existing per-conversation monitor and is the only assignment path for this process-slot state.
+The former `SlotPhase`, `stopFinalizationPending`, and `stoppedCoroutineUnwound` authorities were
+deleted. Legacy UI/persistence tokens, Job ownership, streams, and the monitor remain compatibility
+protection until the mailbox migration.
 
 ### 3.3 Target state vocabulary
 
@@ -115,10 +119,11 @@ must not collapse into Boolean combinations.
 
 | Current owner | Writes | Current fence | Migration consequence |
 | --- | --- | --- | --- |
-| `ConversationGenerationState` | slot, Job, overlay, tokens, queue, Stop barriers | conversation + tokens + run id | Preserve until each path moves into the mailbox. |
+| `ConversationRuntimeReducer` through `ConversationGenerationState` | authoritative slot and Stop-barrier transitions | conversation + owner + run id + pass + effect id | Keep as the real first reducer slice; move command delivery to the mailbox later. |
+| `ConversationGenerationState` adapter | Job, overlay, tokens, streams, queue, UI projection | conversation + owner token | Preserve only until each remaining path moves behind reducer effects. |
 | `MessageGenerationController` | Send/edit/regenerate graph, queue drain, Compact entry, setup failure, release | conversation + token + run id | First foreground migration seam. |
 | `GenerationManager` | stream/checkpoint, tools, continuation, terminal messages/Run, notification | captured run id/pass | Must split one Provider pass from whole-Run finalization. |
-| `GenerationFinalizer` | durable Stop finalization/retry | run id | Move behind idempotent `FinalizeRun` effect. |
+| `GenerationFinalizer` | executes identified durable Stop effect and returns a result command | conversation + owner + run id + pass + effect id | Move execution behind the mailbox; identity/stale rejection is already enforced. |
 | `TaskExecutionEngine` | headless Run setup, Compact, generation and terminal cleanup | conversation + run id/pass | Remove duplication only after Task/Loop parity. |
 | `LoopManager` | occurrence claim/revision/cycle/schedule | revision + fire time + count | Preserve replay fencing; trigger normal Send contract. |
 | `TaskManager`/Workers | reservation, execution conversation, occurrence retry/schedule | task + scheduled time + execution id | Preserve deterministic occurrence identity. |
@@ -233,14 +238,14 @@ ownership. No Room schema rewrite is planned.
 | One live durable Run | unique active-slot index and Run invariants | Concurrent transaction/conditional-update tests. |
 | One process writer | not satisfied | Mailbox is sole transition authority. |
 | Cross-conversation parallelism | coordinator supports it | Runtime tests with two conversations. |
-| Stale/duplicate rejection | partial token/Run/pass guards | universal effect identity tests. |
-| Stop two-barrier release | protected and unit-tested | mailbox order-permutation tests. |
+| Stale/duplicate rejection | Stop finalizer now has full effect identity and reducer rejection | extend identity to Provider/tool/Compact effects. |
+| Stop two-barrier release | reducer owns both orders and exact release effect | route Stop commands through the mailbox. |
 | Tool atomicity | transaction and protocol normalization exist | Room failure/reorder/duplicate tests. |
 | Queue FIFO and memory ownership | protected unit policies | end-to-end Stop/error/attachment tests. |
 | Compact graph safety | graph re-read and unit tests | real Room selected-ancestry tests. |
 | Recovery | orphan terminalization exists | deterministic snapshot-to-command tests. |
 | Notification/title idempotence | partial application guards | explicit delayed/duplicate effect tests. |
-| Privacy-safe trace | not implemented | bounded/redacted trace tests. |
+| Privacy-safe trace | 256-entry reducer trace with digested conversation id and metadata-only fields | expose/merge trace through the final mailbox without adding content. |
 
 The repository has no `androidTest` source tree. Existing repository tests mock `ChatDao`; real
 Room integration coverage is a required addition, not an inferred property of the current green
@@ -250,7 +255,7 @@ JVM suite.
 
 Each row is an independent semantic commit and rollback boundary:
 
-1. Pure runtime vocabulary, reducer tests, identity envelope, bounded redacted trace.
+1. Pure runtime vocabulary, reducer tests, Stop identity envelope, and bounded redacted trace — implemented for the authoritative slot/Stop slice.
 2. Ordinary foreground Send enters a real per-conversation mailbox.
 3. One Provider pass becomes an isolated runner and closed outcome.
 4. Stop and both settlement barriers become mailbox commands.

@@ -1,8 +1,16 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ConversationCommand
+import com.newoether.agora.model.ConversationRuntimeReducer
+import com.newoether.agora.model.ConversationRuntimeTrace
+import com.newoether.agora.model.ConversationRuntimeTraceEntry
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunState
+import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.SelectedAttachment
+import com.newoether.agora.model.SlotReleaseReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -39,8 +47,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * ## Slot lifecycle (acquireForSend / tryAcquireForReplacement / endGeneration / stop)
  *
- * The generation "slot" (the [generating] flag under [genLock]) is the single atomic decision
- * point for launch-vs-enqueue. [acquireForSend] claims it cooperatively (null → enqueue);
+ * The reducer-backed generation slot under [genLock] is the single atomic decision point for
+ * launch-vs-enqueue. [acquireForSend] claims it cooperatively (null → enqueue);
  * [tryAcquireForReplacement] claims it only while idle (regenerate/edit are disabled during an
  * active generation); [endGeneration] releases it token-gated when a generation ends; [stop] is
  * a terminal user Stop that fully releases it. Stop cancels ONLY this conversation's
@@ -62,8 +70,8 @@ class ConversationGenerationState(
     val isLoading = MutableStateFlow(false)
     /** True while this conversation has an active generation. Drives the Stop-button visibility. */
     val generating = MutableStateFlow(false)
-    /** True from a user Stop until the stopped generation coroutine has fully unwound (its
-     *  finally released the slot). Drives the composer's gray "stopping…" spinner. */
+    /** True from a user Stop until both coroutine and durable finalization barriers settle.
+     *  Drives the composer's gray "stopping…" spinner. */
     val stopping = MutableStateFlow(false)
     /** True while this conversation is evaluating or executing a Compact boundary. */
     val compacting = MutableStateFlow(false)
@@ -75,21 +83,13 @@ class ConversationGenerationState(
 
     // ── Ownership tokens ──
     private val genLock = Any()
-    private enum class SlotPhase { IDLE, ACTIVE, STOPPING }
-    private var slotPhase = SlotPhase.IDLE
+    /** Authoritative process-slot state. All mutations go through [ConversationRuntimeReducer]. */
+    private var runState: RunState = RunState.Idle(conversationId)
+    private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
-    /** Token of the generation currently holding the slot; 0 = slot free. Unlike [uiGenToken]
-     *  (advanced on every stop to gate late UI writes), this only changes on acquire/release,
-     *  so a stopped-but-still-unwinding coroutine can still release the slot it owns. */
-    private var slotOwnerToken = 0L
-    /** Run owned by the current slot. Bound before provider work or queue acceptance. */
-    private var slotRunId: String? = null
+    /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
-    /** STOPPING releases only after both the provider coroutine and the durable terminal
-     * transaction complete. Whichever finishes first records its half of the barrier. */
-    private var stopFinalizationPending = false
-    private var stoppedCoroutineUnwound = false
     private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -101,26 +101,34 @@ class ConversationGenerationState(
     /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
     fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
 
-    fun tryBindRun(uiToken: Long, runId: String): Boolean = synchronized(genLock) {
+    fun tryBindRun(uiToken: Long, runId: String, pass: Int = 0): Boolean = synchronized(genLock) {
         require(runId.isNotBlank())
-        if (slotOwnerToken != uiToken || slotPhase != SlotPhase.ACTIVE) return false
-        val existing = slotRunId
-        if (existing != null && existing != runId) return false
-        slotRunId = runId
+        require(pass >= 0)
+        val transition = reduceLocked(
+            ConversationCommand.BindRun(
+                RuntimeRunIdentity(
+                    conversationId = conversationId,
+                    ownerToken = uiToken,
+                    runId = runId,
+                    pass = pass,
+                ),
+            ),
+        )
+        if (!transition.accepted) return false
         true
     }
 
-    fun bindRun(uiToken: Long, runId: String) {
-        check(tryBindRun(uiToken, runId)) {
+    fun bindRun(uiToken: Long, runId: String, pass: Int = 0) {
+        check(tryBindRun(uiToken, runId, pass)) {
             "Only the active slot owner can bind Run $runId"
         }
     }
 
-    fun currentRunId(): String? = synchronized(genLock) { slotRunId }
+    fun currentRunId(): String? = synchronized(genLock) { runState.identityOrNull()?.runId }
 
-    // ── Generation slot (single source of truth: [generating] under [genLock]) ────────────
-    // Replaces the old `sendGate` AtomicBoolean. The slot is the atomic decision point for
-    // "launch now vs enqueue": exactly one generation owns a conversation's tree at a time.
+    // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
+    // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly
+    // one generation owns a conversation's tree at a time.
 
     /**
      * Cooperative claim for a fresh send. If the slot is free, atomically marks this conversation
@@ -129,39 +137,45 @@ class ConversationGenerationState(
      * already running, returns null → the caller must enqueue instead of launching (fixes the
      * silent-drop / same-conversation-parallel window: [generating] is now set synchronously here,
      * not deep inside the coroutine).
-     */
+    */
     fun acquireForSend(): Long? = synchronized(genLock) {
-        if (slotPhase != SlotPhase.IDLE) return null
-        uiGenToken += 1
-        slotOwnerToken = uiGenToken
-        slotPhase = SlotPhase.ACTIVE
-        stopFinalizationPending = false
-        stoppedCoroutineUnwound = false
+        val nextToken = uiGenToken + 1
+        val transition = reduceLocked(
+            ConversationCommand.AcquireSlot(
+                RuntimeRunIdentity(conversationId = conversationId, ownerToken = nextToken),
+            ),
+        )
+        if (!transition.accepted) return null
+        check(transition.effects.singleOrNull() is RunEffect.SlotActivated)
+        uiGenToken = nextToken
         generating.value = true
         stopping.value = false
         onRegistryActive(conversationId)
         onActive?.invoke(conversationId)
-        uiGenToken
+        nextToken
     }
 
     /**
      * Atomic idle-only claim for regenerate/edit. The UI disables both actions while this
      * conversation is generating, but that visual gate can lag by a frame during a conversation
      * switch; enforcing the same rule here makes the state machine authoritative.
-     */
+    */
     fun tryAcquireForReplacement(): Long? = synchronized(genLock) {
-            if (slotPhase != SlotPhase.IDLE) return null
-            uiGenToken += 1
-            slotOwnerToken = uiGenToken
-            slotPhase = SlotPhase.ACTIVE
-            stopFinalizationPending = false
-            stoppedCoroutineUnwound = false
-            isLoading.value = true
-            generating.value = true
-            stopping.value = false
-            onRegistryActive(conversationId)
-            onActive?.invoke(conversationId)
-            uiGenToken
+        val nextToken = uiGenToken + 1
+        val transition = reduceLocked(
+            ConversationCommand.AcquireSlot(
+                RuntimeRunIdentity(conversationId = conversationId, ownerToken = nextToken),
+            ),
+        )
+        if (!transition.accepted) return null
+        check(transition.effects.singleOrNull() is RunEffect.SlotActivated)
+        uiGenToken = nextToken
+        isLoading.value = true
+        generating.value = true
+        stopping.value = false
+        onRegistryActive(conversationId)
+        onActive?.invoke(conversationId)
+        nextToken
     }
 
     /**
@@ -185,8 +199,7 @@ class ConversationGenerationState(
 
         val accepted = synchronized(genLock) {
             if (
-                slotOwnerToken != uiToken ||
-                slotPhase != SlotPhase.ACTIVE ||
+                !runState.isActiveOwner(uiToken) ||
                 generationJob != null
             ) {
                 false
@@ -199,8 +212,7 @@ class ConversationGenerationState(
         if (!accepted) {
             job.cancel()
             val abandonedStoppingLaunch = synchronized(genLock) {
-                slotOwnerToken == uiToken &&
-                    slotPhase == SlotPhase.STOPPING &&
+                runState.isStoppingOwner(uiToken) &&
                     generationJob == null
             }
             if (abandonedStoppingLaunch && endGeneration(uiToken)) {
@@ -227,8 +239,7 @@ class ConversationGenerationState(
         }
         return synchronized(genLock) {
             if (
-                slotOwnerToken != uiToken ||
-                slotPhase != SlotPhase.ACTIVE ||
+                !runState.isActiveOwner(uiToken) ||
                 generationJob != null
             ) {
                 false
@@ -250,20 +261,29 @@ class ConversationGenerationState(
     fun endGeneration(uiToken: Long): Boolean {
         var settledAfterStop = false
         val mayDrainQueue = synchronized(genLock) {
-            if (slotOwnerToken != uiToken) return false
-            if (slotPhase == SlotPhase.STOPPING) {
-                stoppedCoroutineUnwound = true
-                // The durable half has not landed yet; that writer releases the slot instead.
-                if (stopFinalizationPending) return false
-                // Both halves of the Stop barrier are done, so this call owns the release. It must
-                // NOT report a normal drain: the pending inputs still belong to the STOPPED Run and
-                // have to be migrated to a fresh one first. Only the onStopSettled path does that,
-                // so route the post-stop drain there regardless of which half finished last.
-                releaseSlotLocked()
-                settledAfterStop = true
-                false
-            } else {
-                releaseSlotLocked()
+            val currentIdentity = runState.identityOrNull()
+            val commandIdentity = currentIdentity
+                ?.takeIf { it.ownerToken == uiToken }
+                ?: RuntimeRunIdentity(conversationId = conversationId, ownerToken = uiToken)
+            val transition = reduceLocked(
+                ConversationCommand.CoroutineSettled(commandIdentity),
+            )
+            if (!transition.accepted) return false
+            val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
+            when (release?.reason) {
+                SlotReleaseReason.NORMAL_COMPLETION -> {
+                    applyReleasedSlotLocked()
+                    true
+                }
+                SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
+                    // Pending inputs still belong to the STOPPED Run and must migrate to a fresh
+                    // one, so only the post-Stop callback may drain them.
+                    applyReleasedSlotLocked()
+                    settledAfterStop = true
+                    false
+                }
+                SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
+                null -> false
             }
         }
         // Outside the lock: the callback drains on another coroutine and re-enters this monitor.
@@ -271,22 +291,17 @@ class ConversationGenerationState(
         return mayDrainQueue
     }
 
-    private fun releaseSlotLocked(): Boolean {
-        slotPhase = SlotPhase.IDLE
-        slotOwnerToken = 0L
-        slotRunId = null
+    /** Applies UI/resource release after the reducer has already transitioned to [RunState.Idle]. */
+    private fun applyReleasedSlotLocked() {
+        check(runState is RunState.Idle)
         generationJob = null
-        stopFinalizationPending = false
-        stoppedCoroutineUnwound = false
         isLoading.value = false
         generating.value = false
         stopping.value = false
         onRegistryIdle(conversationId)
         onIdle?.invoke(conversationId)
-        return true
     }
 
-    /** Stop is an atomic Run cutoff: accepted but unconsumed inputs stay in the stopped Run. */
     /**
      * Defers exactly the next automatic queue drain. A boundary send that failed before its batch
      * became durable keeps the guidance for a later boundary without immediately retrying itself
@@ -359,49 +374,69 @@ class ConversationGenerationState(
         val previousJob: Job?
         val result = synchronized(genLock) {
             previousJob = generationJob
-            val boundRunId = slotRunId
-            if (slotPhase == SlotPhase.IDLE) {
+            val currentState = runState
+            if (currentState is RunState.Idle) {
                 return@synchronized StopResult(
                     stoppedMessage = null,
                     conversationId = conversationId,
                     runId = null,
-                    shouldFinalize = false,
+                    finalizationEffect = null,
                 )
             }
-            if (slotPhase == SlotPhase.STOPPING) {
+            if (currentState is RunState.Stopping) {
                 return@synchronized StopResult(
                     stoppedMessage = streamingMessage.value,
                     conversationId = conversationId,
-                    runId = boundRunId,
-                    shouldFinalize = false,
+                    runId = currentState.identity.runId,
+                    finalizationEffect = null,
                 )
             }
+            check(currentState is RunState.Active)
+            val identity = currentState.identity
+            val boundRunId = identity.runId
+            val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
+            check(s == null || boundRunId != null) {
+                "A streaming Stop effect requires a bound Run"
+            }
+            val requiresPersistence = boundRunId != null
+            val effectId = if (requiresPersistence) "stop-${identity.ownerToken}" else null
+            val transition = reduceLocked(
+                ConversationCommand.StopRequested(
+                    identity = identity,
+                    coroutineAlreadySettled = previousJob == null || previousJob.isCompleted,
+                    requiresPersistence = requiresPersistence,
+                    effectId = effectId,
+                ),
+            )
+            check(transition.accepted)
+            check(transition.effects.any { it is RunEffect.CancelProviderPass })
             // Queue drain after stop is normal — the user explicitly asked for it.
             // Revoke DB ownership before cancellation can enter GenerationManager.finally. The
             // stopped coroutine therefore skips its normal NonCancellable terminal upsert; the
             // dedicated stop finalizer below is the only terminal writer.
             persistId.incrementAndGet()
             uiGenToken += 1
-            val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
             streamingMessage.value = s
             // Accepted interventions survive Stop: the stop finalizer drains them into a fresh
             // Run after the STOPPED row is durably persisted. See drainQueuedAfterStop.
-            if (slotPhase != SlotPhase.IDLE) {
-                slotPhase = SlotPhase.STOPPING
-                stopFinalizationPending = s != null || boundRunId != null
-                stoppedCoroutineUnwound = previousJob == null || previousJob.isCompleted
-                // STOPPING remains occupied for every tree-mutation/UI gate until the old
-                // coroutine and the durable terminal transaction have both completed.
+            if (runState is RunState.Stopping) {
+                // STOPPING remains occupied for every tree-mutation/UI gate until the reducer has
+                // accepted both the coroutine and durable terminal result for this identity.
                 isLoading.value = true
                 generating.value = true
                 stopping.value = true
-                if (stoppedCoroutineUnwound && !stopFinalizationPending) releaseSlotLocked()
+            } else {
+                val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().single()
+                check(release.reason == SlotReleaseReason.EMPTY_STOP)
+                applyReleasedSlotLocked()
             }
             StopResult(
                 stoppedMessage = s,
                 conversationId = conversationId,
                 runId = boundRunId,
-                shouldFinalize = s != null || boundRunId != null,
+                finalizationEffect = transition.effects
+                    .filterIsInstance<RunEffect.FinalizeStop>()
+                    .singleOrNull(),
             )
         }
         // Hard kill after the ownership cutoff: synchronous cancellation handles wake blocking
@@ -416,23 +451,28 @@ class ConversationGenerationState(
      * STOPPING occupied: the unique live-Run slot is still unavailable, so reporting IDLE would
      * make the next Send fail or attach to the doomed Run.
      */
-    fun finishStopFinalization(success: Boolean): Boolean {
-        val settled = synchronized(genLock) {
-            if (!success) return false
-            // Records the durable half. Clearing this before the unwound check is intentional and
-            // safe: when the coroutine unwinds afterwards it releases the slot itself and routes
-            // the drain through onStopSettled, so neither ordering can reuse the STOPPED Run.
-            stopFinalizationPending = false
-            if (slotPhase != SlotPhase.STOPPING || !stoppedCoroutineUnwound) return false
+    fun finishStopFinalization(
+        command: ConversationCommand.PersistenceSettled,
+    ): StopFinalizationOutcome {
+        var settled = false
+        val outcome = synchronized(genLock) {
+            val transition = reduceLocked(command)
+            if (!transition.accepted) return@synchronized StopFinalizationOutcome.REJECTED
+            if (!command.success) return@synchronized StopFinalizationOutcome.FAILED
+
+            val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
+            if (release == null) return@synchronized StopFinalizationOutcome.RECORDED
+            check(release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED)
             // The controller's releaseAndDrain already returned while waiting for this finalizer, so
             // no matching queue-drain decision remains to consume the Stop suppression.
             suppressNextQueueDrain = false
-            releaseSlotLocked()
-            true
+            applyReleasedSlotLocked()
+            settled = true
+            StopFinalizationOutcome.SETTLED
         }
         // Fire OUTSIDE the lock so the callback can safely inspect state without deadlocking.
         if (settled) onStopSettled?.invoke(this)
-        return settled
+        return outcome
     }
 
     /**
@@ -483,8 +523,45 @@ class ConversationGenerationState(
         val stoppedMessage: ChatMessage?,
         val conversationId: String,
         val runId: String?,
-        val shouldFinalize: Boolean,
+        val finalizationEffect: RunEffect.FinalizeStop?,
     )
+
+    enum class StopFinalizationOutcome {
+        /** Old, duplicate, wrong-Run, wrong-pass, or otherwise illegal callback. */
+        REJECTED,
+        /** Current finalization effect failed; STOPPING remains occupied. */
+        FAILED,
+        /** Durable barrier recorded; coroutine barrier is still pending. */
+        RECORDED,
+        /** Both barriers settled and the slot was released. */
+        SETTLED;
+
+        val accepted: Boolean get() = this != REJECTED
+    }
+
+    private fun RunState.identityOrNull(): RuntimeRunIdentity? = when (this) {
+        is RunState.Idle -> null
+        is RunState.Active -> identity
+        is RunState.Stopping -> identity
+    }
+
+    private fun RunState.isActiveOwner(ownerToken: Long): Boolean =
+        this is RunState.Active && identity.ownerToken == ownerToken
+
+    private fun RunState.isStoppingOwner(ownerToken: Long): Boolean =
+        this is RunState.Stopping && identity.ownerToken == ownerToken
+
+    /** Privacy-safe bounded trace for diagnostics/tests; contains no prompt or message content. */
+    internal fun runtimeTraceSnapshot(): List<ConversationRuntimeTraceEntry> = runtimeTrace.snapshot()
+
+    /** Must be called while [genLock] is held. This is the only process-slot state write path. */
+    private fun reduceLocked(command: ConversationCommand): com.newoether.agora.model.Transition {
+        val oldState = runState
+        val transition = ConversationRuntimeReducer.reduce(oldState, command)
+        runtimeTrace.record(oldState, command, transition)
+        if (transition.accepted) runState = transition.newState
+        return transition
+    }
 
 }
 

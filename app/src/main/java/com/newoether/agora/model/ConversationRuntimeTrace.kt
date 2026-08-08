@@ -1,0 +1,109 @@
+package com.newoether.agora.model
+
+import java.security.MessageDigest
+import java.util.ArrayDeque
+
+data class ConversationRuntimeTraceEntry(
+    val sequence: Long,
+    val conversationIdHash: String,
+    val runId: String?,
+    val pass: Int,
+    val effectId: String?,
+    val oldState: String,
+    val commandType: String,
+    val newState: String,
+    val effectTypes: List<String>,
+    val timestamp: Long,
+)
+
+/** Bounded, content-free diagnostic history for one conversation runtime. */
+class ConversationRuntimeTrace(
+    private val capacity: Int = DEFAULT_CAPACITY,
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
+    private val entries = ArrayDeque<ConversationRuntimeTraceEntry>(capacity)
+    private var nextSequence = 1L
+
+    init {
+        require(capacity in 1..MAX_CAPACITY)
+    }
+
+    @Synchronized
+    fun record(
+        oldState: RunState,
+        command: ConversationCommand,
+        transition: Transition,
+    ) {
+        val identity = command.runIdentity()
+        if (entries.size == capacity) entries.removeFirst()
+        entries.addLast(
+            ConversationRuntimeTraceEntry(
+                sequence = nextSequence++,
+                conversationIdHash = hashConversationId(command.conversationId),
+                runId = identity.runId,
+                pass = identity.pass,
+                effectId = command.effectIdOrNull(),
+                oldState = oldState.traceName(),
+                commandType = command.traceName(),
+                newState = transition.newState.traceName(),
+                effectTypes = transition.effects.map { effect -> effect.traceName() },
+                timestamp = clock(),
+            ),
+        )
+    }
+
+    @Synchronized
+    fun snapshot(): List<ConversationRuntimeTraceEntry> = entries.toList()
+
+    private fun ConversationCommand.runIdentity(): RuntimeRunIdentity = when (this) {
+        is ConversationCommand.AcquireSlot -> identity
+        is ConversationCommand.BindRun -> identity
+        is ConversationCommand.StopRequested -> identity
+        is ConversationCommand.CoroutineSettled -> identity
+        is ConversationCommand.PersistenceSettled -> identity.runIdentity()
+    }
+
+    private fun ConversationCommand.effectIdOrNull(): String? = when (this) {
+        is ConversationCommand.StopRequested -> effectId
+        is ConversationCommand.PersistenceSettled -> identity.effectId
+        is ConversationCommand.AcquireSlot,
+        is ConversationCommand.BindRun,
+        is ConversationCommand.CoroutineSettled,
+        -> null
+    }
+
+    private fun RunState.traceName(): String = when (this) {
+        is RunState.Idle -> "Idle"
+        is RunState.Active -> "Active"
+        is RunState.Stopping -> "Stopping"
+    }
+
+    private fun ConversationCommand.traceName(): String = when (this) {
+        is ConversationCommand.AcquireSlot -> "AcquireSlot"
+        is ConversationCommand.BindRun -> "BindRun"
+        is ConversationCommand.StopRequested -> "StopRequested"
+        is ConversationCommand.CoroutineSettled -> "CoroutineSettled"
+        is ConversationCommand.PersistenceSettled -> "PersistenceSettled"
+    }
+
+    private fun RunEffect.traceName(): String = when (this) {
+        is RunEffect.SlotActivated -> "SlotActivated"
+        is RunEffect.CancelProviderPass -> "CancelProviderPass"
+        is RunEffect.FinalizeStop -> "FinalizeStop"
+        is RunEffect.StopPersistenceFailed -> "StopPersistenceFailed"
+        is RunEffect.ReleaseSlot -> "ReleaseSlot"
+    }
+
+    internal companion object {
+        const val DEFAULT_CAPACITY = 256
+        const val MAX_CAPACITY = 4_096
+
+        fun hashConversationId(conversationId: String): String =
+            MessageDigest.getInstance("SHA-256")
+                .digest(conversationId.toByteArray(Charsets.UTF_8))
+                .take(HASH_BYTES)
+                .joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
+
+        private const val HASH_BYTES = 12
+    }
+}

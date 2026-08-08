@@ -1121,7 +1121,9 @@ internal class MessageGenerationController(
         }
         // The Run already exists, so binding before the next Job is installed is intentional:
         // Stop at this handoff must terminalize that live Run rather than release it as ownerless.
-        continuationRunId?.let { state.bindRun(nextToken, it) }
+        continuationRunId?.let {
+            state.bindRun(nextToken, it, pass = requireNotNull(originRun).currentPass)
+        }
         return QueuedDrainClaim(batch, nextToken, continuationRunId)
     }
 
@@ -1262,7 +1264,10 @@ internal class MessageGenerationController(
                         pass = 0
                     }
                     graphCommitted = true
-                    if (!runBound) runBound = state.tryBindRun(myUiToken, runId)
+                    // Every durable pass claim must still belong to the active reducer identity.
+                    // Do not let an earlier successful Run binding mask a Stop that landed while
+                    // Room was committing this continuation pass.
+                    runBound = state.tryBindRun(myUiToken, runId, pass)
                     if (!runBound) {
                         // Stop landed while Room was committing the fresh boundary. The rows are
                         // durable, so finish them in place; never requeue and duplicate them.

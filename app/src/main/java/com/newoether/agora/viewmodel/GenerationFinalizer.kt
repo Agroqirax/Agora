@@ -2,6 +2,8 @@ package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ConversationCommand
+import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -13,30 +15,30 @@ import kotlinx.coroutines.launch
  * from per-conversation [ConversationGenerationState] (which owns no repos) so it can delegate
  * finalization without holding repository references.
  *
- * Runs on the supplied conversation-owned scope; the stopped conversation id comes from
- * [ConversationGenerationState.StopResult], NOT from the live `currentConversationId`, so a stop
- * triggered after the user switched conversations still persists to the ORIGINAL conversation.
+ * Runs on the supplied conversation-owned scope; conversation/Run/pass/effect identity comes from
+ * the reducer's [RunEffectIdentity], NOT from live UI state. The completion echoes that exact
+ * identity so stale or duplicate callbacks cannot mutate a later Run.
  */
 class GenerationFinalizer(
     private val convRepo: ConversationRepository,
     private val onIndexMessageForRag: (messageId: String, text: String) -> Unit,
 ) {
     /**
-     * Persist [messages] as STOPPED into [conversationId] on [scope]. Returns the launched job
-     * (or null if nothing to persist). The caller may chain a subsequent generation onto this job.
-     * [onFinalized] reports whether Room reached a terminal state. Failure must not release the
-     * in-memory slot because the database's unique live-Run slot is still unavailable.
+     * Persist [messages] as STOPPED for [identity] on [scope]. Returns the launched job; a
+     * finalization effect always identifies a durable Run, even when there is no message overlay.
+     * [onFinalized] returns an identified result command reporting whether Room reached a terminal
+     * state. Failure must not release the in-memory slot because the database's unique live-Run
+     * slot is still unavailable.
      */
     fun launchStopFinalization(
         scope: CoroutineScope,
-        conversationId: String?,
-        runId: String?,
+        identity: RunEffectIdentity,
         messages: List<ChatMessage>,
-        onFinalized: (success: Boolean) -> Unit = {},
-    ): Job? {
-        if (conversationId == null) return null
+        onFinalized: (ConversationCommand.PersistenceSettled) -> Unit = {},
+    ): Job {
+        val conversationId = identity.conversationId
+        val runId = identity.runId
         val distinct = messages.distinctBy { it.id }
-        if (distinct.isEmpty() && runId == null) return null
         return scope.launch {
             var finalized = false
             var lastFailure: Exception? = null
@@ -44,7 +46,7 @@ class GenerationFinalizer(
             for (retryDelayMs in retryDelaysMs) {
                 if (retryDelayMs > 0L) delay(retryDelayMs)
                 try {
-                    if (runId != null) convRepo.requestRunStop(runId)
+                    convRepo.requestRunStop(runId)
                     finalized = convRepo.finishStoppedGeneration(distinct, runId)
                     if (finalized) break
                 } catch (e: Exception) {
@@ -57,7 +59,12 @@ class GenerationFinalizer(
                 if (lastFailure != null) DebugLog.e("AgoraVM", message, lastFailure)
                 else DebugLog.e("AgoraVM", message)
             }
-            onFinalized(finalized)
+            onFinalized(
+                ConversationCommand.PersistenceSettled(
+                    identity = identity,
+                    success = finalized,
+                ),
+            )
             // RAG is outside the Stop critical path and owns its own eligibility gate.
             if (finalized) {
                 distinct.forEach { message ->

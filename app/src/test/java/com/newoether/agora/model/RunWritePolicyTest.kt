@@ -2,7 +2,6 @@ package com.newoether.agora.model
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertSame
 import org.junit.Test
 
 class RunWritePolicyTest {
@@ -58,46 +57,4 @@ class RunWritePolicyTest {
         assertEquals("stopping", decision.terminalizeRunId)
     }
 
-    @Test
-    fun passWithPendingInputs_claimsThemForNextPassInOrder() {
-        val decision = RunPassPolicy.afterPass(
-            run = RunLifecycleState(),
-            currentPass = 3,
-            pendingInputMessageIds = listOf("u2", "u3"),
-        ) as RunPassDecision.StartNextPass
-
-        assertEquals(4, decision.pass)
-        assertEquals(listOf("u2", "u3"), decision.claimedInputMessageIds)
-    }
-
-    @Test
-    fun passWithoutPendingInputs_completesRun() {
-        assertSame(
-            RunPassDecision.CompleteRun,
-            RunPassPolicy.afterPass(RunLifecycleState(), 0, emptyList()),
-        )
-    }
-
-    @Test
-    fun stoppingAndTerminalRuns_ignorePassContinuation() {
-        assertSame(
-            RunPassDecision.AwaitStopFinalization,
-            RunPassPolicy.afterPass(
-                RunLifecycleState(status = RunStatus.STOPPING),
-                0,
-                listOf("pending"),
-            ),
-        )
-        assertSame(
-            RunPassDecision.IgnoreLateCompletion,
-            RunPassPolicy.afterPass(
-                RunLifecycleState(
-                    status = RunStatus.STOPPED,
-                    endReason = RunEndReason.USER_STOPPED,
-                ),
-                0,
-                listOf("pending"),
-            ),
-        )
-    }
 }

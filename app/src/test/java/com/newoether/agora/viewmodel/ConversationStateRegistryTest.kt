@@ -1,5 +1,7 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.model.ConversationCommand
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -15,7 +17,7 @@ class ConversationStateRegistryTest {
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
 
-        state.stop()
+        val stopped = state.stop()
         registry.detachUiCallbacks(firstOwner)
         val secondOwner = Any()
         registry.attachUiCallbacks(secondOwner) { }
@@ -26,7 +28,14 @@ class ConversationStateRegistryTest {
         assertTrue("conversation" in registry.activeConversationIds.value)
 
         assertFalse(state.endGeneration(token))
-        assertTrue(state.finishStopFinalization(success = true))
+        val completion = ConversationCommand.PersistenceSettled(
+            identity = requireNotNull(stopped.finalizationEffect).identity,
+            success = true,
+        )
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(completion),
+        )
         assertFalse(state.generating.value)
         assertFalse(state.stopping.value)
         assertFalse("conversation" in registry.activeConversationIds.value)

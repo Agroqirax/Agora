@@ -110,6 +110,20 @@ stream, while `GenerationManager` currently owns the multi-pass Provider/tool co
 normal Run finalization. `GenerationFinalizer` owns durable Stop finalization and its retry path.
 Separating one Provider pass from one Run is a target refactor boundary.
 
+The first conversation-runtime migration slice is authoritative for the in-process generation
+slot and Stop barriers. Pure `ConversationCommand`, `RunState`, `RunEffect`, and
+`ConversationRuntimeReducer` types decide `Idle`/`Active`/`Stopping`, coroutine settlement,
+durable settlement, and slot release. `ConversationGenerationState` retains the legacy per-
+conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
+`SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
+conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
+before either slot or overlay mutation.
+
+This is not yet the final mailbox architecture: Send preparation, Provider passes, tools, queue,
+Compact, automation, and recovery have not moved into the reducer. A bounded 256-entry runtime
+trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
+types, and timestamp.
+
 ```text
 accepted send
    │
@@ -319,6 +333,7 @@ High-risk changes require focused tests in addition to the full gate:
 
 - provider termination and incremental tool-call parsing;
 - generation ownership, queueing, stopping, and checkpointing;
+- reducer legality, both Stop-barrier orders, and stale/duplicate effect rejection;
 - latest-wins UI buffer behavior;
 - branch path closure and attachment cloning/deletion;
 - task schedule boundary behavior;

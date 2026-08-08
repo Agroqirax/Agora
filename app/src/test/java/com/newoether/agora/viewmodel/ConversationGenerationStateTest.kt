@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import kotlinx.coroutines.CompletableDeferred
@@ -48,7 +49,7 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
 
-        state.stop()
+        val stopped = state.stop()
 
         assertTrue(state.generating.value)
         assertTrue(state.isLoading.value)
@@ -57,7 +58,10 @@ class ConversationGenerationStateTest {
         active.job.join()
         assertTrue(state.generating.value)
         assertTrue(state.stopping.value)
-        assertTrue(state.finishStopFinalization(success = true))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
@@ -68,9 +72,12 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
 
-        state.stop()
+        val stopped = state.stop()
 
-        assertFalse(state.finishStopFinalization(success = true))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
         assertTrue(state.generating.value)
         assertTrue(state.stopping.value)
         active.unwind.complete(Unit)
@@ -85,11 +92,14 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
 
-        state.stop()
+        val stopped = state.stop()
         active.unwind.complete(Unit)
         active.job.join()
 
-        assertFalse(state.finishStopFinalization(success = false))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.FAILED,
+            state.finishStopFinalization(stopped.completion(success = false)),
+        )
         assertTrue(state.generating.value)
         assertTrue(state.stopping.value)
         assertNull(state.acquireForSend())
@@ -132,7 +142,10 @@ class ConversationGenerationStateTest {
         assertEquals("background-run", stopped.runId)
         // The coroutine half settled, but the durable Run half still owns STOPPING.
         assertTrue(state.generating.value)
-        assertTrue(state.finishStopFinalization(success = true))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
         assertFalse(state.generating.value)
     }
 
@@ -184,13 +197,16 @@ class ConversationGenerationStateTest {
         var settledCount = 0
         state.onStopSettled = { settledCount += 1 }
 
-        state.stop()
+        val stopped = state.stop()
         active.unwind.complete(Unit)
         active.job.join()
         // Coroutine unwound first, so it must not have settled anything on its own.
         assertEquals(0, settledCount)
 
-        assertTrue(state.finishStopFinalization(success = true))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
 
         assertEquals(1, settledCount)
         assertFalse(state.generating.value)
@@ -204,9 +220,12 @@ class ConversationGenerationStateTest {
         val settled = CompletableDeferred<Unit>()
         state.onStopSettled = { settled.complete(Unit) }
 
-        state.stop()
+        val stopped = state.stop()
         // Durable half lands first; it cannot release while the coroutine still owns the slot.
-        assertFalse(state.finishStopFinalization(success = true))
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
         assertFalse(settled.isCompleted)
 
         active.unwind.complete(Unit)
@@ -216,6 +235,97 @@ class ConversationGenerationStateTest {
         settled.await()
         assertFalse(state.generating.value)
         assertFalse(state.stopping.value)
+    }
+
+    @Test
+    fun staleStopFinalizerCallback_cannotReleaseLaterStoppingRun() {
+        val state = ConversationGenerationState("conversation")
+        val firstToken = state.acquireForSend()!!
+        state.bindRun(firstToken, "first-run", pass = 2)
+        state.streamUpdate(
+            firstToken,
+            ChatMessage(
+                id = "first-model",
+                text = "first",
+                participant = Participant.MODEL,
+                status = MessageStatus.SENDING,
+            ),
+        )
+        val firstStop = state.stop()
+        val firstCompletion = firstStop.completion(success = true)
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(firstCompletion),
+        )
+
+        val secondToken = state.acquireForSend()!!
+        state.bindRun(secondToken, "second-run", pass = 5)
+        state.streamUpdate(
+            secondToken,
+            ChatMessage(
+                id = "second-model",
+                text = "second",
+                participant = Participant.MODEL,
+                status = MessageStatus.SENDING,
+            ),
+        )
+        val secondStop = state.stop()
+
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.REJECTED,
+            state.finishStopFinalization(firstCompletion),
+        )
+        assertTrue(state.generating.value)
+        assertTrue(state.stopping.value)
+        assertEquals("second-run", state.currentRunId())
+
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(secondStop.completion(success = true)),
+        )
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun stopDuringQueuedPassClaim_rejectsTheNewPassBinding() {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 2)
+
+        val stopped = state.stop()
+
+        // The durable claim may finish after Stop, but it must not reopen the stopped owner for
+        // pass 3. The controller treats this result as a hard boundary and terminalizes the rows.
+        assertFalse(state.tryBindRun(token, "run", pass = 3))
+        assertTrue(state.generating.value)
+        assertTrue(state.stopping.value)
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun runtimeTrace_excludesStreamingMessageContent() {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 4)
+        state.streamUpdate(
+            token,
+            ChatMessage(
+                id = "model",
+                text = "STREAM_CONTENT_SENTINEL",
+                participant = Participant.MODEL,
+                status = MessageStatus.SENDING,
+            ),
+        )
+
+        state.stop()
+
+        val trace = state.runtimeTraceSnapshot()
+        assertEquals(listOf("AcquireSlot", "BindRun", "StopRequested"), trace.map { it.commandType })
+        assertFalse(trace.toString().contains("STREAM_CONTENT_SENTINEL"))
     }
 
     @Test
@@ -361,5 +471,12 @@ class ConversationGenerationStateTest {
         val token: Long,
         val job: Job,
         val unwind: CompletableDeferred<Unit>,
+    )
+
+    private fun ConversationGenerationState.StopResult.completion(
+        success: Boolean,
+    ): ConversationCommand.PersistenceSettled = ConversationCommand.PersistenceSettled(
+        identity = requireNotNull(finalizationEffect).identity,
+        success = success,
     )
 }

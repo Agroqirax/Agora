@@ -1488,14 +1488,19 @@ class ChatViewModel(
                 } else null
             }
         }
-        if (result.shouldFinalize) {
+        val finalizationEffect = result.finalizationEffect
+        if (finalizationEffect != null) {
             // Release the STOPPED overlay once the terminal row is in Room — otherwise the stale
             // snapshot lives on in the state and resolvePath resurrects it as a ghost bubble
             // after the persisted message is later deleted.
             generationFinalizer.launchStopFinalization(
-                state.scope, result.conversationId, result.runId, messages,
-                onFinalized = { success ->
-                    if (success) {
+                state.scope, finalizationEffect.identity, messages,
+                onFinalized = { completion ->
+                    val outcome = state.finishStopFinalization(completion)
+                    // A delayed or duplicate callback from an older Run/effect is a no-op for both
+                    // process state and UI. Only the reducer can accept the result as current.
+                    if (!outcome.accepted) return@launchStopFinalization
+                    if (completion.success) {
                         // Room invalidation and the generation-state mirror are asynchronous.
                         // Commit the exact STOPPED overlay into the visible graph and remove that
                         // overlay as one snapshot before releasing the private state copy.
@@ -1509,7 +1514,6 @@ class ChatViewModel(
                     } else {
                         emitSnackbar(getApplication<Application>().getString(R.string.failed_to_generate))
                     }
-                    state.finishStopFinalization(success)
                 },
             )
         }
