@@ -22,13 +22,15 @@ ChatViewModel ── MessageGenerationController ── ConversationStateRegistr
    │                    ▼
    │               LlmProvider implementations
    │
-   ├── ConversationRepository ── Room (v19)
+   ├── ConversationRepository ── Room (v22)
    ├── SettingsRepository ───── DataStore
    └── MemoryManager / attachment files / export and backup files
-
-AppContainer owns process-scoped dependencies and also exposes the same generation
-stack to TaskExecutionEngine for background tasks and loops.
 ```
+
+AppContainer owns process-scoped dependencies. Foreground-open automation can bridge into the
+controller and join the exact generation Job; headless automation currently shares the same
+providers and repositories but retains a parallel orchestration adapter in
+`TaskExecutionEngine`. Removing that duplication is a staged migration, not current fact.
 
 The project uses manual dependency injection through `di/AppContainer.kt`. Shared
 providers, repositories, automation coordinators, and the local inference engine are
@@ -70,9 +72,14 @@ single global mutable slot:
   transitions.
 - `ConversationGenerationMirror` projects only the selected conversation's live state
   into UI flows.
-- `ConversationExecutionCoordinator` prevents foreground and background execution from
-  writing the same conversation concurrently.
-- UI ownership tokens and run sequence numbers reject stale callbacks from an older run.
+- `ConversationExecutionCoordinator` serializes the main foreground/background generation lease
+  per conversation while allowing different conversations to proceed independently.
+- UI/persistence tokens and Run/pass guards reject some stale callbacks.
+
+This is a compatibility architecture, not yet a true single-writer runtime. The controller,
+generation manager, Stop finalizer, task engine, and Room transactions all retain lifecycle write
+responsibilities. The live ownership table, lock order, acceptance matrix, and staged migration are
+frozen in `docs/development/conversation-runtime-refactor-baseline.md`.
 
 Room remains the durable source of truth. The live message is an overlay for the
 currently selected branch; it does not become a second durable message graph.
@@ -98,8 +105,10 @@ Branch operations must preserve these invariants:
 ## 4. Generation pipeline
 
 `GenerationRequestBuilder` prepares provider configuration, context, tools, memory,
-attachments, and optional transcription. `GenerationManager` owns one provider/tool
-round. `GenerationFinalizer` performs terminal persistence and cleanup.
+attachments, and optional transcription. A Provider owns retry and semantic termination for one
+stream, while `GenerationManager` currently owns the multi-pass Provider/tool continuation and
+normal Run finalization. `GenerationFinalizer` owns durable Stop finalization and its retry path.
+Separating one Provider pass from one Run is a target refactor boundary.
 
 ```text
 accepted send
@@ -178,9 +187,11 @@ checkpoints are best-effort and cannot cancel a healthy provider stream.
 
 ### 4.3 Stop and terminal ownership
 
-Stopping cancels the active run and settles the newest content directly. Pending UI
-animation work cannot replay after `STOPPED`. Final persistence is guarded by the run
-identity so an older run cannot overwrite a newer branch, retry, or queued send.
+Stopping cancels the active Run and preserves queued guidance. The in-process slot enters
+`STOPPING` and remains occupied until both the generation coroutine has unwound and the durable
+Stop transaction has succeeded. Either barrier may complete first; only the second releases the
+slot. Guidance then enters a fresh Run rather than attaching to the terminal Run. Pending UI
+animation work cannot replay after `STOPPED`.
 
 ## 5. Rendering and interaction
 
@@ -226,17 +237,20 @@ provider, and signatures must never be replayed into another provider protocol.
 
 ## 7. Persistence
 
-Room database version 19 contains five entities:
+Room database version 22 contains six entities:
 
 - `conversations`;
+- `runs`;
 - `messages`;
 - `embeddings`;
 - `tasks`;
 - `loops`.
 
-Room stores the conversation graph, selected branches, durable streaming checkpoints,
-automation state, and embedding metadata. Migrations are explicit and schema snapshots
-are committed under `app/schemas`.
+Room stores Run ancestry/status/pass state, the conversation graph, selected message and Run
+branches, durable streaming checkpoints, automation state, and embedding metadata. The unique
+`(conversationId, activeSlot)` index prevents two durable live Runs for one conversation.
+Migrations are explicit and schema snapshots are committed under `app/schemas`; v16→v17
+introduced Runs, and the current chain continues through v22.
 
 DataStore holds user settings, provider/model configuration, encrypted API-key
 references, appearance, generation defaults, tool toggles, backup settings, and
@@ -252,10 +266,12 @@ started. A manual rename or a newer generator always wins.
 
 ## 8. Automation
 
-Tasks and loops run through `TaskExecutionEngine`, which reuses the process-scoped
-provider registry and generation dependencies. WorkManager and alarms are scheduling
-entry points; `AutomationExecutionGate` quiesces automation during destructive import,
-and `ConversationExecutionCoordinator` serializes execution per conversation.
+WorkManager and alarms are scheduling entry points. `AutomationExecutionGate` quiesces automation
+during destructive import, and `ConversationExecutionCoordinator` gives automation waiters
+priority while serializing each conversation. A foreground-open Loop delegates to the controller
+through a direct-only call and joins its exact Job; headless Tasks/Loops use
+`TaskExecutionEngine`, which reuses process-scoped dependencies but currently duplicates parts of
+Run setup, Compact, and finalization.
 
 One-shot schedules preserve explicit past dates so validation can reject them. The
 scheduler must not silently reinterpret an expired date as next year.
@@ -293,12 +309,11 @@ Use the repository scripts from the project root:
 
 ```powershell
 .\build.ps1
-.\deploy.ps1
 ```
 
 `build.ps1` is the required release gate because it configures the Android SDK and
-runs the repository's expected build/test workflow. Both `fdroid` and `play` variants
-must remain lint-clean, even when only one flavor is packaged for a particular release.
+runs the repository's expected unit-test/build workflow. Deployment is a separate, explicitly
+authorized operation and is not part of the architecture or validation gate.
 
 High-risk changes require focused tests in addition to the full gate:
 
@@ -326,3 +341,9 @@ The following are review blockers:
 8. Never overwrite a manual title with delayed automatic title generation.
 9. Never use an Android API above `minSdk` without a guard or compatible implementation.
 10. Never put a raw private origin address into client code or committed configuration.
+11. Never treat Provider-pass completion as Run completion when a tool or guidance continuation
+    remains.
+12. Never release a stopped Run before both coroutine and durable finalization barriers settle.
+13. Never attach queued guidance to a terminal Run or persist it before a legal boundary.
+14. Never accept an asynchronous result for an unexpected Run/pass/effect identity.
+15. Never delete original messages during Context Compact or split a complete tool round.
