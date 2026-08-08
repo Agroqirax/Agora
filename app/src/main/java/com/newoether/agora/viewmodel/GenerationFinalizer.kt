@@ -34,7 +34,7 @@ class GenerationFinalizer(
         scope: CoroutineScope,
         identity: RunEffectIdentity,
         messages: List<ChatMessage>,
-        onFinalized: (ConversationCommand.PersistenceSettled) -> Unit = {},
+        onFinalized: suspend (ConversationCommand.PersistenceSettled) -> Unit = {},
     ): Job {
         val conversationId = identity.conversationId
         val runId = identity.runId

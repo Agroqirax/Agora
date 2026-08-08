@@ -17,13 +17,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * One per conversation. Owns that conversation's private generation state — the IO scope,
@@ -52,8 +56,9 @@ import java.util.concurrent.atomic.AtomicLong
  * Ordinary foreground Send placement enters [requestSend]'s sequential mailbox. The compatibility
  * [acquireForSend] path remains only for queue/headless adapters not migrated in this phase;
  * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration]
- * releases token-gated ownership and [stop] establishes the terminal cutoff. Stop cancels ONLY
- * this conversation's [generationJob] and in-flight HTTP streams (via [streamScope]).
+ * and [stop] now submit through the same mailbox. [endGeneration] releases token-gated ownership;
+ * Stop establishes the terminal cutoff, then cancels only this conversation's [generationJob]
+ * and in-flight HTTP streams (via [streamScope]).
  */
 class ConversationGenerationState(
     val conversationId: String,
@@ -89,7 +94,7 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     private var generationJob: Job? = null
     private var uiGenToken = 0L
-    /** Ordinary foreground Send commands enter here; remaining paths migrate phase by phase. */
+    /** Foreground Send and Stop lifecycle commands enter here; remaining paths migrate by phase. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
     /** One-shot suppression used only by failed queue-boundary recovery. */
     private var suppressNextQueueDrain = false
@@ -229,12 +234,9 @@ class ConversationGenerationState(
         block: suspend CoroutineScope.() -> Unit,
     ): Job? {
         val job = scope.launch(start = CoroutineStart.LAZY, block = block)
-        val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val installed = AtomicBoolean(false)
         job.invokeOnCompletion {
-            if (installed.get() && endGeneration(uiToken)) {
-                // A cancelled-before-start coroutine cannot reach the controller's finally.
-                onQueueDrainRequested?.invoke(this)
-            }
+            if (installed.get()) settleCoroutineAsync(uiToken)
         }
 
         val accepted = synchronized(genLock) {
@@ -255,9 +257,7 @@ class ConversationGenerationState(
                 runState.isStoppingOwner(uiToken) &&
                     generationJob == null
             }
-            if (abandonedStoppingLaunch && endGeneration(uiToken)) {
-                onQueueDrainRequested?.invoke(this)
-            }
+            if (abandonedStoppingLaunch) settleCoroutineAsync(uiToken)
             return null
         }
         job.start()
@@ -271,13 +271,11 @@ class ConversationGenerationState(
      * streams. The same install-before-work invariant as [launchGenerationJob] applies.
      */
     fun attachGenerationJob(uiToken: Long, job: Job): Boolean {
-        val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val installed = AtomicBoolean(false)
         job.invokeOnCompletion {
-            if (installed.get() && endGeneration(uiToken)) {
-                onQueueDrainRequested?.invoke(this)
-            }
+            if (installed.get()) settleCoroutineAsync(uiToken)
         }
-        return synchronized(genLock) {
+        val accepted = synchronized(genLock) {
             if (
                 !runState.isLaunchableOwner(uiToken) ||
                 generationJob != null
@@ -289,48 +287,58 @@ class ConversationGenerationState(
                 true
             }
         }
+        // An external Job can complete between hook registration and installation. The hook sees
+        // installed=false in that race, so this post-install check supplies the result. A duplicate
+        // delivery from the opposite race is harmless because reducer identity rejects it.
+        if (accepted && job.isCompleted) settleCoroutineAsync(uiToken)
+        return accepted
     }
 
     /**
      * Owner-token-gated release of the slot when a generation coroutine finishes (normally OR
-     * after a Stop — [stop] deliberately does not free the slot, see there). Only the owning
-     * coroutine's finally releases, so a coroutine superseded in an earlier era is a no-op.
+     * after a Stop — [stop] deliberately does not free the slot, see there). Only the installed
+     * Job's completion hook reports settlement, so a coroutine superseded in an earlier era is a
+     * no-op.
      * Returns true if this call actually released (i.e. the caller may now drain the queue —
      * the release point is by construction the moment the conversation lock is free again).
      */
-    fun endGeneration(uiToken: Long): Boolean {
-        var settledAfterStop = false
-        val mayDrainQueue = synchronized(genLock) {
-            val currentIdentity = runState.identityOrNull()
-            val commandIdentity = currentIdentity
-                ?.takeIf { it.ownerToken == uiToken }
-                ?: RuntimeRunIdentity(conversationId = conversationId, ownerToken = uiToken)
-            val transition = reduceLocked(
-                ConversationCommand.CoroutineSettled(commandIdentity),
-            )
-            if (!transition.accepted) return false
-            val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
-            when (release?.reason) {
-                SlotReleaseReason.NORMAL_COMPLETION -> {
-                    applyReleasedSlotLocked()
-                    true
+    suspend fun endGeneration(uiToken: Long): Boolean = withContext(NonCancellable) {
+        require(uiToken > 0)
+        val transition = commandMailbox.submit(
+            ConversationCommandFactory {
+                check(generationJob?.isCompleted != false) {
+                    "CoroutineSettled requires the installed generation Job to be completed"
                 }
-                SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
-                    // Pending inputs still belong to the STOPPED Run and must migrate to a fresh
-                    // one, so only the post-Stop callback may drain them.
-                    applyReleasedSlotLocked()
-                    settledAfterStop = true
-                    false
-                }
-                SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
-                SlotReleaseReason.SEND_LAUNCH_ABANDONED ->
-                    error("Coroutine settlement cannot abandon an unlaunched Send")
-                null -> false
+                val currentIdentity = runState.identityOrNull()
+                val commandIdentity = currentIdentity
+                    ?.takeIf { it.ownerToken == uiToken }
+                    ?: RuntimeRunIdentity(conversationId = conversationId, ownerToken = uiToken)
+                ConversationCommand.CoroutineSettled(commandIdentity)
+            },
+        )
+        if (!transition.accepted) return@withContext false
+        when (
+            transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()?.reason
+        ) {
+            SlotReleaseReason.NORMAL_COMPLETION -> true
+            SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
+                // Pending inputs still belong to the STOPPED Run and must migrate to a fresh one.
+                // The callback runs after mailbox handling and therefore outside [genLock].
+                onStopSettled?.invoke(this@ConversationGenerationState)
+                false
             }
+            SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
+            SlotReleaseReason.SEND_LAUNCH_ABANDONED ->
+                error("Coroutine settlement cannot abandon an unlaunched Send")
+            null -> false
         }
-        // Outside the lock: the callback drains on another coroutine and re-enters this monitor.
-        if (settledAfterStop) onStopSettled?.invoke(this)
-        return mayDrainQueue
+    }
+
+    /** Completion hooks cannot suspend; enqueue their identified result on the owned scope. */
+    private fun settleCoroutineAsync(uiToken: Long) {
+        scope.launch(start = CoroutineStart.UNDISPATCHED) {
+            if (endGeneration(uiToken)) onQueueDrainRequested?.invoke(this@ConversationGenerationState)
+        }
     }
 
     /** Applies UI/resource release after the reducer has already transitioned to [RunState.Idle]. */
@@ -406,86 +414,71 @@ class ConversationGenerationState(
 
     // ── Stop / finalization ───────────────────────────────────────────────
     /**
-     * Terminal stop request (Stop button, or a delete that lands inside the generating
-     * conversation). Cancels ONLY this conversation's job + in-flight HTTP streams, advances the
-     * UI token, and commits STOPPED to the streaming snapshot. The cancelled coroutine retains
-     * the slot until its finally block releases it. Regenerate/edit never call Stop; they can
-     * claim only an idle slot through [tryAcquireForReplacement].
+     * Terminal user Stop request. Cancels ONLY this conversation's job + in-flight HTTP streams,
+     * advances the UI token, and commits STOPPED to the streaming snapshot. The cancelled
+     * coroutine retains the slot until its installed Job completion hook reports settlement.
+     * Regenerate/edit never call Stop; they can claim only an idle slot through
+     * [tryAcquireForReplacement].
      */
-    fun stop(): StopResult {
-        val previousJob: Job?
-        val result = synchronized(genLock) {
-            previousJob = generationJob
-            val currentState = runState
-            if (currentState is RunState.Idle) {
-                return@synchronized StopResult(
-                    stoppedMessage = null,
-                    conversationId = conversationId,
-                    runId = null,
-                    finalizationEffect = null,
+    internal suspend fun stop(): StopResult = withContext(NonCancellable) {
+        val previousJob = AtomicReference<Job?>()
+        val requestedIdentity = AtomicReference<RuntimeRunIdentity>()
+        val stoppedMessage = AtomicReference<ChatMessage?>()
+        val duplicateStoppingRequest = AtomicBoolean(false)
+        val transition = commandMailbox.submit(
+            ConversationCommandFactory {
+                val currentState = runState
+                val identity = currentState.identityOrNull()
+                    ?: RuntimeRunIdentity(
+                        conversationId = conversationId,
+                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                    )
+                previousJob.set(generationJob)
+                requestedIdentity.set(identity)
+                duplicateStoppingRequest.set(currentState is RunState.Stopping)
+                stoppedMessage.set(
+                    streamingMessage.value
+                        ?.takeUnless { currentState is RunState.Idle }
+                        ?.copy(status = MessageStatus.STOPPED),
                 )
-            }
-            if (currentState is RunState.Stopping) {
-                return@synchronized StopResult(
-                    stoppedMessage = streamingMessage.value,
-                    conversationId = conversationId,
-                    runId = currentState.identity.runId,
-                    finalizationEffect = null,
-                )
-            }
-            val identity = currentState.identityOrNull()
-                ?: error("A non-idle state must have a Run owner identity")
-            val boundRunId = identity.runId
-            val s = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
-            check(s == null || boundRunId != null) {
-                "A streaming Stop effect requires a bound Run"
-            }
-            val requiresPersistence = boundRunId != null
-            val effectId = if (requiresPersistence) "stop-${identity.ownerToken}" else null
-            val transition = reduceLocked(
+                val requiresPersistence = identity.runId != null
+                val effectId = when {
+                    !requiresPersistence -> null
+                    currentState is RunState.Stopping -> currentState.finalizationEffectId
+                    else -> "stop-${identity.ownerToken}"
+                }
                 ConversationCommand.StopRequested(
                     identity = identity,
-                    coroutineAlreadySettled = previousJob == null || previousJob.isCompleted,
+                    coroutineAlreadySettled = previousJob.get()?.isCompleted != false,
                     requiresPersistence = requiresPersistence,
                     effectId = effectId,
-                ),
-            )
-            check(transition.accepted)
-            check(transition.effects.any { it is RunEffect.CancelProviderPass })
-            // Queue drain after stop is normal — the user explicitly asked for it.
-            // Revoke DB ownership before cancellation can enter GenerationManager.finally. The
-            // stopped coroutine therefore skips its normal NonCancellable terminal upsert; the
-            // dedicated stop finalizer below is the only terminal writer.
-            persistId.incrementAndGet()
-            uiGenToken += 1
-            streamingMessage.value = s
-            // Accepted interventions survive Stop: the stop finalizer drains them into a fresh
-            // Run after the STOPPED row is durably persisted. See drainQueuedAfterStop.
-            if (runState is RunState.Stopping) {
-                // STOPPING remains occupied for every tree-mutation/UI gate until the reducer has
-                // accepted both the coroutine and durable terminal result for this identity.
-                isLoading.value = true
-                generating.value = true
-                stopping.value = true
-            } else {
-                val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().single()
-                check(release.reason == SlotReleaseReason.EMPTY_STOP)
-                applyReleasedSlotLocked()
-            }
-            StopResult(
-                stoppedMessage = s,
-                conversationId = conversationId,
-                runId = boundRunId,
-                finalizationEffect = transition.effects
-                    .filterIsInstance<RunEffect.FinalizeStop>()
-                    .singleOrNull(),
-            )
+                )
+            },
+        )
+        val identity = checkNotNull(requestedIdentity.get())
+        if (transition.accepted || duplicateStoppingRequest.get()) {
+            // Hard kill after the mailbox-owned cutoff: synchronous handle cancellation wakes
+            // blocking HTTP/native reads, then Job cancellation unwinds every remaining child.
+            streamScope.cancelAll()
+            previousJob.get()?.cancel()
         }
-        // Hard kill after the ownership cutoff: synchronous cancellation handles wake blocking
-        // HTTP/native reads immediately, then Job cancellation tears down every remaining child.
-        streamScope.cancelAll()
-        previousJob?.cancel()
-        return result
+        StopResult(
+            stoppedMessage = stoppedMessage.get(),
+            conversationId = conversationId,
+            runId = identity.runId,
+            finalizationEffect = transition.effects
+                .filterIsInstance<RunEffect.FinalizeStop>()
+                .singleOrNull(),
+        )
+    }
+
+    /** Enqueue Stop immediately, but keep accepted-effect handling on the conversation scope. */
+    internal fun requestStop(onResult: (StopResult) -> Unit): Job = scope.launch(
+        start = CoroutineStart.UNDISPATCHED,
+    ) {
+        withContext(NonCancellable) {
+            onResult(stop())
+        }
     }
 
     /**
@@ -493,28 +486,20 @@ class ConversationGenerationState(
      * STOPPING occupied: the unique live-Run slot is still unavailable, so reporting IDLE would
      * make the next Send fail or attach to the doomed Run.
      */
-    fun finishStopFinalization(
+    internal suspend fun finishStopFinalization(
         command: ConversationCommand.PersistenceSettled,
-    ): StopFinalizationOutcome {
-        var settled = false
-        val outcome = synchronized(genLock) {
-            val transition = reduceLocked(command)
-            if (!transition.accepted) return@synchronized StopFinalizationOutcome.REJECTED
-            if (!command.success) return@synchronized StopFinalizationOutcome.FAILED
-
-            val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
-            if (release == null) return@synchronized StopFinalizationOutcome.RECORDED
-            check(release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED)
-            // The controller's releaseAndDrain already returned while waiting for this finalizer, so
-            // no matching queue-drain decision remains to consume the Stop suppression.
-            suppressNextQueueDrain = false
-            applyReleasedSlotLocked()
-            settled = true
-            StopFinalizationOutcome.SETTLED
-        }
-        // Fire OUTSIDE the lock so the callback can safely inspect state without deadlocking.
-        if (settled) onStopSettled?.invoke(this)
-        return outcome
+    ): StopFinalizationOutcome = withContext(NonCancellable) {
+        val transition = commandMailbox.submit(
+            ConversationCommandFactory { command },
+        )
+        if (!transition.accepted) return@withContext StopFinalizationOutcome.REJECTED
+        if (!command.success) return@withContext StopFinalizationOutcome.FAILED
+        val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
+            ?: return@withContext StopFinalizationOutcome.RECORDED
+        check(release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED)
+        // Fire after mailbox handling and outside [genLock].
+        onStopSettled?.invoke(this@ConversationGenerationState)
+        StopFinalizationOutcome.SETTLED
     }
 
     /**
@@ -533,8 +518,16 @@ class ConversationGenerationState(
     }
 
     /** Cancel this conversation's scope (called when the conversation is deleted). */
-    fun cancelScope() {
+    private fun cancelScope() {
         scope.coroutineContext[Job]?.cancel()
+    }
+
+    /** Runtime disposal is not a user Stop and therefore does not create a durable Stop effect. */
+    internal fun dispose() {
+        val job = synchronized(genLock) { generationJob }
+        streamScope.cancelAll()
+        job?.cancel()
+        cancelScope()
     }
 
     /** Append a queued send (generation in progress → enqueue instead of launching). */
@@ -619,12 +612,40 @@ class ConversationGenerationState(
                 check(preparing.inputEffectIdentity == effect.identity)
                 applyActivatedSlotLocked(preparing.ownerIdentity, loading = false)
             }
+        transition.effects.filterIsInstance<RunEffect.CancelProviderPass>()
+            .singleOrNull()
+            ?.let { effect ->
+                check(uiGenToken == effect.identity.ownerToken)
+                val stopped = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
+                check(stopped == null || effect.identity.runId != null) {
+                    "A streaming Stop effect requires a bound Run"
+                }
+                // Revoke DB/UI ownership before cancellation can enter GenerationManager.finally.
+                persistId.incrementAndGet()
+                uiGenToken += 1
+                streamingMessage.value = stopped
+                if (runState is RunState.Stopping) {
+                    isLoading.value = true
+                    generating.value = true
+                    stopping.value = true
+                }
+            }
         transition.effects.filterIsInstance<RunEffect.ReleaseSlot>()
             .singleOrNull()
-            ?.takeIf { release ->
-                release.reason == SlotReleaseReason.SEND_LAUNCH_ABANDONED
+            ?.let { release ->
+                when (release.reason) {
+                    SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
+                        // Stop settlement owns the next drain; a stale failed-boundary suppression
+                        // must not prevent accepted guidance from moving to its fresh Run.
+                        suppressNextQueueDrain = false
+                        applyReleasedSlotLocked()
+                    }
+                    SlotReleaseReason.NORMAL_COMPLETION,
+                    SlotReleaseReason.EMPTY_STOP,
+                    SlotReleaseReason.SEND_LAUNCH_ABANDONED,
+                    -> applyReleasedSlotLocked()
+                }
             }
-            ?.let { applyReleasedSlotLocked() }
     }
 
     private fun applyActivatedSlotLocked(identity: RuntimeRunIdentity, loading: Boolean) {

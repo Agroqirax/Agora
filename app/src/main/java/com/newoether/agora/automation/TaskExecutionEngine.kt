@@ -272,7 +272,9 @@ class TaskExecutionEngine(
         val currentJob = currentCoroutineContext()[Job]
         if (generationState != null && uiToken != null) {
             if (currentJob == null || !generationState.attachGenerationJob(uiToken, currentJob)) {
-                generationState.endGeneration(uiToken)
+                if (generationState.endGeneration(uiToken)) {
+                    generationState.onQueueDrainRequested?.invoke(generationState)
+                }
                 return Result.Failure("Conversation generation slot was revoked")
             }
         }
@@ -526,10 +528,6 @@ class TaskExecutionEngine(
                 convRepo.failRun(runId)
             }
             Result.Failure(reason)
-        } finally {
-            if (generationState != null && uiToken != null && generationState.endGeneration(uiToken)) {
-                generationState.onQueueDrainRequested?.invoke(generationState)
-            }
         }
     }
 }

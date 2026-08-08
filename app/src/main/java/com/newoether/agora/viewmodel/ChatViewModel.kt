@@ -1467,55 +1467,62 @@ class ChatViewModel(
     fun stopGeneration() {
         // Stop the CURRENTLY-OPEN conversation's generation only. A background conversation's
         // generation is intentionally not killed here — the user is asking to stop what they
-        // see. registry.stop() cancels that conversation's job + streamScope (not other
+        // see. the state mailbox cancels that conversation's job + streamScope (not other
         // conversations'), and finalizer persists STOPPED to the correct conversation id.
         val id = _currentConversationId.value ?: return
         val state = generationRegistry.get(id) ?: return
-        val result = state.stop()
-        val stoppedMsg = result.stoppedMessage
-        val messages = if (stoppedMsg != null) listOf(stoppedMsg) else {
-            // streamingMessage was null — mark any in-flight model message in the open list directly.
-            renderStore.allMessages.mapNotNull { m ->
-                if (m.participant == Participant.MODEL &&
-                    (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING ||
-                        m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
-                ) {
-                    val stopped = m.copy(status = MessageStatus.STOPPED)
-                    renderStore.updateAllMessages { list ->
-                        list.map { if (it.id == m.id) stopped else it }
-                    }
-                    stopped
-                } else null
-            }
-        }
-        val finalizationEffect = result.finalizationEffect
-        if (finalizationEffect != null) {
-            // Release the STOPPED overlay once the terminal row is in Room — otherwise the stale
-            // snapshot lives on in the state and resolvePath resurrects it as a ghost bubble
-            // after the persisted message is later deleted.
-            generationFinalizer.launchStopFinalization(
-                state.scope, finalizationEffect.identity, messages,
-                onFinalized = { completion ->
-                    val outcome = state.finishStopFinalization(completion)
-                    // A delayed or duplicate callback from an older Run/effect is a no-op for both
-                    // process state and UI. Only the reducer can accept the result as current.
-                    if (!outcome.accepted) return@launchStopFinalization
-                    if (completion.success) {
-                        // Room invalidation and the generation-state mirror are asynchronous.
-                        // Commit the exact STOPPED overlay into the visible graph and remove that
-                        // overlay as one snapshot before releasing the private state copy.
-                        if (
-                            stoppedMsg != null &&
-                            _currentConversationId.value == result.conversationId
+        state.requestStop { result ->
+            val stoppedMsg = result.stoppedMessage
+            val messages = if (stoppedMsg != null) {
+                listOf(stoppedMsg)
+            } else if (_currentConversationId.value == result.conversationId) {
+                // streamingMessage was null — mark any in-flight model message in the open list directly.
+                runCatching {
+                    renderStore.allMessages.mapNotNull { m ->
+                        if (m.participant == Participant.MODEL &&
+                            (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING ||
+                                m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
                         ) {
-                            renderStore.commitTerminalStreamingMessage(stoppedMsg)
-                        }
-                        state.clearStoppedOverlay()
-                    } else {
-                        emitSnackbar(getApplication<Application>().getString(R.string.failed_to_generate))
+                            val stopped = m.copy(status = MessageStatus.STOPPED)
+                            renderStore.updateAllMessages { list ->
+                                list.map { if (it.id == m.id) stopped else it }
+                            }
+                            stopped
+                        } else null
                     }
-                },
-            )
+                }.getOrElse { error ->
+                    DebugLog.e("AgoraVM", "Failed to snapshot stopped render rows", error)
+                    emptyList()
+                }
+            } else emptyList()
+            val finalizationEffect = result.finalizationEffect
+            if (finalizationEffect != null) {
+                // Release the STOPPED overlay once the terminal row is in Room — otherwise the
+                // stale snapshot lives on in state and resolvePath resurrects it as a ghost bubble.
+                generationFinalizer.launchStopFinalization(
+                    state.scope, finalizationEffect.identity, messages,
+                    onFinalized = { completion ->
+                        val outcome = state.finishStopFinalization(completion)
+                        // A delayed/duplicate callback is a no-op for process state and UI.
+                        if (!outcome.accepted) return@launchStopFinalization
+                        if (completion.success) {
+                            // Room invalidation and the state mirror are asynchronous. Commit the
+                            // exact STOPPED overlay before releasing the private state copy.
+                            if (
+                                stoppedMsg != null &&
+                                _currentConversationId.value == result.conversationId
+                            ) {
+                                renderStore.commitTerminalStreamingMessage(stoppedMsg)
+                            }
+                            state.clearStoppedOverlay()
+                        } else {
+                            emitSnackbar(
+                                getApplication<Application>().getString(R.string.failed_to_generate),
+                            )
+                        }
+                    },
+                )
+            }
         }
     }
 

@@ -1568,8 +1568,8 @@ class GenerationManager(
             // generation resets the loading/streaming/generating-id UI state.
             onStreamClear()
             onLoadingChange(false)
-            // The generating flag + active-set are released by the controller's endGeneration()
-            // in its finally (which also drains the queue), so the slot lifecycle has a single owner.
+            // The installed Job's completion hook reports CoroutineSettled through the mailbox;
+            // only its accepted release clears the active set and requests queue drain.
             if (foregroundLeaseAcquired) {
                 AgoraForegroundService.release(modelMessageId)
             }

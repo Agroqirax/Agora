@@ -21,7 +21,7 @@ import org.junit.Test
 class ConversationGenerationStateTest {
 
     @Test
-    fun replacementClaim_isIdleOnlyAndAtomic() {
+    fun replacementClaim_isIdleOnlyAndAtomic() = runBlocking {
         val state = ConversationGenerationState("conversation")
 
         val token = state.tryAcquireForReplacement()
@@ -34,7 +34,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun normalCompletion_doesNotSuppressQueueDrain() {
+    fun normalCompletion_doesNotSuppressQueueDrain() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
@@ -72,6 +72,8 @@ class ConversationGenerationStateTest {
     fun stopFinalizer_neverReleasesAnOccupiedCoroutineSlot() = runBlocking {
         val active = activeStateWithStreamingMessage()
         val state = active.state
+        val settled = CompletableDeferred<Unit>()
+        state.onStopSettled = { settled.complete(Unit) }
 
         val stopped = state.stop()
 
@@ -83,6 +85,7 @@ class ConversationGenerationStateTest {
         assertTrue(state.stopping.value)
         active.unwind.complete(Unit)
         active.job.join()
+        settled.await()
         assertFalse(state.generating.value)
         assertFalse(state.isLoading.value)
         assertFalse(state.stopping.value)
@@ -107,7 +110,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun stop_synchronouslyCancelsEveryRegisteredGenerationHandle() {
+    fun mailboxStop_cancelsEveryRegisteredGenerationHandleBeforeReturning() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
@@ -121,6 +124,22 @@ class ConversationGenerationStateTest {
 
         assertEquals(1, firstCancelCount)
         assertEquals(1, secondCancelCount)
+    }
+
+    @Test
+    fun cancelledStopSubmitter_cannotDropAnAcceptedCutoffOrItsResult() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
+        val result = CompletableDeferred<ConversationGenerationState.StopResult>()
+
+        val request = state.requestStop { result.complete(it) }
+        request.cancel()
+        val stopped = result.await()
+
+        assertEquals("run", stopped.runId)
+        assertTrue(state.stopping.value)
+        assertFalse(state.isCurrentToken(token))
     }
 
     @Test
@@ -234,18 +253,60 @@ class ConversationGenerationStateTest {
         val token = state.acquireForSend()!!
         val externalJob = Job()
         var drainRequests = 0
-        state.onQueueDrainRequested = { drainRequests += 1 }
+        val drained = CompletableDeferred<Unit>()
+        state.onQueueDrainRequested = {
+            drainRequests += 1
+            drained.complete(Unit)
+        }
 
         assertTrue(state.attachGenerationJob(token, externalJob))
         externalJob.complete()
         externalJob.join()
+        drained.await()
 
         assertEquals(1, drainRequests)
         assertFalse(state.generating.value)
     }
 
     @Test
-    fun stopPreservesQueueDrainPermission() {
+    fun alreadyCompletedExternalJob_cannotStrandAnInstalledSlot() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        val completedJob = Job().apply { complete() }
+        val released = CompletableDeferred<Unit>()
+        state.onQueueDrainRequested = { released.complete(Unit) }
+
+        assertTrue(state.attachGenerationJob(token, completedJob))
+        released.await()
+
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun runningJob_cannotReportCoroutineSettlementBeforeActualCompletion() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
+        val released = CompletableDeferred<Unit>()
+        state.onQueueDrainRequested = { released.complete(Unit) }
+        val job = checkNotNull(state.launchGenerationJob(token) { awaitCancellation() })
+
+        try {
+            state.endGeneration(token)
+            throw AssertionError("Expected early CoroutineSettled to be rejected")
+        } catch (actual: IllegalStateException) {
+            assertTrue(actual.message.orEmpty().contains("completed"))
+        }
+        assertTrue(state.generating.value)
+
+        job.cancel()
+        job.join()
+        released.await()
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun stopPreservesQueueDrainPermission() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
@@ -317,7 +378,35 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun staleStopFinalizerCallback_cannotReleaseLaterStoppingRun() {
+    fun stopAndBothSettlements_areSerializedInMailboxOrder() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        val settled = CompletableDeferred<Unit>()
+        state.onStopSettled = { settled.complete(Unit) }
+
+        val stopped = state.stop()
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
+        active.unwind.complete(Unit)
+        active.job.join()
+        settled.await()
+
+        assertEquals(
+            listOf(
+                "AcquireSlot",
+                "BindRun",
+                "StopRequested",
+                "PersistenceSettled",
+                "CoroutineSettled",
+            ),
+            state.runtimeTraceSnapshot().map { it.commandType },
+        )
+    }
+
+    @Test
+    fun staleStopFinalizerCallback_cannotReleaseLaterStoppingRun() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val firstToken = state.acquireForSend()!!
         state.bindRun(firstToken, "first-run", pass = 2)
@@ -366,7 +455,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun stopDuringQueuedPassClaim_rejectsTheNewPassBinding() {
+    fun stopDuringQueuedPassClaim_rejectsTheNewPassBinding() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 2)
@@ -386,7 +475,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun runtimeTrace_excludesStreamingMessageContent() {
+    fun runtimeTrace_excludesStreamingMessageContent() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 4)

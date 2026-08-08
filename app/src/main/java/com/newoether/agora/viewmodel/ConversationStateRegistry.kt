@@ -123,11 +123,9 @@ class ConversationStateRegistry {
     /** Remove and cancel a conversation's state. Called when the conversation is deleted. */
     fun remove(conversationId: String) {
         states.remove(conversationId)?.also {
-            // stop() first: cancelScope alone cancels the coroutines but cannot interrupt a
-            // blocking OkHttp read — the socket would linger until its read timeout. stop()
-            // severs this conversation's in-flight streams immediately.
-            it.stop()
-            it.cancelScope()
+            // Deletion is runtime disposal, not a user Stop: cancel process resources without
+            // creating a durable finalization effect for a conversation being removed.
+            it.dispose()
             // Pending guidance has no Room row yet, so state destruction owns its private files.
             it.takeQueuedSends().forEach { queued ->
                 com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
@@ -137,12 +135,6 @@ class ConversationStateRegistry {
         markIdle(conversationId)
     }
 
-    /** Stop a specific conversation's generation (only that one). Returns null if no state. */
-    fun stop(conversationId: String): ConversationGenerationState.StopResult? {
-        val state = states[conversationId] ?: return null
-        return state.stop()
-    }
-
     /** Cancel every conversation's state (e.g. on ViewModel cleared). */
     fun cancelAll() {
         synchronized(uiCallbackLock) {
@@ -150,8 +142,7 @@ class ConversationStateRegistry {
             uiCallbackBinder = null
         }
         states.values.forEach {
-            it.streamScope.cancelAll()
-            it.cancelScope()
+            it.dispose()
             it.takeQueuedSends().forEach { queued ->
                 com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
                 queued.preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }

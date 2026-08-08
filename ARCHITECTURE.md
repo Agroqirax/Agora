@@ -134,9 +134,20 @@ Active guidance still
 uses the legacy in-memory queue executor, but its accept/wait/busy/drain-first placement decision is
 made by the reducer.
 
+User Stop enters the same mailbox as `StopRequested`. The accepted transition first revokes the
+old UI/persistence tokens, marks the overlay STOPPED, and retains `Stopping` ownership; only then
+are that conversation's stream handles and generation Job cancelled. Only the installed Job's
+completion hook may report `CoroutineSettled`; reaching a coroutine `finally` is not sufficient.
+Job completion re-enters as `CoroutineSettled`, and the identified `GenerationFinalizer` Room
+result re-enters as `PersistenceSettled`. Either order is valid, but only the command that observes
+both barriers emits `ReleaseSlot`. These handoffs run on the conversation-owned scope and are
+non-cancellable once
+accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conversation deletion is
+separate runtime disposal and does not fabricate a durable user-Stop effect.
+
 This is not yet the final mailbox architecture: Provider outcomes are still accepted by the
 `GenerationManager` adapter rather than the conversation mailbox, and tools, guidance execution,
-Compact, automation, Stop delivery, and recovery have not moved into it. A bounded 256-entry runtime
+Compact, automation, and recovery have not moved into it. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 

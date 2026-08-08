@@ -581,7 +581,9 @@ internal class MessageGenerationController(
             oldMessageId = messageId,
             targetUserMessageId = targetUserMessageId,
         ) ?: run {
-            state.endGeneration(myUiToken)
+            state.scope.launch {
+                releaseUnlaunchedSlotAndDrain(state, myUiToken, genId)
+            }
             return false
         }
         val runId = UUID.randomUUID().toString()
@@ -703,7 +705,6 @@ internal class MessageGenerationController(
                 if (!graphCommitted) {
                     regenerationTransitions.abort(transition.id)
                 }
-                releaseAndDrain(state, myUiToken, genId)
             }
         }
         if (generationJob == null) {
@@ -990,7 +991,6 @@ internal class MessageGenerationController(
                     error = e,
                 )
             } finally {
-                releaseAndDrain(state, myUiToken, genId)
                 if (!committed.isCompleted) committed.complete(graphCommitted)
             }
         }
@@ -1080,11 +1080,10 @@ internal class MessageGenerationController(
         }
     }
 
-    /** Release [uiToken]'s slot and, only if this call actually released it, flush the WHOLE
-     *  queue into its originating conversation (never re-reading currentConversationId, so a
-     *  message queued in conversation A can't land in B after the user switches chats): every
-     *  queued message becomes its own consecutive user bubble and ONE generation answers them. */
-    private suspend fun releaseAndDrain(
+    /** Release a claimed slot for which no generation Job was installed, then flush the WHOLE
+     * queue into its originating conversation. Installed Jobs release only from their completion
+     * hook so `CoroutineSettled` always means actual coroutine completion. */
+    private suspend fun releaseUnlaunchedSlotAndDrain(
         state: ConversationGenerationState,
         uiToken: Long,
         genId: String,
@@ -1169,7 +1168,7 @@ internal class MessageGenerationController(
             state.deferNextQueueDrain()
             state.scope.launch {
                 claim.continuationRunId?.let { convRepo.completeRun(it) }
-                releaseAndDrain(state, myUiToken, genId)
+                releaseUnlaunchedSlotAndDrain(state, myUiToken, genId)
             }
             return
         }
@@ -1345,14 +1344,12 @@ internal class MessageGenerationController(
                 failGenerationSetup(genId, runId, setupModelMessageId, myUiToken, state, e)
                 if (!graphCommitted) {
                     // The guidance is still memory-only, so retain it for a later real boundary.
-                    // Suppress this generation's automatic drain once; otherwise finally would
-                    // immediately consume the same batch, repeat the same setup failure, emit
-                    // another snackbar, and keep the UI in an unbounded generation loop.
+                    // Suppress this generation's completion drain once; otherwise it would consume
+                    // the same batch, repeat the same setup failure, emit another snackbar, and
+                    // keep the UI in an unbounded generation loop.
                     state.requeueFront(batch)
                     state.deferNextQueueDrain()
                 }
-            } finally {
-                releaseAndDrain(state, myUiToken, genId)
             }
         }
         if (generationJob == null) {
@@ -1376,10 +1373,9 @@ internal class MessageGenerationController(
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
      * background send lands in its own conversation). Placement enters the conversation command
      * mailbox: a bound active Run accepts memory-only guidance, STOPPING/PREPARING waits, and IDLE
-     * emits one identified persistence effect before the generation launches. The finally releases
-     * the slot (owner-gated) and batch-drains the queue. Validation failures after the claim release
-     * via [releaseAndDrain] too—a plain endGeneration would strand queued sends behind an idle slot
-     * until the next manual send.
+     * emits one identified persistence effect before the generation launches. The installed Job's
+     * completion hook releases the slot and requests queue drain; pre-launch failures release via
+     * [releaseUnlaunchedSlotAndDrain].
      */
     private suspend fun sendInto(
         genId: String,
@@ -1759,7 +1755,6 @@ internal class MessageGenerationController(
                     durableAcceptance.complete(null)
                 }
                 releaseUnownedPreparedPayload()
-                releaseAndDrain(state, myUiToken, genId)
             }
         }
         onGenerationJob?.invoke(generationJob)

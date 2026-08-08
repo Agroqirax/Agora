@@ -1,6 +1,8 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ConversationCommand
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -9,7 +11,7 @@ import org.junit.Test
 
 class ConversationStateRegistryTest {
     @Test
-    fun stoppingSlot_survivesUiOwnerReplacement() {
+    fun stoppingSlot_survivesUiOwnerReplacement() = runBlocking {
         val registry = ConversationStateRegistry()
         val firstOwner = Any()
         registry.attachUiCallbacks(firstOwner) { }
@@ -58,5 +60,24 @@ class ConversationStateRegistryTest {
         registry.getOrCreate("conversation").acquireForSend()
 
         assertTrue(secondOwnerActive)
+    }
+
+    @Test
+    fun remove_disposesExternalJobAndStreamsWithoutFabricatingUserStop() {
+        val registry = ConversationStateRegistry()
+        val state = registry.getOrCreate("conversation")
+        val token = state.acquireForSend()!!
+        val externalJob = Job()
+        var streamCancelCount = 0
+        state.streamScope.register(GenerationCancelHandle { streamCancelCount += 1 })
+        assertTrue(state.attachGenerationJob(token, externalJob))
+
+        registry.remove("conversation")
+
+        assertTrue(externalJob.isCancelled)
+        assertEquals(1, streamCancelCount)
+        assertFalse(
+            state.runtimeTraceSnapshot().any { it.commandType == "StopRequested" },
+        )
     }
 }

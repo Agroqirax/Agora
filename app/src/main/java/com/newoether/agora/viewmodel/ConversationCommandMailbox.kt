@@ -20,7 +20,8 @@ internal fun interface ConversationCommandFactory {
  * A command factory is evaluated by the mailbox handler, not by the submitting coroutine. This
  * lets the state adapter allocate its next owner identity at the same serialized boundary where
  * the reducer consumes it. Cancellation of a Send claim is explicit: if the caller never receives
- * an accepted direct effect, [cancellationCommand] releases that exact Preparing identity.
+ * an accepted direct effect, [cancellationCommand] releases that exact Preparing identity. Stop
+ * and settlement callers use a conversation-owned, non-cancellable effect/result handoff instead.
  */
 internal class ConversationCommandMailbox(
     private val scope: CoroutineScope,
