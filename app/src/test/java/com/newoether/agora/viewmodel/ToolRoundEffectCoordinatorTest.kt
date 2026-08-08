@@ -85,6 +85,14 @@ class ToolRoundEffectCoordinatorTest {
         onLoadingChange = {},
         onStreamClear = {},
         isLatestPersist = { true },
+        onProviderPassRequested = { RunEffect.StartProviderPass(it) },
+        onProviderPassCompleted = { identity, result ->
+            RunEffect.ProviderPassAccepted(identity, result)
+        },
+        onRunFinalizationRequested = { identity, status, reason, markUnread ->
+            RunEffect.FinalizeRun(identity, status, reason, markUnread)
+        },
+        onRunFinalizationCompleted = { _, _ -> true },
         onToolBatchRequested = { identity ->
             events += "request"
             RunEffect.ExecuteToolBatch(

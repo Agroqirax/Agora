@@ -2,6 +2,9 @@ package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.CompactMode
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -70,6 +73,20 @@ class ContextCompactEffectCoordinatorTest {
             listOf("RunCompact", "ResumeAfterCompact"),
             state.runtimeTraceSnapshot().takeLast(2).flatMap { it.effectTypes },
         )
+        val finalizationIdentity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = token,
+            runId = "run",
+            pass = 3,
+            effectId = "finalize-run-3",
+        )
+        state.requestRunFinalization(
+            finalizationIdentity,
+            RunStatus.COMPLETED,
+            RunEndReason.MODEL_COMPLETED,
+            markConversationUnread = true,
+        )
+        state.finishRunFinalization(finalizationIdentity, success = true)
         assertTrue(state.endGeneration(token))
     }
 

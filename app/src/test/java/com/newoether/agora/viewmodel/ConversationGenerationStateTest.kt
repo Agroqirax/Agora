@@ -5,8 +5,11 @@ import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
@@ -41,7 +44,7 @@ class ConversationGenerationStateTest {
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
 
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "run"))
 
         assertTrue(state.consumeQueueDrainPermission())
         assertTrue(state.consumeQueueDrainPermission())
@@ -160,7 +163,7 @@ class ConversationGenerationStateTest {
         assertNull(state.currentRunId())
         assertTrue(state.inputPersisted(effect.identity))
         assertEquals("run", state.currentRunId())
-        assertTrue(state.endGeneration(effect.identity.ownerToken))
+        assertTrue(finalizeBoundRun(state, effect.identity.ownerToken, "run"))
         assertFalse(state.generating.value)
     }
 
@@ -219,7 +222,7 @@ class ConversationGenerationStateTest {
         assertEquals(2, guidance.identity.pass)
         assertEquals(token, guidance.identity.ownerToken)
         assertEquals("active-run", state.currentRunId())
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "active-run", pass = 2))
     }
 
     @Test
@@ -244,7 +247,7 @@ class ConversationGenerationStateTest {
         assertEquals(firstEffect.identity.ownerToken, guidance.identity.ownerToken)
         assertEquals("preparing-run", guidance.identity.runId)
         assertTrue(state.inputPersisted(firstEffect.identity))
-        assertTrue(state.endGeneration(firstEffect.identity.ownerToken))
+        assertTrue(finalizeBoundRun(state, firstEffect.identity.ownerToken, "preparing-run"))
     }
 
     @Test
@@ -310,7 +313,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun runningJob_cannotReportCoroutineSettlementBeforeActualCompletion() = runBlocking {
+    fun boundJobCompletionWithoutTerminalResultRemainsOccupiedForStopRecovery() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run")
@@ -328,7 +331,14 @@ class ConversationGenerationStateTest {
 
         job.cancel()
         job.join()
-        released.await()
+        assertFalse(released.isCompleted)
+        assertTrue(state.generating.value)
+
+        val stopped = state.stop()
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
         assertFalse(state.generating.value)
     }
 
@@ -707,7 +717,7 @@ class ConversationGenerationStateTest {
         assertTrue(state.inputPersisted(effect.identity))
         assertEquals("fresh-run", state.currentRunId())
         assertTrue(state.settleGuidanceClaim(lease.id, durable = true))
-        assertTrue(state.endGeneration(effect.identity.ownerToken))
+        assertTrue(finalizeBoundRun(state, effect.identity.ownerToken, "fresh-run"))
     }
 
     @Test
@@ -736,7 +746,7 @@ class ConversationGenerationStateTest {
             listOf("ExecutingTools", "CommittingToolRound", "Active"),
             state.runtimeTraceSnapshot().takeLast(3).map { it.newState },
         )
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
     }
 
     @Test
@@ -825,7 +835,7 @@ class ConversationGenerationStateTest {
         assertFalse(state.compacting.value)
         assertTrue(state.generating.value)
         assertEquals("run", state.currentRunId())
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
     }
 
     @Test
@@ -867,7 +877,7 @@ class ConversationGenerationStateTest {
             ),
             retried.effects.single(),
         )
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
     }
 
     @Test
@@ -895,6 +905,107 @@ class ConversationGenerationStateTest {
         settled.await()
         assertFalse(state.generating.value)
         assertFalse(state.stopping.value)
+    }
+
+    @Test
+    fun providerPassCallbacksRejectStaleAndDuplicateResults() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run", pass = 2)
+        val identity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = token,
+            runId = "run",
+            pass = 2,
+            effectId = "provider-2-0",
+        )
+
+        assertEquals(identity, state.requestProviderPass(identity)?.identity)
+        assertNull(
+            state.finishProviderPass(
+                identity.copy(effectId = "provider-2-old"),
+                ProviderPassResult.COMPLETED_TEXT,
+            ),
+        )
+        assertEquals(
+            RunEffect.ProviderPassAccepted(identity, ProviderPassResult.COMPLETED_TEXT),
+            state.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT),
+        )
+        assertNull(state.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT))
+        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
+    }
+
+    @Test
+    fun normalFinalizationWaitsForBothBarriersBeforeReleasing() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
+        val unwind = CompletableDeferred<Unit>()
+        val released = CompletableDeferred<Unit>()
+        state.onQueueDrainRequested = { released.complete(Unit) }
+        val job = checkNotNull(state.launchGenerationJob(token) { unwind.await() })
+        val identity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = token,
+            runId = "run",
+            pass = 0,
+            effectId = "finalize-run-0",
+        )
+        val effect = state.requestRunFinalization(
+            identity,
+            RunStatus.COMPLETED,
+            RunEndReason.MODEL_COMPLETED,
+            markConversationUnread = true,
+        )
+
+        assertEquals(identity, effect?.identity)
+        assertEquals(
+            ConversationGenerationState.RunFinalizationOutcome.RECORDED,
+            state.finishRunFinalization(identity, success = true),
+        )
+        assertTrue(state.generating.value)
+        unwind.complete(Unit)
+        job.join()
+        released.await()
+        assertFalse(state.generating.value)
+    }
+
+    @Test
+    fun failedNormalFinalizationKeepsSlotUntilStopRecoverySettles() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "run")
+        val unwind = CompletableDeferred<Unit>()
+        val job = checkNotNull(state.launchGenerationJob(token) { unwind.await() })
+        val identity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = token,
+            runId = "run",
+            pass = 0,
+            effectId = "finalize-run-0",
+        )
+        state.requestRunFinalization(
+            identity,
+            RunStatus.FAILED,
+            RunEndReason.PROVIDER_ERROR,
+            markConversationUnread = true,
+        )
+
+        assertEquals(
+            ConversationGenerationState.RunFinalizationOutcome.FAILED,
+            state.finishRunFinalization(identity, success = false),
+        )
+        unwind.complete(Unit)
+        job.join()
+        assertTrue(state.generating.value)
+
+        val stopped = state.stop()
+        assertTrue(stopped.finalizationEffect != null)
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(stopped.completion(success = true)),
+        )
+        assertFalse(state.generating.value)
     }
 
     @Test
@@ -950,6 +1061,33 @@ class ConversationGenerationStateTest {
         val job: Job,
         val unwind: CompletableDeferred<Unit>,
     )
+
+    private suspend fun finalizeBoundRun(
+        state: ConversationGenerationState,
+        ownerToken: Long,
+        runId: String,
+        pass: Int = 0,
+    ): Boolean {
+        val identity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = ownerToken,
+            runId = runId,
+            pass = pass,
+            effectId = "finalize-$runId-$pass",
+        )
+        val effect = state.requestRunFinalization(
+            identity,
+            RunStatus.COMPLETED,
+            RunEndReason.MODEL_COMPLETED,
+            markConversationUnread = true,
+        )
+        assertEquals(identity, effect?.identity)
+        assertEquals(
+            ConversationGenerationState.RunFinalizationOutcome.RECORDED,
+            state.finishRunFinalization(identity, success = true),
+        )
+        return state.endGeneration(ownerToken)
+    }
 
     private fun ConversationGenerationState.StopResult.completion(
         success: Boolean,

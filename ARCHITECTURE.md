@@ -30,7 +30,7 @@ ChatViewModel ── MessageGenerationController ── ConversationStateRegistr
 AppContainer owns process-scoped dependencies. Foreground-open automation bridges into the
 controller and joins the exact generation Job. Headless automation enters the same direct-only
 conversation mailbox and accepted-input graph transaction, while `TaskExecutionEngine` remains a
-bounded adapter for headless request building, Provider execution/finalization, and the external
+bounded adapter for headless request building, Provider-effect execution, and the external
 body of mailbox-approved Compact effects.
 
 The project uses manual dependency injection through `di/AppContainer.kt`. Shared
@@ -108,26 +108,36 @@ Branch operations must preserve these invariants:
 `GenerationRequestBuilder` prepares provider configuration, context, tools, memory,
 attachments, and optional transcription. A Provider owns retry and semantic termination for one
 stream. `ProviderPassRunner` collects exactly one such stream and closes it as an identity-bearing
-`CompletedText`, `CompletedToolCalls`, `Truncated`, `Failed`, or `Cancelled` outcome. Live events
-may update the streaming overlay, but `GenerationManager` accepts the exact expected outcome before
-a `ToolBatchRequested` command can enter the conversation mailbox. The reducer emits the identified
+`CompletedText`, `CompletedToolCalls`, `Truncated`, `Failed`, or `Cancelled` outcome. Before network
+execution, the mailbox must emit the exact `StartProviderPass` effect; the closed outcome returns as
+`ProviderPassCompleted`, and only the reducer's exact `ProviderPassAccepted` effect may be consumed.
+Live events may update the streaming overlay, but only an accepted completed-tool outcome can send
+`ToolBatchRequested` into the same mailbox. The reducer emits the identified
 `ExecuteToolBatch`, `CommitToolRound`, and (only after durable success) `ContinueProviderPass`
 effects. The runner adds fail-closed tool metadata validation; it does not replace or weaken
-Provider-specific termination validation and retry. `GenerationManager` executes those effects and
-still owns normal Run finalization, while
+Provider-specific termination validation and retry. `GenerationManager` executes those effect
+bodies. Normal Run completion enters `Finalizing`; a mailbox-emitted `FinalizeRun` is executed with
+bounded retry and its exact Room result returns as `FinalizationCompleted`, while
 `GenerationFinalizer` owns durable Stop finalization and its retry path.
 
 The migrated conversation-runtime slice is authoritative for ordinary foreground/headless Send,
-memory-guidance placement, the in-process generation slot, Stop barriers, tool-round gates, and
+memory-guidance placement, the in-process generation slot, Provider-pass acceptance, normal/Stop
+finalization barriers, tool-round gates, and
 manual/automatic Context Compact admission/result settlement. Pure
 `ConversationCommand`, `RunState`, `RunEffect`, and
 `ConversationRuntimeReducer` types decide
-`Idle`/`Preparing`/`Active`/`Compacting`/`Stopping`, coroutine settlement, durable settlement,
+`Idle`/`Preparing`/`Active`/`Compacting`/`Finalizing`/`Stopping`, coroutine settlement, durable settlement,
 Compact continuation, and slot release. `ConversationGenerationState` retains the legacy per-
 conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
 `SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
 conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
 before either slot or overlay mutation.
+
+Normal finalization and Job completion are independent barriers, just like Stop finalization. A
+bound durable Run never becomes Idle from `CoroutineSettled` alone. Either barrier may arrive first;
+only the command observing both emits `ReleaseSlot`. If the terminal Room transaction exhausts its
+bounded retries, `Finalizing` remains occupied. A later explicit Stop may then take over that failed
+finalization and use the STOPPED transaction to restore a consistent durable terminal state.
 
 Each process-scoped conversation state now also owns a bounded 64-entry sequential command
 mailbox.
@@ -171,8 +181,8 @@ waits only for that Compact result and then re-enters the mailbox: manual settle
 while automatic settlement exposes Active and accepts normal memory guidance. Direct-only
 automation receives busy and creates no input.
 
-This is not yet the final mailbox architecture: Provider outcomes are still first closed/accepted by
-the `GenerationManager` adapter, and recovery and normal Run finalization have not moved into it.
+This is not yet the final mailbox architecture: process recovery and several legacy setup/
+replacement graph adapters have not moved into the runtime contract.
 Headless request building/Provider execution remains a bounded Task adapter after mailbox admission.
 Guidance storage/lease execution remains a bounded controller adapter, but it has no
 alternative Run-placement or durable append authority: every drain is a fresh mailbox-approved
@@ -354,8 +364,9 @@ through a direct-only call and joins its exact Job. Headless Tasks/Loops submit 
 `SendRequested` -> `PersistAcceptedInput` -> `InputPersisted` contract and share the ordinary
 USER/MODEL/Run graph writer. Busy is a typed no-input/no-Run outcome; no bridge queues or falls back
 to a second writer. Automatic Compact now uses the same mailbox effect/result contract in foreground
-and headless execution. `TaskExecutionEngine` still adapts headless request construction, Provider
-execution, and finalization pending their later runtime-effect migrations.
+and headless execution. `TaskExecutionEngine` still adapts headless request construction and
+Provider-effect execution; Provider outcome acceptance and normal finalization already use the
+shared mailbox contract.
 
 One-shot schedules preserve explicit past dates so validation can reject them. The
 scheduler must not silently reinterpret an expired date as next year.

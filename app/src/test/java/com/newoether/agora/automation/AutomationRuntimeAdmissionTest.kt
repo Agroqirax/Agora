@@ -1,6 +1,9 @@
 package com.newoether.agora.automation
 
 import com.newoether.agora.model.CompactOutcome
+import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import com.newoether.agora.viewmodel.ConversationGenerationState
 import com.newoether.agora.viewmodel.QueuedSend
 import kotlinx.coroutines.runBlocking
@@ -25,7 +28,9 @@ class AutomationRuntimeAdmissionTest {
         assertTrue(state.generating.value)
         assertTrue(state.inputPersisted(accepted.inputEffect.identity))
         assertEquals("run", state.currentRunId())
-        assertTrue(state.endGeneration(accepted.inputEffect.identity.ownerToken))
+        assertTrue(
+            finalizeBoundRun(state, accepted.inputEffect.identity.ownerToken, "run"),
+        )
     }
 
     @Test
@@ -38,7 +43,7 @@ class AutomationRuntimeAdmissionTest {
 
         assertSame(AutomationRuntimeAdmission.Decision.Busy, decision)
         assertEquals("active-run", state.currentRunId())
-        assertTrue(state.endGeneration(token))
+        assertTrue(finalizeBoundRun(state, token, "active-run"))
     }
 
     @Test
@@ -85,5 +90,27 @@ class AutomationRuntimeAdmissionTest {
         assertTrue(state.compacting.value)
         assertFalse(state.generating.value)
         assertTrue(state.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED).accepted)
+    }
+
+    private suspend fun finalizeBoundRun(
+        state: ConversationGenerationState,
+        ownerToken: Long,
+        runId: String,
+    ): Boolean {
+        val identity = RunEffectIdentity(
+            conversationId = "conversation",
+            ownerToken = ownerToken,
+            runId = runId,
+            pass = 0,
+            effectId = "finalize-$runId-0",
+        )
+        state.requestRunFinalization(
+            identity,
+            RunStatus.COMPLETED,
+            RunEndReason.MODEL_COMPLETED,
+            markConversationUnread = true,
+        )
+        state.finishRunFinalization(identity, success = true)
+        return state.endGeneration(ownerToken)
     }
 }

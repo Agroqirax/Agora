@@ -15,6 +15,7 @@ import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
@@ -279,6 +280,22 @@ data class GenerationCallbacks(
     val onLoadingChange: (Boolean) -> Unit,
     val onStreamClear: () -> Unit,
     val isLatestPersist: () -> Boolean,
+    /** The conversation mailbox must authorize every Provider pass before network execution. */
+    val onProviderPassRequested: suspend (RunEffectIdentity) -> RunEffect.StartProviderPass?,
+    /** The mailbox accepts the closed outcome before any text/tool continuation is consumed. */
+    val onProviderPassCompleted: suspend (
+        RunEffectIdentity,
+        ProviderPassResult,
+    ) -> RunEffect.ProviderPassAccepted?,
+    /** The mailbox chooses the one normal terminal effect that may mutate Room. */
+    val onRunFinalizationRequested: suspend (
+        RunEffectIdentity,
+        RunStatus,
+        RunEndReason,
+        Boolean,
+    ) -> RunEffect.FinalizeRun?,
+    /** Echo the exact Room result; true means the current mailbox state accepted it. */
+    val onRunFinalizationCompleted: suspend (RunEffectIdentity, Boolean) -> Boolean,
     /** True when the user queued a send behind this generation. The tool loop checks it at
      *  each round boundary and ends the generation there so the queue can flush immediately
      *  (steering) instead of waiting out the entire loop. Headless runs keep the default. */
@@ -333,6 +350,7 @@ class GenerationManager(
     )
     private val toolProviders: List<ToolProvider> = builtInToolProviders + additionalToolProviders
     private val providerPassRunner = ProviderPassRunner()
+    private val runFinalizationEffects = RunFinalizationEffectCoordinator()
 
     private fun resolveToolPresentationMetadata(name: String): ToolPresentationMetadata? {
         if (name.isBlank()) return null
@@ -760,6 +778,7 @@ class GenerationManager(
                 DebugLog.e("AgoraVM", "Failed to persist streaming checkpoint", error)
             },
         )
+        var terminalPersisted = false
 
         suspend fun persistStreamingCheckpoint(message: ChatMessage, force: Boolean = false) {
             if (!isLatestPersist()) return
@@ -883,7 +902,6 @@ class GenerationManager(
             val completedToolCalls = linkedMapOf<String, StreamEvent.ToolCallRequest>()
             var toolRoundSegmentCursor = 0
             var providerRequestOrdinal = 0
-            var expectedProviderPassIdentity: RunEffectIdentity? = null
             val toolRoundEffects = ToolRoundEffectCoordinator(callbacks)
 
             var lastEmitMs = 0L
@@ -1249,20 +1267,21 @@ class GenerationManager(
             ): ProviderPassOutcome {
                 tokenUsageAccumulator.beginRequest()
                 var firstEventPending = onFirstEvent != null
-                try {
-                    val identity = RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = ownerToken,
-                        runId = runId,
-                        pass = pass,
-                        effectId = "provider-$pass-${providerRequestOrdinal++}",
+                val proposedIdentity = RunEffectIdentity(
+                    conversationId = conversationId,
+                    ownerToken = ownerToken,
+                    runId = runId,
+                    pass = pass,
+                    effectId = "provider-$pass-${providerRequestOrdinal++}",
+                )
+                val startEffect = callbacks.onProviderPassRequested(proposedIdentity)
+                    ?.takeIf { it.identity == proposedIdentity }
+                    ?: throw CancellationException(
+                        "Provider pass ${proposedIdentity.effectId} is no longer authorized",
                     )
-                    check(expectedProviderPassIdentity == null) {
-                        "A Provider pass cannot start before the prior outcome is accepted"
-                    }
-                    expectedProviderPassIdentity = identity
+                try {
                     return providerPassRunner.run(
-                        identity = identity,
+                        identity = startEffect.identity,
                         provider = provider,
                         messages = messages,
                         config = providerConfig,
@@ -1273,6 +1292,15 @@ class GenerationManager(
                         }
                         handleStreamEvent(event)
                     }
+                } catch (error: Exception) {
+                    // ProviderPassRunner normally closes cancellation/error into an outcome. This
+                    // path covers a consumer failure before it can do so, ensuring the mailbox
+                    // never retains a phantom Running pass.
+                    callbacks.onProviderPassCompleted(
+                        startEffect.identity,
+                        ProviderPassResult.FAILED,
+                    )
+                    throw error
                 } finally {
                     tokenUsageAccumulator.finishRequest()
                     totalTokenUsage = tokenUsageAccumulator.snapshot()
@@ -1281,10 +1309,19 @@ class GenerationManager(
             }
 
             suspend fun acceptProviderPass(outcome: ProviderPassOutcome) {
-                check(expectedProviderPassIdentity == outcome.identity) {
-                    "Stale, duplicate, or unexpected Provider pass outcome"
+                val result = when (outcome) {
+                    is ProviderPassOutcome.CompletedText -> ProviderPassResult.COMPLETED_TEXT
+                    is ProviderPassOutcome.CompletedToolCalls ->
+                        ProviderPassResult.COMPLETED_TOOL_CALLS
+                    is ProviderPassOutcome.Truncated -> ProviderPassResult.TRUNCATED
+                    is ProviderPassOutcome.Failed -> ProviderPassResult.FAILED
+                    is ProviderPassOutcome.Cancelled -> ProviderPassResult.CANCELLED
                 }
-                expectedProviderPassIdentity = null
+                callbacks.onProviderPassCompleted(outcome.identity, result)
+                    ?.takeIf { it.identity == outcome.identity && it.result == result }
+                    ?: throw CancellationException(
+                        "Provider pass ${outcome.identity.effectId} outcome is no longer current",
+                    )
                 when (outcome) {
                     is ProviderPassOutcome.CompletedText -> Unit
                     is ProviderPassOutcome.CompletedToolCalls -> {
@@ -1510,83 +1547,104 @@ class GenerationManager(
             withContext(NonCancellable) {
                 checkpointWriter.cancelAndJoin()
             }
-            // Critical non-cancellable section: only the terminal DB upsert (and the
-            // image drain that feeds it). A stopped/superseded generation MUST still
-            // write its final row so it isn't left as SENDING. Everything else — RAG
-            // indexing, UI cleanup, foreground release, notifications — is moved below
-            // so a Stop returns from here as soon as the row is written, instead of
-            // running a heavy non-cancellable tail that held the generation lock/queue.
-            if (isLatestPersist()) withContext(NonCancellable) {
+            // The mailbox, rather than a mutable token check in this finally block, chooses the
+            // one terminal effect that may write Room. A concurrent Stop wins by entering
+            // Stopping first; a natural completion wins by entering Finalizing first.
+            withContext(NonCancellable) {
                 // A cancellation can arrive as ImageGenToolProvider's withContext returns,
                 // after the file was queued but before the normal post-tool drain ran.
                 generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
                 try {
-                    if (isLatestPersist()) {
-                        val conversationExists = conversations.getConversation(conversationId) != null
-                        if (conversationExists) {
-                            finishCurrentThoughtTiming()
-                            val finalSegments = buildLiveSegments(
-                                segments,
-                                currentAnswerBuf,
-                                  currentThoughtBuf,
-                                  currentThoughtSignature,
-                                  currentThoughtSignatureProvider,
-                                  currentThoughtDurationMs.takeIf { it > 0L }
-                            )
-                                ?: segments.toList().ifEmpty { null }
-                            // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
-                            // text column — together they can exceed the 2MB CursorWindow otherwise.
-                            val effectiveParentId = parentId
-                            val finalMessage = ChatMessage(
-                                id = modelMessageId,
-                                parentId = effectiveParentId,
-                                text = MessagePersistenceGuard.clipText(totalText),
-                                images = generatedImages.toList(),
-                                thoughts = totalThoughts.ifBlank { null },
-                                thoughtTitle = totalThoughtTitle,
-                                tokenCount = totalTokenCount,
-                                tokenUsage = totalTokenUsage,
-                                status = currentStatus,
-                                participant = Participant.MODEL,
-                                timestamp = startTime,
-                                thoughtTimeMs = totalThoughtTimeMs,
-                                modelName = modelName,
-                                segments = finalSegments,
-                                runId = runId,
-                                runSequence = modelRunSequence,
-                            )
-                            val terminalDisposition = generationTerminalDisposition(
-                                messageStatus = currentStatus,
-                                hasPendingGuidance = callbacks.hasQueuedSends(),
-                            )
-                            // Stop/error/success all close the origin Run in the same transaction
-                            // as its final model checkpoint. A queue-steered success suppresses the
-                            // intermediate unread flag, but no longer keeps the old Run ACTIVE: the
-                            // delayed guidance enters its own fresh Run after coroutine settlement.
-                            val terminalPersisted = conversations.finishGeneration(
-                                finalMessage,
-                                conversationId,
-                                runId,
-                                terminalDisposition.runStatus,
-                                terminalDisposition.endReason,
-                                markConversationUnread = terminalDisposition.markConversationUnread,
-                            )
-                            if (!terminalPersisted) {
-                                DebugLog.e(
-                                    "AgoraVM",
-                                    "Terminal generation write did not update both message and Run: " +
-                                        "message=$modelMessageId run=$runId status=$currentStatus",
+                    val conversationExists = conversations.getConversation(conversationId) != null
+                    if (conversationExists) {
+                        finishCurrentThoughtTiming()
+                        val finalSegments = buildLiveSegments(
+                            segments,
+                            currentAnswerBuf,
+                            currentThoughtBuf,
+                            currentThoughtSignature,
+                            currentThoughtSignatureProvider,
+                            currentThoughtDurationMs.takeIf { it > 0L },
+                        ) ?: segments.toList().ifEmpty { null }
+                        // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
+                        // text column — together they can exceed the 2MB CursorWindow otherwise.
+                        val finalMessage = ChatMessage(
+                            id = modelMessageId,
+                            parentId = parentId,
+                            text = MessagePersistenceGuard.clipText(totalText),
+                            images = generatedImages.toList(),
+                            thoughts = totalThoughts.ifBlank { null },
+                            thoughtTitle = totalThoughtTitle,
+                            tokenCount = totalTokenCount,
+                            tokenUsage = totalTokenUsage,
+                            status = currentStatus,
+                            participant = Participant.MODEL,
+                            timestamp = startTime,
+                            thoughtTimeMs = totalThoughtTimeMs,
+                            modelName = modelName,
+                            segments = finalSegments,
+                            runId = runId,
+                            runSequence = modelRunSequence,
+                        )
+                        val terminalDisposition = generationTerminalDisposition(
+                            messageStatus = currentStatus,
+                            hasPendingGuidance = callbacks.hasQueuedSends(),
+                        )
+                        val finalizationIdentity = RunEffectIdentity(
+                            conversationId = conversationId,
+                            ownerToken = ownerToken,
+                            runId = runId,
+                            pass = pass,
+                            effectId = "finalize-$runId-$pass",
+                        )
+                        val finalizationEffect = callbacks.onRunFinalizationRequested(
+                            finalizationIdentity,
+                            terminalDisposition.runStatus,
+                            terminalDisposition.endReason,
+                            terminalDisposition.markConversationUnread,
+                        )?.takeIf { effect ->
+                            effect.identity == finalizationIdentity &&
+                                effect.status == terminalDisposition.runStatus &&
+                                effect.reason == terminalDisposition.endReason &&
+                                effect.markConversationUnread ==
+                                terminalDisposition.markConversationUnread
+                        }
+                        if (finalizationEffect != null) {
+                            val result = runFinalizationEffects.execute(finalizationEffect) { effect ->
+                                conversations.finishGeneration(
+                                    finalMessage,
+                                    effect.identity.conversationId,
+                                    effect.identity.runId,
+                                    effect.status,
+                                    effect.reason,
+                                    markConversationUnread = effect.markConversationUnread,
                                 )
                             }
-                            // The last periodic checkpoint was emitted before currentStatus became
-                            // terminal. Publish this exact terminal object before onStreamClear():
-                            // otherwise streamClear can commit a stale SENDING snapshot after
-                            // Room already emitted SUCCESS, leaving the UI in Answering by race.
+                            val durableSuccess =
+                                result is RunFinalizationEffectCoordinator.Result.Succeeded
+                            terminalPersisted =
+                                callbacks.onRunFinalizationCompleted(
+                                    finalizationEffect.identity,
+                                    durableSuccess,
+                                ) && durableSuccess
+                            // Keep the exact final snapshot as the overlay even when Room failed.
+                            // It remains non-authoritative, but gives a later explicit Stop the
+                            // complete content to persist instead of an older SENDING checkpoint.
                             onStreamUpdate(finalMessage)
+                            if (!terminalPersisted) {
+                                val failure =
+                                    (result as? RunFinalizationEffectCoordinator.Result.Failed)
+                                        ?.lastFailure
+                                val message =
+                                    "Terminal generation effect failed after ${result.attempts} attempts: " +
+                                        "message=$modelMessageId run=$runId status=$currentStatus"
+                                if (failure != null) DebugLog.e("AgoraVM", message, failure)
+                                else DebugLog.e("AgoraVM", message)
+                            }
                         }
                     }
                 } catch (e: Exception) {
-                    DebugLog.e("AgoraVM", "Failed to persist message to DB", e)
+                    DebugLog.e("AgoraVM", "Failed to execute terminal generation effect", e)
                 }
             }
             // Movable tail (cancellable, no suspension points): runs to completion even
@@ -1594,15 +1652,17 @@ class GenerationManager(
             // so a heavy RAG-indexing callback or notification can't pin the generation.
             // RAG indexing hook — fire-and-forget; the persist above already committed.
             try {
-                if (isLatestPersist() && totalText.isNotBlank()) {
+                if (terminalPersisted && totalText.isNotBlank()) {
                     onMessagePersisted?.invoke(modelMessageId, totalText)
                 }
             } catch (_: Exception) { /* indexing must never break terminal cleanup */ }
             // Terminal UI cleanup. Token-gated at the sink (in ChatViewModel), so they
             // no-op when this generation was stopped/superseded — only the still-current
             // generation resets the loading/streaming/generating-id UI state.
-            onStreamClear()
-            onLoadingChange(false)
+            if (terminalPersisted) {
+                onStreamClear()
+                onLoadingChange(false)
+            }
             // The installed Job's completion hook reports CoroutineSettled through the mailbox;
             // only its accepted release clears the active set and requests queue drain.
             if (foregroundLeaseAcquired) {
@@ -1617,6 +1677,7 @@ class GenerationManager(
                     !interruptedForQueuedSend &&
                     !callbacks.hasQueuedSends()
             if (
+                terminalPersisted &&
                 !AppForegroundTracker.isInForeground &&
                 generationCycleComplete &&
                 totalText.isNotBlank()

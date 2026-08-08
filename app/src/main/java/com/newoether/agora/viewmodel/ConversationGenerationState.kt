@@ -8,9 +8,12 @@ import com.newoether.agora.model.ConversationRuntimeReducer
 import com.newoether.agora.model.ConversationRuntimeTrace
 import com.newoether.agora.model.ConversationRuntimeTraceEntry
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunState
+import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.SlotReleaseReason
@@ -223,6 +226,76 @@ class ConversationGenerationState(
                 ConversationCommand.ToolRoundCommitted(commitIdentity, success)
             },
         ).effects.singleOrNull()
+    }
+
+    /** Authorize exactly one Provider pass for the current Run/pass. */
+    suspend fun requestProviderPass(
+        identity: RunEffectIdentity,
+    ): RunEffect.StartProviderPass? = commandMailbox.submit(
+        commandFactory = ConversationCommandFactory {
+            ConversationCommand.ProviderPassRequested(identity)
+        },
+        cancellationCommand = { transition ->
+            transition.effects.filterIsInstance<RunEffect.StartProviderPass>()
+                .singleOrNull()
+                ?.let { effect ->
+                    ConversationCommand.ProviderPassCompleted(
+                        effect.identity,
+                        ProviderPassResult.CANCELLED,
+                    )
+                }
+        },
+    ).effects.filterIsInstance<RunEffect.StartProviderPass>().singleOrNull()
+
+    /** Accept the closed semantic outcome of the exact currently-running Provider pass. */
+    suspend fun finishProviderPass(
+        identity: RunEffectIdentity,
+        result: ProviderPassResult,
+    ): RunEffect.ProviderPassAccepted? = withContext(NonCancellable) {
+        commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.ProviderPassCompleted(identity, result)
+            },
+        ).effects.filterIsInstance<RunEffect.ProviderPassAccepted>().singleOrNull()
+    }
+
+    /** Move the exact active Run into mailbox-owned normal finalization. */
+    suspend fun requestRunFinalization(
+        identity: RunEffectIdentity,
+        status: RunStatus,
+        reason: RunEndReason,
+        markConversationUnread: Boolean,
+    ): RunEffect.FinalizeRun? = withContext(NonCancellable) {
+        commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.FinalizationRequested(
+                    identity = identity,
+                    status = status,
+                    reason = reason,
+                    markConversationUnread = markConversationUnread,
+                )
+            },
+        ).effects.filterIsInstance<RunEffect.FinalizeRun>().singleOrNull()
+    }
+
+    /** Echo the exact Room finalization result; release requires both durable and Job barriers. */
+    suspend fun finishRunFinalization(
+        identity: RunEffectIdentity,
+        success: Boolean,
+    ): RunFinalizationOutcome = withContext(NonCancellable) {
+        val transition = commandMailbox.submit(
+            ConversationCommandFactory {
+                ConversationCommand.FinalizationCompleted(identity, success)
+            },
+        )
+        if (!transition.accepted) return@withContext RunFinalizationOutcome.REJECTED
+        if (!success) return@withContext RunFinalizationOutcome.FAILED
+        val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
+            ?: return@withContext RunFinalizationOutcome.RECORDED
+        check(release.reason == SlotReleaseReason.NORMAL_FINALIZATION_SETTLED)
+        // Fire after mailbox handling and outside [genLock].
+        onQueueDrainRequested?.invoke(this@ConversationGenerationState)
+        RunFinalizationOutcome.SETTLED
     }
 
     /** Claim an idle-only manual Compact without presenting it as a generation Run. */
@@ -441,8 +514,9 @@ class ConversationGenerationState(
      * after a Stop — [stop] deliberately does not free the slot, see there). Only the installed
      * Job's completion hook reports settlement, so a coroutine superseded in an earlier era is a
      * no-op.
-     * Returns true if this call actually released (i.e. the caller may now drain the queue —
-     * the release point is by construction the moment the conversation lock is free again).
+     * A bound durable Run cannot release from this signal alone: normal finalization or Stop must
+     * also settle. Returns true only if this command actually emitted the release effect (i.e. the
+     * caller may now drain the queue).
      */
     suspend fun endGeneration(uiToken: Long): Boolean = withContext(NonCancellable) {
         require(uiToken > 0)
@@ -463,6 +537,11 @@ class ConversationGenerationState(
             transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()?.reason
         ) {
             SlotReleaseReason.NORMAL_COMPLETION -> true
+            SlotReleaseReason.NORMAL_FINALIZATION_SETTLED -> {
+                // The durable callback owns queue drain when it wins the barrier race. If the Job
+                // completion wins, this hook owns it instead.
+                true
+            }
             SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
                 // Pending inputs still belong to the STOPPED Run and must migrate to a fresh one.
                 // The callback runs after mailbox handling and therefore outside [genLock].
@@ -550,6 +629,12 @@ class ConversationGenerationState(
         onLoadingChange = { loadingChange(uiToken, it) },
         onStreamClear = { streamClear(uiToken) },
         isLatestPersist = { isLatestPersist(persistId) },
+        onProviderPassRequested = ::requestProviderPass,
+        onProviderPassCompleted = ::finishProviderPass,
+        onRunFinalizationRequested = ::requestRunFinalization,
+        onRunFinalizationCompleted = { identity, success ->
+            finishRunFinalization(identity, success).accepted
+        },
         // Steering: lets the tool loop see a mid-generation queued send and end at the next
         // round boundary, so the queue flushes without waiting out the whole tool loop.
         hasQueuedSends = { queuedSends.value.isNotEmpty() },
@@ -587,7 +672,9 @@ class ConversationGenerationState(
                         ?.takeUnless {
                             currentState is RunState.Idle ||
                                 currentState is RunState.Compacting &&
-                                currentState.resumeIdentity == null
+                                currentState.resumeIdentity == null ||
+                                currentState is RunState.Finalizing &&
+                                !currentState.persistenceFailureReported
                         }
                         ?.copy(status = MessageStatus.STOPPED),
                 )
@@ -753,19 +840,34 @@ class ConversationGenerationState(
         val accepted: Boolean get() = this != REJECTED
     }
 
+    enum class RunFinalizationOutcome {
+        /** Old, duplicate, wrong-Run, wrong-pass, or otherwise illegal callback. */
+        REJECTED,
+        /** Current finalization effect failed; the live Run remains occupied. */
+        FAILED,
+        /** Durable barrier recorded; coroutine barrier is still pending. */
+        RECORDED,
+        /** Both barriers settled and the slot was released. */
+        SETTLED;
+
+        val accepted: Boolean get() = this != REJECTED
+    }
+
     private fun RunState.identityOrNull(): RuntimeRunIdentity? = when (this) {
         is RunState.Idle -> null
         is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
         is RunState.Compacting -> resumeIdentity
+        is RunState.Finalizing -> identity
         is RunState.Stopping -> identity
     }
 
     private fun RunState.isLaunchableOwner(ownerToken: Long): Boolean = when (this) {
         is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
-        is RunState.Active -> identity.ownerToken == ownerToken
+        is RunState.Active -> !coroutineSettled && identity.ownerToken == ownerToken
         is RunState.Idle,
         is RunState.Compacting,
+        is RunState.Finalizing,
         is RunState.Stopping,
         -> false
     }
@@ -835,6 +937,7 @@ class ConversationGenerationState(
                         applyReleasedSlotLocked()
                     }
                     SlotReleaseReason.NORMAL_COMPLETION,
+                    SlotReleaseReason.NORMAL_FINALIZATION_SETTLED,
                     SlotReleaseReason.EMPTY_STOP,
                     SlotReleaseReason.SEND_LAUNCH_ABANDONED,
                     -> applyReleasedSlotLocked()
