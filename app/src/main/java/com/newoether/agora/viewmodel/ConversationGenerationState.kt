@@ -21,13 +21,12 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.getAndUpdate
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
+import java.util.UUID
 
 /**
  * One per conversation. Owns that conversation's private generation state — the IO scope,
@@ -53,8 +52,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * ## Slot lifecycle (requestSend / compatibility claims / endGeneration / stop)
  *
- * Ordinary foreground Send placement enters [requestSend]'s sequential mailbox. The compatibility
- * [acquireForSend] path remains only for queue/headless adapters not migrated in this phase;
+ * Ordinary foreground Send and queued-guidance placement enter [requestSend]'s sequential mailbox.
+ * The compatibility [acquireForSend] path remains only for headless Task execution;
  * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration]
  * and [stop] now submit through the same mailbox. [endGeneration] releases token-gated ownership;
  * Stop establishes the terminal cutoff, then cancels only this conversation's [generationJob]
@@ -84,6 +83,9 @@ class ConversationGenerationState(
 
     /** Queued sends waiting for the current generation to finish. Per-conversation. */
     val queuedSends = MutableStateFlow<List<QueuedSend>>(emptyList())
+    private val guidanceLock = Any()
+    private val claimedGuidance = mutableMapOf<String, List<QueuedSend>>()
+    private var guidanceDisposed = false
     /** Serializes durable intervention acceptance against slot release/queue drain. */
     val queueMutationMutex = Mutex()
 
@@ -560,16 +562,24 @@ class ConversationGenerationState(
     }
 
     /** Runtime disposal is not a user Stop and therefore does not create a durable Stop effect. */
-    internal fun dispose() {
+    internal fun dispose(): List<QueuedSend> {
+        val pendingGuidance = synchronized(guidanceLock) {
+            guidanceDisposed = true
+            queuedSends.value.also { queuedSends.value = emptyList() }
+        }
         val job = synchronized(genLock) { generationJob }
         streamScope.cancelAll()
         job?.cancel()
         cancelScope()
+        return pendingGuidance
     }
 
     /** Append a queued send (generation in progress → enqueue instead of launching). */
     fun enqueueSend(send: QueuedSend) {
-        queuedSends.update { it + send }
+        synchronized(guidanceLock) {
+            check(!guidanceDisposed) { "Conversation guidance store was disposed" }
+            queuedSends.value = queuedSends.value + send
+        }
     }
 
     /**
@@ -578,17 +588,38 @@ class ConversationGenerationState(
      * enqueue, so the QueuedSend holds the only handle to those copied files.
      */
     fun removeQueuedSend(id: String): QueuedSend? {
-        val before = queuedSends.getAndUpdate { queue -> queue.filterNot { it.id == id } }
-        return before.firstOrNull { it.id == id }
+        synchronized(guidanceLock) {
+            val removed = queuedSends.value.firstOrNull { it.id == id } ?: return null
+            queuedSends.value = queuedSends.value.filterNot { it.id == id }
+            return removed
+        }
     }
 
-    /** Atomically take the whole queue for a batch drain (each item becomes its own bubble). */
-    fun takeQueuedSends(): List<QueuedSend> = queuedSends.getAndUpdate { emptyList() }
+    /** Transfer the pending batch to one explicit in-flight owner before leaving memory-only state. */
+    fun claimQueuedSends(): GuidanceBatchLease? = synchronized(guidanceLock) {
+        if (guidanceDisposed || queuedSends.value.isEmpty()) return null
+        val lease = GuidanceBatchLease(UUID.randomUUID().toString(), queuedSends.value)
+        queuedSends.value = emptyList()
+        check(claimedGuidance.put(lease.id, lease.batch) == null)
+        lease
+    }
 
-    /** Push [items] back to the FRONT in order (a batch drain lost the slot race to a manual
-     *  send — nothing is lost, the batch just waits for the next release). */
-    fun requeueFront(items: List<QueuedSend>) {
-        queuedSends.update { items + it }
+    /**
+     * End one in-flight ownership lease. A durable commit transfers file ownership to Room;
+     * otherwise the exact batch returns to the front, unless disposal now owns cleanup.
+     */
+    fun settleGuidanceClaim(leaseId: String, durable: Boolean): Boolean {
+        var orphaned = emptyList<QueuedSend>()
+        synchronized(guidanceLock) {
+            val batch = claimedGuidance.remove(leaseId) ?: return false
+            when {
+                durable -> Unit
+                guidanceDisposed -> orphaned = batch
+                else -> queuedSends.value = batch + queuedSends.value
+            }
+        }
+        orphaned.forEach(QueuedSend::deleteOwnedFiles)
+        return true
     }
 
     data class StopResult(
@@ -717,7 +748,7 @@ data class QueuedSend(
     /** Model selected in the originating conversation when Send was tapped. */
     val modelId: String,
     val attachments: List<SelectedAttachment>,
-    /** Run that was ACTIVE when this guidance was accepted. It is only a boundary hint. */
+    /** Provenance only; drain always creates a fresh Run and never reuses this id. */
     val runId: String,
     /** Legacy bare-image paths retained for queue display and cleanup. */
     val images: List<String> = emptyList(),
@@ -727,6 +758,21 @@ data class QueuedSend(
     val preparedOwnedPaths: List<String> = emptyList(),
     val createdAt: Long = System.currentTimeMillis(),
 )
+
+data class GuidanceBatchLease(
+    val id: String,
+    val batch: List<QueuedSend>,
+) {
+    init {
+        require(id.isNotBlank())
+        require(batch.isNotEmpty())
+    }
+}
+
+internal fun QueuedSend.deleteOwnedFiles() {
+    com.newoether.agora.util.AttachmentFiles.deleteBacking(attachments)
+    preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
+}
 
 /**
  * Per-conversation collection of in-flight HTTP streaming handles. [cancelAll] severs only the

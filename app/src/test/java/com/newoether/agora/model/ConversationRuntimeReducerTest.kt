@@ -91,7 +91,7 @@ class ConversationRuntimeReducerTest {
     }
 
     @Test
-    fun `Send waits during preparation or stopping and direct-only reports busy`() {
+    fun `Send accepts memory guidance during preparation while stopping waits and direct-only is busy`() {
         val request = sendCommand(ownerToken = 1, runId = "run", effectId = "send")
         val preparing = ConversationRuntimeReducer.reduce(
             RunState.Idle(CONVERSATION_ID),
@@ -103,11 +103,32 @@ class ConversationRuntimeReducerTest {
             stopCommand(stoppingActive, effectId = "stop"),
         ).newState
 
-        for (state in listOf(preparing, stopping)) {
-            val wait = ConversationRuntimeReducer.reduce(state, request.copy(directOnly = false))
-            assertSame(state, wait.newState)
-            assertTrue(wait.effects.single() is RunEffect.AwaitRunRelease)
+        val preparingGuidance = ConversationRuntimeReducer.reduce(
+            preparing,
+            request.copy(
+                identity = request.identity.copy(
+                    ownerToken = 99,
+                    runId = "later",
+                    effectId = "guidance",
+                ),
+            ),
+        )
+        assertSame(preparing, preparingGuidance.newState)
+        assertEquals(
+            RunEffect.AcceptGuidance(
+                request.identity.copy(runId = "run", effectId = "guidance"),
+            ),
+            preparingGuidance.effects.single(),
+        )
 
+        val stoppingWait = ConversationRuntimeReducer.reduce(
+            stopping,
+            request.copy(directOnly = false),
+        )
+        assertSame(stopping, stoppingWait.newState)
+        assertTrue(stoppingWait.effects.single() is RunEffect.AwaitRunRelease)
+
+        for (state in listOf(preparing, stopping)) {
             val busy = ConversationRuntimeReducer.reduce(state, request.copy(directOnly = true))
             assertSame(state, busy.newState)
             assertTrue(busy.effects.single() is RunEffect.RejectSendBusy)

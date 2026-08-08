@@ -51,15 +51,3 @@ data class RunEntity(
         require(status != RunStatus.STOPPING || stopRequestedAt != null)
     }
 }
-
-data class ClaimedRunPass(
-    val runId: String,
-    val pass: Int,
-    val inputMessageIds: List<String>,
-)
-
-data class RemovedPendingRunInput(
-    val message: MessageEntity,
-    val reparentedChildIds: List<String>,
-    val repairedSelections: Map<String?, String>,
-)

@@ -222,6 +222,31 @@ class ConversationGenerationStateTest {
     }
 
     @Test
+    fun preparingSendAcceptsMemoryGuidanceForItsProposedFreshRun() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val first = state.requestSend(
+            proposedRunId = "preparing-run",
+            effectId = "first",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val firstEffect = first.effects.single() as RunEffect.PersistAcceptedInput
+
+        val second = state.requestSend(
+            proposedRunId = "unused-second-run",
+            effectId = "guidance",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val guidance = second.effects.single() as RunEffect.AcceptGuidance
+
+        assertEquals(firstEffect.identity.ownerToken, guidance.identity.ownerToken)
+        assertEquals("preparing-run", guidance.identity.runId)
+        assertTrue(state.inputPersisted(firstEffect.identity))
+        assertTrue(state.endGeneration(firstEffect.identity.ownerToken))
+    }
+
+    @Test
     fun stopCancelsAnExternallyOwnedBackgroundGenerationJob() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
@@ -572,8 +597,116 @@ class ConversationGenerationStateTest {
         state.enqueueSend(second)
 
         assertEquals(listOf("one", "two"), state.queuedSends.value.map { it.id })
-        assertEquals(listOf(first, second), state.takeQueuedSends())
+        val lease = state.claimQueuedSends()!!
+        assertEquals(listOf(first, second), lease.batch)
         assertTrue(state.queuedSends.value.isEmpty())
+        assertTrue(state.settleGuidanceClaim(lease.id, durable = true))
+    }
+
+    @Test
+    fun failedGuidanceLeaseReturnsTheExactBatchToTheFront() {
+        val state = ConversationGenerationState("conversation")
+        val first = QueuedSend("one", "first", "model", emptyList(), "old-run")
+        val second = QueuedSend("two", "second", "model", emptyList(), "old-run")
+        state.enqueueSend(first)
+        state.enqueueSend(second)
+
+        val lease = state.claimQueuedSends()!!
+        assertTrue(state.queuedSends.value.isEmpty())
+        assertEquals(listOf(first, second), lease.batch)
+        val newer = QueuedSend("three", "third", "model", emptyList(), "old-run")
+        state.enqueueSend(newer)
+
+        assertTrue(state.settleGuidanceClaim(lease.id, durable = false))
+        assertEquals(listOf(first, second, newer), state.queuedSends.value)
+        assertFalse(state.settleGuidanceClaim(lease.id, durable = false))
+    }
+
+    @Test
+    fun disposalCleansPendingAndFailedInflightGuidanceOwnership() {
+        val state = ConversationGenerationState("conversation")
+        val pendingFile = java.nio.file.Files.createTempFile("agora-pending", ".tmp").toFile()
+        val claimedFile = java.nio.file.Files.createTempFile("agora-claimed", ".tmp").toFile()
+        try {
+            val pending = QueuedSend(
+                "pending",
+                "pending",
+                "model",
+                emptyList(),
+                "old-run",
+                preparedOwnedPaths = listOf(pendingFile.absolutePath),
+            )
+            val claimed = QueuedSend(
+                "claimed",
+                "claimed",
+                "model",
+                emptyList(),
+                "old-run",
+                preparedOwnedPaths = listOf(claimedFile.absolutePath),
+            )
+            state.enqueueSend(claimed)
+            val lease = state.claimQueuedSends()!!
+            state.enqueueSend(pending)
+
+            state.dispose().forEach(QueuedSend::deleteOwnedFiles)
+
+            assertFalse(pendingFile.exists())
+            assertTrue(claimedFile.exists())
+            assertTrue(state.settleGuidanceClaim(lease.id, durable = false))
+            assertFalse(claimedFile.exists())
+        } finally {
+            pendingFile.delete()
+            claimedFile.delete()
+        }
+    }
+
+    @Test
+    fun durableGuidanceLeaseTransfersFilesToRoomEvenAfterDisposal() {
+        val state = ConversationGenerationState("conversation")
+        val durableFile = java.nio.file.Files.createTempFile("agora-durable", ".tmp").toFile()
+        state.enqueueSend(
+            QueuedSend(
+                "durable",
+                "durable",
+                "model",
+                emptyList(),
+                "old-run",
+                preparedOwnedPaths = listOf(durableFile.absolutePath),
+            ),
+        )
+        val lease = state.claimQueuedSends()!!
+        state.dispose()
+
+        try {
+            assertTrue(state.settleGuidanceClaim(lease.id, durable = true))
+            assertTrue(durableFile.exists())
+        } finally {
+            durableFile.delete()
+        }
+    }
+
+    @Test
+    fun guidanceLeaseUsesNormalSendContractForAFreshRun() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        state.enqueueSend(
+            QueuedSend("guidance", "text", "model", emptyList(), "stopped-run"),
+        )
+        val lease = state.claimQueuedSends()!!
+
+        val requested = state.requestSend(
+            proposedRunId = "fresh-run",
+            effectId = "guidance-fresh-run",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val effect = requested.effects.filterIsInstance<RunEffect.PersistAcceptedInput>().single()
+
+        assertEquals("fresh-run", effect.identity.runId)
+        assertFalse(lease.batch.any { it.runId == effect.identity.runId })
+        assertTrue(state.inputPersisted(effect.identity))
+        assertEquals("fresh-run", state.currentRunId())
+        assertTrue(state.settleGuidanceClaim(lease.id, durable = true))
+        assertTrue(state.endGeneration(effect.identity.ownerToken))
     }
 
     @Test
@@ -614,18 +747,6 @@ class ConversationGenerationStateTest {
         assertEquals(queued, state.removeQueuedSend("one"))
         assertNull(state.removeQueuedSend("one"))
         assertTrue(state.queuedSends.value.isEmpty())
-    }
-
-    @Test
-    fun failedBoundaryDrainRestoresWholeBatchAtFront() {
-        val state = ConversationGenerationState("conversation")
-        val older = QueuedSend("older", "a", "model", emptyList(), "run")
-        val newer = QueuedSend("newer", "b", "model", emptyList(), "run")
-        state.enqueueSend(newer)
-
-        state.requeueFront(listOf(older))
-
-        assertEquals(listOf("older", "newer"), state.queuedSends.value.map { it.id })
     }
 
     @Test

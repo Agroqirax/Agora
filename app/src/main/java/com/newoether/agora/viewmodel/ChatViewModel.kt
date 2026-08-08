@@ -1456,10 +1456,7 @@ class ChatViewModel(
                 val queued = state.removeQueuedSend(id) ?: return@withLock
                 // Guidance has not entered Room or the message tree yet. Removing it therefore
                 // only releases the prepared files owned by this in-memory pending input.
-                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
-                queued.preparedOwnedPaths.forEach { path ->
-                    runCatching { java.io.File(path).delete() }
-                }
+                queued.deleteOwnedFiles()
             }
         }
     }

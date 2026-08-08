@@ -66,6 +66,38 @@ internal fun <T> requireRegisteredProvider(providers: Map<String, T>, name: Stri
 private const val STREAM_UI_UPDATE_INTERVAL_MS = 50L
 private const val TOOL_UI_UPDATE_INTERVAL_MS = 50L
 
+internal data class GenerationTerminalDisposition(
+    val runStatus: RunStatus,
+    val endReason: RunEndReason,
+    val markConversationUnread: Boolean,
+)
+
+/**
+ * Every provider-generation exit closes its durable Run. Pending guidance only defers the
+ * conversation-unread/completion presentation; it cannot keep the origin Run live because the
+ * normal Send boundary that consumes that guidance must create a distinct Run.
+ */
+internal fun generationTerminalDisposition(
+    messageStatus: MessageStatus,
+    hasPendingGuidance: Boolean,
+): GenerationTerminalDisposition = when (messageStatus) {
+    MessageStatus.STOPPED -> GenerationTerminalDisposition(
+        RunStatus.STOPPED,
+        RunEndReason.USER_STOPPED,
+        markConversationUnread = false,
+    )
+    MessageStatus.ERROR -> GenerationTerminalDisposition(
+        RunStatus.FAILED,
+        RunEndReason.PROVIDER_ERROR,
+        markConversationUnread = false,
+    )
+    else -> GenerationTerminalDisposition(
+        RunStatus.COMPLETED,
+        RunEndReason.MODEL_COMPLETED,
+        markConversationUnread = !hasPendingGuidance,
+    )
+}
+
 /**
  * Throttles durable stream snapshots while allowing lifecycle boundaries to force a write.
  * The first snapshot is always accepted, including when the clock moves backwards.
@@ -1523,43 +1555,22 @@ class GenerationManager(
                                 runId = runId,
                                 runSequence = modelRunSequence,
                             )
-                            val terminalPersisted = when {
-                                // Stop always wins over a queued intervention. Otherwise a
-                                // cancellation racing with a queued send can strand this Run ACTIVE.
-                                currentStatus == MessageStatus.STOPPED ->
-                                    conversations.finishGeneration(
-                                        finalMessage,
-                                        conversationId,
-                                        runId,
-                                        RunStatus.STOPPED,
-                                        RunEndReason.USER_STOPPED,
-                                    )
-                                // Failure is a terminal generation boundary even when guidance is
-                                // waiting. The controller migrates that memory batch into a fresh
-                                // child Run; keeping the failed origin live would block the unique
-                                // active-Run slot forever.
-                                currentStatus == MessageStatus.ERROR ->
-                                    conversations.finishGeneration(
-                                        finalMessage,
-                                        conversationId,
-                                        runId,
-                                        RunStatus.FAILED,
-                                        RunEndReason.PROVIDER_ERROR,
-                                    )
-                                // A queue-steered successful pass keeps this Run ACTIVE for the
-                                // next pass in the same generation cycle.
-                                callbacks.hasQueuedSends() ->
-                                    conversations.updateStreamingMessageCheckpoint(finalMessage)
-                                else ->
-                                    conversations.finishGeneration(
-                                        finalMessage,
-                                        conversationId,
-                                        runId,
-                                        RunStatus.COMPLETED,
-                                        RunEndReason.MODEL_COMPLETED,
-                                        markConversationUnread = true,
-                                    )
-                            }
+                            val terminalDisposition = generationTerminalDisposition(
+                                messageStatus = currentStatus,
+                                hasPendingGuidance = callbacks.hasQueuedSends(),
+                            )
+                            // Stop/error/success all close the origin Run in the same transaction
+                            // as its final model checkpoint. A queue-steered success suppresses the
+                            // intermediate unread flag, but no longer keeps the old Run ACTIVE: the
+                            // delayed guidance enters its own fresh Run after coroutine settlement.
+                            val terminalPersisted = conversations.finishGeneration(
+                                finalMessage,
+                                conversationId,
+                                runId,
+                                terminalDisposition.runStatus,
+                                terminalDisposition.endReason,
+                                markConversationUnread = terminalDisposition.markConversationUnread,
+                            )
                             if (!terminalPersisted) {
                                 DebugLog.e(
                                     "AgoraVM",

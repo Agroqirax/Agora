@@ -85,8 +85,8 @@ class ConversationStateRegistry {
             states.values.forEach { state ->
                 val pendingDrain = state.onQueueDrainRequested
                 if (pendingDrain != null && state.queuedSends.value.isNotEmpty()) {
-                    // Foreground controller jobs drain from their own finally. This fallback is for
-                    // a headless Task/Loop whose final callback would otherwise be erased here.
+                    // Installed Job completion requests the normal drain. This fallback is for a
+                    // headless Task/Loop whose final callback would otherwise be erased here.
                     // Capture only the bounded handoff closure until the active slot settles, then
                     // release the old ViewModel graph once the batch has been claimed.
                     state.scope.launch {
@@ -125,12 +125,10 @@ class ConversationStateRegistry {
         states.remove(conversationId)?.also {
             // Deletion is runtime disposal, not a user Stop: cancel process resources without
             // creating a durable finalization effect for a conversation being removed.
-            it.dispose()
             // Pending guidance has no Room row yet, so state destruction owns its private files.
-            it.takeQueuedSends().forEach { queued ->
-                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
-                queued.preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
-            }
+            // An in-flight lease remains with its cancelling Job until that Job reconciles whether
+            // Room committed; deleting it here could race a transaction that just became durable.
+            it.dispose().forEach(QueuedSend::deleteOwnedFiles)
         }
         markIdle(conversationId)
     }
@@ -142,11 +140,7 @@ class ConversationStateRegistry {
             uiCallbackBinder = null
         }
         states.values.forEach {
-            it.dispose()
-            it.takeQueuedSends().forEach { queued ->
-                com.newoether.agora.util.AttachmentFiles.deleteBacking(queued.attachments)
-                queued.preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
-            }
+            it.dispose().forEach(QueuedSend::deleteOwnedFiles)
         }
         states.clear()
         _activeConversationIds.value = emptySet()

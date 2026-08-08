@@ -116,8 +116,9 @@ Provider-specific termination validation and retry. `GenerationManager` executes
 still owns normal Run finalization, while
 `GenerationFinalizer` owns durable Stop finalization and its retry path.
 
-The migrated conversation-runtime slice is authoritative for ordinary foreground Send placement,
-the in-process generation slot, and Stop barriers. Pure `ConversationCommand`, `RunState`, `RunEffect`, and
+The migrated conversation-runtime slice is authoritative for ordinary foreground Send and
+memory-guidance placement, the in-process generation slot, and Stop barriers. Pure
+`ConversationCommand`, `RunState`, `RunEffect`, and
 `ConversationRuntimeReducer` types decide `Idle`/`Preparing`/`Active`/`Stopping`, coroutine settlement,
 durable settlement, and slot release. `ConversationGenerationState` retains the legacy per-
 conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
@@ -132,9 +133,15 @@ Foreground Send enters as `SendRequested`: `Idle` becomes `Preparing` and emits 
 Run becomes `Active`, while a failed transaction returns `InputPersistenceFailed` and retains
 ownership until its coroutine settles. Cancellation before the controller receives the direct
 claim emits an exact `SendLaunchAbandoned` command, so an unstarted Send cannot strand the slot.
-Active guidance still
-uses the legacy in-memory queue executor, but its accept/wait/busy/drain-first placement decision is
-made by the reducer.
+Another Send while the current Send is preparing or active is accepted by the reducer as
+memory-only guidance. At the next legal tool/final/Stop boundary, the origin Run is terminal before
+one explicit FIFO guidance lease enters the same normal
+`SendRequested` → `PersistAcceptedInput` → `InputPersisted` contract with a fresh Run id. One Room
+transaction creates that Run, every guidance item as a distinct USER row, one MODEL placeholder,
+and the matching selections. The lease transfers attachment ownership to Room only after that
+transaction commits; a pre-commit failure returns the exact batch to the front, while runtime
+disposal deletes only files that never became durable. The removed same-Run append/pass-claim
+transactions no longer exist.
 
 User Stop enters the same mailbox as `StopRequested`. The accepted transition first revokes the
 old UI/persistence tokens, marks the overlay STOPPED, and retains `Stopping` ownership; only then
@@ -148,9 +155,11 @@ accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conver
 separate runtime disposal and does not fabricate a durable user-Stop effect.
 
 This is not yet the final mailbox architecture: Provider outcomes are still first closed/accepted by
-the `GenerationManager` adapter, and guidance execution, Compact, automation, recovery, and Run
-finalization have not moved into it. State-backed tool execution/commit authorization does use the
-mailbox; the registry-less headless compatibility adapter remains until automation unification. A bounded 256-entry runtime
+the `GenerationManager` adapter, and Compact, automation, recovery, and Run finalization have not
+moved into it. Guidance storage/lease execution remains a bounded controller adapter, but it has no
+alternative Run-placement or durable append authority: every drain is a fresh mailbox-approved
+normal Send. State-backed tool execution/commit authorization uses the mailbox; the registry-less
+headless compatibility adapter remains until automation unification. A bounded 256-entry runtime
 trace records only sequence, conversation-id digest, Run/pass/effect identity, state/command/effect
 types, and timestamp.
 
@@ -396,8 +405,8 @@ The following are review blockers:
 8. Never overwrite a manual title with delayed automatic title generation.
 9. Never use an Android API above `minSdk` without a guard or compatible implementation.
 10. Never put a raw private origin address into client code or committed configuration.
-11. Never treat Provider-pass completion as Run completion when a tool or guidance continuation
-    remains.
+11. Never treat Provider-pass completion as Run completion when a tool continuation remains;
+    queued guidance closes the origin only at its legal boundary and continues through a fresh Run.
 12. Never release a stopped Run before both coroutine and durable finalization barriers settle.
 13. Never attach queued guidance to a terminal Run or persist it before a legal boundary.
 14. Never accept an asynchronous result for an unexpected Run/pass/effect identity.

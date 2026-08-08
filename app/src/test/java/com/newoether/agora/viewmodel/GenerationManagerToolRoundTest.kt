@@ -1,10 +1,59 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GenerationManagerToolRoundTest {
+    @Test
+    fun queuedGuidanceClosesTheOriginRunBeforeItsFreshRunStarts() {
+        val disposition = generationTerminalDisposition(
+            messageStatus = MessageStatus.SUCCESS,
+            hasPendingGuidance = true,
+        )
+
+        assertEquals(RunStatus.COMPLETED, disposition.runStatus)
+        assertEquals(RunEndReason.MODEL_COMPLETED, disposition.endReason)
+        assertFalse(disposition.markConversationUnread)
+    }
+
+    @Test
+    fun ordinarySuccessfulExitMarksTheConversationUnread() {
+        val disposition = generationTerminalDisposition(
+            messageStatus = MessageStatus.SUCCESS,
+            hasPendingGuidance = false,
+        )
+
+        assertEquals(RunStatus.COMPLETED, disposition.runStatus)
+        assertEquals(RunEndReason.MODEL_COMPLETED, disposition.endReason)
+        assertTrue(disposition.markConversationUnread)
+    }
+
+    @Test
+    fun stoppedAndFailedExitsRemainTerminalWhenGuidanceIsPending() {
+        assertEquals(
+            GenerationTerminalDisposition(
+                RunStatus.STOPPED,
+                RunEndReason.USER_STOPPED,
+                markConversationUnread = false,
+            ),
+            generationTerminalDisposition(MessageStatus.STOPPED, hasPendingGuidance = true),
+        )
+        assertEquals(
+            GenerationTerminalDisposition(
+                RunStatus.FAILED,
+                RunEndReason.PROVIDER_ERROR,
+                markConversationUnread = false,
+            ),
+            generationTerminalDisposition(MessageStatus.ERROR, hasPendingGuidance = true),
+        )
+    }
+
     @Test
     fun toolRoundThoughtSegments_neverRepeatsEarlierReasoningOrSignatures() {
         val firstThought = MessageSegment(

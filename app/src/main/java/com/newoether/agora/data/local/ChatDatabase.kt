@@ -7,7 +7,6 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.model.repairSelectionsAfterQueuedRemoval
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.RunRecoveryPolicy
 import com.newoether.agora.model.RunEndReason
@@ -273,18 +272,6 @@ data class RunGraphCommit(
     val messages: List<MessageEntity>,
     val messageSelections: Map<String?, String>,
     val runSelections: Map<String?, String>,
-)
-
-data class PendingRunInputCommit(
-    val message: MessageEntity,
-    val messageSelections: Map<String?, String>,
-)
-
-data class ClaimedRunPassCommit(
-    val claimedPass: ClaimedRunPass,
-    val inputs: List<MessageEntity> = emptyList(),
-    val placeholder: MessageEntity,
-    val messageSelections: Map<String?, String>,
 )
 
 data class ToolRoundCommit(
@@ -800,50 +787,6 @@ interface ChatDao {
         }
     }
 
-    @Transaction
-    suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
-        val run = getRun(message.runId) ?: error("Run ${message.runId} does not exist")
-        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
-        val assigned = message.copy(runSequence = nextRunSequence(run.id))
-        insertMessage(assigned)
-        touchRun(run.id, maxOf(run.lastCheckpointAt, assigned.timestamp))
-        return assigned
-    }
-
-    /**
-     * Accepts one queued user intervention as a single graph commit. The visible edge and the
-     * message row can therefore never disagree after process death.
-     */
-    @Transaction
-    suspend fun appendPendingInputToRun(
-        message: MessageEntity,
-        at: Long,
-    ): PendingRunInputCommit {
-        require(message.participant == Participant.USER)
-        require(message.consumedAtPass == null)
-        val run = getRun(message.runId) ?: error("Run ${message.runId} does not exist")
-        check(run.status == RunStatus.ACTIVE) { "Cannot append to ${run.status} Run ${run.id}" }
-        check(run.conversationId == message.conversationId)
-        val assigned = message.copy(runSequence = nextRunSequence(run.id))
-        insertMessage(assigned)
-        touchRun(run.id, maxOf(run.lastCheckpointAt, assigned.timestamp))
-
-        val conversation = checkNotNull(getConversation(message.conversationId)) {
-            "Conversation ${message.conversationId} disappeared during queue append"
-        }
-        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
-            put(assigned.parentId, assigned.id)
-        }
-        check(
-            updateMessageSelectionsAfterPendingRemoval(
-                conversationId = message.conversationId,
-                selectedBranchesJson = encodeSelectionMap(selections),
-                at = at,
-            ) == 1
-        )
-        return PendingRunInputCommit(assigned, selections)
-    }
-
     /** A provider tool round is protocol-atomic: assistant tool_calls and every result commit
      * together, or none of them do. */
     @Transaction
@@ -955,248 +898,11 @@ interface ChatDao {
 
     @Query(
         """
-        SELECT * FROM messages
-        WHERE runId = :runId
-          AND participant = 'USER'
-          AND id NOT LIKE 'tool_%'
-          AND id NOT LIKE 'result_%'
-          AND consumedAtPass IS NULL
-        ORDER BY runSequence
-        """
-    )
-    suspend fun getPendingRunInputs(runId: String): List<MessageEntity>
-
-    @Query(
-        """
-        SELECT * FROM messages
-        WHERE runId = :runId
-          AND parentId = :parentId
-          AND participant = 'USER'
-          AND consumedAtPass IS NULL
-        ORDER BY runSequence, timestamp, id
-        """
-    )
-    suspend fun getPendingRunInputChildren(
-        runId: String,
-        parentId: String,
-    ): List<MessageEntity>
-
-    @Query(
-        """
-        UPDATE messages
-        SET parentId = :replacementParentId
-        WHERE runId = :runId
-          AND parentId = :removedMessageId
-          AND participant = 'USER'
-          AND consumedAtPass IS NULL
-        """
-    )
-    suspend fun reparentPendingRunInputChildren(
-        runId: String,
-        removedMessageId: String,
-        replacementParentId: String?,
-    ): Int
-
-    @Query(
-        """
-        UPDATE conversations
-        SET selectedBranchesJson = :selectedBranchesJson, lastUpdated = :at
-        WHERE id = :conversationId
-        """
-    )
-    suspend fun updateMessageSelectionsAfterPendingRemoval(
-        conversationId: String,
-        selectedBranchesJson: String,
-        at: Long,
-    ): Int
-
-    @Transaction
-    suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? {
-        val message = getMessage(messageId) ?: return null
-        check(message.participant == Participant.USER && message.consumedAtPass == null) {
-            "Only an unconsumed user intervention can be removed from the queue"
-        }
-        val children = getPendingRunInputChildren(message.runId, message.id)
-        check(
-            reparentPendingRunInputChildren(
-                runId = message.runId,
-                removedMessageId = message.id,
-                replacementParentId = message.parentId,
-            ) == children.size
-        )
-        deleteEmbeddingsByMessageIds(listOf(message.id))
-        deleteMessagesByIds(listOf(message.id))
-        val conversation = checkNotNull(getConversation(message.conversationId)) {
-            "Conversation ${message.conversationId} disappeared during queue removal"
-        }
-        val selections = conversation.selectedBranchesJson?.let { raw ->
-            runCatching {
-                Json.decodeFromString<Map<String, String>>(raw)
-                    .mapKeys { if (it.key == "null") null else it.key }
-            }.getOrDefault(emptyMap())
-        }.orEmpty()
-        val repairedSelections = repairSelectionsAfterQueuedRemoval(
-            selections = selections,
-            removedMessageId = message.id,
-            removedParentId = message.parentId,
-            reparentedChildIds = children.map { it.id },
-        )
-        check(
-            updateMessageSelectionsAfterPendingRemoval(
-                conversationId = message.conversationId,
-                selectedBranchesJson = Json.encodeToString(
-                    repairedSelections.mapKeys { it.key ?: "null" }
-                ),
-                at = System.currentTimeMillis(),
-            ) == 1
-        )
-        return RemovedPendingRunInput(
-            message = message,
-            reparentedChildIds = children.map { it.id },
-            repairedSelections = repairedSelections,
-        )
-    }
-
-    @Query(
-        "UPDATE messages SET consumedAtPass = :pass WHERE id IN (:messageIds) AND consumedAtPass IS NULL"
-    )
-    suspend fun markInputsConsumed(messageIds: List<String>, pass: Int): Int
-
-    @Query(
-        """
-        UPDATE runs
-        SET currentPass = :pass, lastCheckpointAt = :at
-        WHERE id = :runId AND status = 'ACTIVE' AND currentPass = :previousPass
-        """
-    )
-    suspend fun advanceRunPass(runId: String, previousPass: Int, pass: Int, at: Long): Int
-
-    @Query(
-        """
         SELECT id FROM runs
         WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
         """
     )
     suspend fun getOrphanedLiveRunIds(): List<String>
-
-    /**
-     * Claims exactly the queue batch observed by the state machine, advances the Run Pass, creates
-     * its model placeholder, and selects that placeholder in one transaction.
-     */
-    @Transaction
-    suspend fun claimPendingRunInputsAndAppendPlaceholder(
-        runId: String,
-        expectedInputMessageIds: List<String>,
-        placeholder: MessageEntity,
-        at: Long,
-    ): ClaimedRunPassCommit? {
-        require(placeholder.runId == runId)
-        require(placeholder.participant == Participant.MODEL)
-        val run = getRun(runId) ?: return null
-        if (run.status != RunStatus.ACTIVE) return null
-        val pending = getPendingRunInputs(runId)
-        if (pending.isEmpty()) return null
-        check(pending.map { it.id } == expectedInputMessageIds) {
-            "The durable Run queue changed before Pass ${run.currentPass + 1} was claimed"
-        }
-
-        val pass = run.currentPass + 1
-        check(markInputsConsumed(expectedInputMessageIds, pass) == expectedInputMessageIds.size)
-        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
-        val assignedPlaceholder = placeholder.copy(runSequence = nextRunSequence(runId))
-        insertMessage(assignedPlaceholder)
-        touchRun(runId, maxOf(run.lastCheckpointAt, assignedPlaceholder.timestamp, at))
-
-        val conversation = checkNotNull(getConversation(run.conversationId)) {
-            "Conversation ${run.conversationId} disappeared during queue drain"
-        }
-        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
-            put(assignedPlaceholder.parentId, assignedPlaceholder.id)
-        }
-        check(
-            updateMessageSelectionsAfterPendingRemoval(
-                conversationId = run.conversationId,
-                selectedBranchesJson = encodeSelectionMap(selections),
-                at = at,
-            ) == 1
-        )
-        return ClaimedRunPassCommit(
-            claimedPass = ClaimedRunPass(runId, pass, expectedInputMessageIds),
-            placeholder = assignedPlaceholder,
-            messageSelections = selections,
-        )
-    }
-
-    /**
-     * Publishes a memory-only guidance batch and claims its next provider Pass in one transaction.
-     * Until this method commits, none of the user rows, selection edges, or placeholder exist.
-     */
-    @Transaction
-    suspend fun appendGuidanceBatchAndClaimPass(
-        runId: String,
-        inputs: List<MessageEntity>,
-        placeholder: MessageEntity,
-        at: Long,
-    ): ClaimedRunPassCommit? {
-        require(inputs.isNotEmpty())
-        require(inputs.all { input ->
-            input.runId == runId &&
-                input.participant == Participant.USER &&
-                input.consumedAtPass == null
-        })
-        require(inputs.zipWithNext().all { (previous, next) -> next.parentId == previous.id })
-        require(placeholder.runId == runId)
-        require(placeholder.participant == Participant.MODEL)
-        require(placeholder.parentId == inputs.last().id)
-
-        val run = getRun(runId) ?: return null
-        if (run.status != RunStatus.ACTIVE || run.activeSlot != 1) return null
-        check(getPendingRunInputs(runId).isEmpty()) {
-            "Run $runId already has durable pending inputs before guidance publication"
-        }
-
-        val pass = run.currentPass + 1
-        val firstSequence = nextRunSequence(runId)
-        val assignedInputs = inputs.mapIndexed { index, input ->
-            input.copy(runSequence = firstSequence + index, consumedAtPass = pass)
-        }
-        assignedInputs.forEach { insertMessage(it) }
-        check(advanceRunPass(runId, run.currentPass, pass, at) == 1)
-        val assignedPlaceholder = placeholder.copy(
-            runSequence = firstSequence + assignedInputs.size,
-        )
-        insertMessage(assignedPlaceholder)
-        touchRun(
-            runId,
-            maxOf(
-                run.lastCheckpointAt,
-                assignedInputs.maxOf { it.timestamp },
-                assignedPlaceholder.timestamp,
-                at,
-            ),
-        )
-
-        val conversation = checkNotNull(getConversation(run.conversationId)) {
-            "Conversation ${run.conversationId} disappeared during guidance publication"
-        }
-        val selections = decodeSelectionMap(conversation.selectedBranchesJson).apply {
-            assignedInputs.forEach { input -> put(input.parentId, input.id) }
-            put(assignedPlaceholder.parentId, assignedPlaceholder.id)
-        }
-        check(
-            updateMessageSelectionsAfterPendingRemoval(
-                conversationId = run.conversationId,
-                selectedBranchesJson = encodeSelectionMap(selections),
-                at = at,
-            ) == 1
-        )
-        return ClaimedRunPassCommit(
-            claimedPass = ClaimedRunPass(runId, pass, assignedInputs.map { it.id }),
-            inputs = assignedInputs,
-            placeholder = assignedPlaceholder,
-            messageSelections = selections,
-        )
-    }
 
     @Query(
         """

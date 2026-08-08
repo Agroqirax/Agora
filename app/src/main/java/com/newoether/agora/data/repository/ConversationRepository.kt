@@ -2,15 +2,12 @@ package com.newoether.agora.data.repository
 
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
-import com.newoether.agora.data.local.ClaimedRunPassCommit
 import com.newoether.agora.data.local.ConversationDraftAttachmentReference
 import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.MessageStreamCheckpoint
-import com.newoether.agora.data.local.PendingRunInputCommit
-import com.newoether.agora.data.local.RemovedPendingRunInput
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.local.RunGraphCommit
 import com.newoether.agora.data.local.ToolRoundCommit
@@ -192,21 +189,6 @@ class ConversationRepository(
         sourceToForkMessageIds: Map<String, String>,
     ) = chatDao.createForkGraph(conversation, runs, messages, sourceToForkMessageIds)
 
-    suspend fun appendMessageToRun(message: MessageEntity): MessageEntity {
-        ensureRunRecovery()
-        require(message.runId.isNotBlank()) { "Message ${message.id} has no Run" }
-        return chatDao.appendMessageToRun(message)
-    }
-
-    suspend fun appendPendingInputToRun(
-        message: MessageEntity,
-        at: Long = System.currentTimeMillis(),
-    ): PendingRunInputCommit {
-        ensureRunRecovery()
-        require(message.runId.isNotBlank()) { "Message ${message.id} has no Run" }
-        return chatDao.appendPendingInputToRun(message, at)
-    }
-
     suspend fun appendToolRoundToRun(
         messages: List<MessageEntity>,
         expectedPass: Int,
@@ -257,14 +239,6 @@ class ConversationRepository(
         at: Long = System.currentTimeMillis(),
     ): Boolean = chatDao.terminalizeLiveRun(runId, RunStatus.STOPPED, reason, at) == 1
 
-    suspend fun completeRun(runId: String, at: Long = System.currentTimeMillis()): Boolean =
-        chatDao.terminalizeLiveRun(
-            runId,
-            RunStatus.COMPLETED,
-            RunEndReason.MODEL_COMPLETED,
-            at,
-        ) == 1
-
     suspend fun failRun(runId: String, at: Long = System.currentTimeMillis()): Boolean =
         chatDao.terminalizeLiveRun(
             runId,
@@ -272,39 +246,6 @@ class ConversationRepository(
             RunEndReason.PROVIDER_ERROR,
             at,
         ) == 1
-
-    suspend fun claimPendingRunInputsAndAppendPlaceholder(
-        runId: String,
-        expectedInputMessageIds: List<String>,
-        placeholder: MessageEntity,
-        at: Long = System.currentTimeMillis(),
-    ): ClaimedRunPassCommit? {
-        ensureRunRecovery()
-        return chatDao.claimPendingRunInputsAndAppendPlaceholder(
-            runId = runId,
-            expectedInputMessageIds = expectedInputMessageIds,
-            placeholder = placeholder,
-            at = at,
-        )
-    }
-
-    suspend fun appendGuidanceBatchAndClaimPass(
-        runId: String,
-        inputs: List<MessageEntity>,
-        placeholder: MessageEntity,
-        at: Long = System.currentTimeMillis(),
-    ): ClaimedRunPassCommit? {
-        ensureRunRecovery()
-        return chatDao.appendGuidanceBatchAndClaimPass(
-            runId = runId,
-            inputs = inputs,
-            placeholder = placeholder,
-            at = at,
-        )
-    }
-
-    suspend fun removePendingRunInput(messageId: String): RemovedPendingRunInput? =
-        chatDao.removePendingRunInput(messageId)
 
     /**
      * Persist the mutable portion of an in-flight model message without creating a missing row.

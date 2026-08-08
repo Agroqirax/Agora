@@ -364,7 +364,22 @@ object ConversationRuntimeReducer {
                 )
             }
         }
-        is RunState.Preparing -> deferredOrBusy(state, command)
+        is RunState.Preparing -> if (command.directOnly) {
+            busy(state, command)
+        } else {
+            Transition(
+                newState = state,
+                effects = listOf(
+                    RunEffect.AcceptGuidance(
+                        command.identity.copy(
+                            ownerToken = state.ownerIdentity.ownerToken,
+                            runId = state.inputEffectIdentity.runId,
+                            pass = 0,
+                        ),
+                    ),
+                ),
+            )
+        }
         is RunState.Active -> when {
             command.directOnly -> busy(state, command)
             state.identity.runId == null -> deferred(state, command)
