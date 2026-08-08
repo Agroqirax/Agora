@@ -187,6 +187,53 @@ class ConversationGenerationStateTest {
     }
 
     @Test
+    fun StopDuringRoomCommit_bindsTheDurableRunAndReturnsItsExactStopEffect() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val requested = state.requestSend(
+            proposedRunId = "run",
+            effectId = "send",
+            directOnly = false,
+            hasPendingGuidance = false,
+        )
+        val inputEffect = requested.effects.single() as RunEffect.PersistAcceptedInput
+        val unwind = CompletableDeferred<Unit>()
+        val job = launch {
+            withContext(NonCancellable) { unwind.await() }
+        }
+        assertTrue(state.attachGenerationJob(inputEffect.identity.ownerToken, job))
+        val settled = CompletableDeferred<Unit>()
+        state.onStopSettled = { settled.complete(Unit) }
+
+        val initialStop = state.stop()
+        val binding = state.finishInputPersistence(inputEffect.identity)
+
+        assertNull(initialStop.finalizationEffect)
+        assertTrue(binding is ConversationGenerationState.RunBindingOutcome.Stopping)
+        binding as ConversationGenerationState.RunBindingOutcome.Stopping
+        assertEquals("run", binding.finalizationEffect.identity.runId)
+        assertEquals(
+            "stop-${inputEffect.identity.ownerToken}",
+            binding.finalizationEffect.identity.effectId,
+        )
+        assertEquals("run", state.currentRunId())
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
+            state.finishStopFinalization(
+                ConversationCommand.PersistenceSettled(
+                    identity = binding.finalizationEffect.identity,
+                    success = true,
+                ),
+            ),
+        )
+
+        unwind.complete(Unit)
+        job.join()
+        settled.await()
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
+    }
+
+    @Test
     fun mailboxInputFailure_remainsOwnedUntilTheGenerationCoroutineSettles() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val requested = state.requestSend(

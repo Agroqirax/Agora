@@ -71,12 +71,42 @@ data class RunEffectIdentity(
     )
 }
 
+/** Durable process-start snapshot for one live Run; no coroutine is ever reconstructed from it. */
+data class RunRecoverySnapshot(
+    val conversationId: String,
+    val runId: String,
+    val pass: Int,
+    val status: RunStatus,
+) {
+    init {
+        require(conversationId.isNotBlank())
+        require(runId.isNotBlank())
+        require(pass >= 0)
+        require(status == RunStatus.ACTIVE || status == RunStatus.STOPPING)
+    }
+}
+
 sealed interface RunState {
     val conversationId: String
 
     data class Idle(override val conversationId: String) : RunState {
         init {
             require(conversationId.isNotBlank())
+        }
+    }
+
+    /** Ephemeral startup-only ownership while an orphaned durable Run is terminalized. */
+    data class Recovering(
+        val snapshot: RunRecoverySnapshot,
+        val effectIdentity: RunEffectIdentity,
+        val failureReported: Boolean = false,
+    ) : RunState {
+        override val conversationId: String = snapshot.conversationId
+
+        init {
+            require(effectIdentity.conversationId == snapshot.conversationId)
+            require(effectIdentity.runId == snapshot.runId)
+            require(effectIdentity.pass == snapshot.pass)
         }
     }
 
@@ -246,6 +276,19 @@ enum class ProviderPassResult {
 sealed interface ConversationCommand {
     val conversationId: String
 
+    /** Convert one Room live-Run snapshot into an identified terminal recovery effect. */
+    data class Recover(val snapshot: RunRecoverySnapshot) : ConversationCommand {
+        override val conversationId: String = snapshot.conversationId
+    }
+
+    /** Result of the exact [RunEffect.RecoverDurableRun] transaction. */
+    data class RecoveryCompleted(
+        val identity: RunEffectIdentity,
+        val success: Boolean,
+    ) : ConversationCommand {
+        override val conversationId: String = identity.conversationId
+    }
+
     data class AcquireSlot(val identity: RuntimeRunIdentity) : ConversationCommand {
         override val conversationId: String = identity.conversationId
 
@@ -403,6 +446,15 @@ enum class SlotReleaseReason {
 }
 
 sealed interface RunEffect {
+    data class RecoverDurableRun(
+        val identity: RunEffectIdentity,
+        val priorStatus: RunStatus,
+    ) : RunEffect {
+        init {
+            require(priorStatus == RunStatus.ACTIVE || priorStatus == RunStatus.STOPPING)
+        }
+    }
+    data class RunRecoveryFailed(val identity: RunEffectIdentity) : RunEffect
     data class SlotActivated(val identity: RuntimeRunIdentity) : RunEffect
     data class PersistAcceptedInput(val identity: RunEffectIdentity) : RunEffect
     data class AcceptGuidance(val identity: RunEffectIdentity) : RunEffect
@@ -476,13 +528,15 @@ data class Transition(
     val accepted: Boolean get() = rejection == null
 }
 
+private const val RECOVERY_OWNER_TOKEN = Long.MAX_VALUE
+
 /**
  * Authoritative migrated slice of the conversation runtime reducer.
  *
- * It owns ordinary Send placement/input acceptance, the process slot, Stop's coroutine/persistence
- * barriers, the tool-batch/result/commit/continuation gate, and Context Compact admission/result
- * settlement. Provider outcome delivery, guidance execution, recovery, and Run finalization remain
- * behind bounded adapters until their later migration phases. The reducer has no Android,
+ * It owns startup recovery planning, ordinary Send placement/input acceptance, the process slot,
+ * Provider-pass acceptance, normal/Stop coroutine/persistence barriers, the
+ * tool-batch/result/commit/continuation gate, and Context Compact admission/result settlement.
+ * Guidance and external effect bodies remain bounded adapters. The reducer has no Android,
  * coroutine, Room, network, or Compose dependency.
  */
 object ConversationRuntimeReducer {
@@ -495,6 +549,8 @@ object ConversationRuntimeReducer {
         }
 
         return when (command) {
+            is ConversationCommand.Recover -> requestRecovery(state, command)
+            is ConversationCommand.RecoveryCompleted -> completeRecovery(state, command)
             is ConversationCommand.AcquireSlot -> acquire(state, command)
             is ConversationCommand.SendRequested -> requestSend(state, command)
             is ConversationCommand.InputPersisted -> inputPersisted(state, command)
@@ -516,6 +572,63 @@ object ConversationRuntimeReducer {
         }
     }
 
+    private fun requestRecovery(
+        state: RunState,
+        command: ConversationCommand.Recover,
+    ): Transition = when (state) {
+        is RunState.Idle -> {
+            val snapshot = command.snapshot
+            val effectIdentity = RunEffectIdentity(
+                conversationId = snapshot.conversationId,
+                ownerToken = RECOVERY_OWNER_TOKEN,
+                runId = snapshot.runId,
+                pass = snapshot.pass,
+                effectId = "recover-${snapshot.runId}-${snapshot.pass}",
+            )
+            Transition(
+                newState = RunState.Recovering(snapshot, effectIdentity),
+                effects = listOf(
+                    RunEffect.RecoverDurableRun(effectIdentity, snapshot.status),
+                ),
+            )
+        }
+        is RunState.Recovering -> reject(
+            state,
+            if (state.snapshot == command.snapshot) {
+                CommandRejection.DUPLICATE_RESULT
+            } else {
+                CommandRejection.STALE_IDENTITY
+            },
+        )
+        is RunState.Preparing,
+        is RunState.Active,
+        is RunState.Compacting,
+        is RunState.Finalizing,
+        is RunState.Stopping,
+        -> reject(state, CommandRejection.ILLEGAL_STATE)
+    }
+
+    private fun completeRecovery(
+        state: RunState,
+        command: ConversationCommand.RecoveryCompleted,
+    ): Transition {
+        val recovering = state as? RunState.Recovering
+            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
+        if (recovering.effectIdentity != command.identity) {
+            return reject(state, CommandRejection.STALE_IDENTITY)
+        }
+        if (!command.success) {
+            if (recovering.failureReported) {
+                return reject(state, CommandRejection.DUPLICATE_RESULT)
+            }
+            return Transition(
+                newState = recovering.copy(failureReported = true),
+                effects = listOf(RunEffect.RunRecoveryFailed(command.identity)),
+            )
+        }
+        return Transition(RunState.Idle(recovering.conversationId))
+    }
+
     private fun acquire(
         state: RunState,
         command: ConversationCommand.AcquireSlot,
@@ -524,6 +637,7 @@ object ConversationRuntimeReducer {
             newState = RunState.Active(command.identity),
             effects = listOf(RunEffect.SlotActivated(command.identity)),
         )
+        is RunState.Recovering,
         is RunState.Preparing,
         is RunState.Active,
         is RunState.Compacting,
@@ -604,18 +718,27 @@ object ConversationRuntimeReducer {
             )
         }
         is RunState.Finalizing -> deferredOrBusy(state, command)
+        is RunState.Recovering -> reject(state, CommandRejection.ILLEGAL_STATE)
     }
 
     private fun inputPersisted(
         state: RunState,
         command: ConversationCommand.InputPersisted,
     ): Transition {
-        val preparing = state as? RunState.Preparing
-            ?: return reject(state, CommandRejection.ILLEGAL_STATE)
-        if (preparing.inputEffectIdentity != command.identity) {
-            return reject(state, CommandRejection.STALE_IDENTITY)
+        return when (state) {
+            is RunState.Preparing -> {
+                if (state.inputEffectIdentity != command.identity) {
+                    reject(state, CommandRejection.STALE_IDENTITY)
+                } else {
+                    Transition(RunState.Active(command.identity.runIdentity()))
+                }
+            }
+            is RunState.Stopping -> bindDurableRunAfterStop(
+                state,
+                command.identity.runIdentity(),
+            )
+            else -> reject(state, CommandRejection.ILLEGAL_STATE)
         }
-        return Transition(RunState.Active(command.identity.runIdentity()))
     }
 
     private fun inputPersistenceFailed(
@@ -659,6 +782,9 @@ object ConversationRuntimeReducer {
         state: RunState,
         command: ConversationCommand.BindRun,
     ): Transition {
+        if (state is RunState.Stopping) {
+            return bindDurableRunAfterStop(state, command.identity)
+        }
         val active = state as? RunState.Active
             ?: return reject(state, CommandRejection.ILLEGAL_STATE)
         if (
@@ -685,6 +811,38 @@ object ConversationRuntimeReducer {
             return reject(state, CommandRejection.STALE_IDENTITY)
         }
         return Transition(RunState.Active(command.identity))
+    }
+
+    private fun bindDurableRunAfterStop(
+        stopping: RunState.Stopping,
+        boundIdentity: RuntimeRunIdentity,
+    ): Transition {
+        if (stopping.identity.runId != null) {
+            return reject(
+                stopping,
+                if (stopping.identity == boundIdentity) {
+                    CommandRejection.DUPLICATE_RESULT
+                } else {
+                    CommandRejection.STALE_IDENTITY
+                },
+            )
+        }
+        if (stopping.finalizationEffectId != null || !stopping.persistenceSettled) {
+            return reject(stopping, CommandRejection.ILLEGAL_STATE)
+        }
+        if (!sameOwner(stopping.identity, boundIdentity)) {
+            return reject(stopping, CommandRejection.STALE_IDENTITY)
+        }
+        val effectId = "stop-${boundIdentity.ownerToken}"
+        val effectIdentity = boundIdentity.effectIdentity(effectId)
+        return Transition(
+            newState = stopping.copy(
+                identity = boundIdentity,
+                finalizationEffectId = effectId,
+                persistenceSettled = false,
+            ),
+            effects = listOf(RunEffect.FinalizeStop(effectIdentity)),
+        )
     }
 
     private fun requestProviderPass(
@@ -911,6 +1069,7 @@ object ConversationRuntimeReducer {
                 CommandRejection.STALE_IDENTITY
             },
         )
+        is RunState.Recovering,
         is RunState.Preparing,
         is RunState.Finalizing,
         is RunState.Stopping,
@@ -1006,6 +1165,7 @@ object ConversationRuntimeReducer {
         command: ConversationCommand.StopRequested,
     ): Transition {
         val activeIdentity = when (state) {
+            is RunState.Recovering -> return reject(state, CommandRejection.ILLEGAL_STATE)
             is RunState.Preparing -> state.ownerIdentity
             is RunState.Active -> state.identity
             is RunState.Compacting -> state.resumeIdentity
@@ -1056,6 +1216,7 @@ object ConversationRuntimeReducer {
         command: ConversationCommand.CoroutineSettled,
     ): Transition = when (state) {
         is RunState.Idle -> reject(state, CommandRejection.ILLEGAL_STATE)
+        is RunState.Recovering -> reject(state, CommandRejection.ILLEGAL_STATE)
         is RunState.Preparing -> {
             if (state.ownerIdentity != command.identity) {
                 reject(state, CommandRejection.STALE_IDENTITY)

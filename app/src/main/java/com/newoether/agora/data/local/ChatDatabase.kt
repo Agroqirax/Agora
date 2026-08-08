@@ -9,6 +9,11 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.RunRecoveryPolicy
+import com.newoether.agora.model.ConversationCommand
+import com.newoether.agora.model.ConversationRuntimeReducer
+import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunRecoverySnapshot
+import com.newoether.agora.model.RunState
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.data.local.migration.MIGRATION_16_17
@@ -898,69 +903,85 @@ interface ChatDao {
 
     @Query(
         """
-        SELECT id FROM runs
+        SELECT * FROM runs
         WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
+        ORDER BY conversationId, id
         """
     )
-    suspend fun getOrphanedLiveRunIds(): List<String>
-
-    @Query(
-        """
-        UPDATE runs
-        SET status = 'STOPPED', activeSlot = NULL, lastCheckpointAt = :at, endedAt = :at,
-            endReason = 'PROCESS_RECOVERED'
-        WHERE activeSlot = 1 AND status IN ('ACTIVE', 'STOPPING')
-        """
-    )
-    suspend fun terminalizeOrphanedRuns(at: Long): Int
+    suspend fun getOrphanedLiveRuns(): List<RunEntity>
 
     @Transaction
     suspend fun recoverOrphanedRuns(at: Long): Int {
-        val orphanedRunIds = getOrphanedLiveRunIds()
-        if (orphanedRunIds.isEmpty()) return 0
-        getMessagesForRuns(orphanedRunIds).forEach { message ->
-            val recoveredStatus = if (
-                message.participant == Participant.MODEL &&
-                message.status in setOf(
-                    MessageStatus.SENDING,
-                    MessageStatus.THINKING,
-                    MessageStatus.TOOL_CALLING,
-                    MessageStatus.TRANSCRIBING,
+        val orphanedRuns = getOrphanedLiveRuns()
+        if (orphanedRuns.isEmpty()) return 0
+        val messagesByRun = getMessagesForRuns(orphanedRuns.map { it.id })
+            .groupBy { it.runId }
+        orphanedRuns.forEach { run ->
+            val snapshot = RunRecoverySnapshot(
+                conversationId = run.conversationId,
+                runId = run.id,
+                pass = run.currentPass,
+                status = run.status,
+            )
+            val requested = ConversationRuntimeReducer.reduce(
+                RunState.Idle(run.conversationId),
+                ConversationCommand.Recover(snapshot),
+            )
+            val recoveryEffect = requested.effects
+                .filterIsInstance<RunEffect.RecoverDurableRun>()
+                .single()
+            check(recoveryEffect.priorStatus == run.status)
+            messagesByRun[run.id].orEmpty().forEach { message ->
+                val recoveredStatus = RunRecoveryPolicy.recoverMessageStatus(
+                    message.participant,
+                    message.status,
                 )
-            ) {
-                MessageStatus.STOPPED
-            } else {
-                message.status
-            }
-            val recoveredToolJson = message.toolCallJson?.let { raw ->
-                runCatching {
-                    val segments = Json.decodeFromString<List<MessageSegment>>(raw)
-                    val recovered = RunRecoveryPolicy.stopIncompleteTools(segments)
-                    if (recovered == segments) raw else Json.encodeToString(recovered)
-                }.getOrDefault(raw)
-            }
-            if (recoveredStatus != message.status || recoveredToolJson != message.toolCallJson) {
-                updateMessageCheckpoint(
-                    MessageStreamCheckpoint(
-                        id = message.id,
-                        text = message.text,
-                        images = message.images,
-                        thoughts = message.thoughts,
-                        thoughtTitle = message.thoughtTitle,
-                        tokenCount = message.tokenCount,
-                        inputTokenCount = message.inputTokenCount,
-                        cachedInputTokenCount = message.cachedInputTokenCount,
-                        uncachedInputTokenCount = message.uncachedInputTokenCount,
-                        outputTokenCount = message.outputTokenCount,
-                        reasoningTokenCount = message.reasoningTokenCount,
-                        status = recoveredStatus,
-                        thoughtTimeMs = message.thoughtTimeMs,
-                        toolCallJson = recoveredToolJson,
+                val recoveredToolJson = message.toolCallJson?.let { raw ->
+                    runCatching {
+                        val segments = Json.decodeFromString<List<MessageSegment>>(raw)
+                        val recovered = RunRecoveryPolicy.stopIncompleteTools(segments)
+                        if (recovered == segments) raw else Json.encodeToString(recovered)
+                    }.getOrDefault(raw)
+                }
+                if (recoveredStatus != message.status || recoveredToolJson != message.toolCallJson) {
+                    updateMessageCheckpoint(
+                        MessageStreamCheckpoint(
+                            id = message.id,
+                            text = message.text,
+                            images = message.images,
+                            thoughts = message.thoughts,
+                            thoughtTitle = message.thoughtTitle,
+                            tokenCount = message.tokenCount,
+                            inputTokenCount = message.inputTokenCount,
+                            cachedInputTokenCount = message.cachedInputTokenCount,
+                            uncachedInputTokenCount = message.uncachedInputTokenCount,
+                            outputTokenCount = message.outputTokenCount,
+                            reasoningTokenCount = message.reasoningTokenCount,
+                            status = recoveredStatus,
+                            thoughtTimeMs = message.thoughtTimeMs,
+                            toolCallJson = recoveredToolJson,
+                        )
                     )
-                )
+                }
+            }
+            val durableSuccess = terminalizeLiveRun(
+                runId = recoveryEffect.identity.runId,
+                status = RunStatus.STOPPED,
+                reason = RunEndReason.PROCESS_RECOVERED,
+                at = at,
+            ) == 1
+            val completed = ConversationRuntimeReducer.reduce(
+                requested.newState,
+                ConversationCommand.RecoveryCompleted(
+                    recoveryEffect.identity,
+                    durableSuccess,
+                ),
+            )
+            check(durableSuccess && completed.accepted && completed.newState is RunState.Idle) {
+                "Run recovery transaction lost ownership for ${run.id}"
             }
         }
-        return terminalizeOrphanedRuns(at)
+        return orphanedRuns.size
     }
 
     @Update(entity = MessageEntity::class)

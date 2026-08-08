@@ -77,10 +77,11 @@ single global mutable slot:
   per conversation while allowing different conversations to proceed independently.
 - UI/persistence tokens and Run/pass guards reject some stale callbacks.
 
-This is a compatibility architecture, not yet a true single-writer runtime. The controller,
-generation manager, Stop finalizer, task engine, and Room transactions all retain lifecycle write
-responsibilities. The live ownership table, lock order, acceptance matrix, and staged migration are
-frozen in `docs/development/conversation-runtime-refactor-baseline.md`.
+The pure reducer is the single authority for in-process Run state. The controller, generation
+manager, Stop finalizer, task engine, and Room transactions execute identified effect bodies but
+cannot release or retarget a Run without returning the exact result command. A few graph-building
+and guidance-storage adapters remain outside the pure core; their bounded ownership is recorded in
+`docs/development/conversation-runtime-refactor-baseline.md`.
 
 Room remains the durable source of truth. The live message is an overlay for the
 currently selected branch; it does not become a second durable message graph.
@@ -126,8 +127,8 @@ finalization barriers, tool-round gates, and
 manual/automatic Context Compact admission/result settlement. Pure
 `ConversationCommand`, `RunState`, `RunEffect`, and
 `ConversationRuntimeReducer` types decide
-`Idle`/`Preparing`/`Active`/`Compacting`/`Finalizing`/`Stopping`, coroutine settlement, durable settlement,
-Compact continuation, and slot release. `ConversationGenerationState` retains the legacy per-
+`Idle`/`Recovering`/`Preparing`/`Active`/`Compacting`/`Finalizing`/`Stopping`, coroutine settlement,
+durable settlement, Compact continuation, and slot release. `ConversationGenerationState` retains the legacy per-
 conversation monitor, tokens, Job, streams, and UI flows as an adapter, but its former
 `SlotPhase` and Stop-barrier Booleans no longer exist. Every Stop-finalization result echoes
 conversation, Run, pass, owner, and effect identity; stale and duplicate results are rejected
@@ -168,6 +169,11 @@ non-cancellable once
 accepted, so caller/lifecycle cancellation cannot drop a terminal result. Conversation deletion is
 separate runtime disposal and does not fabricate a durable user-Stop effect.
 
+If Stop wins while an accepted-input or replacement Room transaction is still committing, the
+late exact Run identity is adopted by the existing `Stopping` state. That transition emits one
+identified `FinalizeStop`; the coroutine and persistence barriers still both have to settle. The
+normal commit race therefore cannot bypass the mailbox or attach work to the stopped Run.
+
 Manual Compact claims only `Idle` and does not activate the generation registry or Stop button.
 Its short admission check shares the queue-mutation mutex, so it cannot overtake pending-guidance
 lease transfer; pending guidance wins and manual Compact reports busy without changing it.
@@ -181,9 +187,14 @@ waits only for that Compact result and then re-enters the mailbox: manual settle
 while automatic settlement exposes Active and accepts normal memory guidance. Direct-only
 automation receives busy and creates no input.
 
-This is not yet the final mailbox architecture: process recovery and several legacy setup/
-replacement graph adapters have not moved into the runtime contract.
-Headless request building/Provider execution remains a bounded Task adapter after mailbox admission.
+Startup recovery now uses the same pure runtime contract: Room reads ordered `ACTIVE`/`STOPPING`
+snapshots, reduces each through `Recover`, executes the exact `RecoverDurableRun` transaction, and
+echoes `RecoveryCompleted`. It never reconstructs a coroutine. The transaction stops in-flight
+model/tool UI state and terminalizes that exact live Run as `STOPPED/PROCESS_RECOVERED`; any failed
+effect/result assertion rolls the whole recovery transaction back and keeps generation gated for
+retry. The superseded broad live-Run id/update queries were removed.
+
+Headless request building/Provider execution remains a bounded Task effect adapter after mailbox admission.
 Guidance storage/lease execution remains a bounded controller adapter, but it has no
 alternative Run-placement or durable append authority: every drain is a fresh mailbox-approved
 normal Send. State-backed foreground and headless tool execution/commit authorization uses the
@@ -394,7 +405,8 @@ ChatGPT and Claude exports. Auto backup uses WorkManager and configurable retent
 Recovery rules:
 
 - non-terminal messages are checkpointed during generation;
-- startup recovery repairs interrupted runs without inventing successful output;
+- startup recovery deterministically maps ordered Room snapshots to identified reducer effects and
+  repairs interrupted Runs atomically without inventing successful output or resuming a coroutine;
 - attachment cleanup occurs only after database ownership changes commit;
 - fork cloning rolls back newly created files if graph insertion fails.
 

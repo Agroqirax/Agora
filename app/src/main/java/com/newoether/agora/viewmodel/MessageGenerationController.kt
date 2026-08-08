@@ -17,9 +17,10 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.SelectedAttachment
-import com.newoether.agora.model.TokenUsage
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
@@ -274,6 +275,54 @@ internal class MessageGenerationController(
     )
     private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
     private val compactEffectCoordinator = ContextCompactEffectCoordinator()
+    private val stopFinalizer = GenerationFinalizer(convRepo) { _, _ -> }
+    private val runFinalizationEffects = RunFinalizationEffectCoordinator()
+
+    /** Execute the exact Stop effect emitted when Room wins the commit race after Stop. */
+    private suspend fun settleLateBoundStop(
+        state: ConversationGenerationState,
+        outcome: ConversationGenerationState.RunBindingOutcome.Stopping,
+    ) = withContext(kotlinx.coroutines.NonCancellable) {
+        stopFinalizer.launchStopFinalization(
+            scope = state.scope,
+            identity = outcome.finalizationEffect.identity,
+            messages = emptyList(),
+        ) { completion ->
+            val result = state.finishStopFinalization(completion)
+            if (result.accepted && completion.success) state.clearStoppedOverlay()
+        }.join()
+    }
+
+    /** Convert an external cancellation after a Room commit into the same mailbox Stop path. */
+    private suspend fun settleCancelledDurableRun(
+        state: ConversationGenerationState,
+        binding: ConversationGenerationState.RunBindingOutcome,
+    ): Boolean = withContext(kotlinx.coroutines.NonCancellable) {
+        when (binding) {
+            ConversationGenerationState.RunBindingOutcome.Active -> {
+                val stopped = state.stop()
+                val effect = stopped.finalizationEffect
+                if (effect == null) {
+                    // A concurrent user Stop already owns the finalization effect.
+                    return@withContext state.stopping.value
+                }
+                stopFinalizer.launchStopFinalization(
+                    scope = state.scope,
+                    identity = effect.identity,
+                    messages = stopped.stoppedMessage?.let(::listOf).orEmpty(),
+                ) { completion ->
+                    val result = state.finishStopFinalization(completion)
+                    if (result.accepted && completion.success) state.clearStoppedOverlay()
+                }.join()
+                true
+            }
+            is ConversationGenerationState.RunBindingOutcome.Stopping -> {
+                settleLateBoundStop(state, binding)
+                true
+            }
+            ConversationGenerationState.RunBindingOutcome.Rejected -> false
+        }
+    }
 
     private suspend fun compactBeforeBoundaryIfNeeded(
         genId: String,
@@ -363,7 +412,10 @@ internal class MessageGenerationController(
         state: ConversationGenerationState,
         error: Exception,
     ) {
-        DebugLog.e("AgoraVM", "Failed to start Run $runId", error)
+        DebugLog.e(
+            "AgoraVM",
+            "Failed to start Run $runId errorType=${error.javaClass.simpleName}",
+        )
         val errorText = appContext.getString(R.string.failed_to_generate)
         val failedMessage = modelMessageId?.let { id ->
             runCatching {
@@ -373,14 +425,76 @@ internal class MessageGenerationController(
                     ?.copy(text = errorText, status = MessageStatus.ERROR)
             }.getOrNull()
         }
-        if (failedMessage != null) {
-            runCatching { convRepo.updateStreamingMessageCheckpoint(failedMessage) }
+        if (failedMessage != null && state.currentRunId() == runId) {
+            finalizeBoundFailure(
+                conversationId = conversationId,
+                runId = runId,
+                pass = 0,
+                uiToken = uiToken,
+                state = state,
+                failedMessage = failedMessage,
+                effectId = "setup-finalize-$runId",
+            )
+        } else if (failedMessage != null && !state.generating.value) {
+            // Runtime disposal is the only no-writer edge. Repair message + Run atomically without
+            // accepting a stale result into a newer process state.
+            runCatching {
+                convRepo.finishGeneration(
+                    message = failedMessage,
+                    conversationId = conversationId,
+                    runId = runId,
+                    status = RunStatus.FAILED,
+                    reason = RunEndReason.PROVIDER_ERROR,
+                    markConversationUnread = false,
+                )
+            }
+        } else if (failedMessage == null) {
+            // No Run graph was committed. The installed Job's coroutine barrier releases the
+            // unbound process slot; there is no durable terminal state to write.
+            state.loadingChange(uiToken, false)
+        }
+        onSnackbar(errorText)
+    }
+
+    private suspend fun finalizeBoundFailure(
+        conversationId: String,
+        runId: String,
+        pass: Int,
+        uiToken: Long,
+        state: ConversationGenerationState,
+        failedMessage: ChatMessage,
+        effectId: String,
+    ): Boolean {
+        val requested = state.requestRunFinalization(
+            identity = RunEffectIdentity(
+                conversationId = conversationId,
+                ownerToken = uiToken,
+                runId = runId,
+                pass = pass,
+                effectId = effectId,
+            ),
+            status = RunStatus.FAILED,
+            reason = RunEndReason.PROVIDER_ERROR,
+            markConversationUnread = false,
+        ) ?: return false
+        val result = runFinalizationEffects.execute(requested) { effect ->
+            convRepo.finishGeneration(
+                message = failedMessage,
+                conversationId = effect.identity.conversationId,
+                runId = effect.identity.runId,
+                status = effect.status,
+                reason = effect.reason,
+                markConversationUnread = effect.markConversationUnread,
+            )
+        }
+        val success = result is RunFinalizationEffectCoordinator.Result.Succeeded
+        state.finishRunFinalization(requested.identity, success)
+        if (success) {
             state.streamUpdate(uiToken, failedMessage)
             state.streamClear(uiToken)
+            state.loadingChange(uiToken, false)
         }
-        runCatching { convRepo.failRun(runId) }
-        state.loadingChange(uiToken, false)
-        onSnackbar(errorText)
+        return success
     }
 
     suspend fun compactManual(request: CompactRequest): CompactResult {
@@ -590,6 +704,7 @@ internal class MessageGenerationController(
         val generationJob = state.launchGenerationJob(myUiToken) generation@ {
             var setupModelMessageId: String? = null
             var runBound = false
+            var stopFinalizationClaimed = false
             try {
                 if (!regenerationTransitions.awaitFade(transition.id)) return@generation
                 if (
@@ -648,12 +763,18 @@ internal class MessageGenerationController(
                 )
                 graphCommitted = true
                 regenerationTransitions.markCommitted(transition.id)
-                runBound = state.tryBindRun(myUiToken, runId)
+                val binding = state.bindPersistedRun(myUiToken, runId)
+                runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
                 if (!runBound) {
-                    // Stop can win after Room commits but before the fresh Run is visible to the
-                    // slot. No Stop finalizer knows this id, so this coroutine owns termination.
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        convRepo.finishStoppedGeneration(emptyList(), runId)
+                    if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                        stopFinalizationClaimed = true
+                        settleLateBoundStop(state, binding)
+                    } else {
+                        // A disposed/replaced runtime cannot accept the durable Run. This is a
+                        // recovery-only fallback; the normal Stop race is mailbox-authorized.
+                        withContext(kotlinx.coroutines.NonCancellable) {
+                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                        }
                     }
                     return@lock
                 }
@@ -680,17 +801,36 @@ internal class MessageGenerationController(
             } catch (e: CancellationException) {
                 // A Room transaction may commit just before cancellation is observed. If the Run
                 // was never bound, the normal Stop finalizer cannot discover it.
-                if (!runBound) {
+                if (!runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         if (convRepo.getRun(runId) != null) {
                             graphCommitted = true
                             regenerationTransitions.markCommitted(transition.id)
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                            val binding = state.bindPersistedRun(myUiToken, runId)
+                            stopFinalizationClaimed = settleCancelledDurableRun(state, binding)
+                            if (!stopFinalizationClaimed) {
+                                convRepo.finishStoppedGeneration(emptyList(), runId)
+                            }
                         }
                     }
                 }
                 throw e
             } catch (e: Exception) {
+                if (!runBound && !stopFinalizationClaimed) {
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        if (convRepo.getRun(runId) != null) {
+                            graphCommitted = true
+                            regenerationTransitions.markCommitted(transition.id)
+                            val binding = state.bindPersistedRun(myUiToken, runId)
+                            runBound = binding is
+                                ConversationGenerationState.RunBindingOutcome.Active
+                            if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                                stopFinalizationClaimed = true
+                                settleLateBoundStop(state, binding)
+                            }
+                        }
+                    }
+                }
                 failGenerationSetup(
                     conversationId = genId,
                     runId = runId,
@@ -799,45 +939,31 @@ internal class MessageGenerationController(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            DebugLog.e("AgoraVM", "Generation failed in $callerTag", e)
+            DebugLog.e(
+                "AgoraVM",
+                "Generation failed in $callerTag errorType=${e.javaClass.simpleName}",
+            )
             // A pre-stream failure (prompt/config build -e.g. RAG key resolution) would otherwise
             // strand the SENDING placeholder row + streaming overlay until the conversation is
-            // reopened. Persist a terminal ERROR row and clear this generation's overlay.
+            // reopened. The mailbox owns the atomic ERROR/Run terminal transaction.
             runCatching {
                 val existing = convRepo.getMessagesForConversationSnapshot(currentId)
                     .find { it.id == modelMessageId }
                 if (existing != null && existing.status == MessageStatus.SENDING) {
-                    convRepo.updateStreamingMessageCheckpoint(
-                        ChatMessage(
-                            id = existing.id,
-                            parentId = existing.parentId,
+                    finalizeBoundFailure(
+                        conversationId = currentId,
+                        runId = runId,
+                        pass = pass,
+                        uiToken = uiToken,
+                        state = state,
+                        failedMessage = existing.toUiChatMessage(appContext).copy(
                             text = "Error: ${e.localizedMessage ?: "Failed to build the request."}",
-                            images = existing.images,
-                            thoughts = existing.thoughts,
-                            thoughtTitle = existing.thoughtTitle,
-                            tokenCount = existing.tokenCount,
-                            tokenUsage = TokenUsage.fromPersisted(
-                                totalTokenCount = existing.tokenCount,
-                                inputTokenCount = existing.inputTokenCount,
-                                cachedInputTokenCount = existing.cachedInputTokenCount,
-                                uncachedInputTokenCount = existing.uncachedInputTokenCount,
-                                outputTokenCount = existing.outputTokenCount,
-                                reasoningTokenCount = existing.reasoningTokenCount,
-                            ),
                             status = MessageStatus.ERROR,
-                            participant = existing.participant,
-                            timestamp = existing.timestamp,
-                            thoughtTimeMs = existing.thoughtTimeMs,
-                            modelName = existing.modelName,
-                            runId = existing.runId,
-                            runSequence = existing.runSequence,
-                        )
+                        ),
+                        effectId = "request-finalize-$runId-$pass",
                     )
                 }
-                convRepo.failRun(runId)
             }
-            state.streamClear(uiToken)
-            state.loadingChange(uiToken, false)
         }
     }
 
@@ -883,6 +1009,7 @@ internal class MessageGenerationController(
             var setupModelMessageId: String? = null
             var graphCommitted = false
             var runBound = false
+            var stopFinalizationClaimed = false
             try {
             executionCoordinator.withConversationLock(genId) lock@ {
             val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
@@ -919,10 +1046,16 @@ internal class MessageGenerationController(
                 ),
             )
             graphCommitted = true
-            runBound = state.tryBindRun(myUiToken, runId)
+            val binding = state.bindPersistedRun(myUiToken, runId)
+            runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
             if (!runBound) {
-                withContext(kotlinx.coroutines.NonCancellable) {
-                    convRepo.finishStoppedGeneration(emptyList(), runId)
+                if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                    stopFinalizationClaimed = true
+                    settleLateBoundStop(state, binding)
+                } else {
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        convRepo.finishStoppedGeneration(emptyList(), runId)
+                    }
                 }
                 committed.complete(true)
                 return@lock
@@ -971,16 +1104,34 @@ internal class MessageGenerationController(
             )
             }
             } catch (e: CancellationException) {
-                if (!runBound) {
+                if (!runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         if (convRepo.getRun(runId) != null) {
                             graphCommitted = true
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                            val binding = state.bindPersistedRun(myUiToken, runId)
+                            stopFinalizationClaimed = settleCancelledDurableRun(state, binding)
+                            if (!stopFinalizationClaimed) {
+                                convRepo.finishStoppedGeneration(emptyList(), runId)
+                            }
                         }
                     }
                 }
                 throw e
             } catch (e: Exception) {
+                if (!runBound && !stopFinalizationClaimed) {
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        if (convRepo.getRun(runId) != null) {
+                            graphCommitted = true
+                            val binding = state.bindPersistedRun(myUiToken, runId)
+                            runBound = binding is
+                                ConversationGenerationState.RunBindingOutcome.Active
+                            if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                                stopFinalizationClaimed = true
+                                settleLateBoundStop(state, binding)
+                            }
+                        }
+                    }
+                }
                 failGenerationSetup(
                     conversationId = genId,
                     runId = runId,
@@ -1176,6 +1327,7 @@ internal class MessageGenerationController(
             var setupModelMessageId: String? = null
             var graphCommitted = false
             var runBound = false
+            var stopFinalizationClaimed = false
             suspend fun reconcileGuidanceOwnership(): Boolean =
                 withContext(kotlinx.coroutines.NonCancellable) {
                     if (!graphCommitted) {
@@ -1258,14 +1410,20 @@ internal class MessageGenerationController(
                     // Echo the same PersistAcceptedInput identity used by ordinary Send. Stop can
                     // win while Room commits; in that order the durable fresh Run is stopped below
                     // and the old STOPPED Run is never reused.
-                    runBound = withContext(kotlinx.coroutines.NonCancellable) {
-                        state.inputPersisted(claim.inputEffect.identity)
+                    val binding = withContext(kotlinx.coroutines.NonCancellable) {
+                        state.finishInputPersistence(claim.inputEffect.identity)
                     }
+                    runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
                     if (!runBound) {
-                        // Stop landed while Room was committing the fresh boundary. The rows are
-                        // durable, so finish them in place; never requeue and duplicate them.
-                        withContext(kotlinx.coroutines.NonCancellable) {
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                        if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                            stopFinalizationClaimed = true
+                            settleLateBoundStop(state, binding)
+                        } else {
+                            // Runtime disposal is the only rejected durable edge; never requeue
+                            // the already-committed guidance or duplicate its user bubbles.
+                            withContext(kotlinx.coroutines.NonCancellable) {
+                                convRepo.finishStoppedGeneration(emptyList(), runId)
+                            }
                         }
                         return@withConversationLock
                     }
@@ -1320,15 +1478,29 @@ internal class MessageGenerationController(
                 }
             } catch (e: CancellationException) {
                 val durable = reconcileGuidanceOwnership()
-                if (durable && !runBound) {
+                if (durable && !runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
-                        convRepo.finishStoppedGeneration(emptyList(), runId)
+                        val binding = state.finishInputPersistence(claim.inputEffect.identity)
+                        stopFinalizationClaimed = settleCancelledDurableRun(state, binding)
+                        if (!stopFinalizationClaimed) {
+                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                        }
                     }
                 }
                 throw e
             } catch (e: Exception) {
                 val durable = reconcileGuidanceOwnership()
-                if (!durable) {
+                if (durable && !runBound && !stopFinalizationClaimed) {
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        val binding = state.finishInputPersistence(claim.inputEffect.identity)
+                        runBound = binding is
+                            ConversationGenerationState.RunBindingOutcome.Active
+                        if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
+                            stopFinalizationClaimed = true
+                            settleLateBoundStop(state, binding)
+                        }
+                    }
+                } else if (!durable) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         state.inputPersistenceFailed(claim.inputEffect.identity)
                     }
@@ -1538,9 +1710,41 @@ internal class MessageGenerationController(
         val generationJob = state.launchGenerationJob(myUiToken) generation@ {
             val myPersistId = state.nextPersistId()
             var runBound = false
+            var bindingOutcome: ConversationGenerationState.RunBindingOutcome =
+                ConversationGenerationState.RunBindingOutcome.Rejected
             var inputGraphCommitted = false
-            var setupModelMessageId: String? = null
+            val userMessageId = UUID.randomUUID().toString()
+            val modelMessageId = UUID.randomUUID().toString()
+            val setupModelMessageId: String? = modelMessageId
             var roomProjectionFence: RoomMessageProjectionFence? = null
+            suspend fun reconcileCommittedInput(): Boolean =
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    if (!inputGraphCommitted) {
+                        inputGraphCommitted = convRepo.getRun(runId) != null
+                    }
+                    if (!inputGraphCommitted) return@withContext false
+                    payloadOwnershipTransferred.set(true)
+                    if (
+                        bindingOutcome is ConversationGenerationState.RunBindingOutcome.Rejected
+                    ) {
+                        bindingOutcome =
+                            state.finishInputPersistence(direct.inputEffect.identity)
+                        runBound = bindingOutcome is
+                            ConversationGenerationState.RunBindingOutcome.Active
+                    }
+                    if (!durableAcceptance.isCompleted) {
+                        val acceptance = SendAcceptance.Direct(userMessageId, genId)
+                        notifySendAccepted(acceptance, onAccepted)
+                        durableAcceptance.complete(acceptance)
+                        runCatching { onModelMessageCreated?.invoke(modelMessageId) }
+                        if (wasNewChat) {
+                            currentConversationId.value = genId
+                            isNewChatMode.value = false
+                            onConversationCreatedBySend(genId)
+                        }
+                    }
+                    true
+                }
             try {
                 // Skipping the lock here is ONLY sound because the caller that already holds it
                 // also joins this job (see sendMessageFromAutomationAwaitingCompletion). If the
@@ -1552,9 +1756,6 @@ internal class MessageGenerationController(
                         settings.setConversationSettings(genId, pendingSettings)
                         pendingConversationSettings.value = null
                     }
-                    val userMessageId = UUID.randomUUID().toString()
-                    val modelMessageId = UUID.randomUUID().toString()
-                    setupModelMessageId = modelMessageId
                     val graphCommit = acceptedInputGraphWriter.commit(
                         request = AcceptedInputGraphWriter.Request(
                             inputEffect = direct.inputEffect,
@@ -1585,7 +1786,9 @@ internal class MessageGenerationController(
                     // Everything below acknowledges a transaction Room already committed. Finish
                     // it even if Stop/Activity teardown cancels this coroutine at that exact edge.
                     withContext(kotlinx.coroutines.NonCancellable) {
-                        runBound = state.inputPersisted(direct.inputEffect.identity)
+                        bindingOutcome = state.finishInputPersistence(direct.inputEffect.identity)
+                        runBound = bindingOutcome is
+                            ConversationGenerationState.RunBindingOutcome.Active
                         if (text.isNotBlank()) {
                             runCatching { onUserMessagePersisted(userMessageId, text) }
                                 .onFailure { error ->
@@ -1647,10 +1850,14 @@ internal class MessageGenerationController(
                     }
 
                     if (!runBound) {
-                        // Stop won the post-commit bind race. No external finalizer knows this Run
-                        // id, so this installed Job owns the one STOPPED transaction.
-                        withContext(kotlinx.coroutines.NonCancellable) {
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                        val stopping = bindingOutcome as?
+                            ConversationGenerationState.RunBindingOutcome.Stopping
+                        if (stopping != null) {
+                            settleLateBoundStop(state, stopping)
+                        } else {
+                            withContext(kotlinx.coroutines.NonCancellable) {
+                                convRepo.finishStoppedGeneration(emptyList(), runId)
+                            }
                         }
                         return@generationLock
                     }
@@ -1686,21 +1893,32 @@ internal class MessageGenerationController(
             } catch (e: CancellationException) {
                 // If cancellation landed inside Room's transaction, it may have committed before
                 // surfacing cancellation. Only the unbound edge lacks a Stop finalizer.
-                if (!runBound) {
+                if (
+                    !runBound &&
+                    bindingOutcome is ConversationGenerationState.RunBindingOutcome.Rejected
+                ) {
                     withContext(kotlinx.coroutines.NonCancellable) {
-                        if (convRepo.getRun(runId) != null) {
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
+                        if (reconcileCommittedInput()) {
+                            val claimed = settleCancelledDurableRun(state, bindingOutcome)
+                            if (!claimed) {
+                                convRepo.finishStoppedGeneration(emptyList(), runId)
+                            }
                         }
                     }
                 }
                 throw e
             } catch (e: Exception) {
-                if (!inputGraphCommitted) {
+                val durable = reconcileCommittedInput()
+                if (!durable) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         runCatching {
                             state.inputPersistenceFailed(direct.inputEffect.identity)
                         }
                     }
+                } else {
+                    val stopping = bindingOutcome as?
+                        ConversationGenerationState.RunBindingOutcome.Stopping
+                    if (stopping != null) settleLateBoundStop(state, stopping)
                 }
                 failGenerationSetup(
                     conversationId = genId,

@@ -67,6 +67,92 @@ class ConversationRuntimeReducerTest {
     }
 
     @Test
+    fun `durable Run arriving after pre-bind Stop receives one identified finalization effect`() {
+        val send = sendCommand(ownerToken = 3, runId = "run", effectId = "send-1")
+        val preparing = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            send,
+        ).newState
+        val stopping = ConversationRuntimeReducer.reduce(
+            preparing,
+            ConversationCommand.StopRequested(
+                identity = identity(ownerToken = 3),
+                coroutineAlreadySettled = false,
+                requiresPersistence = false,
+                effectId = null,
+            ),
+        ).newState
+
+        val persisted = ConversationRuntimeReducer.reduce(
+            stopping,
+            ConversationCommand.InputPersisted(send.identity),
+        )
+        val expectedIdentity = effectIdentity(
+            identity(ownerToken = 3, runId = "run"),
+            "stop-3",
+        )
+
+        assertEquals(
+            RunState.Stopping(
+                identity = identity(ownerToken = 3, runId = "run"),
+                finalizationEffectId = "stop-3",
+                coroutineSettled = false,
+                persistenceSettled = false,
+            ),
+            persisted.newState,
+        )
+        assertEquals(listOf(RunEffect.FinalizeStop(expectedIdentity)), persisted.effects)
+
+        val duplicate = ConversationRuntimeReducer.reduce(
+            persisted.newState,
+            ConversationCommand.InputPersisted(send.identity),
+        )
+        assertEquals(CommandRejection.DUPLICATE_RESULT, duplicate.rejection)
+
+        val staleBind = ConversationRuntimeReducer.reduce(
+            stopping,
+            ConversationCommand.BindRun(identity(ownerToken = 4, runId = "other")),
+        )
+        assertEquals(CommandRejection.STALE_IDENTITY, staleBind.rejection)
+    }
+
+    @Test
+    fun `replacement Run bind after Stop uses the same late finalization transition`() {
+        val unbound = RunState.Active(identity(ownerToken = 9))
+        val stopping = ConversationRuntimeReducer.reduce(
+            unbound,
+            ConversationCommand.StopRequested(
+                identity = unbound.identity,
+                coroutineAlreadySettled = false,
+                requiresPersistence = false,
+                effectId = null,
+            ),
+        ).newState
+        val durableIdentity = identity(ownerToken = 9, runId = "replacement", pass = 0)
+
+        val bound = ConversationRuntimeReducer.reduce(
+            stopping,
+            ConversationCommand.BindRun(durableIdentity),
+        )
+
+        assertEquals(
+            RunState.Stopping(
+                identity = durableIdentity,
+                finalizationEffectId = "stop-9",
+                coroutineSettled = false,
+                persistenceSettled = false,
+            ),
+            bound.newState,
+        )
+        assertEquals(
+            listOf(
+                RunEffect.FinalizeStop(effectIdentity(durableIdentity, "stop-9")),
+            ),
+            bound.effects,
+        )
+    }
+
+    @Test
     fun `active Send accepts guidance only for the currently bound Run`() {
         val active = active(ownerToken = 4, runId = "active-run", pass = 2)
         val request = sendCommand(ownerToken = 99, runId = "unused", effectId = "guidance")
@@ -223,7 +309,7 @@ class ConversationRuntimeReducerTest {
     }
 
     @Test
-    fun `Stop before input persistence rejects the late Room result and waits only for coroutine`() {
+    fun `Stop before input persistence adopts the late durable Run and waits for both barriers`() {
         val request = sendCommand(ownerToken = 5, runId = "run", effectId = "input")
         val preparing = ConversationRuntimeReducer.reduce(
             RunState.Idle(CONVERSATION_ID),
@@ -252,12 +338,20 @@ class ConversationRuntimeReducerTest {
             stopping.newState,
             ConversationCommand.InputPersisted(request.identity),
         )
-        assertFalse(lateInput.accepted)
-        assertSame(stopping.newState, lateInput.newState)
+        val stopIdentity = effectIdentity(request.identity.runIdentity(), "stop-5")
+        assertTrue(lateInput.accepted)
+        assertEquals(listOf(RunEffect.FinalizeStop(stopIdentity)), lateInput.effects)
+
+        val coroutineSettled = ConversationRuntimeReducer.reduce(
+            lateInput.newState,
+            ConversationCommand.CoroutineSettled(request.identity.runIdentity()),
+        )
+        assertTrue(coroutineSettled.newState is RunState.Stopping)
+        assertTrue(coroutineSettled.effects.isEmpty())
 
         val settled = ConversationRuntimeReducer.reduce(
-            stopping.newState,
-            ConversationCommand.CoroutineSettled(preparing.ownerIdentity),
+            coroutineSettled.newState,
+            ConversationCommand.PersistenceSettled(stopIdentity, success = true),
         )
         assertEquals(RunState.Idle(CONVERSATION_ID), settled.newState)
         assertEquals(SlotReleaseReason.STOP_BARRIERS_SETTLED, releaseEffect(settled).reason)
@@ -485,7 +579,7 @@ class ConversationRuntimeReducerTest {
             Triple(
                 stopping,
                 ConversationCommand.BindRun(identity(ownerToken = 1, runId = "run", pass = 1)),
-                CommandRejection.ILLEGAL_STATE,
+                CommandRejection.STALE_IDENTITY,
             ),
             Triple(
                 RunState.Preparing(
@@ -961,6 +1055,85 @@ class ConversationRuntimeReducerTest {
             ),
         )
         assertEquals(CommandRejection.ILLEGAL_STATE, lateFinalization.rejection)
+    }
+
+    @Test
+    fun `Room live Run snapshot produces one deterministic recovery effect`() {
+        listOf(RunStatus.ACTIVE, RunStatus.STOPPING).forEach { priorStatus ->
+            val snapshot = RunRecoverySnapshot(
+                conversationId = CONVERSATION_ID,
+                runId = "orphaned-run",
+                pass = 4,
+                status = priorStatus,
+            )
+            val command = ConversationCommand.Recover(snapshot)
+
+            val first = ConversationRuntimeReducer.reduce(
+                RunState.Idle(CONVERSATION_ID),
+                command,
+            )
+            val replay = ConversationRuntimeReducer.reduce(
+                RunState.Idle(CONVERSATION_ID),
+                command,
+            )
+
+            assertEquals(first, replay)
+            val effect = first.effects.filterIsInstance<RunEffect.RecoverDurableRun>().single()
+            assertEquals("orphaned-run", effect.identity.runId)
+            assertEquals(4, effect.identity.pass)
+            assertEquals("recover-orphaned-run-4", effect.identity.effectId)
+            assertEquals(priorStatus, effect.priorStatus)
+            assertTrue(first.newState is RunState.Recovering)
+            assertFalse(first.effects.any { it is RunEffect.StartProviderPass })
+        }
+    }
+
+    @Test
+    fun `recovery rejects stale and duplicate results and becomes Idle only on durable success`() {
+        val snapshot = RunRecoverySnapshot(
+            conversationId = CONVERSATION_ID,
+            runId = "orphaned-run",
+            pass = 2,
+            status = RunStatus.ACTIVE,
+        )
+        val requested = ConversationRuntimeReducer.reduce(
+            RunState.Idle(CONVERSATION_ID),
+            ConversationCommand.Recover(snapshot),
+        )
+        val effect = requested.effects.filterIsInstance<RunEffect.RecoverDurableRun>().single()
+        val duplicateRequest = ConversationRuntimeReducer.reduce(
+            requested.newState,
+            ConversationCommand.Recover(snapshot),
+        )
+        assertEquals(CommandRejection.DUPLICATE_RESULT, duplicateRequest.rejection)
+
+        val stale = ConversationRuntimeReducer.reduce(
+            requested.newState,
+            ConversationCommand.RecoveryCompleted(
+                effect.identity.copy(pass = 1),
+                success = true,
+            ),
+        )
+        assertEquals(CommandRejection.STALE_IDENTITY, stale.rejection)
+
+        val failed = ConversationRuntimeReducer.reduce(
+            requested.newState,
+            ConversationCommand.RecoveryCompleted(effect.identity, success = false),
+        )
+        assertEquals(listOf(RunEffect.RunRecoveryFailed(effect.identity)), failed.effects)
+        assertTrue((failed.newState as RunState.Recovering).failureReported)
+        val duplicateFailure = ConversationRuntimeReducer.reduce(
+            failed.newState,
+            ConversationCommand.RecoveryCompleted(effect.identity, success = false),
+        )
+        assertEquals(CommandRejection.DUPLICATE_RESULT, duplicateFailure.rejection)
+
+        val recovered = ConversationRuntimeReducer.reduce(
+            failed.newState,
+            ConversationCommand.RecoveryCompleted(effect.identity, success = true),
+        )
+        assertEquals(RunState.Idle(CONVERSATION_ID), recovered.newState)
+        assertTrue(recovered.effects.isEmpty())
     }
 
     @Test

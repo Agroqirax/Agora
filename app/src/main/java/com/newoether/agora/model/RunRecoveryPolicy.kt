@@ -8,6 +8,23 @@ package com.newoether.agora.model
  * where the external operation intentionally outlives the request coroutine.
  */
 object RunRecoveryPolicy {
+    fun recoverMessageStatus(
+        participant: Participant,
+        status: MessageStatus,
+    ): MessageStatus = if (
+        participant == Participant.MODEL &&
+        status in setOf(
+            MessageStatus.SENDING,
+            MessageStatus.THINKING,
+            MessageStatus.TOOL_CALLING,
+            MessageStatus.TRANSCRIBING,
+        )
+    ) {
+        MessageStatus.STOPPED
+    } else {
+        status
+    }
+
     fun stopIncompleteTools(segments: List<MessageSegment>): List<MessageSegment> =
         segments.map { segment ->
             if (

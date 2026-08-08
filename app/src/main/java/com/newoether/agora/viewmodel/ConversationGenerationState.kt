@@ -118,7 +118,11 @@ class ConversationGenerationState(
     /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
     fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
 
-    fun tryBindRun(uiToken: Long, runId: String, pass: Int = 0): Boolean = synchronized(genLock) {
+    fun bindPersistedRun(
+        uiToken: Long,
+        runId: String,
+        pass: Int = 0,
+    ): RunBindingOutcome = synchronized(genLock) {
         require(runId.isNotBlank())
         require(pass >= 0)
         val transition = reduceLocked(
@@ -131,9 +135,13 @@ class ConversationGenerationState(
                 ),
             ),
         )
-        if (!transition.accepted) return false
-        true
+        if (!transition.accepted) return@synchronized RunBindingOutcome.Rejected
+        applyMailboxEffectsLocked(transition)
+        transition.bindingOutcome()
     }
+
+    fun tryBindRun(uiToken: Long, runId: String, pass: Int = 0): Boolean =
+        bindPersistedRun(uiToken, runId, pass) is RunBindingOutcome.Active
 
     fun bindRun(uiToken: Long, runId: String, pass: Int = 0) {
         check(tryBindRun(uiToken, runId, pass)) {
@@ -180,9 +188,15 @@ class ConversationGenerationState(
     }
 
     /** Echo the exact Room acceptance effect back through the mailbox. */
-    suspend fun inputPersisted(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
-        ConversationCommandFactory { ConversationCommand.InputPersisted(identity) },
-    ).accepted
+    suspend fun finishInputPersistence(identity: RunEffectIdentity): RunBindingOutcome {
+        val transition = commandMailbox.submit(
+            ConversationCommandFactory { ConversationCommand.InputPersisted(identity) },
+        )
+        return transition.bindingOutcome()
+    }
+
+    suspend fun inputPersisted(identity: RunEffectIdentity): Boolean =
+        finishInputPersistence(identity) is RunBindingOutcome.Active
 
     /** Report failure of the exact accepted-input persistence effect without releasing its Job. */
     suspend fun inputPersistenceFailed(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
@@ -827,6 +841,16 @@ class ConversationGenerationState(
         val finalizationEffect: RunEffect.FinalizeStop?,
     )
 
+    sealed interface RunBindingOutcome {
+        data object Active : RunBindingOutcome
+
+        data class Stopping(
+            val finalizationEffect: RunEffect.FinalizeStop,
+        ) : RunBindingOutcome
+
+        data object Rejected : RunBindingOutcome
+    }
+
     enum class StopFinalizationOutcome {
         /** Old, duplicate, wrong-Run, wrong-pass, or otherwise illegal callback. */
         REJECTED,
@@ -855,6 +879,7 @@ class ConversationGenerationState(
 
     private fun RunState.identityOrNull(): RuntimeRunIdentity? = when (this) {
         is RunState.Idle -> null
+        is RunState.Recovering -> null
         is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
         is RunState.Compacting -> resumeIdentity
@@ -866,6 +891,7 @@ class ConversationGenerationState(
         is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
         is RunState.Active -> !coroutineSettled && identity.ownerToken == ownerToken
         is RunState.Idle,
+        is RunState.Recovering,
         is RunState.Compacting,
         is RunState.Finalizing,
         is RunState.Stopping,
@@ -972,6 +998,19 @@ class ConversationGenerationState(
             pass = pass,
             effectId = effectId,
         )
+
+    private fun Transition.bindingOutcome(): RunBindingOutcome {
+        if (!accepted) return RunBindingOutcome.Rejected
+        return when (newState) {
+            is RunState.Active -> RunBindingOutcome.Active
+            is RunState.Stopping -> effects
+                .filterIsInstance<RunEffect.FinalizeStop>()
+                .singleOrNull()
+                ?.let { RunBindingOutcome.Stopping(it) }
+                ?: RunBindingOutcome.Rejected
+            else -> RunBindingOutcome.Rejected
+        }
+    }
 
 }
 

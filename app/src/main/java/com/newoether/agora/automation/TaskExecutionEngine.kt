@@ -10,6 +10,9 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.RunEndReason
+import com.newoether.agora.model.RunStatus
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.CompactResult
@@ -18,10 +21,13 @@ import com.newoether.agora.viewmodel.ContextCompactEffectCoordinator
 import com.newoether.agora.viewmodel.ContextCompactor
 import com.newoether.agora.viewmodel.ConversationTitleGenerator
 import com.newoether.agora.viewmodel.GenerationManager
+import com.newoether.agora.viewmodel.GenerationFinalizer
 import com.newoether.agora.viewmodel.ConversationStateRegistry
+import com.newoether.agora.viewmodel.ConversationGenerationState
 import com.newoether.agora.viewmodel.GenerationRequestBuilder
 import com.newoether.agora.viewmodel.ProviderRegistry
 import com.newoether.agora.viewmodel.RagManager
+import com.newoether.agora.viewmodel.RunFinalizationEffectCoordinator
 import com.newoether.agora.viewmodel.ShellConfirmationController
 import com.newoether.agora.viewmodel.fallbackConversationTitle
 import com.newoether.agora.viewmodel.toUiChatMessage
@@ -123,6 +129,8 @@ class TaskExecutionEngine(
         scope = appScope,
         emitSnackbar = {},
     )
+    private val stopFinalizer = GenerationFinalizer(convRepo, ragManager::indexMessageForRag)
+    private val runFinalizationEffects = RunFinalizationEffectCoordinator()
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
     private val contextCompactor = ContextCompactor(
         conversations = convRepo,
@@ -132,6 +140,21 @@ class TaskExecutionEngine(
     )
     private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
     private val compactEffectCoordinator = ContextCompactEffectCoordinator()
+
+    private suspend fun settleStopEffect(
+        state: ConversationGenerationState,
+        effect: RunEffect.FinalizeStop,
+        messages: List<ChatMessage>,
+    ) = withContext(NonCancellable) {
+        stopFinalizer.launchStopFinalization(
+            scope = state.scope,
+            identity = effect.identity,
+            messages = messages,
+        ) { completion ->
+            val result = state.finishStopFinalization(completion)
+            if (result.accepted && completion.success) state.clearStoppedOverlay()
+        }.join()
+    }
 
     /**
      * Task-only post-processing. Loop runs share this engine but never call this method, so a
@@ -271,6 +294,9 @@ class TaskExecutionEngine(
         var lastStreamed: ChatMessage? = null
         var runCreated = false
         var runBound = false
+        var stopEffectHandled = false
+        var bindingOutcome: ConversationGenerationState.RunBindingOutcome =
+            ConversationGenerationState.RunBindingOutcome.Rejected
         var inputEffect: RunEffect.PersistAcceptedInput? = null
 
         return try {
@@ -369,12 +395,26 @@ class TaskExecutionEngine(
                 ),
             )
             runCreated = true
-            runBound = withContext(NonCancellable) {
-                generationState.inputPersisted(acceptedInputEffect.identity)
+            bindingOutcome = withContext(NonCancellable) {
+                generationState.finishInputPersistence(acceptedInputEffect.identity)
             }
+            runBound = bindingOutcome is ConversationGenerationState.RunBindingOutcome.Active
             if (!runBound) {
-                withContext(NonCancellable) {
-                    convRepo.finishStoppedGeneration(emptyList(), runId)
+                val stopping = bindingOutcome as?
+                    ConversationGenerationState.RunBindingOutcome.Stopping
+                if (stopping != null) {
+                    settleStopEffect(
+                        state = generationState,
+                        effect = stopping.finalizationEffect,
+                        messages = emptyList(),
+                    )
+                    stopEffectHandled = true
+                } else {
+                    // Runtime disposal is the only rejected durable edge. The ordinary Stop race
+                    // is represented by the exact effect handled above.
+                    withContext(NonCancellable) {
+                        convRepo.finishStoppedGeneration(emptyList(), runId)
+                    }
                 }
                 currentCoroutineContext().ensureActive()
                 return Result.Failure("Execution cancelled")
@@ -455,17 +495,64 @@ class TaskExecutionEngine(
                     if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
                 }
             }
-            // User Stop has a dedicated finalizer once the Run is bound. Other cancellation owners
-            // (Worker/Task teardown or the pre-bind commit edge) must not strand a live Run.
-            if (runCreated && (!runBound || !generationState.stopping.value)) {
-                withContext(NonCancellable) {
-                    val stopped = lastStreamed?.copy(status = MessageStatus.STOPPED)
-                    convRepo.finishStoppedGeneration(stopped?.let(::listOf).orEmpty(), runId)
+            withContext(NonCancellable) {
+                // If Room committed just before cancellation surfaced, first echo that exact
+                // persistence result. This either binds Active or emits the mailbox-owned late
+                // Stop effect; it never invents a second terminal writer.
+                if (
+                    runCreated &&
+                    !runBound &&
+                    bindingOutcome is ConversationGenerationState.RunBindingOutcome.Rejected &&
+                    inputEffect != null
+                ) {
+                    bindingOutcome = generationState.finishInputPersistence(inputEffect.identity)
+                    runBound = bindingOutcome is
+                        ConversationGenerationState.RunBindingOutcome.Active
+                }
+                when (val binding = bindingOutcome) {
+                    is ConversationGenerationState.RunBindingOutcome.Stopping -> {
+                        if (!stopEffectHandled) {
+                            settleStopEffect(
+                                state = generationState,
+                                effect = binding.finalizationEffect,
+                                messages = emptyList(),
+                            )
+                            stopEffectHandled = true
+                        }
+                    }
+                    ConversationGenerationState.RunBindingOutcome.Active -> {
+                        // An external user Stop already owns its effect. Worker/Task cancellation
+                        // enters the same mailbox only when no Stop is in progress.
+                        if (!generationState.stopping.value) {
+                            val stopped = generationState.stop()
+                            stopped.finalizationEffect?.let { effect ->
+                                settleStopEffect(
+                                    state = generationState,
+                                    effect = effect,
+                                    messages = stopped.stoppedMessage?.let(::listOf).orEmpty(),
+                                )
+                            }
+                        }
+                    }
+                    ConversationGenerationState.RunBindingOutcome.Rejected -> {
+                        if (runCreated) {
+                            // Runtime disposal/replacement is an exceptional recovery edge.
+                            val stopped = lastStreamed?.copy(status = MessageStatus.STOPPED)
+                            convRepo.finishStoppedGeneration(
+                                stopped?.let(::listOf).orEmpty(),
+                                runId,
+                            )
+                        }
+                    }
                 }
             }
             throw e
         } catch (e: Exception) {
-            DebugLog.e("TaskExecutionEngine", "runOnce failed for conversation=$conversationId", e)
+            DebugLog.e(
+                "TaskExecutionEngine",
+                "runOnce failed for conversation=$conversationId " +
+                    "errorType=${e.javaClass.simpleName}",
+            )
             val reason = e.localizedMessage ?: "Unexpected error"
             if (!runCreated && inputEffect != null) {
                 withContext(NonCancellable) {
@@ -473,22 +560,90 @@ class TaskExecutionEngine(
                     if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
                 }
             }
+            if (
+                runCreated &&
+                !runBound &&
+                bindingOutcome is ConversationGenerationState.RunBindingOutcome.Rejected &&
+                inputEffect != null
+            ) {
+                withContext(NonCancellable) {
+                    bindingOutcome = generationState.finishInputPersistence(inputEffect.identity)
+                    runBound = bindingOutcome is
+                        ConversationGenerationState.RunBindingOutcome.Active
+                }
+            }
             if (runCreated) {
-                convRepo.updateStreamingMessageCheckpoint(
-                    ChatMessage(
-                        id = modelMessageId,
-                        parentId = userMessageId,
-                        text = reason,
-                        thoughts = null,
-                        status = MessageStatus.ERROR,
-                        participant = Participant.MODEL,
-                        timestamp = startTime,
-                        modelName = effectiveModelId.takeIf { it.isNotBlank() },
-                        runId = runId,
-                        runSequence = 1,
-                    )
+                val failedMessage = ChatMessage(
+                    id = modelMessageId,
+                    parentId = userMessageId,
+                    text = reason,
+                    thoughts = null,
+                    status = MessageStatus.ERROR,
+                    participant = Participant.MODEL,
+                    timestamp = startTime,
+                    modelName = effectiveModelId.takeIf { it.isNotBlank() },
+                    runId = runId,
+                    runSequence = 1,
                 )
-                convRepo.failRun(runId)
+                val stopping = bindingOutcome as?
+                    ConversationGenerationState.RunBindingOutcome.Stopping
+                if (stopping != null) {
+                    if (!stopEffectHandled) {
+                        settleStopEffect(
+                            state = generationState,
+                            effect = stopping.finalizationEffect,
+                            messages = emptyList(),
+                        )
+                        stopEffectHandled = true
+                    }
+                } else if (runBound) {
+                    val effectIdentity = RunEffectIdentity(
+                        conversationId = conversationId,
+                        ownerToken = inputEffect?.identity?.ownerToken
+                            ?: error("Bound automation Run has no input identity"),
+                        runId = runId,
+                        pass = 0,
+                        effectId = "finalize-$runId-0",
+                    )
+                    val effect = generationState.requestRunFinalization(
+                        identity = effectIdentity,
+                        status = RunStatus.FAILED,
+                        reason = RunEndReason.PROVIDER_ERROR,
+                        markConversationUnread = false,
+                    )
+                    if (effect != null) {
+                        val result = runFinalizationEffects.execute(effect) { requested ->
+                            convRepo.finishGeneration(
+                                message = failedMessage,
+                                conversationId = requested.identity.conversationId,
+                                runId = requested.identity.runId,
+                                status = requested.status,
+                                reason = requested.reason,
+                                markConversationUnread = requested.markConversationUnread,
+                            )
+                        }
+                        val success = result is
+                            RunFinalizationEffectCoordinator.Result.Succeeded
+                        generationState.finishRunFinalization(effect.identity, success)
+                        if (success) {
+                            generationState.streamUpdate(effect.identity.ownerToken, failedMessage)
+                            generationState.streamClear(effect.identity.ownerToken)
+                        }
+                    }
+                } else if (
+                    bindingOutcome is ConversationGenerationState.RunBindingOutcome.Rejected
+                ) {
+                    // The runtime disappeared after Room commit; repair the durable graph even
+                    // though no process writer remains to accept a result command.
+                    convRepo.finishGeneration(
+                        message = failedMessage,
+                        conversationId = conversationId,
+                        runId = runId,
+                        status = RunStatus.FAILED,
+                        reason = RunEndReason.PROVIDER_ERROR,
+                        markConversationUnread = false,
+                    )
+                }
             }
             Result.Failure(reason)
         }

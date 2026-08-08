@@ -56,6 +56,32 @@ class ConversationRuntimeTraceTest {
         assertFalse(first.contains(CONVERSATION_ID))
     }
 
+    @Test
+    fun `recovery trace records only its identified metadata`() {
+        val trace = ConversationRuntimeTrace(capacity = 4, clock = { 123L })
+        val idle = RunState.Idle(CONVERSATION_ID)
+        val recover = ConversationCommand.Recover(
+            RunRecoverySnapshot(
+                conversationId = CONVERSATION_ID,
+                runId = "orphaned-run",
+                pass = 2,
+                status = RunStatus.STOPPING,
+            ),
+        )
+        val requested = ConversationRuntimeReducer.reduce(idle, recover)
+
+        trace.record(idle, recover, requested)
+
+        val entry = trace.snapshot().single()
+        assertEquals("Recover", entry.commandType)
+        assertEquals("Recovering", entry.newState)
+        assertEquals("orphaned-run", entry.runId)
+        assertEquals(2, entry.pass)
+        assertEquals("recover-orphaned-run-2", entry.effectId)
+        assertEquals(listOf("RecoverDurableRun"), entry.effectTypes)
+        assertFalse(entry.conversationIdHash.contains(CONVERSATION_ID))
+    }
+
     private fun identity(runId: String?, pass: Int = 0) = RuntimeRunIdentity(
         conversationId = CONVERSATION_ID,
         ownerToken = 1,

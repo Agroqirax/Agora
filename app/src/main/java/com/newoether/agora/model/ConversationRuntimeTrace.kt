@@ -56,6 +56,13 @@ class ConversationRuntimeTrace(
     fun snapshot(): List<ConversationRuntimeTraceEntry> = entries.toList()
 
     private fun ConversationCommand.runIdentity(): RuntimeRunIdentity = when (this) {
+        is ConversationCommand.Recover -> RuntimeRunIdentity(
+            conversationId = snapshot.conversationId,
+            ownerToken = Long.MAX_VALUE,
+            runId = snapshot.runId,
+            pass = snapshot.pass,
+        )
+        is ConversationCommand.RecoveryCompleted -> identity.runIdentity()
         is ConversationCommand.AcquireSlot -> identity
         is ConversationCommand.SendRequested -> identity.runIdentity()
         is ConversationCommand.InputPersisted -> identity.runIdentity()
@@ -77,6 +84,8 @@ class ConversationRuntimeTrace(
     }
 
     private fun ConversationCommand.effectIdOrNull(): String? = when (this) {
+        is ConversationCommand.Recover -> "recover-${snapshot.runId}-${snapshot.pass}"
+        is ConversationCommand.RecoveryCompleted -> identity.effectId
         is ConversationCommand.SendRequested -> identity.effectId
         is ConversationCommand.InputPersisted -> identity.effectId
         is ConversationCommand.InputPersistenceFailed -> identity.effectId
@@ -100,6 +109,7 @@ class ConversationRuntimeTrace(
 
     private fun RunState.traceName(): String = when (this) {
         is RunState.Idle -> "Idle"
+        is RunState.Recovering -> "Recovering"
         is RunState.Preparing -> "Preparing"
         is RunState.Active -> when (toolPhase) {
             RunToolPhase.None -> when (providerPhase) {
@@ -118,6 +128,8 @@ class ConversationRuntimeTrace(
     }
 
     private fun ConversationCommand.traceName(): String = when (this) {
+        is ConversationCommand.Recover -> "Recover"
+        is ConversationCommand.RecoveryCompleted -> "RecoveryCompleted"
         is ConversationCommand.AcquireSlot -> "AcquireSlot"
         is ConversationCommand.SendRequested -> "SendRequested"
         is ConversationCommand.InputPersisted -> "InputPersisted"
@@ -139,6 +151,8 @@ class ConversationRuntimeTrace(
     }
 
     private fun RunEffect.traceName(): String = when (this) {
+        is RunEffect.RecoverDurableRun -> "RecoverDurableRun"
+        is RunEffect.RunRecoveryFailed -> "RunRecoveryFailed"
         is RunEffect.SlotActivated -> "SlotActivated"
         is RunEffect.PersistAcceptedInput -> "PersistAcceptedInput"
         is RunEffect.AcceptGuidance -> "AcceptGuidance"

@@ -5,6 +5,33 @@ import org.junit.Test
 
 class RunRecoveryPolicyTest {
     @Test
+    fun recoverMessageStatusStopsOnlyInFlightModelMessages() {
+        val inFlight = listOf(
+            MessageStatus.SENDING,
+            MessageStatus.THINKING,
+            MessageStatus.TOOL_CALLING,
+            MessageStatus.TRANSCRIBING,
+        )
+
+        inFlight.forEach { status ->
+            assertEquals(
+                MessageStatus.STOPPED,
+                RunRecoveryPolicy.recoverMessageStatus(Participant.MODEL, status),
+            )
+            assertEquals(
+                status,
+                RunRecoveryPolicy.recoverMessageStatus(Participant.USER, status),
+            )
+        }
+        listOf(MessageStatus.SUCCESS, MessageStatus.ERROR, MessageStatus.STOPPED).forEach { status ->
+            assertEquals(
+                status,
+                RunRecoveryPolicy.recoverMessageStatus(Participant.MODEL, status),
+            )
+        }
+    }
+
+    @Test
     fun stopIncompleteTools_onlyTerminalizesLiveToolStates() {
         val recovered = RunRecoveryPolicy.stopIncompleteTools(
             listOf(
