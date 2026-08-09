@@ -188,6 +188,19 @@ internal class MessageGenerationController(
         toUiMessage = { it.toUiChatMessage(appContext) },
         onSnackbar = onSnackbar,
     )
+    private val branchMutationService = ConversationBranchMutationService(
+        scope = viewModelScope,
+        conversations = convRepo,
+        executionCoordinator = executionCoordinator,
+        toUiMessage = { it.toUiChatMessage(appContext) },
+        isConversationOpen = { currentConversationId.value == it },
+        projectGraph = { all, selected ->
+            renderStore.replaceGraph(allMessages = all, selectedChildren = selected)
+        },
+        onMutationStart = onTreeMutationStart,
+        onMutationSettling = onTreeMutationSettling,
+        onMutationFailed = onTreeMutationFailed,
+    )
 
     private suspend fun <T> withOptionalLock(
         genId: String,
@@ -233,111 +246,12 @@ internal class MessageGenerationController(
     fun deleteMessage(messageId: String): Int {
         val currentId = currentConversationId.value ?: return 0
         val state = registry.getOrCreate(currentId)
-        if (state.generating.value) return 0
-        val snapshot = renderStore.allMessages
-        if (snapshot.none { it.id == messageId }) return 0
-        val compactOnly = messageId.startsWith(Constants.COMPACT_MSG_PREFIX)
-        val previewIds = if (compactOnly) setOf(messageId) else structuralDescendantIds(snapshot, messageId)
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val switchingRequestId = onTreeMutationStart()
-            var committed = false
-            try {
-                state.queueMutationMutex.withLock {
-                    // Recheck after the overlay fade and under the same mutex that accepts Send.
-                    if (state.generating.value) return@withLock
-                    executionCoordinator.withConversationLock(currentId) lock@ {
-                        if (convRepo.getLiveRun(currentId) != null) return@lock
-                        if (compactOnly) {
-                            check(convRepo.removeContextCompact(messageId))
-                            val remaining = convRepo.getMessagesForConversationSnapshot(currentId)
-                            val selections = convRepo.restoreBranchSelections(currentId)
-                            ifOpenOn(currentId) {
-                                renderStore.replaceGraph(
-                                    allMessages = remaining.map { it.toUiChatMessage(appContext) },
-                                    selectedChildren = selections,
-                                )
-                            }
-                            committed = true
-                            onTreeMutationSettling(switchingRequestId, remaining.lastOrNull()?.id)
-                            return@lock
-                        }
-
-                        val runs = convRepo.getRunsForConversationSnapshot(currentId)
-                        val allMsgs = convRepo.getMessagesForConversationSnapshot(currentId)
-                        val allChatMessages =
-                            allMsgs.map { it.toUiChatMessage(appContext) }
-                        val previousSelected = convRepo.restoreBranchSelections(currentId)
-                        val previousRunSelections =
-                            convRepo.restoreRunBranchSelections(currentId)
-                        val plan = BranchDeletionPlanner.plan(
-                            rootMessageId = messageId,
-                            messages = allMsgs,
-                            runs = runs,
-                            messageSelections = previousSelected,
-                            runSelections = previousRunSelections,
-                        )
-                        val staleList = allMsgs.filter { it.id in plan.deletedMessageIds }
-                        val remainingMsgs =
-                            allMsgs.filter { it.id !in plan.deletedMessageIds }
-                        check(
-                            convRepo.deleteMessageSubtree(
-                                conversationId = currentId,
-                                rootMessageId = messageId,
-                                staleMessageIds = plan.deletedMessageIds.toList(),
-                                rootRunIdsToDelete = plan.rootRunIdsToDelete.toList(),
-                                messageSelections = plan.messageSelections,
-                                runSelections = plan.runSelections,
-                            )
-                        ) { "Message $messageId disappeared during delete" }
-
-                        // Files are external to Room, so remove them only after graph commit.
-                        convRepo.deleteMessageFiles(staleList)
-                        val remainingChatMessages =
-                            remainingMsgs.map { it.toUiChatMessage(appContext) }
-                        val remainingPath = ConversationUiState.resolvePath(
-                            allMessages = remainingChatMessages,
-                            streamingMsg = null,
-                            selectedChildren = plan.messageSelections,
-                        )
-                        val targetAfterDelete = deleteSettlementTargetMessageId(
-                            messagesBeforeDelete = allChatMessages,
-                            deletedRootMessageId = messageId,
-                            remainingPath = remainingPath,
-                        )
-                        ifOpenOn(currentId) {
-                            renderStore.replaceGraph(
-                                allMessages = remainingChatMessages,
-                                selectedChildren = plan.messageSelections,
-                            )
-                        }
-                        committed = true
-                        onTreeMutationSettling(switchingRequestId, targetAfterDelete)
-                    }
-                }
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Failed to delete message branch $messageId", e)
-            } finally {
-                if (!committed) onTreeMutationFailed(switchingRequestId)
-            }
-        }
-
-        return previewIds.size
-    }
-
-    private fun structuralDescendantIds(
-        messages: List<ChatMessage>,
-        rootMessageId: String,
-    ): Set<String> {
-        val childrenByParent = messages.groupBy { it.parentId }
-        val descendants = linkedSetOf(rootMessageId)
-        val pending = ArrayDeque<String>().apply { add(rootMessageId) }
-        while (pending.isNotEmpty()) {
-            for (child in childrenByParent[pending.removeFirst()].orEmpty()) {
-                if (descendants.add(child.id)) pending.add(child.id)
-            }
-        }
-        return descendants
+        return branchMutationService.delete(
+            conversationId = currentId,
+            messageId = messageId,
+            state = state,
+            snapshot = renderStore.allMessages,
+        )
     }
 
     // ==================================
