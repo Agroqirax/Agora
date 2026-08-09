@@ -7,7 +7,6 @@ import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ConversationRuntimeReducer
 import com.newoether.agora.model.ConversationRuntimeTrace
 import com.newoether.agora.model.ConversationRuntimeTraceEntry
-import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
@@ -15,7 +14,6 @@ import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunState
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.RuntimeRunIdentity
-import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.model.SlotReleaseReason
 import com.newoether.agora.model.Transition
 import kotlinx.coroutines.CoroutineScope
@@ -25,21 +23,17 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
-import java.util.UUID
 
 /**
- * One per conversation. Owns that conversation's private generation state — the IO scope,
- * current generation job, send gate, streaming/loading UI flows, ownership tokens, and the
- * queued-send list — so two conversations can generate in parallel without their state
- * clobbering each other.
+ * One runtime host per conversation. It exclusively owns [runState], applies reducer transitions,
+ * and coordinates the mailbox with the separately owned process resources and guidance leases, so
+ * two conversations can generate in parallel without their state clobbering each other.
  *
  * Replaces the process-global single-slot generation state that predated per-conversation parallelism.
  * The global StateFlows ChatViewModel exposes to the UI are now a mirror of whichever
@@ -49,11 +43,12 @@ import java.util.UUID
  *
  * ## Ownership tokens (unchanged semantics, scoped per conversation)
  *
- *  • [uiGenToken] owns the shared UI mirror (isLoading/streamingMessage/generatingInConversationId
+ *  • The resource owner's UI token owns the shared UI mirror (isLoading/streamingMessage
  *    as seen through the registry). Advanced on EVERY stop and captured by each new generation.
  *    Token-gated mutators below only touch state while their captured token is current.
  *
- *  • [persistId] owns the model message's DB row. Advanced when a new generation starts and when
+ *  • The resource owner's persistence token owns the model message's DB row. It advances when a
+ *    new generation starts and when
  *    Stop transfers terminal-write ownership to [GenerationFinalizer], so the cancelled provider
  *    coroutine cannot race the dedicated STOPPED transaction.
  *
@@ -63,7 +58,7 @@ import java.util.UUID
  * [requestSend]'s sequential mailbox. [acquireForSend] remains only as a legacy test adapter;
  * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration] and
  * [stop] submit through the same mailbox. [endGeneration] releases token-gated ownership; Stop
- * establishes the terminal cutoff, then cancels only this conversation's [generationJob] and
+ * establishes the terminal cutoff, then cancels only this conversation's owned generation Job and
  * in-flight HTTP streams (via [streamScope]).
  */
 class ConversationGenerationState(
@@ -74,25 +69,18 @@ class ConversationGenerationState(
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** This conversation's in-flight HTTP streaming handles. Cancelled together on stop. */
-    val streamScope: StreamScope = StreamScope()
+    private val resources = ConversationRuntimeResources()
+    private val guidanceLeases = GuidanceLeaseStore()
 
-    // ── Private UI state (mirrored to the global UI flows only while this conversation is open) ──
-    val streamingMessage = MutableStateFlow<ChatMessage?>(null)
-    val isLoading = MutableStateFlow(false)
-    /** True while this conversation has an active generation. Drives the Stop-button visibility. */
-    val generating = MutableStateFlow(false)
-    /** True from a user Stop until both coroutine and durable finalization barriers settle.
-     *  Drives the composer's gray "stopping…" spinner. */
-    val stopping = MutableStateFlow(false)
-    /** True while this conversation is evaluating or executing a Compact boundary. */
-    val compacting = MutableStateFlow(false)
+    /** Read-only process-resource projection observed by the UI and effect runners. */
+    val streamScope = resources.streamScope
+    val streamingMessage = resources.streamingMessage
+    val isLoading = resources.isLoading
+    val generating = resources.generating
+    val stopping = resources.stopping
+    val compacting = resources.compacting
+    val queuedSends = guidanceLeases.queuedSends
 
-    /** Queued sends waiting for the current generation to finish. Per-conversation. */
-    val queuedSends = MutableStateFlow<List<QueuedSend>>(emptyList())
-    private val guidanceLock = Any()
-    private val claimedGuidance = mutableMapOf<String, List<QueuedSend>>()
-    private var guidanceDisposed = false
     /** Serializes durable intervention acceptance against slot release/queue drain. */
     val queueMutationMutex = Mutex()
 
@@ -101,22 +89,19 @@ class ConversationGenerationState(
     /** Authoritative process-slot state. All mutations go through [ConversationRuntimeReducer]. */
     private var runState: RunState = RunState.Idle(conversationId)
     private val runtimeTrace = ConversationRuntimeTrace()
-    private var generationJob: Job? = null
-    private var uiGenToken = 0L
     /** Foreground/headless Send, Stop, tool-effect, and Compact lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
-    /** One-shot suppression used only by failed queue-boundary recovery. */
-    private var suppressNextQueueDrain = false
-    private val persistId = AtomicLong(0L)
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
-    fun captureUiToken(): Long = synchronized(genLock) { uiGenToken }
+    fun captureUiToken(): Long = synchronized(genLock) { resources.captureUiToken() }
     /** Claims DB-row ownership for a freshly-started generation. */
-    fun nextPersistId(): Long = persistId.incrementAndGet()
-    /** True while [persistId] still belongs to the generation that captured [id]. */
-    fun isLatestPersist(id: Long): Boolean = persistId.get() == id
+    fun nextPersistId(): Long = resources.nextPersistId()
+    /** True while the persistence token still belongs to the generation that captured [id]. */
+    fun isLatestPersist(id: Long): Boolean = resources.isLatestPersist(id)
     /** True while [uiToken] is still the current UI-ownership token (nothing stopped/superseded us). */
-    fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) { uiGenToken == uiToken }
+    fun isCurrentToken(uiToken: Long): Boolean = synchronized(genLock) {
+        resources.isCurrentToken(uiToken)
+    }
 
     fun bindPersistedRun(
         uiToken: Long,
@@ -169,7 +154,7 @@ class ConversationGenerationState(
                 ConversationCommand.SendRequested(
                     identity = RunEffectIdentity(
                         conversationId = conversationId,
-                        ownerToken = uiGenToken + 1,
+                        ownerToken = resources.nextUiToken(),
                         runId = proposedRunId,
                         pass = 0,
                         effectId = effectId,
@@ -324,7 +309,7 @@ class ConversationGenerationState(
                 ConversationCommand.CompactRequested(
                     identity = RunEffectIdentity(
                         conversationId = conversationId,
-                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                        ownerToken = resources.nextUiToken().coerceAtLeast(1),
                         runId = compactRunId,
                         pass = 0,
                         effectId = effectId,
@@ -361,7 +346,7 @@ class ConversationGenerationState(
                 } else {
                     RunEffectIdentity(
                         conversationId = conversationId,
-                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                        ownerToken = resources.nextUiToken().coerceAtLeast(1),
                         runId = "unbound_$compactRunId",
                         pass = 0,
                         effectId = effectId,
@@ -422,7 +407,7 @@ class ConversationGenerationState(
      * not deep inside the coroutine).
     */
     fun acquireForSend(): Long? = synchronized(genLock) {
-        val nextToken = uiGenToken + 1
+        val nextToken = resources.nextUiToken()
         val transition = reduceLocked(
             ConversationCommand.AcquireSlot(
                 RuntimeRunIdentity(conversationId = conversationId, ownerToken = nextToken),
@@ -440,7 +425,7 @@ class ConversationGenerationState(
      * switch; enforcing the same rule here makes the state machine authoritative.
     */
     fun tryAcquireForReplacement(): Long? = synchronized(genLock) {
-        val nextToken = uiGenToken + 1
+        val nextToken = resources.nextUiToken()
         val transition = reduceLocked(
             ConversationCommand.AcquireSlot(
                 RuntimeRunIdentity(conversationId = conversationId, ownerToken = nextToken),
@@ -471,20 +456,17 @@ class ConversationGenerationState(
         val accepted = synchronized(genLock) {
             if (
                 !runState.isLaunchableOwner(uiToken) ||
-                generationJob != null
+                resources.currentGenerationJob() != null
             ) {
                 false
             } else {
-                generationJob = job
-                installed.set(true)
-                true
+                resources.installGenerationJob(job).also(installed::set)
             }
         }
         if (!accepted) {
             job.cancel()
             val abandonedStoppingLaunch = synchronized(genLock) {
-                runState.isStoppingOwner(uiToken) &&
-                    generationJob == null
+                runState.isStoppingOwner(uiToken) && resources.currentGenerationJob() == null
             }
             if (abandonedStoppingLaunch) settleCoroutineAsync(uiToken)
             return null
@@ -507,13 +489,11 @@ class ConversationGenerationState(
         val accepted = synchronized(genLock) {
             if (
                 !runState.isLaunchableOwner(uiToken) ||
-                generationJob != null
+                resources.currentGenerationJob() != null
             ) {
                 false
             } else {
-                generationJob = job
-                installed.set(true)
-                true
+                resources.installGenerationJob(job).also(installed::set)
             }
         }
         // An external Job can complete between hook registration and installation. The hook sees
@@ -536,7 +516,7 @@ class ConversationGenerationState(
         require(uiToken > 0)
         val transition = commandMailbox.submit(
             ConversationCommandFactory {
-                check(generationJob?.isCompleted != false) {
+                check(resources.currentGenerationJob()?.isCompleted != false) {
                     "CoroutineSettled requires the installed generation Job to be completed"
                 }
                 val currentIdentity = runState.identityOrNull()
@@ -576,51 +556,32 @@ class ConversationGenerationState(
         }
     }
 
-    /** Applies UI/resource release after the reducer has already transitioned to [RunState.Idle]. */
-    private fun applyReleasedSlotLocked() {
-        check(runState is RunState.Idle)
-        generationJob = null
-        isLoading.value = false
-        generating.value = false
-        stopping.value = false
-        compacting.value = false
-        onRegistryIdle(conversationId)
-        onIdle?.invoke(conversationId)
-    }
-
     /**
      * Defers exactly the next automatic queue drain. A boundary send that failed before its batch
      * became durable keeps the guidance for a later boundary without immediately retrying itself
      * from the current generation's finally block.
      */
     fun deferNextQueueDrain() = synchronized(genLock) {
-        suppressNextQueueDrain = true
+        resources.deferNextQueueDrain()
     }
 
     fun consumeQueueDrainPermission(): Boolean = synchronized(genLock) {
-        val allowed = !suppressNextQueueDrain
-        suppressNextQueueDrain = false
-        allowed
+        resources.consumeQueueDrainPermission()
     }
 
     // ── Token-gated UI mutators ───────────────────────────────────────────
     fun streamUpdate(uiToken: Long, msg: ChatMessage) {
-        synchronized(genLock) { if (uiGenToken == uiToken) streamingMessage.value = msg }
+        synchronized(genLock) { resources.streamUpdate(uiToken, msg) }
     }
     fun loadingChange(uiToken: Long, value: Boolean) {
-        synchronized(genLock) { if (uiGenToken == uiToken) isLoading.value = value }
+        synchronized(genLock) { resources.loadingChange(uiToken, value) }
     }
     fun streamClear(uiToken: Long) {
         synchronized(genLock) {
-            if (uiGenToken != uiToken) return
-            val message = streamingMessage.value
-            // A user Stop deliberately keeps the STOPPED overlay until Room has persisted it.
-            // Normal completion must commit the final in-memory message before removing the
-            // overlay, otherwise the UI briefly falls back to the empty SENDING placeholder.
-            if (message?.status != MessageStatus.STOPPED) {
-                if (message != null) onStreamCommit?.invoke(conversationId, message)
-                streamingMessage.value = null
-            }
+            val message = resources.streamMessageForClear(uiToken) ?: return
+            // Commit before removing the overlay so the UI never exposes the empty placeholder.
+            onStreamCommit?.invoke(conversationId, message)
+            resources.clearStreamingMessage()
         }
     }
 
@@ -676,22 +637,12 @@ class ConversationGenerationState(
                 val identity = currentState.identityOrNull()
                     ?: RuntimeRunIdentity(
                         conversationId = conversationId,
-                        ownerToken = (uiGenToken + 1).coerceAtLeast(1),
+                        ownerToken = resources.nextUiToken().coerceAtLeast(1),
                     )
-                previousJob.set(generationJob)
+                previousJob.set(resources.currentGenerationJob())
                 requestedIdentity.set(identity)
                 duplicateStoppingRequest.set(currentState is RunState.Stopping)
-                stoppedMessage.set(
-                    streamingMessage.value
-                        ?.takeUnless {
-                            currentState is RunState.Idle ||
-                                currentState is RunState.Compacting &&
-                                currentState.resumeIdentity == null ||
-                                currentState is RunState.Finalizing &&
-                                !currentState.persistenceFailureReported
-                        }
-                        ?.copy(status = MessageStatus.STOPPED),
-                )
+                stoppedMessage.set(resources.stoppableOverlay(currentState))
                 val requiresPersistence = identity.runId != null
                 val effectId = when {
                     !requiresPersistence -> null
@@ -710,8 +661,7 @@ class ConversationGenerationState(
         if (transition.accepted || duplicateStoppingRequest.get()) {
             // Hard kill after the mailbox-owned cutoff: synchronous handle cancellation wakes
             // blocking HTTP/native reads, then Job cancellation unwinds every remaining child.
-            streamScope.cancelAll()
-            previousJob.get()?.cancel()
+            resources.cancelStreamsAnd(previousJob.get())
         }
         StopResult(
             stoppedMessage = stoppedMessage.get(),
@@ -762,9 +712,7 @@ class ConversationGenerationState(
      */
     fun clearStoppedOverlay() {
         synchronized(genLock) {
-            if (streamingMessage.value?.status == MessageStatus.STOPPED) {
-                streamingMessage.value = null
-            }
+            resources.clearStoppedOverlay()
         }
     }
 
@@ -775,64 +723,32 @@ class ConversationGenerationState(
 
     /** Runtime disposal is not a user Stop and therefore does not create a durable Stop effect. */
     internal fun dispose(): List<QueuedSend> {
-        val pendingGuidance = synchronized(guidanceLock) {
-            guidanceDisposed = true
-            queuedSends.value.also { queuedSends.value = emptyList() }
-        }
-        val job = synchronized(genLock) { generationJob }
-        streamScope.cancelAll()
-        job?.cancel()
+        val pendingGuidance = guidanceLeases.disposePending()
+        val job = synchronized(genLock) { resources.currentGenerationJob() }
+        resources.cancelStreamsAnd(job)
         cancelScope()
         return pendingGuidance
     }
 
     /** Append a queued send (generation in progress → enqueue instead of launching). */
-    fun enqueueSend(send: QueuedSend) {
-        synchronized(guidanceLock) {
-            check(!guidanceDisposed) { "Conversation guidance store was disposed" }
-            queuedSends.value = queuedSends.value + send
-        }
-    }
+    fun enqueueSend(send: QueuedSend) = guidanceLeases.enqueue(send)
 
     /**
      * Remove a queued send by id (X button). Returns the removed item (or null) so the caller can
      * delete its now-orphaned attachment files — the composer already cleared its own reference on
      * enqueue, so the QueuedSend holds the only handle to those copied files.
      */
-    fun removeQueuedSend(id: String): QueuedSend? {
-        synchronized(guidanceLock) {
-            val removed = queuedSends.value.firstOrNull { it.id == id } ?: return null
-            queuedSends.value = queuedSends.value.filterNot { it.id == id }
-            return removed
-        }
-    }
+    fun removeQueuedSend(id: String): QueuedSend? = guidanceLeases.remove(id)
 
     /** Transfer the pending batch to one explicit in-flight owner before leaving memory-only state. */
-    fun claimQueuedSends(): GuidanceBatchLease? = synchronized(guidanceLock) {
-        if (guidanceDisposed || queuedSends.value.isEmpty()) return null
-        val lease = GuidanceBatchLease(UUID.randomUUID().toString(), queuedSends.value)
-        queuedSends.value = emptyList()
-        check(claimedGuidance.put(lease.id, lease.batch) == null)
-        lease
-    }
+    fun claimQueuedSends(): GuidanceBatchLease? = guidanceLeases.claim()
 
     /**
      * End one in-flight ownership lease. A durable commit transfers file ownership to Room;
      * otherwise the exact batch returns to the front, unless disposal now owns cleanup.
      */
-    fun settleGuidanceClaim(leaseId: String, durable: Boolean): Boolean {
-        var orphaned = emptyList<QueuedSend>()
-        synchronized(guidanceLock) {
-            val batch = claimedGuidance.remove(leaseId) ?: return false
-            when {
-                durable -> Unit
-                guidanceDisposed -> orphaned = batch
-                else -> queuedSends.value = batch + queuedSends.value
-            }
-        }
-        orphaned.forEach(QueuedSend::deleteOwnedFiles)
-        return true
-    }
+    fun settleGuidanceClaim(leaseId: String, durable: Boolean): Boolean =
+        guidanceLeases.settle(leaseId, durable)
 
     data class StopResult(
         val stoppedMessage: ChatMessage?,
@@ -913,72 +829,26 @@ class ConversationGenerationState(
 
     /** Apply only effects whose authority has moved to the mailbox in the current phase. */
     private fun applyMailboxEffectsLocked(transition: Transition) {
-        transition.effects.filterIsInstance<RunEffect.RunCompact>()
-            .singleOrNull()
-            ?.let { effect ->
-                val compactState = runState as? RunState.Compacting
-                    ?: error("RunCompact must enter Compacting")
-                check(compactState.effectIdentity == effect.identity)
-                check(compactState.compactRunId == effect.compactRunId)
-                check(compactState.mode == effect.mode)
-                compacting.value = true
-            }
-        if (runState !is RunState.Compacting && compacting.value) {
-            compacting.value = false
-        }
-        transition.effects.filterIsInstance<RunEffect.PersistAcceptedInput>()
-            .singleOrNull()
-            ?.let { effect ->
-                val preparing = runState as? RunState.Preparing
-                    ?: error("Accepted input persistence must enter Preparing")
-                check(preparing.inputEffectIdentity == effect.identity)
-                applyActivatedSlotLocked(preparing.ownerIdentity, loading = false)
-            }
-        transition.effects.filterIsInstance<RunEffect.CancelProviderPass>()
-            .singleOrNull()
-            ?.let { effect ->
-                check(uiGenToken == effect.identity.ownerToken)
-                val stopped = streamingMessage.value?.copy(status = MessageStatus.STOPPED)
-                check(stopped == null || effect.identity.runId != null) {
-                    "A streaming Stop effect requires a bound Run"
-                }
-                // Revoke DB/UI ownership before cancellation can enter GenerationManager.finally.
-                persistId.incrementAndGet()
-                uiGenToken += 1
-                streamingMessage.value = stopped
-                if (runState is RunState.Stopping) {
-                    isLoading.value = true
-                    generating.value = true
-                    stopping.value = true
-                }
-            }
-        transition.effects.filterIsInstance<RunEffect.ReleaseSlot>()
-            .singleOrNull()
-            ?.let { release ->
-                when (release.reason) {
-                    SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
-                        // Stop settlement owns the next drain; a stale failed-boundary suppression
-                        // must not prevent accepted guidance from moving to its fresh Run.
-                        suppressNextQueueDrain = false
-                        applyReleasedSlotLocked()
-                    }
-                    SlotReleaseReason.NORMAL_COMPLETION,
-                    SlotReleaseReason.NORMAL_FINALIZATION_SETTLED,
-                    SlotReleaseReason.EMPTY_STOP,
-                    SlotReleaseReason.SEND_LAUNCH_ABANDONED,
-                    -> applyReleasedSlotLocked()
-                }
-            }
+        val events = resources.applyMailboxEffects(transition, runState)
+        if (events.activated) notifyActivatedLocked()
+        if (events.released) notifyReleasedLocked()
     }
 
     private fun applyActivatedSlotLocked(identity: RuntimeRunIdentity, loading: Boolean) {
         check(runState !is RunState.Idle)
-        uiGenToken = identity.ownerToken
-        isLoading.value = loading
-        generating.value = true
-        stopping.value = false
+        resources.activate(identity, loading)
+        notifyActivatedLocked()
+    }
+
+    private fun notifyActivatedLocked() {
         onRegistryActive(conversationId)
         onActive?.invoke(conversationId)
+    }
+
+    private fun notifyReleasedLocked() {
+        check(runState is RunState.Idle)
+        onRegistryIdle(conversationId)
+        onIdle?.invoke(conversationId)
     }
 
     /** Must be called while [genLock] is held. This is the only process-slot state write path. */
@@ -1012,69 +882,4 @@ class ConversationGenerationState(
         }
     }
 
-}
-
-/**
- * A message queued behind an in-progress generation, waiting to be sent. Carries the full
- * [SelectedAttachment] list for the queue banner. It is deliberately not a MessageEntity yet:
- * Room and the selected tree first see it at the next durable tool/generation boundary.
- */
-data class QueuedSend(
-    val id: String,
-    val text: String,
-    /** Model selected in the originating conversation when Send was tapped. */
-    val modelId: String,
-    val attachments: List<SelectedAttachment>,
-    /** Provenance only; drain always creates a fresh Run and never reuses this id. */
-    val runId: String,
-    /** Legacy bare-image paths retained for queue display and cleanup. */
-    val images: List<String> = emptyList(),
-    /** Prepared payload owned by this in-memory guidance until its boundary commit. */
-    val preparedImages: List<String> = emptyList(),
-    val preparedAttachmentMetaJson: String? = null,
-    val preparedOwnedPaths: List<String> = emptyList(),
-    val createdAt: Long = System.currentTimeMillis(),
-)
-
-data class GuidanceBatchLease(
-    val id: String,
-    val batch: List<QueuedSend>,
-) {
-    init {
-        require(id.isNotBlank())
-        require(batch.isNotEmpty())
-    }
-}
-
-internal fun QueuedSend.deleteOwnedFiles() {
-    com.newoether.agora.util.AttachmentFiles.deleteBacking(attachments)
-    preparedOwnedPaths.forEach { path -> runCatching { java.io.File(path).delete() } }
-}
-
-/**
- * Per-conversation collection of in-flight HTTP streaming handles. [cancelAll] severs only the
- * streams opened under this scope — so a Stop on conversation A no longer kills conversation B's
- * in-flight provider stream (the fix for the global `cancelAllStreams` race).
- */
-fun interface GenerationCancelHandle {
-    fun cancel()
-}
-
-class StreamScope {
-    private val handles = java.util.Collections.newSetFromMap(
-        java.util.concurrent.ConcurrentHashMap<GenerationCancelHandle, Boolean>()
-    )
-
-    fun register(handle: GenerationCancelHandle) {
-        handles.add(handle)
-    }
-
-    fun unregister(handle: GenerationCancelHandle) {
-        handles.remove(handle)
-    }
-
-    fun cancelAll() {
-        handles.toList().forEach { runCatching { it.cancel() } }
-        handles.clear()
-    }
 }
