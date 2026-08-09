@@ -27,7 +27,6 @@ import com.newoether.agora.data.PredefinedVariables
 import com.newoether.agora.data.ShellDeviceConfig
 
 import com.newoether.agora.data.local.ChatEntity
-import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.AttachmentItem
@@ -257,6 +256,14 @@ class ChatViewModel(
             gm.onMessagePersisted = { messageId, text -> ragManager.indexMessageForRag(messageId, text) }
             gm.onConfirmShellCommand = { server, summary -> shellConfirmation.confirm(server, summary) }
         }
+    }
+    private val semanticSearchService by lazy {
+        SemanticSearchService(
+            settings = settings,
+            activeEmbeddingConfig = { activeEmbeddingModel.value },
+            resolveEmbeddingApiKey = ragManager::resolveEmbeddingApiKey,
+            search = generationManager::semanticSearch,
+        )
     }
 
     val sandboxManager: SandboxManager? by lazy {
@@ -795,25 +802,8 @@ class ChatViewModel(
         mmprojPath: String = ""
     ) = modelManager.updateLocalChatModel(uuid, newModelId, newAlias, nCtx, temperature, topP, maxTokens, mmprojPath)
 
-    suspend fun semanticSearch(query: String, limit: Int = 20): List<Pair<MessageEntity, Float>> {
-        val ctx = GenerationContext(
-            accessSavedMemories = settings.accessSavedMemories.value,
-            accessActiveMemory = settings.accessActiveMemory.value,
-            accessPastConversations = settings.accessPastConversations.value,
-            modelSearchMethod = settings.modelSearchMethod.value,
-            activeEmbeddingConfig = activeEmbeddingModel.value,
-            embeddingApiKey = ragManager.resolveEmbeddingApiKey() ?: "",
-            ragThreshold = settings.ragThreshold.value,
-            searchMatchLimit = settings.searchMatchLimit.value,
-            searchContextWindow = settings.searchContextWindow.value,
-            webSearchEnabled = settings.webSearchEnabled.value,
-            webSearchApiKeys = settings.webSearchApiKeys.value,
-            webSearchProvider = settings.webSearchProvider.value,
-            webSearchNumResults = settings.webSearchNumResults.value,
-            webSearchBaseUrl = settings.webSearchBaseUrl.value
-        )
-        return generationManager.semanticSearch(query, limit, ctx)
-    }
+    suspend fun semanticSearch(query: String, limit: Int = 20) =
+        semanticSearchService.search(query, limit)
 
     fun resolveEmbeddingKeyForProviderExact(targetProvider: String) =
         ragManager.resolveEmbeddingKeyForProviderExact(targetProvider)
