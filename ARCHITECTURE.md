@@ -54,7 +54,7 @@ those instances instead of building competing stacks.
 | `app/src/play` | Play flavor implementation without bundled PRoot binaries |
 | `app/src/main/cpp` | llama.cpp chat/embedding JNI and PRoot bridge |
 | `thirdparty` | Vendored/submodule native dependencies |
-| `build-logic` | Android bytecode compatibility transform |
+| `build-logic` | Android bytecode compatibility transform and repository source-size policy |
 | `server` | Optional Agora-related server components; not part of the APK runtime |
 | `docs` | User-facing MkDocs documentation |
 
@@ -103,6 +103,24 @@ Branch operations must preserve these invariants:
 
 `ConversationBranchPath`, `ConversationForkShareService`, and
 `MessageAttachmentCloneSession` implement these rules.
+
+### 3.3 Orchestration source ownership
+
+The runtime decomposition keeps one directional control path while separating effect bodies:
+
+| Surface | Ownership |
+|---|---|
+| `ConversationCommandMailbox` | Bounded, sequential command admission for one conversation. |
+| `ConversationRuntimeReducer` | Pure transition and effect authority; owns no Android, Room, Provider, Tool, or UI dependency. |
+| `ConversationGenerationState` | Applies accepted transitions and owns the per-conversation runtime resources and read-only projections. |
+| `GenerationManager` | Routes mailbox-authorized Provider, tool, checkpoint, finalization, and notification effects; returns identified result commands. |
+| `MessageGenerationController` | Adapts external Send, Stop, queue, edit, regenerate, Compact, and lifecycle requests to the mailbox/effect contract. |
+| `ChatViewModel` | Stable Compose facade over feature controllers and immutable UI projections; it does not decide Run transitions. |
+
+Extracted controllers and executors receive explicit inputs and own only their named side effect or
+UI projection. They do not hold a writable `RunState`, release a conversation slot, or call the
+reducer directly. `ConversationStateRegistry` owns the process lifetime and deterministic disposal
+of the per-conversation runtime state.
 
 ## 4. Generation pipeline
 
@@ -354,6 +372,15 @@ complete replay of the same message ids as idempotent. Partial or conflicting re
 Migrations are explicit and schema snapshots are committed under `app/schemas`; v16→v17
 introduced Runs, and the current chain continues through v22.
 
+The local persistence declarations are split by responsibility without creating competing DAOs:
+
+- `ChatEntities.kt` contains Room entities, converters, query projections, and pure tool-round
+  validation;
+- `ChatDao.kt` is the sole `@Dao` and owns graph/Run/Compact/embedding/export declarations plus
+  cross-domain transactions;
+- `ChatAutomationDao.kt` is a stateless inherited declaration surface for Task and Loop rows;
+- `ChatDatabase.kt` is only the v22 Room composition root and migration chain.
+
 DataStore holds user settings, provider/model configuration, encrypted API-key
 references, appearance, generation defaults, tool toggles, backup settings, and
 per-conversation overrides.
@@ -421,6 +448,12 @@ Use the repository scripts from the project root:
 `build.ps1` is the required release gate because it configures the Android SDK and
 runs the repository's expected unit-test/build workflow. Deployment is a separate, explicitly
 authorized operation and is not part of the architecture or validation gate.
+
+Every handwritten Kotlin source in main, test, flavor, and build-logic source sets is limited to
+999 physical lines by `verifyKotlinFileSize`. The task is wired into Gradle `check`, Android
+`preBuild`, `build.ps1`, and CI. Generated/build output, caches, and the vendored `thirdparty` tree
+are excluded; the temporary migration baseline is empty. The exact counting and baseline rules are
+documented in `docs/development/kotlin-source-size-policy.md`.
 
 High-risk changes require focused tests in addition to the full gate:
 

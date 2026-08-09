@@ -14,6 +14,10 @@ higher cap is accepted. A new oversized source always fails, and an entry become
 as its source reaches 999 lines or is removed. The baseline must be edited intentionally; no task
 rewrites it.
 
+The migration baseline currently has zero entries. All handwritten Kotlin sources are therefore
+checked directly against the 999-line limit; the immutable initial cap set remains in build logic
+only to prevent a removed historical exception from being reintroduced.
+
 The root convention plugin wires the verification into Gradle `check`, the aggregate `test` task
 used by the local `build.ps1`, and Android `preBuild`. GitHub Actions also invokes the task
 explicitly before assembling the F-Droid APK.
