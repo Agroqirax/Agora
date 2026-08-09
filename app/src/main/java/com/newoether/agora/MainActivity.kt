@@ -16,7 +16,6 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.runtime.key
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.rememberScrollState
@@ -37,23 +36,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.AccessibilityManager
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.Font
@@ -82,7 +74,6 @@ import com.newoether.agora.util.CrashReporter
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
 
@@ -298,189 +289,6 @@ class MainActivity : ComponentActivity() {
             }?.lastPathSegment?.takeIf { it.isNotBlank() }
     }
 }
-
-private const val SettingsOverlayScrimAlpha = 0.45f
-private const val SettingsOverlayEnterOffsetFraction = 0.25f
-private const val SettingsOverlayEnterScale = 0.92f
-private const val SettingsOverlayExitScale = 0.94f
-private const val SettingsOverlaySpringVisibilityThreshold = 0.001f
-
-@Composable
-private fun SettingsOverlayHost(
-    visible: Boolean,
-    onDismiss: () -> Unit,
-    onEnterFinished: () -> Unit = {},
-    content: @Composable () -> Unit
-) {
-    val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
-    val scrimAlpha = remember { Animatable(0f) }
-    val pageOffsetFraction = remember { Animatable(0f) }
-    val pageAlpha = remember { Animatable(1f) }
-    val pageScale = remember { Animatable(1f) }
-    var renderOverlay by remember { mutableStateOf(visible) }
-    val latestOnEnterFinished by rememberUpdatedState(onEnterFinished)
-
-    // Motion policy changes while the overlay is already visible must not replay its entrance.
-    // The latest policy is still observed when `visible` changes and a new enter/exit begins.
-    LaunchedEffect(visible) {
-        if (visible) {
-            renderOverlay = true
-            scrimAlpha.snapTo(0f)
-            pageOffsetFraction.snapTo(
-                if (allowSpatialTransitions) SettingsOverlayEnterOffsetFraction else 0f,
-            )
-            pageAlpha.snapTo(0f)
-            pageScale.snapTo(
-                if (allowSpatialTransitions) SettingsOverlayEnterScale else 1f,
-            )
-            if (allowSpatialTransitions) {
-                listOf(
-                    launch {
-                        scrimAlpha.animateTo(
-                            SettingsOverlayScrimAlpha,
-                            animationSpec = tween(300, delayMillis = 50)
-                        )
-                    },
-                    launch {
-                        pageOffsetFraction.animateTo(
-                            0f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessLow,
-                                visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
-                            )
-                        )
-                    },
-                    launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
-                    launch {
-                        pageScale.animateTo(
-                            1f,
-                            animationSpec = spring(
-                                dampingRatio = Spring.DampingRatioLowBouncy,
-                                stiffness = Spring.StiffnessLow,
-                                visibilityThreshold = SettingsOverlaySpringVisibilityThreshold
-                            )
-                        )
-                    }
-                ).joinAll()
-            } else {
-                pageOffsetFraction.snapTo(0f)
-                pageScale.snapTo(1f)
-                listOf(
-                    launch {
-                        scrimAlpha.animateTo(
-                            SettingsOverlayScrimAlpha,
-                            animationSpec = tween(300),
-                        )
-                    },
-                    launch { pageAlpha.animateTo(1f, animationSpec = tween(300)) },
-                ).joinAll()
-            }
-            latestOnEnterFinished()
-        } else if (renderOverlay) {
-            if (allowSpatialTransitions) {
-                listOf(
-                    launch {
-                        scrimAlpha.animateTo(
-                            0f,
-                            animationSpec = tween(400, easing = FastOutSlowInEasing)
-                        )
-                    },
-                    launch {
-                        pageOffsetFraction.animateTo(
-                            1f,
-                            animationSpec = tween(400, easing = FastOutSlowInEasing)
-                        )
-                    },
-                    launch {
-                        pageAlpha.animateTo(
-                            0f,
-                            animationSpec = tween(400, easing = FastOutSlowInEasing)
-                        )
-                    },
-                    launch {
-                        pageScale.animateTo(
-                            SettingsOverlayExitScale,
-                            animationSpec = tween(400, easing = FastOutSlowInEasing)
-                        )
-                    }
-                ).joinAll()
-            } else {
-                pageOffsetFraction.snapTo(0f)
-                pageScale.snapTo(1f)
-                listOf(
-                    launch {
-                        scrimAlpha.animateTo(
-                            0f,
-                            animationSpec = tween(300),
-                        )
-                    },
-                    launch { pageAlpha.animateTo(0f, animationSpec = tween(300)) },
-                ).joinAll()
-            }
-            renderOverlay = false
-        }
-    }
-
-    if (!renderOverlay) return
-
-    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val widthPx = with(LocalDensity.current) { maxWidth.roundToPx() }
-        val pageOffsetX = if (allowSpatialTransitions) {
-            (widthPx * pageOffsetFraction.value).roundToInt()
-        } else {
-            0
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(0f)
-                .background(Color.Black.copy(alpha = scrimAlpha.value.coerceIn(0f, SettingsOverlayScrimAlpha)))
-                .pointerInput(onDismiss) {
-                    detectTapGestures { onDismiss() }
-                }
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .zIndex(1f)
-                .offset { IntOffset(pageOffsetX, 0) }
-                .alpha(pageAlpha.value.coerceIn(0f, 1f))
-                .graphicsLayer {
-                    val resolvedScale = if (allowSpatialTransitions) pageScale.value else 1f
-                    scaleX = resolvedScale
-                    scaleY = resolvedScale
-                }
-        ) {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = MaterialTheme.colorScheme.background
-            ) {
-                content()
-            }
-
-            if (!visible) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .consumePointerInput()
-                )
-            }
-        }
-    }
-}
-
-private fun Modifier.consumePointerInput(): Modifier =
-    pointerInput(Unit) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                event.changes.forEach { it.consume() }
-            }
-        }
-    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
