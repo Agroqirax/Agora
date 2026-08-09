@@ -230,6 +230,23 @@ internal class MessageGenerationController(
         onScrollToAbsoluteBottomAfter = onScrollToAbsoluteBottomAfter,
         onUserMessagePersisted = onUserMessagePersisted,
     )
+    private val regenerationService = ConversationRegenerationService(
+        conversations = convRepo,
+        executionCoordinator = executionCoordinator,
+        transitions = regenerationTransitions,
+        terminalSettlement = terminalSettlement,
+        boundRunGenerationLauncher = boundRunGenerationLauncher,
+        guidanceDrain = queuedGuidanceDrainExecutor,
+        toUiMessage = { it.toUiChatMessage(appContext) },
+        isConversationOpen = { currentConversationId.value == it },
+        projectGraph = { _, committedMessages, selectedChildren, streamingMessage ->
+            renderStore.commitGraph(
+                committedMessages = committedMessages,
+                selectedChildren = selectedChildren,
+                streamingMessage = streamingMessage,
+            )
+        },
+    )
     private val branchMutationService = ConversationBranchMutationService(
         scope = viewModelScope,
         conversations = convRepo,
@@ -306,205 +323,17 @@ internal class MessageGenerationController(
         val modelId = currentActiveModel.value
         val (providerName, activeKey) =
             requestBuilder.resolveProviderKey(modelId) ?: return false
-
-        // Validate and snapshot the open conversation BEFORE claiming the slot. The generation
-        // coroutine may wait behind automation while the user switches to another conversation.
-        val visiblePath = messages.value
-        val messageToRegenerate = visiblePath.find { it.id == messageId } ?: return false
-        if (messageToRegenerate.participant != Participant.MODEL) return false
-        val sourceRunId = messageToRegenerate.runId ?: return false
-        val targetUserMessageId = messageToRegenerate.parentId ?: return false
-        val outputBoundary = visiblePath
-            .filter {
-                it.runId == sourceRunId &&
-                    it.participant == Participant.MODEL &&
-                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            }
-            .maxWithOrNull(
-                compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-                    .thenBy { it.timestamp }
-                    .thenBy { it.id }
-            )
-        if (outputBoundary?.id != messageId) return false
-
-        // Regenerate is idle-only by product rule. Enforce it atomically in the state machine in
-        // addition to the UI's enabled flag, which can lag during a conversation switch.
-        val myUiToken = state.tryAcquireForReplacement() ?: return false
-        val transition = regenerationTransitions.begin(
-            conversationId = genId,
-            oldMessageId = messageId,
-            targetUserMessageId = targetUserMessageId,
-        ) ?: run {
-            state.scope.launch {
-                queuedGuidanceDrainExecutor.releaseUnlaunchedSlotAndDrain(state, myUiToken)
-            }
-            return false
-        }
-        val runId = UUID.randomUUID().toString()
-
-        var graphCommitted = false
-        val generationJob = state.launchGenerationJob(myUiToken) generation@ {
-            var setupModelMessageId: String? = null
-            var runBound = false
-            var stopFinalizationClaimed = false
-            try {
-                if (!regenerationTransitions.awaitFade(transition.id)) return@generation
-                if (
-                    !state.isCurrentToken(myUiToken) ||
-                    !regenerationTransitions.isAnimating(transition.id) ||
-                    currentConversationId.value != genId
-                ) {
-                    return@generation
-                }
-                val myPersistId = state.nextPersistId()
-                executionCoordinator.withConversationLock(genId) lock@ {
-                if (
-                    !state.isCurrentToken(myUiToken) ||
-                    !regenerationTransitions.isAnimating(transition.id) ||
-                    currentConversationId.value != genId
-                ) {
-                    return@lock
-                }
-                val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
-                val persistedTarget = persistedMessages.find { it.id == messageId } ?: return@lock
-                if (persistedTarget.runId != sourceRunId) return@lock
-                convRepo.getRun(sourceRunId) ?: return@lock
-                val sourceInput =
-                    RunRegenerationPolicy.selectBoundaryInput(persistedMessages, sourceRunId)
-                        ?: return@lock
-                val inputRunId = sourceInput.runId
-                val modelMessageId = UUID.randomUUID().toString()
-                setupModelMessageId = modelMessageId
-                val startTime = maxOf(System.currentTimeMillis(), persistedTarget.timestamp + 1)
-                val modelEntity = MessageEntity(
-                    id = modelMessageId,
-                    conversationId = genId,
-                    parentId = sourceInput.id,
-                    text = "",
-                    thoughts = null,
-                    thoughtTitle = null,
-                    status = MessageStatus.SENDING,
-                    participant = Participant.MODEL,
-                    timestamp = startTime,
-                    modelName = modelId,
-                    runId = runId,
-                    runSequence = 0,
-                )
-                val graphCommit = convRepo.createRunWithMessages(
-                    RunEntity(
-                        id = runId,
-                        conversationId = genId,
-                        parentRunId = inputRunId,
-                        status = RunStatus.ACTIVE,
-                        activeSlot = 1,
-                        startedAt = startTime,
-                        lastCheckpointAt = startTime,
-                    ),
-                    listOf(modelEntity),
-                    messageSelectionUpdates = mapOf(sourceInput.id to modelEntity.id),
-                )
-                graphCommitted = true
-                regenerationTransitions.markCommitted(transition.id)
-                val binding = state.bindPersistedRun(myUiToken, runId)
-                runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
-                if (!runBound) {
-                    if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                        stopFinalizationClaimed = true
-                        terminalSettlement.settleLateBoundStop(state, binding)
-                    } else {
-                        // A disposed/replaced runtime cannot accept the durable Run. This is a
-                        // recovery-only fallback; the normal Stop race is mailbox-authorized.
-                        withContext(kotlinx.coroutines.NonCancellable) {
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
-                        }
-                    }
-                    return@lock
-                }
-                val placeholder = modelEntity.toUiChatMessage(appContext)
-                val selectedAfterRegenerate = graphCommit.messageSelections
-                // The overlay is installed before the graph projection. An intermediate combine
-                // frame can therefore only retain the old path; it can never expose an empty
-                // persisted SENDING placeholder.
-                state.streamUpdate(myUiToken, placeholder)
-                ifOpenOn(genId) {
-                    renderStore.commitGraph(
-                        committedMessages = listOf(placeholder),
-                        selectedChildren = selectedAfterRegenerate,
-                        streamingMessage = placeholder,
-                    )
-                }
-                boundRunGenerationLauncher.launch(
-                    BoundRunGenerationRequest(
-                        conversationId = genId,
-                        modelMessageId = modelMessageId,
-                        startTime = startTime,
-                        isRegenerate = false,
-                        replaceMessageId = null,
-                        providerName = providerName,
-                        modelId = modelId,
-                        activeKey = activeKey,
-                        uiToken = myUiToken,
-                        persistId = myPersistId,
-                        runId = runId,
-                        pass = 0,
-                        callerTag = "regenerate",
-                    ),
-                    state,
-                )
-                }
-            } catch (e: CancellationException) {
-                // A Room transaction may commit just before cancellation is observed. If the Run
-                // was never bound, the normal Stop finalizer cannot discover it.
-                if (!runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        if (convRepo.getRun(runId) != null) {
-                            graphCommitted = true
-                            regenerationTransitions.markCommitted(transition.id)
-                            val binding = state.bindPersistedRun(myUiToken, runId)
-                            stopFinalizationClaimed =
-                                terminalSettlement.settleCancelledDurableRun(state, binding)
-                            if (!stopFinalizationClaimed) {
-                                convRepo.finishStoppedGeneration(emptyList(), runId)
-                            }
-                        }
-                    }
-                }
-                throw e
-            } catch (e: Exception) {
-                if (!runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        if (convRepo.getRun(runId) != null) {
-                            graphCommitted = true
-                            regenerationTransitions.markCommitted(transition.id)
-                            val binding = state.bindPersistedRun(myUiToken, runId)
-                            runBound = binding is
-                                ConversationGenerationState.RunBindingOutcome.Active
-                            if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                                stopFinalizationClaimed = true
-                                terminalSettlement.settleLateBoundStop(state, binding)
-                            }
-                        }
-                    }
-                }
-                terminalSettlement.failGenerationSetup(
-                    conversationId = genId,
-                    runId = runId,
-                    modelMessageId = setupModelMessageId,
-                    uiToken = myUiToken,
-                    state = state,
-                    error = e,
-                )
-            } finally {
-                if (!graphCommitted) {
-                    regenerationTransitions.abort(transition.id)
-                }
-            }
-        }
-        if (generationJob == null) {
-            regenerationTransitions.abort(transition.id)
-        }
-        return generationJob != null
+        return regenerationService.regenerate(
+            ConversationRegenerationRequest(
+                conversationId = genId,
+                messageId = messageId,
+                modelId = modelId,
+                providerName = providerName,
+                activeKey = activeKey,
+                visiblePath = messages.value.toList(),
+            ),
+            state,
+        )
     }
 
     // ==================================

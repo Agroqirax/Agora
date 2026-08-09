@@ -96,7 +96,7 @@ internal class QueuedGuidanceDrainExecutor(
     suspend fun releaseUnlaunchedSlotAndDrain(
         state: ConversationGenerationState,
         uiToken: Long,
-    ) = withContext(kotlinx.coroutines.NonCancellable) {
+    ): Unit = withContext(kotlinx.coroutines.NonCancellable) {
         var drainClaim: QueuedDrainClaim? = null
         state.queueMutationMutex.withLock {
             if (state.endGeneration(uiToken) && state.consumeQueueDrainPermission()) {
@@ -106,6 +106,7 @@ internal class QueuedGuidanceDrainExecutor(
             }
         }
         drainClaim?.let { launchClaim(state, it) }
+        Unit
     }
 
     fun launchClaim(
