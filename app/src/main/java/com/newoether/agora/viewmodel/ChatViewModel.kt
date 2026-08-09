@@ -118,6 +118,22 @@ class ChatViewModel(
             settingsRepository,
             File(application.filesDir, "fork-attachments"),
         )
+    private val conversationForkShareController by lazy {
+        ConversationForkShareController(
+            currentConversationId = currentConversationId,
+            service = conversationForkShare,
+            scope = viewModelScope,
+            onConversationForked = selectionController::selectConversation,
+            onShareReady = _conversationShareText::emit,
+            forkFailureText = { reason ->
+                appContext.getString(R.string.conversation_fork_failed, reason)
+            },
+            shareFailureText = { reason ->
+                appContext.getString(R.string.conversation_share_failed, reason)
+            },
+            onFailure = { message -> _snackbarMessage.emit(SnackbarEvent(message)) },
+        )
+    }
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
     val ragManager = RagManager(
@@ -915,60 +931,16 @@ class ChatViewModel(
         hapticOnCompletion: Boolean = true,
     ) = selectionController.selectConversation(id, hapticOnCompletion)
 
-    fun forkConversationFrom(messageId: String? = null) {
-        val conversationId = currentConversationId.value ?: return
-        viewModelScope.launch {
-            when (val result = conversationForkShare.fork(conversationId, messageId)) {
-                is ConversationForkShareService.ForkResult.Success ->
-                    selectConversation(result.conversationId)
-                is ConversationForkShareService.ForkResult.Failure ->
-                    _snackbarMessage.emit(
-                        SnackbarEvent(
-                            appContext.getString(R.string.conversation_fork_failed, result.reason)
-                        )
-                    )
-            }
-        }
-    }
+    fun forkConversationFrom(messageId: String? = null) =
+        conversationForkShareController.fork(messageId)
 
-    fun shareConversation() {
-        val conversationId = currentConversationId.value ?: return
-        viewModelScope.launch {
-            emitShareResult(conversationForkShare.shareAll(conversationId))
-        }
-    }
+    fun shareConversation() = conversationForkShareController.shareConversation()
 
-    fun shareGeneration(assistantMessageId: String) {
-        val conversationId = currentConversationId.value ?: return
-        viewModelScope.launch {
-            emitShareResult(
-                conversationForkShare.shareRun(conversationId, assistantMessageId)
-            )
-        }
-    }
+    fun shareGeneration(assistantMessageId: String) =
+        conversationForkShareController.shareGeneration(assistantMessageId)
 
-    fun shareMessages(messageIds: Set<String>) {
-        val conversationId = currentConversationId.value ?: return
-        if (messageIds.isEmpty()) return
-        viewModelScope.launch {
-            emitShareResult(
-                conversationForkShare.shareMessages(conversationId, messageIds)
-            )
-        }
-    }
-
-    private suspend fun emitShareResult(result: ConversationForkShareService.ShareResult) {
-        when (result) {
-            is ConversationForkShareService.ShareResult.Success ->
-                _conversationShareText.emit(result.text)
-            is ConversationForkShareService.ShareResult.Failure ->
-                _snackbarMessage.emit(
-                    SnackbarEvent(
-                        appContext.getString(R.string.conversation_share_failed, result.reason)
-                    )
-                )
-        }
-    }
+    fun shareMessages(messageIds: Set<String>) =
+        conversationForkShareController.shareMessages(messageIds)
 
     fun renameConversation(id: String, newTitle: String) {
         viewModelScope.launch {
