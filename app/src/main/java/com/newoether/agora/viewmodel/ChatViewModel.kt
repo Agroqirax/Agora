@@ -13,7 +13,6 @@ import com.newoether.agora.api.gemini.*
 import com.newoether.agora.api.local.*
 import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
-import com.newoether.agora.automation.TaskExecutionEngine.BridgeOutcome
 import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ClaudeChatImporter
@@ -313,7 +312,7 @@ class ChatViewModel(
         super.onCleared()
         // The engine and the registry are process-scoped while this ViewModel is not, so every
         // reference either of them holds must be released here or the whole graph leaks.
-        taskExecutionEngine.detachForegroundSendBridge(generationCallbackOwner)
+        foregroundAutomationBridge.close()
         sandboxManager?.close()
         generationRegistry.detachUiCallbacks(generationCallbackOwner)
         dataControl.destroy()
@@ -530,6 +529,15 @@ class ChatViewModel(
      *  ConversationGenerationState; the global loading/render mirrors
      *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */
     private val generationCallbackOwner = Any()
+    private val foregroundAutomationBridge by lazy {
+        ForegroundAutomationBridgeController(
+            currentConversationId = currentConversationId,
+            send = generationController::sendMessageFromAutomationAwaitingCompletion,
+            loadMessages = convRepo::getMessagesForConversationSnapshot,
+            attach = taskExecutionEngine::attachForegroundSendBridge,
+            detach = taskExecutionEngine::detachForegroundSendBridge,
+        )
+    }
     private val generationCallbacksAttached = Unit.also {
         generationRegistry.attachUiCallbacks(generationCallbackOwner) { state ->
             state.onActive = { conversationId ->
@@ -760,36 +768,9 @@ class ChatViewModel(
         }
         conversationUi.start()
 
-        // Register the foreground-send bridge so loop cycles on this open conversation
-        // go through the controller's regular send path (bubble animation + scroll + haptics).
-        taskExecutionEngine.attachForegroundSendBridge(generationCallbackOwner) bridge@{ convId, text, modelId ->
-            if (currentConversationId.value != convId) return@bridge BridgeOutcome.NotDelegated
-            // The Loop already holds this conversation's automation lease. Falling back to the
-            // headless path while a manual send owns the generation slot recreates the lock/slot
-            // deadlock this direct-only bridge exists to prevent. Busy therefore ends this cycle as
-            // an explicit failure without persisting another user turn.
-            val delivered = when (
-                val outcome = generationController.sendMessageFromAutomationAwaitingCompletion(
-                    convId, text, modelId,
-                )
-            ) {
-                AutomationSendOutcome.SlotBusy ->
-                    return@bridge BridgeOutcome.Busy()
-                is AutomationSendOutcome.Delivered -> outcome
-            }
-            // Read back the exact row this send created, never the conversation tail: a branch
-            // switch or a queue drain could otherwise make an unrelated turn look like this result.
-            val modelMsg = convRepo.getMessagesForConversationSnapshot(convId)
-                .find { it.id == delivered.modelMessageId }
-            when {
-                modelMsg == null -> BridgeOutcome.Failed("Generation row disappeared")
-                modelMsg.status == MessageStatus.SUCCESS ->
-                    BridgeOutcome.Completed(modelMsg.id, modelMsg.text)
-                else -> BridgeOutcome.Failed(
-                    modelMsg.text.takeIf { it.isNotBlank() } ?: "Generation failed",
-                )
-            }
-        }
+        // Loop cycles for the open conversation use the regular Send path; the bridge waits for
+        // that exact durable turn and returns a typed result to the automation lease owner.
+        foregroundAutomationBridge.start()
     }
 
     // ── Custom providers ──────────────────────────────────────
