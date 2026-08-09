@@ -50,7 +50,6 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
@@ -904,37 +903,15 @@ class ChatViewModel(
         return generationController.deleteMessage(messageId)
     }
 
-    /** Queued sends for the currently-open conversation (drives the queue banner above the input). */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val queuedSends: StateFlow<List<QueuedSend>> = currentConversationId
-        .flatMapLatest { id ->
-            if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
-            else generationRegistry.getOrCreate(id).queuedSends
-        }
-        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, emptyList())
+    private val currentRuntimeFacade = CurrentConversationRuntimeFacade(
+        currentConversationId = currentConversationId,
+        registry = generationRegistry,
+        scope = viewModelScope,
+    )
+    val queuedSends: StateFlow<List<QueuedSend>> get() = currentRuntimeFacade.queuedSends
+    val isStopping: StateFlow<Boolean> get() = currentRuntimeFacade.isStopping
 
-    /** True while the open conversation's Stop is still winding down (slot held until the
-     *  cancelled coroutine fully unwinds). Drives the composer's gray stopping spinner. */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val isStopping: StateFlow<Boolean> = currentConversationId
-        .flatMapLatest { id ->
-            if (id == null) kotlinx.coroutines.flow.flowOf(false)
-            else generationRegistry.getOrCreate(id).stopping
-        }
-        .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
-
-    fun removeQueuedSend(id: String) {
-        val conversationId = currentConversationId.value ?: return
-        val state = generationRegistry.getOrCreate(conversationId)
-        viewModelScope.launch(Dispatchers.IO) {
-            state.queueMutationMutex.withLock {
-                val queued = state.removeQueuedSend(id) ?: return@withLock
-                // Guidance has not entered Room or the message tree yet. Removing it therefore
-                // only releases the prepared files owned by this in-memory pending input.
-                queued.deleteOwnedFiles()
-            }
-        }
-    }
+    fun removeQueuedSend(id: String) = currentRuntimeFacade.removeQueuedSend(id)
 
     fun stopGeneration() = generationStopAdapter.stopVisibleConversation()
 
