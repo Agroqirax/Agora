@@ -2,6 +2,6 @@
 # Do not add new entries or raise a recorded count. Remove an entry once its file reaches 999.
 app/src/fdroid/java/com/newoether/agora/sandbox/ProotSandboxManager.kt=1153
 app/src/main/java/com/newoether/agora/data/DataImporter.kt=1509
-app/src/main/java/com/newoether/agora/data/SettingsManager.kt=1274
+app/src/main/java/com/newoether/agora/data/SettingsManager.kt=1153
 app/src/main/java/com/newoether/agora/data/local/ChatDatabase.kt=1587
 app/src/main/java/com/newoether/agora/tool/ShellToolProvider.kt=1514

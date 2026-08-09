@@ -8,12 +8,7 @@ import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
-import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.longPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -28,126 +23,10 @@ class SettingsManager(private val context: Context) {
     private val json = Json { ignoreUnknownKeys = true }
 
     companion object {
-        val SELECTED_MODEL = stringPreferencesKey("selected_model")
-        val AVAILABLE_MODELS_JSON = stringPreferencesKey("available_models_json")
-        val CUSTOM_MODELS = stringSetPreferencesKey("custom_models")
-        val ENABLED_MODELS = stringSetPreferencesKey("enabled_models")
-        
-        val API_KEYS_JSON = stringPreferencesKey("api_keys_json")
-        val ACTIVE_API_KEY_IDS_JSON = stringPreferencesKey("active_api_key_ids_json")
-        
-        val SYSTEM_PROMPTS_JSON = stringPreferencesKey("system_prompts_json")
-        val ACTIVE_SYSTEM_PROMPT_ID = stringPreferencesKey("active_system_prompt_id")
-        val MODEL_ALIASES_JSON = stringPreferencesKey("model_aliases_json")
-        val CONTEXT_TOKEN_BUDGET = stringPreferencesKey("context_token_budget")
-        /** Legacy logical-message window, retained only as a migration source. */
-        val MAX_CONTEXT_WINDOW = stringPreferencesKey("max_context_window")
-        val VISUALIZE_CONTEXT_ROLLOUT = booleanPreferencesKey("visualize_context_rollout")
-        val CONTEXT_COMPACT_ENABLED = booleanPreferencesKey("context_compact_enabled")
-        val CONTEXT_COMPACT_MODEL = stringPreferencesKey("context_compact_model")
-        val CONTEXT_COMPACT_PROMPT = stringPreferencesKey("context_compact_prompt")
-        val CONTEXT_COMPACT_RETAIN_COUNT = intPreferencesKey("context_compact_retain_count")
-        val CODE_EXECUTION_ENABLED = booleanPreferencesKey("code_execution_enabled")
-        val GOOGLE_SEARCH_ENABLED = booleanPreferencesKey("google_search_enabled")
-        val THINKING_ENABLED = booleanPreferencesKey("thinking_enabled")
-        val THINKING_LEVEL = stringPreferencesKey("thinking_level")
-        val THINKING_BUDGET_ENABLED = booleanPreferencesKey("thinking_budget_enabled")
-        val THINKING_BUDGET_TOKENS = intPreferencesKey("thinking_budget_tokens")
-        val OPENAI_SERVICE_TIER_ENABLED = booleanPreferencesKey("openai_service_tier_enabled")
-        val OPENAI_SERVICE_TIER = stringPreferencesKey("openai_service_tier")
-        val PROVIDER_BASE_URLS = stringPreferencesKey("provider_base_urls")
-        val CUSTOM_ENDPOINT_RESOLUTIONS_JSON = stringPreferencesKey("custom_endpoint_resolutions_json")
-        val TITLE_GENERATION_ENABLED = booleanPreferencesKey("title_generation_enabled")
-        val TITLE_GENERATION_MODEL = stringPreferencesKey("title_generation_model")
-        val TITLE_GENERATION_PROMPT = stringPreferencesKey("title_generation_prompt")
-        val TITLE_GENERATION_NOTIFICATIONS_ENABLED =
-            booleanPreferencesKey("title_generation_notifications_enabled")
-        val IMAGE_TRANSCRIPTION_ENABLED =
-            booleanPreferencesKey("image_transcription_enabled")
-        val IMAGE_TRANSCRIPTION_ENABLED_MODELS = stringSetPreferencesKey("image_transcription_enabled_models")
-        val IMAGE_TRANSCRIPTION_MODEL = stringPreferencesKey("image_transcription_model")
-        val IMAGE_TRANSCRIPTION_BATCH_SIZE = intPreferencesKey("image_transcription_batch_size")
-        val IMAGE_TRANSCRIPTION_PROMPT = stringPreferencesKey("image_transcription_prompt")
-        val ACCESS_PAST_CONVERSATIONS = booleanPreferencesKey("access_past_conversations")
-        val ACCESS_SAVED_MEMORIES = booleanPreferencesKey("access_saved_memories")
-        val ACCESS_ACTIVE_MEMORY = booleanPreferencesKey("access_active_memory")
-        val RAG_SEARCH_ENABLED = booleanPreferencesKey("rag_search_enabled")
-        val MODEL_SEARCH_METHOD = stringPreferencesKey("model_search_method")
-        val MANUAL_SEARCH_METHOD = stringPreferencesKey("manual_search_method")
-        val EMBEDDING_MODELS_JSON = stringPreferencesKey("embedding_models_json")
-        val ACTIVE_EMBEDDING_MODEL_ID = stringPreferencesKey("active_embedding_model_id")
-        val APP_LANGUAGE = stringPreferencesKey("app_language")
-        val WEB_SEARCH_ENABLED = booleanPreferencesKey("web_search_enabled")
-        val WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
-        val WEB_SEARCH_API_KEYS_JSON = stringPreferencesKey("web_search_api_keys_json")
-        val WEB_SEARCH_NUM_RESULTS = intPreferencesKey("web_search_num_results")
-        val WEB_SEARCH_BASE_URL = stringPreferencesKey("web_search_base_url")
-        val IMAGE_GEN_ENABLED = booleanPreferencesKey("image_gen_enabled")
-        // Selected image model as "Provider:modelId"; provider creds are reused (no separate key/url).
-        val IMAGE_GEN_MODEL = stringPreferencesKey("image_gen_model")
-        val IMAGE_GEN_SIZE = stringPreferencesKey("image_gen_size")
-        val SEARCH_CONTEXT_WINDOW = intPreferencesKey("search_context_window")
-        val SEARCH_MATCH_LIMIT = intPreferencesKey("search_match_limit")
-        val RAG_THRESHOLD = stringPreferencesKey("rag_threshold")
-        val AUTO_CACHE_ENABLED = booleanPreferencesKey("auto_cache_enabled")
-        val AUTO_UPDATE_CHECK = booleanPreferencesKey("auto_update_check")
-        val LAST_UPDATE_CHECK_TIME = longPreferencesKey("last_update_check_time")
-        val LOCAL_CHAT_MODELS_JSON = stringPreferencesKey("local_chat_models_json")
-        val CUSTOM_PROVIDERS_JSON = stringPreferencesKey("custom_providers_json")
-        val SHELL_ENABLED = booleanPreferencesKey("shell_enabled")
-        val AUTOMATION_TOOLS_ENABLED = booleanPreferencesKey("automation_tools_enabled")
-        val EXACT_EXECUTION_ENABLED = booleanPreferencesKey("exact_execution_enabled")
-        val PROXY_ENABLED = booleanPreferencesKey("proxy_enabled")
-        val PROXY_TYPE = stringPreferencesKey("proxy_type")
-        val PROXY_HOST = stringPreferencesKey("proxy_host")
-        val PROXY_PORT = stringPreferencesKey("proxy_port")
-        val PROXY_USERNAME = stringPreferencesKey("proxy_username")
-        val PROXY_PASSWORD = stringPreferencesKey("proxy_password")
-        val PROXY_BYPASS = stringPreferencesKey("proxy_bypass")
         const val DEFAULT_PROXY_HOST = "127.0.0.1"
         const val DEFAULT_PROXY_PORT = "7890"
-        const val DEFAULT_PROXY_BYPASS = "localhost\n127.0.0.1\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n::1"
-        val SHELL_CONFIRM_ENABLED = booleanPreferencesKey("shell_confirm_enabled")
-        val SHELL_DEVICES_JSON = stringPreferencesKey("shell_devices_json")
-        val MCP_SERVERS_JSON = stringPreferencesKey("mcp_servers_json")
-        val SANDBOX_ENABLED = booleanPreferencesKey("sandbox_enabled")
-        val SANDBOX_SHARED_STORAGE_ENABLED =
-            booleanPreferencesKey("sandbox_shared_storage_enabled")
-        val THEME_MODE = stringPreferencesKey("theme_mode")
-        val COLOR_SCHEME = stringPreferencesKey("color_scheme")
-        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
-        val BLUR_EFFECTS_ENABLED = booleanPreferencesKey("blur_effects_enabled")
-        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
-        val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
-        val DETAILED_TOKEN_USAGE = booleanPreferencesKey("detailed_token_usage")
-        val TOOL_CALL_DISPLAY_MODE = stringPreferencesKey("tool_call_display_mode")
-        val THINKING_SEGMENT_DISPLAY_MODE = stringPreferencesKey("thinking_segment_display_mode")
-        val AUTO_EXPAND_ACTIVE_GROUP = booleanPreferencesKey("auto_expand_active_group")
-        val SCHEME_STYLE = stringPreferencesKey("scheme_style")
-        val FONT_PREFERENCE = stringPreferencesKey("font_preference")
-        val CUSTOM_FONT_PATH = stringPreferencesKey("custom_font_path")
-        val CUSTOM_FONT_NAME = stringPreferencesKey("custom_font_name")
-        val FIRST_LAUNCH_TIME = longPreferencesKey("first_launch_time")
-        val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
-        val RATING_PROMPT_SUBMITTED = booleanPreferencesKey("rating_prompt_submitted")
-        val RATING_PROMPT_DISMISSED = booleanPreferencesKey("rating_prompt_dismissed")
-        val SHOW_DOCUMENTATION_FAB = booleanPreferencesKey("show_documentation_fab")
-        val TOTAL_MESSAGES_SENT = intPreferencesKey("total_messages_sent")
-        val DEFAULT_TEMPERATURE = stringPreferencesKey("default_temperature")
-        val DEFAULT_MAX_TOKENS = intPreferencesKey("default_max_tokens")
-        val DEFAULT_TOP_P = stringPreferencesKey("default_top_p")
-        val DEFAULT_FREQUENCY_PENALTY = stringPreferencesKey("default_frequency_penalty")
-        val DEFAULT_PRESENCE_PENALTY = stringPreferencesKey("default_presence_penalty")
-        val CONVERSATION_SETTINGS_JSON = stringPreferencesKey("conversation_settings_json")
-        // ── Auto Backup ───────────────────────────────────────────
-        val AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
-        val AUTO_BACKUP_PERIOD_HOURS = intPreferencesKey("auto_backup_period_hours")
-        val AUTO_BACKUP_CATEGORIES = stringPreferencesKey("auto_backup_categories")
-        val AUTO_BACKUP_DIRECTORY = stringPreferencesKey("auto_backup_directory")
-        val AUTO_DELETE_ENABLED = booleanPreferencesKey("auto_delete_enabled")
-        val AUTO_DELETE_PERIOD_HOURS = intPreferencesKey("auto_delete_period_hours")
-        val LAST_BACKUP_TIMESTAMP = longPreferencesKey("last_backup_timestamp")
-        val LAST_MODELS_FETCH_FINGERPRINT = stringPreferencesKey("last_models_fetch_fingerprint")
+        const val DEFAULT_PROXY_BYPASS =
+            "localhost\n127.0.0.1\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n::1"
     }
 
     val selectedModel: Flow<String> = context.dataStore.data.map { it[SELECTED_MODEL] ?: Constants.EXAMPLE_MODEL_ID }
