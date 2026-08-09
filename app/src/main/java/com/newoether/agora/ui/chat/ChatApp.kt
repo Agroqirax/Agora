@@ -80,7 +80,6 @@ import com.newoether.agora.viewmodel.RegenerationTransitionStage
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
@@ -101,7 +100,6 @@ private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 @OptIn(
     ExperimentalMaterial3Api::class,
     ExperimentalFoundationApi::class,
-    kotlinx.coroutines.FlowPreview::class,
 )
 @Composable
 fun ChatApp(
@@ -384,92 +382,19 @@ fun ChatApp(
         bypassScrollIsolation =
             streamingTailController.isAutoFollowing || absoluteBottomScrollPhase.isActive,
     )
-    var conversationSearchActive by rememberSaveable { mutableStateOf(false) }
-    var conversationSearchQuery by rememberSaveable { mutableStateOf("") }
-    var conversationSearchMatchIndex by remember { mutableIntStateOf(-1) }
-    var shareSelectionActive by remember { mutableStateOf(false) }
-    var selectedShareMessageIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val messagesForSearchAndSelection = if (conversationSearchActive || shareSelectionActive) {
-        messagesState.value
-    } else {
-        emptyList()
-    }
-    val selectableShareMessageIds = remember(messagesForSearchAndSelection) {
-        messagesForSearchAndSelection.mapTo(linkedSetOf()) { it.id }
-    }
+    val conversationInteraction = rememberConversationInteractionState(
+        currentConversationId = currentConversationId,
+        messages = messagesState,
+        listState = listState,
+    )
+    val conversationSearchActive = conversationInteraction.searchActive
+    val conversationSearchQuery = conversationInteraction.searchQuery
+    val conversationSearchMatchIndex = conversationInteraction.searchMatchIndex
+    val shareSelectionActive = conversationInteraction.shareSelectionActive
+    val selectedShareMessageIds = conversationInteraction.selectedShareMessageIds
+    val selectableShareMessageIds = conversationInteraction.selectableShareMessageIds
     val shareSelectionBarSpace = if (shareSelectionActive) 68.dp else 0.dp
-    val conversationSearchMatchDistances = remember(currentConversationId) {
-        mutableStateMapOf<String, Float>()
-    }
-    val conversationSearchMatches = remember(messagesForSearchAndSelection, conversationSearchQuery) {
-        findConversationSearchMatches(messagesForSearchAndSelection, conversationSearchQuery)
-    }
-    val searchTurns = remember(messagesForSearchAndSelection) {
-        buildMessageListTurns(messagesForSearchAndSelection)
-    }
-    val searchTurnIndexByMessageId = remember(searchTurns) {
-        buildMap {
-            searchTurns.forEachIndexed { index, turn ->
-                turn.messages.forEach { message -> put(message.id, index) }
-            }
-        }
-    }
-    LaunchedEffect(
-        conversationSearchActive,
-        conversationSearchQuery,
-        conversationSearchMatches,
-        currentConversationId,
-    ) {
-        if (!conversationSearchActive || conversationSearchQuery.isBlank() ||
-            conversationSearchMatches.isEmpty()
-        ) {
-            conversationSearchMatchIndex = -1
-            conversationSearchMatchDistances.clear()
-            return@LaunchedEffect
-        }
-        conversationSearchMatchDistances.clear()
-        val visibleDistances = withTimeoutOrNull(250L) {
-            snapshotFlow {
-                conversationSearchMatchDistances
-                    .filterKeys { key -> conversationSearchMatches.any { it.key == key } }
-                    .toMap()
-            }
-                .filter { it.isNotEmpty() }
-                .debounce(32L)
-                .first()
-        }.orEmpty()
-        val exactVisibleIndex = nearestVisibleConversationSearchMatchIndex(
-            conversationSearchMatches,
-            visibleDistances,
-        )
-        if (exactVisibleIndex != null) {
-            conversationSearchMatchIndex = exactVisibleIndex
-            return@LaunchedEffect
-        }
-        val layout = listState.layoutInfo
-        val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
-        val anchorTurn = layout.visibleItemsInfo
-            .minByOrNull { item ->
-                kotlin.math.abs((item.offset + item.size / 2) - viewportCenter)
-            }
-            ?.index
-            ?: listState.firstVisibleItemIndex
-        conversationSearchMatchIndex = nearestConversationSearchMatchIndex(
-            matches = conversationSearchMatches,
-            turnIndexByMessageId = searchTurnIndexByMessageId,
-            anchorTurnIndex = anchorTurn,
-        )
-    }
-    LaunchedEffect(currentConversationId) {
-        conversationSearchActive = false
-        conversationSearchQuery = ""
-        conversationSearchMatchIndex = -1
-        shareSelectionActive = false
-        selectedShareMessageIds = emptySet()
-    }
-    LaunchedEffect(selectableShareMessageIds) {
-        selectedShareMessageIds = selectedShareMessageIds.intersect(selectableShareMessageIds)
-    }
+    val conversationSearchMatches = conversationInteraction.searchMatches
     val textFieldState = rememberSaveable(saver = androidx.compose.foundation.text.input.TextFieldState.Saver) { androidx.compose.foundation.text.input.TextFieldState() }
     val composer = com.newoether.agora.ui.chat.bottombar.rememberChatComposerState()
     val inputFocusRequester = remember { FocusRequester() }
@@ -1070,14 +995,11 @@ fun ChatApp(
         onNavigateBack?.invoke()
     }
     BackHandler(enabled = conversationSearchActive) {
-        conversationSearchActive = false
-        conversationSearchQuery = ""
-        conversationSearchMatchIndex = -1
+        conversationInteraction.dismissSearch()
         focusManager.clearFocus()
     }
     BackHandler(enabled = shareSelectionActive) {
-        shareSelectionActive = false
-        selectedShareMessageIds = emptySet()
+        conversationInteraction.dismissShareSelection()
     }
 
     LaunchedEffect(drawerState.currentValue) {
@@ -1174,46 +1096,33 @@ fun ChatApp(
                             }
                         },
                         onSearchQueryChange = { query ->
-                            conversationSearchMatchIndex = -1
-                            conversationSearchMatchDistances.clear()
-                            conversationSearchQuery = query
+                            conversationInteraction.updateSearchQuery(query)
                         },
                         onSearchPrevious = {
-                            if (conversationSearchMatchIndex > 0) {
+                            if (conversationInteraction.previousSearchMatch()) {
                                 haptics.selection()
-                                conversationSearchMatchIndex--
                             }
                         },
                         onSearchNext = {
-                            if (conversationSearchMatchIndex in
-                                0 until conversationSearchMatches.lastIndex
-                            ) {
+                            if (conversationInteraction.nextSearchMatch()) {
                                 haptics.selection()
-                                conversationSearchMatchIndex++
                             }
                         },
                         onSearchDismiss = {
-                            conversationSearchActive = false
-                            conversationSearchQuery = ""
-                            conversationSearchMatchIndex = -1
+                            conversationInteraction.dismissSearch()
                             focusManager.clearFocus()
                         },
                         onSearchClick = {
-                            shareSelectionActive = false
-                            selectedShareMessageIds = emptySet()
-                            conversationSearchActive = true
+                            conversationInteraction.activateSearch()
                         },
                         onSystemPromptClick = { showPromptDialog = true },
                         onForkConversation = {
                             viewModel.forkConversationFrom()
                         },
                         onShareConversation = {
-                            conversationSearchActive = false
-                            conversationSearchQuery = ""
-                            conversationSearchMatchIndex = -1
+                            conversationInteraction.dismissSearch()
                             focusManager.clearFocus()
-                            selectedShareMessageIds = emptySet()
-                            shareSelectionActive = true
+                            conversationInteraction.activateShareSelection()
                         },
                         onNewChat = {
                             if (!isNewChatMode) {
@@ -1366,18 +1275,13 @@ fun ChatApp(
                                 activeSearchMatch = conversationSearchMatches
                                     .getOrNull(conversationSearchMatchIndex),
                                 onSearchMatchDistance = { key, distance ->
-                                    conversationSearchMatchDistances[key] = distance
+                                    conversationInteraction.recordSearchMatchDistance(key, distance)
                                 },
                                 selectionMode = shareSelectionActive,
                                 selectedMessageIds = selectedShareMessageIds,
                                 onToggleMessageSelection = { messageId ->
                                     haptics.selection()
-                                    selectedShareMessageIds =
-                                        if (messageId in selectedShareMessageIds) {
-                                            selectedShareMessageIds - messageId
-                                        } else {
-                                            selectedShareMessageIds + messageId
-                                        }
+                                    conversationInteraction.toggleShareMessage(messageId)
                                 },
                                 onMediaClick = { urls, index ->
                                     onMediaClick(urls, index)
@@ -1539,25 +1443,15 @@ fun ChatApp(
                                 selectedShareMessageIds.containsAll(selectableShareMessageIds),
                             hasSelection = selectedShareMessageIds.isNotEmpty(),
                             onDismiss = {
-                                shareSelectionActive = false
-                                selectedShareMessageIds = emptySet()
+                                conversationInteraction.dismissShareSelection()
                             },
                             onToggleAll = {
                                 haptics.selection()
-                                selectedShareMessageIds =
-                                    if (selectableShareMessageIds.isNotEmpty() &&
-                                        selectedShareMessageIds.containsAll(selectableShareMessageIds)
-                                    ) {
-                                        emptySet()
-                                    } else {
-                                        selectableShareMessageIds
-                                    }
+                                conversationInteraction.toggleAllShareMessages()
                             },
                             onConfirm = {
-                                val selection = selectedShareMessageIds
+                                val selection = conversationInteraction.takeShareSelection()
                                 if (selection.isNotEmpty()) {
-                                    shareSelectionActive = false
-                                    selectedShareMessageIds = emptySet()
                                     viewModel.shareMessages(selection)
                                 }
                             },
