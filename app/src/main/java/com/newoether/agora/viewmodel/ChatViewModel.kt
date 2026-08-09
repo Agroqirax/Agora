@@ -35,7 +35,6 @@ import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
-import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
@@ -58,7 +57,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -164,7 +162,17 @@ class ChatViewModel(
 
     /** Local (on-device) chat-model configuration CRUD. */
     val modelManager = ModelManager(settings, viewModelScope)
-    private val customModelMutationMutex = Mutex()
+    private val customModelConfiguration = CustomModelConfigurationController(
+        providers = providerRegistry,
+        conversations = convRepo,
+        settings = settings,
+        scope = viewModelScope,
+        onModelReferenceReplaced = { oldModelId, newModelId ->
+            if (_currentActiveModel.value == oldModelId) {
+                _currentActiveModel.value = newModelId
+            }
+        },
+    )
 
     // [providerRegistry] and [localProvider] are now constructor-injected, process-scoped
     // singletons (see AppContainer) so background task execution shares the same instances.
@@ -780,18 +788,14 @@ class ChatViewModel(
         baseUrl: String,
         protocol: com.newoether.agora.data.CustomEndpointProtocol =
             com.newoether.agora.data.CustomEndpointProtocol.OPENAI,
-    ) = providerRegistry.addCustom(name, baseUrl, protocol)
-    fun renameCustomProvider(oldName: String, newName: String) {
-        if (!providerRegistry.renameCustom(oldName, newName)) return
-        viewModelScope.launch(Dispatchers.IO) {
-            convRepo.renameConfiguredProviderModelReferences(oldName, newName.trim())
-        }
-    }
+    ) = customModelConfiguration.addProvider(name, baseUrl, protocol)
+    fun renameCustomProvider(oldName: String, newName: String) =
+        customModelConfiguration.renameProvider(oldName, newName)
     fun updateCustomProviderProtocol(
         name: String,
         protocol: com.newoether.agora.data.CustomEndpointProtocol,
-    ) = providerRegistry.updateCustomProtocol(name, protocol)
-    fun deleteCustomProvider(name: String) = providerRegistry.deleteCustom(name)
+    ) = customModelConfiguration.updateProviderProtocol(name, protocol)
+    fun deleteCustomProvider(name: String) = customModelConfiguration.deleteProvider(name)
 
     fun updateCustomModel(
         oldModelId: String,
@@ -799,38 +803,11 @@ class ChatViewModel(
         modelId: String,
         alias: String,
     ) {
-        val normalizedProvider = provider.trim()
-        val normalizedModelId = modelId.trim()
-        if (normalizedProvider.isEmpty() || normalizedModelId.isEmpty()) return
-        val newModelId = ModelId(normalizedProvider, normalizedModelId).prefixed
-
-        viewModelScope.launch(Dispatchers.IO) {
-            customModelMutationMutex.withLock {
-                val customModels = settings.customModels.value
-                if (oldModelId !in customModels) return@withLock
-                if (newModelId != oldModelId && newModelId in customModels) return@withLock
-
-                settings.replaceCustomModel(oldModelId, newModelId, alias)
-                convRepo.replaceConfiguredModelReferences(oldModelId, newModelId)
-                if (_currentActiveModel.value == oldModelId) {
-                    _currentActiveModel.value = newModelId
-                }
-            }
-        }
+        customModelConfiguration.updateModel(oldModelId, provider, modelId, alias)
     }
 
     fun deleteCustomModel(modelId: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            customModelMutationMutex.withLock {
-                if (modelId !in settings.customModels.value) return@withLock
-
-                settings.replaceCustomModel(modelId, null, "")
-                convRepo.replaceConfiguredModelReferences(modelId, null)
-                if (_currentActiveModel.value == modelId) {
-                    _currentActiveModel.value = null
-                }
-            }
-        }
+        customModelConfiguration.deleteModel(modelId)
     }
 
     fun getCurrentVersion(): String {
