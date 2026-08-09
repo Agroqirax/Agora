@@ -7,8 +7,6 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.Easing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -20,11 +18,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -55,8 +50,6 @@ import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.api.util.contextWindowUsage
 import com.newoether.agora.api.util.expandSelectedToolProtocolRows
 import com.newoether.agora.util.gradientBlur
-import com.newoether.agora.model.Participant
-import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
@@ -73,30 +66,11 @@ import com.newoether.agora.ui.motion.openWithMotionPolicy
 import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
-import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.AnimatedScrollDestination
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.RegenerationTransitionStage
-import com.newoether.agora.viewmodel.SwitchingRequestKind
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
-
-private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
-private val SEND_FEEDBACK_SCROLL_SPEC = DefaultFeedbackScrollSpec.copy(
-    startup = FeedbackScrollStartupSpec(
-        durationMillis = 240L,
-        easing = FastOutSlowInEasing,
-    ),
-)
-private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
-private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
-private const val STABLE_LAYOUT_SAMPLES = 3
-private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
 @OptIn(
     ExperimentalMaterial3Api::class,
     ExperimentalFoundationApi::class,
@@ -271,110 +245,27 @@ fun ChatApp(
         bottomInset = bottomInset,
         onOffsetChanged = onSnackbarOffsetChanged,
     )
-    val listState = rememberLazyListState()
-    var absoluteBottomScrollPhase by remember(currentConversationId) {
-        mutableStateOf(AbsoluteBottomScrollPhase.IDLE)
-    }
-    var absoluteBottomRequestToken by remember(currentConversationId) {
-        mutableLongStateOf(0L)
-    }
-    var absoluteBottomRequestFeedbackSpec by remember(currentConversationId) {
-        mutableStateOf(DefaultFeedbackScrollSpec)
-    }
-    val bottomButtonHideThresholdPx = with(density) { 64.dp.toPx() }
-    val bottomButtonShowThresholdPx = with(density) { 96.dp.toPx() }
-    var isNearAbsoluteBottom by remember(currentConversationId) {
-        mutableStateOf(true)
-    }
-    var isWithinAbsoluteBottomAttachThreshold by remember(currentConversationId) {
-        mutableStateOf(false)
-    }
-    var composerInputFocused by remember { mutableStateOf(false) }
     val imeBottomPx = with(density) { imeBottom.roundToPx() }
-    var imeBottomAnchorState by remember(currentConversationId) {
-        mutableStateOf(
-            ImeBottomAnchorState(
-                observedInsetPx = imeBottomPx,
-                bottomEligibleBeforeInsetChange = false,
-            ),
-        )
-    }
-    val imeBottomEligibleNow =
-        currentConversationId != null &&
-            loadedMessagesConversationId == currentConversationId &&
-            composerInputFocused &&
-            isWithinAbsoluteBottomAttachThreshold
-    SideEffect {
-        val next = reduceImeBottomAnchor(
-            current = imeBottomAnchorState,
-            event = ImeBottomAnchorEvent.InsetsObserved(
-                insetPx = imeBottomPx,
-                bottomEligibleNow = imeBottomEligibleNow,
-                anchorAllowed = composerInputFocused,
-            ),
-        )
-        if (next != imeBottomAnchorState) imeBottomAnchorState = next
-    }
-    // STOPPING deliberately keeps the generation slot's loading flag true until both coroutine
-    // unwind and durable finalization finish. It cannot produce more content, though, so treating
-    // it as a growing stream lets a transient terminal-layout contraction drive either follow
-    // actor upward (in the worst case all the way to the top).
-    val latestGenerationCanGrow by rememberUpdatedState(isLoading && !isStopping)
-    // Follow state belongs to one conversation. Reusing it across a conversation switch can
-    // carry a stale auto-follow=true flag into the next screen and suppress its bottom button.
-    val streamingTailController = rememberStreamingTailController(currentConversationId)
-    fun requestAbsoluteBottomScroll(
-        feedbackSpec: FeedbackScrollSpec = DefaultFeedbackScrollSpec,
-    ): Boolean {
-        if (absoluteBottomScrollPhase.isActive) return false
-        imeBottomAnchorState = reduceImeBottomAnchor(
-            imeBottomAnchorState,
-            ImeBottomAnchorEvent.Cancelled,
-        )
-        absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
-            absoluteBottomScrollPhase,
-            AbsoluteBottomScrollEvent.Requested,
-        )
-        absoluteBottomRequestFeedbackSpec = feedbackSpec
-        absoluteBottomRequestToken =
-            if (absoluteBottomRequestToken == Long.MAX_VALUE) 1L
-            else absoluteBottomRequestToken + 1L
-        return true
-    }
-    LaunchedEffect(
-        listState,
+    val scrollCoordinator = rememberChatScrollCoordinator(
         currentConversationId,
-        bottomButtonHideThresholdPx,
-        bottomButtonShowThresholdPx,
-    ) {
-        val estimatedSentinelSizePx = with(density) { 1.dp.toPx() }
-        snapshotFlow {
-            val snapshot = absoluteBottomLayoutSnapshot(
-                layoutInfo = listState.layoutInfo,
-                canScrollForward = listState.canScrollForward,
-            )
-            snapshot to snapshot.estimatedRemainingDistancePx(estimatedSentinelSizePx)
-        }
-            .distinctUntilChanged()
-            .collect { (snapshot, remainingDistancePx) ->
-                isWithinAbsoluteBottomAttachThreshold =
-                    isWithinAbsoluteBottomAttachThreshold(
-                        snapshot = snapshot,
-                        remainingDistancePx = remainingDistancePx,
-                        thresholdPx = bottomButtonHideThresholdPx,
-                    )
-                isNearAbsoluteBottom = reduceAbsoluteBottomProximity(
-                    wasNearBottom = isNearAbsoluteBottom,
-                    canScrollForward = snapshot.canScrollForward,
-                    remainingDistancePx = remainingDistancePx,
-                    hideThresholdPx = bottomButtonHideThresholdPx,
-                    showThresholdPx = bottomButtonShowThresholdPx,
-                )
-            }
-    }
-    val messageLifecycleAppearanceRegistry = remember {
-        MessageLifecycleAppearanceRegistry()
-    }
+        imeBottomPx,
+    )
+    scrollCoordinator.BindLayoutObservation(
+        currentConversationId = currentConversationId,
+        loadedMessagesConversationId = loadedMessagesConversationId,
+        imeBottomPx = imeBottomPx,
+        density = density,
+    )
+    val listState = scrollCoordinator.listState
+    val absoluteBottomScrollPhase = scrollCoordinator.absoluteBottomScrollPhase
+    val isNearAbsoluteBottom = scrollCoordinator.isNearAbsoluteBottom
+    val isWithinAbsoluteBottomAttachThreshold =
+        scrollCoordinator.isWithinAbsoluteBottomAttachThreshold
+    val imeBottomAnchorState = scrollCoordinator.imeBottomAnchorState
+    val streamingTailController = scrollCoordinator.streamingTailController
+    val messageLifecycleAppearanceRegistry = scrollCoordinator.messageLifecycleAppearanceRegistry
+    val messageHeights = scrollCoordinator.messageHeights
+    val viewportHeightPx = scrollCoordinator.viewportHeightPx
     val renderMessagesState = rememberScrollIsolatedMessages(
         conversationId = currentConversationId,
         upstream = messagesState,
@@ -399,14 +290,6 @@ fun ChatApp(
     val composer = com.newoether.agora.ui.chat.bottombar.rememberChatComposerState()
     val inputFocusRequester = remember { FocusRequester() }
 
-    // Keyed per conversation: message ids are unique, but the map is also summed wholesale
-    // (see the scroll math below), so entries left behind by a previous conversation would
-    // inflate those totals and misplace the scroll.
-    val messageHeights = remember(currentConversationId) {
-        androidx.compose.runtime.mutableStateMapOf<String, Int>()
-    }
-    var viewportHeightPx by remember { mutableIntStateOf(0) }
-
     var showLaunchContent by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
         delay(50)
@@ -415,382 +298,19 @@ fun ChatApp(
     }
 
 
-    fun resolveScrollTargetMessage(
-        currentMessages: List<com.newoether.agora.model.ChatMessage>,
-        targetMessageId: String?,
-    ): com.newoether.agora.model.ChatMessage? = if (targetMessageId != null) {
-            val msg = currentMessages.find { it.id == targetMessageId }
-            if (msg?.participant == Participant.MODEL && msg.parentId != null) {
-                currentMessages.find { it.id == msg.parentId }
-            } else {
-                msg
-            }
-        } else {
-            currentMessages.lastOrNull { it.participant == Participant.USER }
-        }
-
-    fun resolveScrollTargetIndex(
-        currentMessages: List<com.newoether.agora.model.ChatMessage>,
-        targetMessageId: String?,
-    ): Int {
-        val target = resolveScrollTargetMessage(currentMessages, targetMessageId) ?: return -1
-        return messageListTurnIndex(buildMessageListTurns(currentMessages), target.id)
-    }
-
-    suspend fun animateToUserMessage(
-        targetMessageId: String? = null,
-        easing: Easing = FastOutSlowInEasing,
-    ): Boolean {
-        val currentMessages = messagesState.value
-        if (currentMessages.isEmpty() || viewportHeightPx == 0) return false
-        val layoutTurns = buildMessageListTurns(currentMessages)
-        val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-        if (targetIndex == -1) return false
-        if (!motionPolicy.allowProgrammaticScrollMotion) {
-            listState.scrollToItem(targetIndex, 0)
-            return true
-        }
-
-        val firstVisibleIndex = listState.firstVisibleItemIndex
-        val visibleSizes = listState.layoutInfo.visibleItemsInfo.associate {
-            it.index to it.size
-        }
-        val fallbackHeight = visibleSizes.values
-            .takeIf { it.isNotEmpty() }
-            ?.average()
-            ?.toFloat()
-            ?: with(density) { 72.dp.toPx() }
-        fun heightAt(index: Int): Float {
-            visibleSizes[index]?.let { return it.toFloat() }
-            val turn = layoutTurns.getOrNull(index) ?: return fallbackHeight
-            return estimateMessageListTurnHeightPx(turn, messageHeights, fallbackHeight)
-        }
-
-        val distance = if (targetIndex >= firstVisibleIndex) {
-            var value = -listState.firstVisibleItemScrollOffset.toFloat()
-            for (index in firstVisibleIndex until targetIndex) value += heightAt(index)
-            value
-        } else {
-            var value = -listState.firstVisibleItemScrollOffset.toFloat()
-            for (index in targetIndex until firstVisibleIndex) value -= heightAt(index)
-            value
-        }
-        if (kotlin.math.abs(distance) > 2f) {
-            // A single continuous distance animation has no animateScrollToItem seek/teleport and
-            // therefore no visible exact-position correction on its final frame.
-            listState.animateScrollBy(distance, tween(600, easing = easing))
-        }
-        return true
-    }
-
-    fun estimateRemainingAbsoluteBottomDistance(): Float? {
-        val layout = listState.layoutInfo
-        val lastVisible = layout.visibleItemsInfo.maxByOrNull { item -> item.index }
-            ?: return null
-        val currentMessages = messagesState.value
-        val layoutTurns = buildMessageListTurns(currentMessages)
-        val visibleSizes = layout.visibleItemsInfo.associate { item -> item.index to item.size }
-        val fallbackHeight = visibleSizes.values
-            .filter { size -> size > 1 }
-            .takeIf { sizes -> sizes.isNotEmpty() }
-            ?.average()
-            ?.toFloat()
-            ?: with(density) { 72.dp.toPx() }
-        val lastUserMessageId = currentMessages
-            .lastOrNull { message -> message.participant == Participant.USER }
-            ?.id
-        val tailMinimumHeightPx = if (lastUserMessageId == null || viewportHeightPx == 0) {
-            0f
-        } else {
-            calculateTailMinHeightPx(
-                viewportHeightPx = viewportHeightPx,
-                targetTopPx = with(density) { 140.dp.roundToPx() },
-                bottomObstructionPx = with(density) {
-                    (bottomBarHeight + shareSelectionBarSpace + 8.dp).roundToPx()
-                },
-            ).toFloat()
-        }
-        val sentinelHeightPx = with(density) { 1.dp.toPx() }
-
-        fun estimatedItemSize(index: Int): Float {
-            visibleSizes[index]?.let { size -> return size.toFloat() }
-            val turn = layoutTurns.getOrNull(index) ?: return sentinelHeightPx
-            val estimated = estimateMessageListTurnHeightPx(
-                turn = turn,
-                messageHeights = messageHeights,
-                fallbackHeightPx = fallbackHeight,
-            )
-            return if (turn.key == lastUserMessageId) {
-                maxOf(estimated, tailMinimumHeightPx)
-            } else {
-                estimated
-            }
-        }
-
-        return estimateAbsoluteBottomDistancePx(
-            lastVisibleIndex = lastVisible.index,
-            lastVisibleEndOffsetPx = lastVisible.offset + lastVisible.size,
-            viewportEndOffsetPx = layout.viewportEndOffset,
-            afterContentPaddingPx = layout.afterContentPadding,
-            totalItemsCount = layout.totalItemsCount,
-            estimatedItemSizePx = ::estimatedItemSize,
-        )
-    }
-
-    val latestImeBottomAnchorState by rememberUpdatedState(imeBottomAnchorState)
-    val latestImeBottomPx by rememberUpdatedState(imeBottomPx)
-    LaunchedEffect(
-        currentConversationId,
-        imeBottomAnchorState.active,
-    ) {
-        if (!imeBottomAnchorState.active) return@LaunchedEffect
-
-        val actorStartNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
-        var lastObservedInsetPx = latestImeBottomPx
-        var lastInsetChangeNanos = actorStartNanos
-        var stableFrames = 0
-        while (true) {
-            val frameNanos = withFrameNanos { frameTimeNanos -> frameTimeNanos }
-            if (!latestImeBottomAnchorState.active) return@LaunchedEffect
-            if (latestImeBottomPx != lastObservedInsetPx) {
-                lastObservedInsetPx = latestImeBottomPx
-                lastInsetChangeNanos = frameNanos
-            }
-
-            val layout = absoluteBottomLayoutSnapshot(
-                layoutInfo = listState.layoutInfo,
-                canScrollForward = listState.canScrollForward,
-            )
-            val remainingDistancePx =
-                layout.remainingDistancePx
-                    ?: estimateRemainingAbsoluteBottomDistance()
-                    ?: if (listState.canScrollForward) {
-                        layout.viewportSizePx * 0.5f
-                    } else {
-                        0f
-                    }
-
-            if (remainingDistancePx > 0.5f) {
-                // IME anchoring is a positional correction, not navigational travel. Consume each
-                // newly exposed gap in one frame in both motion modes, so the composer and list
-                // remain visually attached to the keyboard instead of trailing its inset motion.
-                listState.dispatchRawDelta(remainingDistancePx)
-                stableFrames = 0
-            } else {
-                val insetStableForNanos = frameNanos - lastInsetChangeNanos
-                stableFrames =
-                    if (insetStableForNanos >= 80_000_000L) stableFrames + 1 else 0
-                if (stableFrames >= 3) {
-                    imeBottomAnchorState = reduceImeBottomAnchor(
-                        latestImeBottomAnchorState,
-                        ImeBottomAnchorEvent.CorrectionSettled,
-                    )
-                    return@LaunchedEffect
-                }
-            }
-
-            if (frameNanos - actorStartNanos >= 1_600_000_000L) {
-                // Bound the actor even if a malformed layout never exposes a stable sentinel. The
-                // normal proximity state will then expose the bottom button instead of burning
-                // frames indefinitely.
-                imeBottomAnchorState = reduceImeBottomAnchor(
-                    latestImeBottomAnchorState,
-                    ImeBottomAnchorEvent.CorrectionSettled,
-                )
-                return@LaunchedEffect
-            }
-        }
-    }
-
-    suspend fun awaitScrollTargetCommitted(targetMessageId: String?): Boolean =
-        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
-            snapshotFlow {
-                val index = resolveScrollTargetIndex(messagesState.value, targetMessageId)
-                index to listState.layoutInfo.totalItemsCount
-            }.first { (index, itemCount) ->
-                index >= 0 && index < itemCount
-            }
-            true
-        } == true
-
-    suspend fun animateAfterTargetCommitted(targetMessageId: String?): Boolean {
-        if (!awaitScrollTargetCommitted(targetMessageId)) return false
-        return animateToUserMessage(targetMessageId)
-    }
-
-    /**
-     * Branch/delete/conversation transitions stay covered. While covered, hard-position the
-     * target whenever necessary and require three identical, correctly-positioned layout samples
-     * before reporting settlement.
-     */
-    suspend fun settleCoveredTransition(targetMessageId: String?): Boolean =
-        withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
-            var stableSamples = 0
-            var previousSignature: List<Any>? = null
-            while (stableSamples < STABLE_LAYOUT_SAMPLES) {
-                delay(LAYOUT_SAMPLE_INTERVAL_MS)
-                val currentMessages = messagesState.value
-                if (currentMessages.isEmpty()) {
-                    val signature = listOf(0, viewportHeightPx)
-                    if (signature == previousSignature) stableSamples += 1
-                    else {
-                        previousSignature = signature
-                        stableSamples = 1
-                    }
-                    continue
-                }
-                val targetIndex = resolveScrollTargetIndex(currentMessages, targetMessageId)
-                val target = resolveScrollTargetMessage(currentMessages, targetMessageId)
-                if (targetIndex == -1 || target == null || viewportHeightPx <= 0) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-                // A MODEL branch scrolls relative to its parent USER, but the new assistant bubble
-                // itself must exist and stabilize before the cover may disappear. Otherwise two
-                // regeneration branches with the same user anchor can appear "settled" before the
-                // newly selected output has entered layout.
-                val requestedTarget = targetMessageId?.let { id ->
-                    currentMessages.firstOrNull { it.id == id }
-                }
-                if (targetMessageId != null && requestedTarget == null) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-                val requestedTargetHeight = requestedTarget?.let { messageHeights[it.id] }
-                if (
-                    requestedTarget != null &&
-                    (requestedTargetHeight == null || requestedTargetHeight <= 0)
-                ) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-
-                val positioned =
-                    listState.firstVisibleItemIndex == targetIndex &&
-                        listState.firstVisibleItemScrollOffset <= 2
-                if (!positioned) {
-                    // Covered transition: a hard correction is intentional and never visible.
-                    listState.scrollToItem(targetIndex, 0)
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-
-                val targetInfo = listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.index == targetIndex }
-                val measuredHeight = messageHeights[target.id]
-                if (targetInfo == null || measuredHeight == null || measuredHeight <= 0) {
-                    stableSamples = 0
-                    previousSignature = null
-                    continue
-                }
-                val signature = listOf(
-                    targetIndex,
-                    listState.firstVisibleItemIndex,
-                    listState.firstVisibleItemScrollOffset,
-                    targetInfo.offset,
-                    targetInfo.size,
-                    measuredHeight,
-                    viewportHeightPx,
-                    currentMessages.size,
-                    requestedTarget?.id.orEmpty(),
-                    requestedTargetHeight ?: 0,
-                )
-                if (signature == previousSignature) stableSamples += 1
-                else {
-                    previousSignature = signature
-                    stableSamples = 1
-                }
-            }
-            true
-        } == true
-
-    val switchingScrollRequest by viewModel.switchingScrollRequest.collectAsState()
-
-    LaunchedEffect(switchingScrollRequest?.id, switchingScrollRequest?.readyForUi) {
-        val request = switchingScrollRequest ?: return@LaunchedEffect
-        if (!request.readyForUi || request.kind == SwitchingRequestKind.NEW_CHAT) {
-            return@LaunchedEffect
-        }
-        var terminalized = false
-        try {
-            val targetConversationId = request.conversationId
-            if (targetConversationId == null) {
-                viewModel.failSwitchingScroll(request.id, "conversation disappeared")
-                terminalized = true
-                return@LaunchedEffect
-            }
-
-            if (request.kind == SwitchingRequestKind.CONVERSATION) {
-                // The target id may equal the current id, so request identity — not a StateFlow
-                // value edge — owns this effect. Room's first target-specific message snapshot is
-                // also required before measuring; an empty target is represented by the loaded id.
-                val resolved = withTimeoutOrNull(CONVERSATION_RESOLVE_TIMEOUT_MS) {
-                    snapshotFlow {
-                        Triple(
-                            currentConversationId,
-                            currentConversation?.id,
-                            loadedMessagesConversationId,
-                        )
-                    }.filter { (currentId, loadedConversationId, loadedMessagesId) ->
-                        currentId == targetConversationId &&
-                            loadedConversationId == targetConversationId &&
-                            loadedMessagesId == targetConversationId
-                    }.first()
-                }
-                if (resolved == null) {
-                    // Preserve the historical missing-target recovery, but terminalize this
-                    // request first even when createNewChat is already a no-op.
-                    viewModel.failSwitchingScroll(request.id, "conversation did not resolve")
-                    terminalized = true
-                    viewModel.createNewChat()
-                    return@LaunchedEffect
-                }
-            } else if (currentConversationId != targetConversationId) {
-                viewModel.failSwitchingScroll(request.id, "conversation changed")
-                terminalized = true
-                return@LaunchedEffect
-            }
-
-            if (settleCoveredTransition(request.targetMessageId)) {
-                val completed = viewModel.completeSwitchingScroll(request.id)
-                if (
-                    completed &&
-                    request.kind == SwitchingRequestKind.CONVERSATION &&
-                    request.hapticOnCompletion
-                ) {
-                    haptics.confirm()
-                }
-            } else {
-                viewModel.failSwitchingScroll(request.id, "layout failed to stabilize")
-            }
-            terminalized = true
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            DebugLog.e("AgoraUI", "Switching request ${request.id} failed", e)
-            viewModel.failSwitchingScroll(request.id, "unexpected UI failure")
-            terminalized = true
-        } finally {
-            if (!terminalized) {
-                // Owner gating makes this a no-op when a newer request caused cancellation.
-                // When the composition itself disappears, it prevents a retained infinite cover.
-                viewModel.failSwitchingScroll(request.id, "switching effect cancelled")
-            }
-        }
-    }
-
-    LaunchedEffect(currentConversationId) {
-        // New chat's first send owns its persistent animated-scroll request. Conversation
-        // navigation is handled above by a monotonic switching request, so this effect only
-        // consumes the legacy one-shot suppression marker.
-        if (viewModel.suppressNextOpenScroll) {
-            viewModel.suppressNextOpenScroll = false
-        }
-    }
+    scrollCoordinator.BindTransitionEffects(
+        currentConversationId = currentConversationId,
+        currentConversation = currentConversation,
+        loadedMessagesConversationId = loadedMessagesConversationId,
+        messages = messagesState,
+        density = density,
+        motionPolicy = motionPolicy,
+        bottomBarHeight = bottomBarHeight,
+        shareSelectionBarSpace = shareSelectionBarSpace,
+        imeBottomPx = imeBottomPx,
+        viewModel = viewModel,
+        haptics = haptics,
+    )
 
     ComposerDraftLifecycleEffect(
         currentConversationId = currentConversationId,
@@ -800,187 +320,23 @@ fun ChatApp(
     )
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
-    LaunchedEffect(
-        absoluteBottomRequestToken,
-        currentConversationId,
-        motionPolicy.allowProgrammaticScrollMotion,
-    ) {
-        if (absoluteBottomRequestToken == 0L) return@LaunchedEffect
-        try {
-            val reachedBottom = if (motionPolicy.allowProgrammaticScrollMotion) {
-                listState.animateToAbsoluteBottom(
-                    isGenerationActive = { latestGenerationCanGrow },
-                    estimateRemainingDistancePx = ::estimateRemainingAbsoluteBottomDistance,
-                    minimumStepPx = with(density) { 2.dp.toPx() },
-                    onPhaseChanged = { phase -> absoluteBottomScrollPhase = phase },
-                    feedbackSpec = absoluteBottomRequestFeedbackSpec,
-                )
-            } else {
-                absoluteBottomScrollPhase = AbsoluteBottomScrollPhase.SEEKING
-                val lastIndex = listState.layoutInfo.totalItemsCount - 1
-                if (lastIndex >= 0) {
-                    listState.scrollToItem(lastIndex)
-                    withFrameNanos { }
-                    !listState.canScrollForward
-                } else {
-                    false
-                }
-            }
-            if (reachedBottom) {
-                imeBottomAnchorState = reduceImeBottomAnchor(
-                    imeBottomAnchorState,
-                    ImeBottomAnchorEvent.ExplicitBottomReached,
-                )
-            }
-        } finally {
-            if (absoluteBottomScrollPhase.isActive) {
-                absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
-                    absoluteBottomScrollPhase,
-                    AbsoluteBottomScrollEvent.Cancelled,
-                )
-            }
-        }
-    }
-    LaunchedEffect(listState, currentConversationId) {
-        listState.interactionSource.interactions.collect { interaction ->
-            if (interaction is DragInteraction.Start) {
-                imeBottomAnchorState = reduceImeBottomAnchor(
-                    imeBottomAnchorState,
-                    ImeBottomAnchorEvent.UserDragStarted,
-                )
-                if (absoluteBottomScrollPhase.isActive) {
-                    absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
-                        absoluteBottomScrollPhase,
-                        AbsoluteBottomScrollEvent.Cancelled,
-                    )
-                    absoluteBottomRequestToken = 0L
-                }
-            }
-        }
-    }
-    LaunchedEffect(
-        conversationSearchActive,
-        shareSelectionActive,
-        isSwitching,
-        regenerationTransition?.id,
-        animatedScrollRequest?.id,
-        imeBottomAnchorState.active,
-    ) {
-        val competingTransition =
-            conversationSearchActive ||
-                shareSelectionActive ||
-                isSwitching ||
-                regenerationTransition != null ||
-                animatedScrollRequest != null
-        if (competingTransition && absoluteBottomScrollPhase.isActive) {
-            absoluteBottomScrollPhase = reduceAbsoluteBottomScroll(
-                absoluteBottomScrollPhase,
-                AbsoluteBottomScrollEvent.Cancelled,
-            )
-            absoluteBottomRequestToken = 0L
-        }
-        if (competingTransition && imeBottomAnchorState.active) {
-            imeBottomAnchorState = reduceImeBottomAnchor(
-                imeBottomAnchorState,
-                ImeBottomAnchorEvent.Cancelled,
-            )
-        }
-    }
-    LaunchedEffect(
-        regenerationTransition?.id,
-        currentConversationId,
-    ) {
-        val request = regenerationTransition ?: return@LaunchedEffect
-        if (request.scrollFinished) return@LaunchedEffect
-        if (request.conversationId != currentConversationId) {
-            viewModel.acknowledgeRegenerationScroll(request.id, success = false)
-            return@LaunchedEffect
-        }
-        try {
-            val success = animateToUserMessage(
-                targetMessageId = request.targetUserMessageId,
-                easing = SCROLL_EASING,
-            )
-            viewModel.acknowledgeRegenerationScroll(request.id, success)
-        } catch (e: CancellationException) {
-            viewModel.acknowledgeRegenerationScroll(request.id, success = false)
-            throw e
-        }
-    }
-    LaunchedEffect(
-        regenerationTransition?.id,
-        regenerationTransition?.stage,
-        regenerationTransition?.scrollFinished,
-        currentConversationId,
-    ) {
-        val request = regenerationTransition
-            ?.takeIf {
-                it.stage == RegenerationTransitionStage.COMMITTED &&
-                    it.scrollFinished
-            }
-            ?: return@LaunchedEffect
-        if (request.conversationId == currentConversationId) {
-            snapshotFlow {
-                messagesState.value.none { message -> message.id == request.oldMessageId }
-            }.first { oldPathRemoved -> oldPathRemoved }
-            withFrameNanos { }
-        }
-        viewModel.completeRegenerationTransition(request.id)
-    }
-    LaunchedEffect(animatedScrollRequest?.id, currentConversationId) {
-        val request = animatedScrollRequest ?: return@LaunchedEffect
-        if (request.conversationId != currentConversationId) {
-            // A first Send arms its entrance/scroll request immediately before publishing the
-            // newly-created conversation id. Keep that request alive across the single null-id
-            // frame; this effect restarts as soon as currentConversationId is published.
-            if (currentConversationId != null || !isNewChatMode) {
-                viewModel.completeAnimatedScroll(request.id)
-            }
-            return@LaunchedEffect
-        }
-        when (request.destination) {
-            AnimatedScrollDestination.MESSAGE -> {
-                try {
-                    if (!animateAfterTargetCommitted(request.targetMessageId)) {
-                        DebugLog.e(
-                            "AgoraUI",
-                            "Animated scroll target was not committed: ${request.targetMessageId}",
-                        )
-                    }
-                } finally {
-                    viewModel.completeAnimatedScroll(request.id)
-                }
-            }
-            AnimatedScrollDestination.ABSOLUTE_BOTTOM -> {
-                val targetCommitted = try {
-                    awaitScrollTargetCommitted(request.targetMessageId)
-                } finally {
-                    // Complete the readiness request before arming the bottom actor. The
-                    // competing-transition gate therefore cannot cancel the Send's own scroll.
-                    viewModel.completeAnimatedScroll(request.id)
-                }
-                if (
-                    targetCommitted &&
-                    request.conversationId == currentConversationId
-                ) {
-                    // ATTACHED_ONLY (loop cycles) skips scrolling when the user has scrolled
-                    // away so automated messages never steal the scroll position. The one-shot
-                    // bubble entrance animation still plays because the request was active
-                    // during target commitment.
-                    val shouldScroll =
-                        !request.attachedOnly || isWithinAbsoluteBottomAttachThreshold
-                    if (shouldScroll) {
-                        requestAbsoluteBottomScroll(feedbackSpec = SEND_FEEDBACK_SCROLL_SPEC)
-                    }
-                } else if (!targetCommitted) {
-                    DebugLog.e(
-                        "AgoraUI",
-                        "Absolute-bottom scroll target was not committed: ${request.targetMessageId}",
-                    )
-                }
-            }
-        }
-    }
+    scrollCoordinator.BindRequestEffects(
+        currentConversationId = currentConversationId,
+        isNewChatMode = isNewChatMode,
+        isLoading = isLoading,
+        isStopping = isStopping,
+        isSwitching = isSwitching,
+        conversationSearchActive = conversationSearchActive,
+        shareSelectionActive = shareSelectionActive,
+        regenerationTransition = regenerationTransition,
+        animatedScrollRequest = animatedScrollRequest,
+        messages = messagesState,
+        density = density,
+        motionPolicy = motionPolicy,
+        bottomBarHeight = bottomBarHeight,
+        shareSelectionBarSpace = shareSelectionBarSpace,
+        viewModel = viewModel,
+    )
 
     BackHandler(enabled = drawerState.currentValue != DrawerValue.Closed || drawerState.targetValue != DrawerValue.Closed) {
         focusManager.clearFocus()
@@ -1043,7 +399,7 @@ fun ChatApp(
             modifier = Modifier
                 .fillMaxSize()
                 .clearFocusOnTap()
-                .onSizeChanged { viewportHeightPx = it.height }
+                .onSizeChanged { scrollCoordinator.recordViewportHeight(it.height) }
         ) {
             val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
             val (targetCa, targetQa) = if (!dark) {
@@ -1409,7 +765,7 @@ fun ChatApp(
                     ) {
                         Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
                             FloatingActionButton(onClick = {
-                                requestAbsoluteBottomScroll()
+                                scrollCoordinator.requestAbsoluteBottomScroll()
                             }, containerColor = MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp), contentColor = MaterialTheme.colorScheme.onSurface, shape = CircleShape, elevation = FloatingActionButtonDefaults.elevation(fabElevation), modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.scroll_to_bottom), modifier = Modifier.size(24.dp))
                             }
@@ -1611,9 +967,7 @@ fun ChatApp(
                         composerState = composer,
                         focusRequester = inputFocusRequester,
                         onInputFocusChanged = { focused ->
-                            if (composerInputFocused != focused) {
-                                composerInputFocused = focused
-                            }
+                            scrollCoordinator.setComposerInputFocused(focused)
                         },
                         isExpanded = isExpanded,
                         isExpandAnimating = isExpandAnimating,
