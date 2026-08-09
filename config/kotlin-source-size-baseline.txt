@@ -8,5 +8,4 @@ app/src/main/java/com/newoether/agora/data/SettingsManager.kt=1369
 app/src/main/java/com/newoether/agora/data/local/ChatDatabase.kt=1587
 app/src/main/java/com/newoether/agora/tool/ShellToolProvider.kt=1514
 app/src/main/java/com/newoether/agora/ui/chat/MessageList.kt=1181
-app/src/main/java/com/newoether/agora/ui/settings/SettingsModelsPage.kt=1004
 app/src/test/java/com/newoether/agora/ui/chat/MessageListLayoutTest.kt=1256
