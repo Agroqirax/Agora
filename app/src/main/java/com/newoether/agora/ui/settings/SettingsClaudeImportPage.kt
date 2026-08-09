@@ -33,9 +33,9 @@ fun SettingsClaudeImportPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val importProgress by viewModel.claudeImportProgress.collectAsState()
-    val importResult by viewModel.claudeImportResult.collectAsState()
-    val importPreview by viewModel.claudeImportPreview.collectAsState()
+    val importProgress by viewModel.importExport.claudeImportProgress.collectAsState()
+    val importResult by viewModel.importExport.claudeImportResult.collectAsState()
+    val importPreview by viewModel.importExport.claudeImportPreview.collectAsState()
 
     var showImportDialog by remember { mutableStateOf(false) }
     var importStrategy by remember { mutableStateOf<ImportStrategy>(ImportStrategy.MERGE) }
@@ -56,7 +56,7 @@ fun SettingsClaudeImportPage(
                 if (fileUri == uri) fileName = name
             }
             // Preview the file
-            viewModel.previewClaudeChat(uri)
+            viewModel.importExport.previewClaudeChat(uri)
         }
     }
 
@@ -155,7 +155,7 @@ fun SettingsClaudeImportPage(
                     showImportDialog = false
                     fileUri?.let {
                         scope.launch {
-                            viewModel.importClaudeChat(it, importStrategy, emptySet())
+                            viewModel.importExport.importClaudeChat(it, importStrategy, emptySet())
                         }
                     }
                 }) {
@@ -194,7 +194,7 @@ fun SettingsClaudeImportPage(
             confirmButton = {
                 TextButton(onClick = {
                     showSuccessDialog = false
-                    viewModel.clearClaudeImportState()
+                    viewModel.importExport.clearClaudeImportState()
                 }) {
                     Text(stringResource(R.string.provider_close))
                 }

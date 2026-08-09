@@ -2,7 +2,6 @@ package com.newoether.agora.viewmodel
 
 import android.app.Application
 import android.content.Context
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.newoether.agora.R
@@ -15,7 +14,6 @@ import com.newoether.agora.api.ollama.*
 import com.newoether.agora.api.openai.*
 import com.newoether.agora.data.AutoBackupManager
 import com.newoether.agora.data.BuiltInPrompts
-import com.newoether.agora.data.ClaudeChatImporter
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
@@ -38,7 +36,6 @@ import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.AgoraForegroundService
-import com.newoether.agora.ui.settings.ImportStrategy
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.PdfPageRenderer
 import com.newoether.agora.util.SnackbarEvent
@@ -732,19 +729,6 @@ class ChatViewModel(
     fun failSwitchingScroll(requestId: Long, reason: String) =
         selectionController.failSwitchingScroll(requestId, reason)
 
-    // Export/Import state lives in [importExport]; exposed here for the UI.
-    val exportProgress get() = importExport.exportProgress
-    val importProgress get() = importExport.importProgress
-    val importManifest get() = importExport.importManifest
-    val importPreview get() = importExport.importPreview
-    val claudeImportPreview get() = importExport.claudeImportPreview
-    val claudeImportProgress get() = importExport.claudeImportProgress
-    val claudeImportResult get() = importExport.claudeImportResult
-    val gptImportPreview get() = importExport.gptImportPreview
-    val gptImportProgress get() = importExport.gptImportProgress
-    val gptImportResult get() = importExport.gptImportResult
-
-
     val conversationCount: StateFlow<Int> = dataControl.conversationCount
     val memoryCount: StateFlow<Int> = dataControl.memoryCount
     val systemPromptCount: StateFlow<Int> = dataControl.systemPromptCount
@@ -942,24 +926,6 @@ class ChatViewModel(
     // ---- Data Control: Export / Import ----
 
     fun refreshDataCounts() = dataControl.refreshCounts()
-
-    fun exportData(uri: Uri, categories: Set<DataExporter.ExportCategory>, includeApiKeys: Boolean) =
-        importExport.exportData(uri, categories, includeApiKeys)
-    fun previewImport(uri: Uri) = importExport.previewImport(uri)
-    fun clearImportState() = importExport.clearImportState()
-    fun setClaudeImportPreview(preview: ClaudeChatImporter.ImportPreview) = importExport.setClaudeImportPreview(preview)
-    fun previewClaudeChat(uri: Uri) = importExport.previewClaudeChat(uri)
-    fun setClaudeImportError(error: String) = importExport.setClaudeImportError(error)
-    fun clearClaudeImportState() = importExport.clearClaudeImportState()
-    fun importClaudeChat(uri: Uri, strategy: ImportStrategy, selectedIds: Set<String>) =
-        importExport.importClaudeChat(uri, strategy, selectedIds)
-    fun previewGptChat(uri: Uri) = importExport.previewGptChat(uri)
-    fun setGptImportError(error: String) = importExport.setGptImportError(error)
-    fun clearGptImportState() = importExport.clearGptImportState()
-    fun importGptChat(uri: Uri, strategy: ImportStrategy, selectedIds: Set<String>) =
-        importExport.importGptChat(uri, strategy, selectedIds)
-    fun importData(uri: Uri, decisions: Map<DataExporter.ExportCategory, DataImporter.ImportStrategy>) =
-        importExport.importData(uri, decisions)
 
     // ── Per-conversation draft persistence ─────────────────────
 

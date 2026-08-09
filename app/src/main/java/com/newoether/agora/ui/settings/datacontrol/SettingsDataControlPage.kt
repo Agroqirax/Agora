@@ -47,18 +47,18 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val conversationCount by viewModel.conversationCount.collectAsState()
     val memoryCount by viewModel.memoryCount.collectAsState()
     val promptCount by viewModel.systemPromptCount.collectAsState()
-    val exportProgress by viewModel.exportProgress.collectAsState()
-    val importProgress by viewModel.importProgress.collectAsState()
-    val importManifest by viewModel.importManifest.collectAsState()
-    val importPreview by viewModel.importPreview.collectAsState()
+    val exportProgress by viewModel.importExport.exportProgress.collectAsState()
+    val importProgress by viewModel.importExport.importProgress.collectAsState()
+    val importManifest by viewModel.importExport.importManifest.collectAsState()
+    val importPreview by viewModel.importExport.importPreview.collectAsState()
 
-    val claudeImportPreview by viewModel.claudeImportPreview.collectAsState()
-    val claudeImportProgress by viewModel.claudeImportProgress.collectAsState()
-    val claudeImportResult by viewModel.claudeImportResult.collectAsState()
+    val claudeImportPreview by viewModel.importExport.claudeImportPreview.collectAsState()
+    val claudeImportProgress by viewModel.importExport.claudeImportProgress.collectAsState()
+    val claudeImportResult by viewModel.importExport.claudeImportResult.collectAsState()
 
-    val gptImportPreview by viewModel.gptImportPreview.collectAsState()
-    val gptImportProgress by viewModel.gptImportProgress.collectAsState()
-    val gptImportResult by viewModel.gptImportResult.collectAsState()
+    val gptImportPreview by viewModel.importExport.gptImportPreview.collectAsState()
+    val gptImportProgress by viewModel.importExport.gptImportProgress.collectAsState()
+    val gptImportResult by viewModel.importExport.gptImportResult.collectAsState()
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportPreviewDialog by remember { mutableStateOf(false) }
     var importUri by remember { mutableStateOf<Uri?>(null) }
@@ -96,7 +96,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri != null && pendingExportCategories.isNotEmpty()) {
-            viewModel.exportData(uri, pendingExportCategories, pendingExportIncludeApiKeys)
+            viewModel.importExport.exportData(uri, pendingExportCategories, pendingExportIncludeApiKeys)
             pendingExportCategories = emptySet()
             pendingExportIncludeApiKeys = false
         }
@@ -107,7 +107,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     ) { uri ->
         if (uri != null) {
             importUri = uri
-            viewModel.previewImport(uri)
+            viewModel.importExport.previewImport(uri)
         }
     }
 
@@ -123,7 +123,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
                 if (claudeFileUri == uri) claudeFileName = name
             }
-            viewModel.previewClaudeChat(uri)
+            viewModel.importExport.previewClaudeChat(uri)
         }
     }
 
@@ -139,7 +139,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }
                 if (gptFileUri == uri) gptFileName = name
             }
-            viewModel.previewGptChat(uri)
+            viewModel.importExport.previewGptChat(uri)
         }
     }
 
@@ -318,11 +318,11 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             preview = importPreview!!,
             onDismiss = {
                 showImportPreviewDialog = false
-                viewModel.clearImportState()
+                viewModel.importExport.clearImportState()
             },
             onImport = { decisions ->
                 showImportPreviewDialog = false
-                importUri?.let { viewModel.importData(it, decisions) }
+                importUri?.let { viewModel.importExport.importData(it, decisions) }
             }
         )
     }
@@ -340,7 +340,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 showClaudeImportDialog = false
-                viewModel.clearClaudeImportState()
+                viewModel.importExport.clearClaudeImportState()
             },
             title = { Text(stringResource(R.string.claude_import_title), fontWeight = FontWeight.Bold) },
             text = {
@@ -407,10 +407,10 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     onClick = {
                         val finalIds = dialogSelectedIds
                         showClaudeImportDialog = false
-                        viewModel.clearClaudeImportState()
+                        viewModel.importExport.clearClaudeImportState()
                         claudeFileUri?.let {
                             scope.launch {
-                                viewModel.importClaudeChat(it, ImportStrategy.MERGE, finalIds)
+                                viewModel.importExport.importClaudeChat(it, ImportStrategy.MERGE, finalIds)
                             }
                         }
                     },
@@ -422,7 +422,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             dismissButton = {
                 TextButton(onClick = {
                     showClaudeImportDialog = false
-                    viewModel.clearClaudeImportState()
+                    viewModel.importExport.clearClaudeImportState()
                 }) {
                     Text(stringResource(R.string.cancel))
                 }
@@ -437,7 +437,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 showClaudeSuccessDialog = false
-                viewModel.clearClaudeImportState()
+                viewModel.importExport.clearClaudeImportState()
             },
             title = { Text(stringResource(R.string.claude_import_success), fontWeight = FontWeight.Bold) },
             text = {
@@ -456,7 +456,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     showClaudeSuccessDialog = false
-                    viewModel.clearClaudeImportState()
+                    viewModel.importExport.clearClaudeImportState()
                 }) {
                     Text(stringResource(R.string.provider_close))
                 }
@@ -477,7 +477,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 showGptImportDialog = false
-                viewModel.clearGptImportState()
+                viewModel.importExport.clearGptImportState()
             },
             title = { Text(stringResource(R.string.gpt_import_title), fontWeight = FontWeight.Bold) },
             text = {
@@ -542,10 +542,10 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     onClick = {
                         val finalIds = dialogSelectedIds
                         showGptImportDialog = false
-                        viewModel.clearGptImportState()
+                        viewModel.importExport.clearGptImportState()
                         gptFileUri?.let {
                             scope.launch {
-                                viewModel.importGptChat(it, ImportStrategy.MERGE, finalIds)
+                                viewModel.importExport.importGptChat(it, ImportStrategy.MERGE, finalIds)
                             }
                         }
                     },
@@ -557,7 +557,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             dismissButton = {
                 TextButton(onClick = {
                     showGptImportDialog = false
-                    viewModel.clearGptImportState()
+                    viewModel.importExport.clearGptImportState()
                 }) {
                     Text(stringResource(R.string.cancel))
                 }
@@ -572,7 +572,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = {
                 showGptSuccessDialog = false
-                viewModel.clearGptImportState()
+                viewModel.importExport.clearGptImportState()
             },
             title = { Text(stringResource(R.string.gpt_import_success), fontWeight = FontWeight.Bold) },
             text = {
@@ -591,7 +591,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     showGptSuccessDialog = false
-                    viewModel.clearGptImportState()
+                    viewModel.importExport.clearGptImportState()
                 }) {
                     Text(stringResource(R.string.provider_close))
                 }
