@@ -49,11 +49,8 @@ import com.newoether.agora.util.SnackbarEvent
 import com.newoether.agora.util.SshClient
 import com.newoether.agora.util.UpdateChecker
 import com.newoether.agora.util.UpdateInfo
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -94,11 +91,6 @@ class ChatViewModel(
     private val mcpToolProvider: com.newoether.agora.tool.McpToolProvider,
     private val taskExecutionEngine: com.newoether.agora.automation.TaskExecutionEngine,
 ) : AndroidViewModel(application) {
-
-    companion object {
-        /** Overlay fade duration for conversation-switch transitions. */
-        private const val SWITCH_OVERLAY_FADE_MS = 200L
-    }
 
     val settings: SettingsRepository = settingsRepository
 
@@ -168,9 +160,7 @@ class ChatViewModel(
         settings = settings,
         scope = viewModelScope,
         onModelReferenceReplaced = { oldModelId, newModelId ->
-            if (_currentActiveModel.value == oldModelId) {
-                _currentActiveModel.value = newModelId
-            }
+            selectionController.replaceActiveModelReference(oldModelId, newModelId)
         },
     )
 
@@ -321,6 +311,20 @@ class ChatViewModel(
 
 
     private val scrollRequests = ScrollRequestCoordinator()
+    private val selectionController by lazy {
+        ConversationSelectionController(
+            scope = viewModelScope,
+            conversations = convRepo,
+            registry = generationRegistry,
+            defaultModel = settings.selectedModel,
+            scrollRequests = scrollRequests,
+            renderStore = { renderStore },
+            clearConversationGraph = { conversationUi.clearConversationGraph() },
+            clearPendingSystemPrompt = { _pendingSystemPromptId.value = null },
+            clearPendingConversationSettings = { _pendingConversationSettings.value = null },
+            abortRegeneration = { regenerationTransitions.abortCurrent() },
+        )
+    }
 
     /** Callback invoked when any send path (manual/queue/loop) accepts a message.
      *  ChatApp wires this to trigger a single haptics.confirm() for all three paths. */
@@ -342,7 +346,7 @@ class ChatViewModel(
         set(value) { scrollRequests.loadingDraft = value }
 
     fun triggerScrollToMessage(messageId: String? = null) {
-        scrollRequests.requestMessage(_currentConversationId.value, messageId)
+        scrollRequests.requestMessage(currentConversationId.value, messageId)
     }
 
     fun triggerScrollToAbsoluteBottomAfter(conversationId: String, messageId: String) {
@@ -359,10 +363,7 @@ class ChatViewModel(
 
     fun completeAnimatedScroll(requestId: Long) = scrollRequests.complete(requestId)
 
-    private val _currentActiveModel = MutableStateFlow<String?>(null)
-    val currentActiveModel = kotlinx.coroutines.flow.combine(_currentActiveModel, settings.selectedModel) { active, default ->
-        active ?: default
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, Constants.EXAMPLE_MODEL_ID)
+    val currentActiveModel: StateFlow<String> get() = selectionController.currentActiveModel
 
     fun getProviderForModel(modelId: String): String = providerRegistry.providerForModel(modelId)
     
@@ -408,14 +409,13 @@ class ChatViewModel(
 
     val conversations: StateFlow<List<ChatConversation>> = convRepo.getAllConversations()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    private val _currentConversationId = MutableStateFlow<String?>(null)
-    val currentConversationId: StateFlow<String?> = _currentConversationId.asStateFlow()
+    val currentConversationId: StateFlow<String?> get() = selectionController.currentConversationId
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val currentConversation: StateFlow<ChatConversation?> = _currentConversationId
+    val currentConversation: StateFlow<ChatConversation?> = currentConversationId
         .flatMapLatest { id -> if (id == null) flowOf(null) else convRepo.observeConversation(id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val currentLoop: StateFlow<com.newoether.agora.data.local.LoopEntity?> = _currentConversationId
+    val currentLoop: StateFlow<com.newoether.agora.data.local.LoopEntity?> = currentConversationId
         .flatMapLatest { id ->
             if (id == null) {
                 flowOf(null)
@@ -439,7 +439,7 @@ class ChatViewModel(
     val runningLoopConversationIds: StateFlow<Set<String>> get() = loopManager.runningConversationIds
 
     fun stopCurrentLoop() {
-        val id = _currentConversationId.value ?: return
+        val id = currentConversationId.value ?: return
         viewModelScope.launch { loopManager.stopLoop(id) }
     }
 
@@ -447,7 +447,7 @@ class ChatViewModel(
         conversations = convRepo,
         registry = generationRegistry,
         executionCoordinator = conversationExecutionCoordinator,
-        currentConversationId = _currentConversationId,
+        currentConversationId = currentConversationId,
         appContext = appContext,
         scope = viewModelScope,
     )
@@ -557,8 +557,7 @@ class ChatViewModel(
         GenerationFinalizer(convRepo, ragManager::indexMessageForRag)
     }
 
-    private val switchingCoordinator = SwitchingCoordinator()
-    val isSwitching: StateFlow<Boolean> = switchingCoordinator.isSwitching
+    val isSwitching: StateFlow<Boolean> get() = selectionController.isSwitching
 
     private val regenerationTransitions = RegenerationTransitionCoordinator()
     internal val regenerationTransition: StateFlow<RegenerationTransitionRequest?> =
@@ -576,19 +575,10 @@ class ChatViewModel(
         regenerationTransitions.complete(requestId)
     }
 
-    private var switchingJob: Job? = null
-
-    private val _isNewChatMode = MutableStateFlow(true)
-    val isNewChatMode: StateFlow<Boolean> = _isNewChatMode.asStateFlow()
-
-    // A monotonic page-entry identity, distinct from recomposition/configuration changes.
-    // The initial value owns the app-launch welcome; each real conversation→New Chat
-    // transition increments it exactly once.
-    private val _newChatEntryId = MutableStateFlow(1L)
-    val newChatEntryId: StateFlow<Long> = _newChatEntryId.asStateFlow()
-
-    private val _isTransitioningToNewChat = MutableStateFlow(false)
-    val isTransitioningToNewChat: StateFlow<Boolean> = _isTransitioningToNewChat.asStateFlow()
+    val isNewChatMode: StateFlow<Boolean> get() = selectionController.isNewChatMode
+    val newChatEntryId: StateFlow<Long> get() = selectionController.newChatEntryId
+    val isTransitioningToNewChat: StateFlow<Boolean>
+        get() = selectionController.isTransitioningToNewChat
 
     private val _pendingSystemPromptId = MutableStateFlow<String?>(null)
     val pendingSystemPromptId: StateFlow<String?> = _pendingSystemPromptId.asStateFlow()
@@ -599,13 +589,13 @@ class ChatViewModel(
 
     private val _pendingConversationSettings = MutableStateFlow<ConversationSettings?>(null)
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val isCompacting: StateFlow<Boolean> = _currentConversationId
+    val isCompacting: StateFlow<Boolean> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf(false)
             else generationRegistry.getOrCreate(conversationId).compacting
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    val compactPreview: StateFlow<String> = _currentConversationId
+    val compactPreview: StateFlow<String> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf("")
             else generationRegistry.getOrCreate(conversationId).compactPreview
@@ -650,9 +640,14 @@ class ChatViewModel(
             localProvider = localProvider,
             executionCoordinator = conversationExecutionCoordinator,
             renderStore = renderStore,
-            currentConversationId = _currentConversationId,
-            isNewChatMode = _isNewChatMode,
-            pendingConversationSettings = _pendingConversationSettings,
+            currentConversationId = currentConversationId,
+            isNewChatMode = isNewChatMode,
+            applyPendingConversationSettings = { conversationId ->
+                _pendingConversationSettings.value?.let { pending ->
+                    settings.setConversationSettings(conversationId, pending)
+                    _pendingConversationSettings.value = null
+                }
+            },
             pendingSystemPromptId = _pendingSystemPromptId,
             currentActiveModel = currentActiveModel,
             messages = messages,
@@ -665,7 +660,7 @@ class ChatViewModel(
                 // published after acceptance, so it is matched via isNewChatMode rather than by id.
                 // Background automation on another conversation stays silent: from the user's point
                 // of view nothing happened on screen.
-                val currentId = _currentConversationId.value
+                val currentId = currentConversationId.value
                 val targetsOpenConversation = currentId == convId ||
                     (currentId == null && isNewChatMode.value)
                 if (targetsOpenConversation) onSendAccepted?.invoke(convId, msgId)
@@ -676,22 +671,13 @@ class ChatViewModel(
                 suppressNextOpenScroll = true
                 _firstMessageCommitted.tryEmit(conversationId)
             },
+            onConversationAcceptedBySend = selectionController::publishAcceptedConversation,
             onUserMessagePersisted = ragManager::indexMessageForRag,
             onTreeMutationStart = {
-                val request = _currentConversationId.value?.let {
-                    switchingCoordinator.beginTreeMutation(it)
-                }
-                delay(SWITCH_OVERLAY_FADE_MS)
-                request?.id
+                selectionController.beginTreeMutation()
             },
-            onTreeMutationSettling = { requestId, targetMessageId ->
-                requestId?.let {
-                    switchingCoordinator.markTreeMutationReady(it, targetMessageId)
-                }
-            },
-            onTreeMutationFailed = { requestId ->
-                requestId?.let { switchingCoordinator.complete(it) }
-            },
+            onTreeMutationSettling = selectionController::markTreeMutationReady,
+            onTreeMutationFailed = selectionController::failTreeMutation,
             regenerationTransitions = regenerationTransitions,
             pauseConversationTasks = { conversationId -> loopManager.stopLoop(conversationId) },
         )
@@ -708,16 +694,13 @@ class ChatViewModel(
     }
 
     val switchingScrollRequest: StateFlow<SwitchingScrollRequest?> =
-        switchingCoordinator.request
+        selectionController.switchingScrollRequest
 
     fun completeSwitchingScroll(requestId: Long): Boolean =
-        switchingCoordinator.complete(requestId)
+        selectionController.completeSwitchingScroll(requestId)
 
-    fun failSwitchingScroll(requestId: Long, reason: String) {
-        if (!switchingCoordinator.isCurrent(requestId)) return
-        DebugLog.e("AgoraVM", "Switching scroll did not settle: $reason")
-        switchingCoordinator.complete(requestId)
-    }
+    fun failSwitchingScroll(requestId: Long, reason: String) =
+        selectionController.failSwitchingScroll(requestId, reason)
 
     // Export/Import state lives in [importExport]; exposed here for the UI.
     val exportProgress get() = importExport.exportProgress
@@ -757,7 +740,7 @@ class ChatViewModel(
         // Register the foreground-send bridge so loop cycles on this open conversation
         // go through the controller's regular send path (bubble animation + scroll + haptics).
         taskExecutionEngine.attachForegroundSendBridge(generationCallbackOwner) bridge@{ convId, text, modelId ->
-            if (_currentConversationId.value != convId) return@bridge BridgeOutcome.NotDelegated
+            if (currentConversationId.value != convId) return@bridge BridgeOutcome.NotDelegated
             // The Loop already holds this conversation's automation lease. Falling back to the
             // headless path while a manual send owns the generation slot recreates the lock/slot
             // deadlock this direct-only bridge exists to prevent. Busy therefore ends this cycle as
@@ -918,81 +901,15 @@ class ChatViewModel(
         }
     }
 
-    fun createNewChat() {
-        // Already on the new-chat screen: ignore (both the drawer and the top-bar capsule route
-        // here; behaviour must be identical and a no-op when there's nothing to reset).
-        if (_isNewChatMode.value) return
-        regenerationTransitions.abortCurrent()
-        val previousJob = switchingJob
-        val request = switchingCoordinator.beginNewChat()
-        previousJob?.cancel()
-        if (!_isNewChatMode.value) {
-            _pendingSystemPromptId.value = null
-        }
-        _newChatEntryId.value += 1L
-        _isNewChatMode.value = true
-        _isTransitioningToNewChat.value = true
-        scrollRequests.clear()
-        switchingJob = viewModelScope.launch {
-            try {
-                kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
-                if (!switchingCoordinator.isCurrent(request.id)) return@launch
-                _currentConversationId.value = null
-                _currentActiveModel.value = null
-                _pendingConversationSettings.value = null
-                conversationUi.clearConversationGraph()
-            } finally {
-                if (switchingCoordinator.complete(request.id)) {
-                    _isTransitioningToNewChat.value = false
-                }
-            }
-        }
-    }
+    fun createNewChat() = selectionController.createNewChat()
 
     fun selectConversation(
         id: String,
         hapticOnCompletion: Boolean = true,
-    ) {
-        if (_currentConversationId.value == id && !_isNewChatMode.value) return
-        regenerationTransitions.abortCurrent()
-
-        val previousJob = switchingJob
-        val request = switchingCoordinator.beginConversation(
-            conversationId = id,
-            hapticOnCompletion = hapticOnCompletion,
-        )
-        previousJob?.cancel()
-        _isTransitioningToNewChat.value = false
-        scrollRequests.clear()
-        switchingJob = viewModelScope.launch {
-            try {
-                kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
-                if (!switchingCoordinator.isCurrent(request.id)) return@launch
-                _isNewChatMode.value = false
-                _currentConversationId.value = id
-                val conversation = convRepo.getConversation(id)
-                if (switchingCoordinator.isCurrent(request.id)) {
-                    _currentActiveModel.value = conversation?.modelId
-                    // Publish UI readiness only after this owned job has committed every
-                    // synchronous target state. In particular, a same-id selection must not let
-                    // the UI settle the request during the overlay delay and cancel this job's
-                    // transition out of New Chat mode.
-                    switchingCoordinator.markConversationReady(request.id)
-                }
-            } catch (e: CancellationException) {
-                if (switchingCoordinator.isCurrent(request.id)) {
-                    failSwitchingScroll(request.id, "conversation switch cancelled")
-                }
-                throw e
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Failed to select conversation $id", e)
-                failSwitchingScroll(request.id, "conversation load failed")
-            }
-        }
-    }
+    ) = selectionController.selectConversation(id, hapticOnCompletion)
 
     fun forkConversationFrom(messageId: String? = null) {
-        val conversationId = _currentConversationId.value ?: return
+        val conversationId = currentConversationId.value ?: return
         viewModelScope.launch {
             when (val result = conversationForkShare.fork(conversationId, messageId)) {
                 is ConversationForkShareService.ForkResult.Success ->
@@ -1008,14 +925,14 @@ class ChatViewModel(
     }
 
     fun shareConversation() {
-        val conversationId = _currentConversationId.value ?: return
+        val conversationId = currentConversationId.value ?: return
         viewModelScope.launch {
             emitShareResult(conversationForkShare.shareAll(conversationId))
         }
     }
 
     fun shareGeneration(assistantMessageId: String) {
-        val conversationId = _currentConversationId.value ?: return
+        val conversationId = currentConversationId.value ?: return
         viewModelScope.launch {
             emitShareResult(
                 conversationForkShare.shareRun(conversationId, assistantMessageId)
@@ -1024,7 +941,7 @@ class ChatViewModel(
     }
 
     fun shareMessages(messageIds: Set<String>) {
-        val conversationId = _currentConversationId.value ?: return
+        val conversationId = currentConversationId.value ?: return
         if (messageIds.isEmpty()) return
         viewModelScope.launch {
             emitShareResult(
@@ -1063,20 +980,10 @@ class ChatViewModel(
         }
     }
 
-    fun setActiveModel(model: String) {
-        _currentActiveModel.value = model
-        _currentConversationId.value?.let { id ->
-            viewModelScope.launch {
-                val existing = convRepo.getConversation(id)
-                if (existing != null) {
-                    convRepo.upsertConversation(existing.copy(modelId = model))
-                }
-            }
-        }
-    }
+    fun setActiveModel(model: String) = selectionController.setActiveModel(model)
 
     fun deleteConversation(id: String) {
-        if (_currentConversationId.value == id) {
+        if (currentConversationId.value == id) {
             stopGeneration()
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -1085,7 +992,7 @@ class ChatViewModel(
                 convRepo.deleteConversation(id)
             }
             generationRegistry.remove(id)
-            if (_currentConversationId.value == id) {
+            if (currentConversationId.value == id) {
                 withContext(Dispatchers.Main) { createNewChat() }
             }
         }
@@ -1112,7 +1019,7 @@ class ChatViewModel(
 
     /** Queued sends for the currently-open conversation (drives the queue banner above the input). */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val queuedSends: StateFlow<List<QueuedSend>> = _currentConversationId
+    val queuedSends: StateFlow<List<QueuedSend>> = currentConversationId
         .flatMapLatest { id ->
             if (id == null) kotlinx.coroutines.flow.flowOf(emptyList())
             else generationRegistry.getOrCreate(id).queuedSends
@@ -1122,7 +1029,7 @@ class ChatViewModel(
     /** True while the open conversation's Stop is still winding down (slot held until the
      *  cancelled coroutine fully unwinds). Drives the composer's gray stopping spinner. */
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val isStopping: StateFlow<Boolean> = _currentConversationId
+    val isStopping: StateFlow<Boolean> = currentConversationId
         .flatMapLatest { id ->
             if (id == null) kotlinx.coroutines.flow.flowOf(false)
             else generationRegistry.getOrCreate(id).stopping
@@ -1130,7 +1037,7 @@ class ChatViewModel(
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
 
     fun removeQueuedSend(id: String) {
-        val conversationId = _currentConversationId.value ?: return
+        val conversationId = currentConversationId.value ?: return
         val state = generationRegistry.getOrCreate(conversationId)
         viewModelScope.launch(Dispatchers.IO) {
             state.queueMutationMutex.withLock {
@@ -1147,13 +1054,13 @@ class ChatViewModel(
         // generation is intentionally not killed here — the user is asking to stop what they
         // see. the state mailbox cancels that conversation's job + streamScope (not other
         // conversations'), and finalizer persists STOPPED to the correct conversation id.
-        val id = _currentConversationId.value ?: return
+        val id = currentConversationId.value ?: return
         val state = generationRegistry.get(id) ?: return
         state.requestStop { result ->
             val stoppedMsg = result.stoppedMessage
             val messages = if (stoppedMsg != null) {
                 listOf(stoppedMsg)
-            } else if (_currentConversationId.value == result.conversationId) {
+            } else if (currentConversationId.value == result.conversationId) {
                 // streamingMessage was null — mark any in-flight model message in the open list directly.
                 runCatching {
                     renderStore.allMessages.mapNotNull { m ->
@@ -1188,7 +1095,7 @@ class ChatViewModel(
                             // exact STOPPED overlay before releasing the private state copy.
                             if (
                                 stoppedMsg != null &&
-                                _currentConversationId.value == result.conversationId
+                                currentConversationId.value == result.conversationId
                             ) {
                                 renderStore.commitTerminalStreamingMessage(stoppedMsg)
                             }
@@ -1206,73 +1113,8 @@ class ChatViewModel(
 
     fun regenerate(messageId: String): Boolean = generationController.regenerate(messageId)
 
-    fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) {
-        if (isSwitching.value) return
-        val conversationId = _currentConversationId.value ?: return
-        val state = generationRegistry.getOrCreate(conversationId)
-        if (state.generating.value) return
-        val currentAnchor = renderStore.allMessages.firstOrNull { it.id == currentMessageId }
-            ?: return
-        // Edit branches are USER siblings; Regenerate branches are MODEL siblings. Never mix
-        // another structural edge that happens to share the same parent into this selector.
-        val siblings = renderStore.allMessages.filter {
-            it.parentId == parentId &&
-                it.participant == currentAnchor.participant &&
-                !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-        }.sortedWith(compareBy<ChatMessage> { it.timestamp }.thenBy { it.id })
-        if (siblings.size < 2) return
-        var currentIndex = siblings.indexOfFirst { it.id == currentMessageId }
-        if (currentIndex == -1) {
-            val selectedId = renderStore.selectedChildren[parentId]
-            currentIndex = siblings.indexOfFirst { it.id == selectedId }
-        }
-        if (currentIndex == -1) return
-        val newIndex = (currentIndex + direction).coerceIn(0, siblings.size - 1)
-        if (newIndex == currentIndex) return
-        val parentRunId = parentId?.let { pid ->
-            renderStore.allMessages.firstOrNull { it.id == pid }?.runId
-        }
-        
-        val previousJob = switchingJob
-        val request = switchingCoordinator.beginTreeMutation(conversationId)
-        previousJob?.cancel()
-        switchingJob = viewModelScope.launch {
-            try {
-                delay(SWITCH_OVERLAY_FADE_MS)
-                if (!switchingCoordinator.isCurrent(request.id)) return@launch
-                state.queueMutationMutex.withLock {
-                    if (
-                        state.generating.value ||
-                        _currentConversationId.value != conversationId
-                    ) {
-                        switchingCoordinator.complete(request.id)
-                        return@withLock
-                    }
-                    val newMap = renderStore.selectedChildren.toMutableMap()
-                    val targetMessage = siblings[newIndex]
-                    val targetRunId = targetMessage.runId ?: run {
-                        switchingCoordinator.complete(request.id)
-                        return@withLock
-                    }
-                    newMap[parentId] = targetMessage.id
-                    convRepo.selectRunBranch(
-                        conversationId = conversationId,
-                        parentRunId = parentRunId,
-                        runId = targetRunId,
-                        messageSelections = newMap,
-                    )
-                    renderStore.setSelectedChildren(newMap)
-                    switchingCoordinator.markTreeMutationReady(request.id, targetMessage.id)
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                DebugLog.e("AgoraVM", "Failed to switch Run branch", e)
-                switchingCoordinator.complete(request.id)
-            }
-        }
-    }
+    fun switchBranch(parentId: String?, currentMessageId: String, direction: Int) =
+        selectionController.switchBranch(parentId, currentMessageId, direction)
 
     suspend fun editMessage(messageId: String, newText: String): Boolean =
         generationController.editMessage(messageId, newText)

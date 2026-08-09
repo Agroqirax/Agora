@@ -5,7 +5,6 @@ import android.content.Context
 import com.newoether.agora.R
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.automation.ConversationExecutionCoordinator
-import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
@@ -17,7 +16,6 @@ import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
@@ -102,10 +100,10 @@ internal class MessageGenerationController(
     private val executionCoordinator: ConversationExecutionCoordinator,
     // -- Shared UI state: the SAME instances ChatViewModel exposes -never recreate --
     private val renderStore: ConversationRenderStore,
-    private val currentConversationId: MutableStateFlow<String?>,
-    private val isNewChatMode: MutableStateFlow<Boolean>,
-    private val pendingConversationSettings: MutableStateFlow<ConversationSettings?>,
-    private val pendingSystemPromptId: MutableStateFlow<String?>,
+    private val currentConversationId: StateFlow<String?>,
+    private val isNewChatMode: StateFlow<Boolean>,
+    private val applyPendingConversationSettings: suspend (String) -> Unit,
+    private val pendingSystemPromptId: StateFlow<String?>,
     private val currentActiveModel: StateFlow<String>,
     private val messages: StateFlow<List<ChatMessage>>,
     // -- Callbacks into ChatViewModel-owned side effects --
@@ -125,6 +123,8 @@ internal class MessageGenerationController(
     // conversation-open auto-scroll (the send's own physical-bottom scroll handles it) and
     // avoid a double scroll on the first message of a new chat.
     private val onConversationCreatedBySend: (String) -> Unit = {},
+    /** Publishes the first durable Send's conversation into the selection state owner. */
+    private val onConversationAcceptedBySend: (String) -> Unit = {},
     // Called once when a hidden task/loop execution becomes searchable. The callback
     // only enqueues background work; embedding computation must not run under the send lock.
     // Called after a USER message row is persisted (send / edit), so incremental RAG
@@ -190,15 +190,9 @@ internal class MessageGenerationController(
         acceptanceNotifier = acceptanceNotifier,
         toUiMessage = { it.toUiChatMessage(appContext) },
         isConversationOpen = { currentConversationId.value == it },
-        applyPendingConversationSettings = { conversationId ->
-            pendingConversationSettings.value?.let { pending ->
-                settings.setConversationSettings(conversationId, pending)
-                pendingConversationSettings.value = null
-            }
-        },
+        applyPendingConversationSettings = applyPendingConversationSettings,
         publishNewConversation = { conversationId ->
-            currentConversationId.value = conversationId
-            isNewChatMode.value = false
+            onConversationAcceptedBySend(conversationId)
             onConversationCreatedBySend(conversationId)
         },
         onUserMessagePersisted = onUserMessagePersisted,
