@@ -447,7 +447,27 @@ class ChatViewModel(
         settings = settings,
         scope = viewModelScope,
     )
-    val isSyncingModels: StateFlow<Boolean> = providerModelSync.isSyncing
+    private val providerModelSyncUi by lazy {
+        ProviderModelSyncUiAdapter(
+            controller = providerModelSync,
+            text = ProviderModelSyncUiText(
+                failureLabels = ModelSyncFailureLabels(
+                    noModels = appContext.getString(R.string.sync_error_no_models),
+                    timeout = appContext.getString(R.string.sync_error_timeout),
+                    invalidResponse = appContext.getString(R.string.sync_error_invalid_response),
+                    unknown = appContext.getString(R.string.unknown_error),
+                ),
+                globalProviderName = appContext.getString(R.string.models_title),
+                successfulProviders = { count ->
+                    appContext.getString(R.string.sync_success_providers, count)
+                },
+                noProviders = appContext.getString(R.string.sync_no_providers),
+                completed = appContext.getString(R.string.sync_completed),
+            ),
+            publishMessage = { message -> _snackbarMessage.emit(SnackbarEvent(message)) },
+        )
+    }
+    val isSyncingModels: StateFlow<Boolean> get() = providerModelSyncUi.isSyncing
 
     // replay=0: with replay=1 an Activity recreation (rotation) re-collected the flow and
     // re-showed the last snackbar. The 1-slot buffer keeps tryEmit lossless for slow collectors;
@@ -912,48 +932,12 @@ class ChatViewModel(
         onAccepted: suspend () -> Unit = {},
     ): SendAcceptance? = composerSendAdapter.sendMessage(text, images, attachments, onAccepted)
 
-    /**
-     * Onboarding-focused model fetch for a single provider.
-     *
-     * Unlike [fetchAvailableModels] this carries no global side effects: no
-     * full-sync admission guard (so re-entry always refetches the latest key),
-     * no enabled-set intersection, and no snackbar. It is a plain suspend
-     * function so the caller's coroutine owns its lifecycle — cancelling that
-     * coroutine cooperatively aborts the in-flight network request, which keeps
-     * the welcome flow seamless (no stale result can land after the user edits
-     * their key and returns). Results are persisted so the [availableModels]
-     * flow updates the list. Returns the prefixed model ids, or empty on
-     * failure / unconfigured provider.
-     */
     suspend fun fetchModelsForProvider(name: String): List<String> =
-        providerModelSync.fetchModelsForProvider(name)
+        providerModelSyncUi.fetchModelsForProvider(name)
 
-    fun computeProviderFingerprint(): String = providerModelSync.computeFingerprint()
+    fun computeProviderFingerprint(): String = providerModelSyncUi.computeFingerprint()
 
-    fun fetchAvailableModels() {
-        providerModelSync.start(
-            request = ProviderModelSyncRequest(
-                failureLabels = ModelSyncFailureLabels(
-                    noModels = appContext.getString(R.string.sync_error_no_models),
-                    timeout = appContext.getString(R.string.sync_error_timeout),
-                    invalidResponse = appContext.getString(R.string.sync_error_invalid_response),
-                    unknown = appContext.getString(R.string.unknown_error),
-                ),
-                globalProviderName = appContext.getString(R.string.models_title),
-            ),
-        ) { outcome ->
-            val message = providerModelSyncFailureMessage(outcome.failures) ?: when {
-                outcome.successfulProviderCount > 0 -> appContext.getString(
-                    R.string.sync_success_providers,
-                    outcome.successfulProviderCount,
-                )
-                outcome.skippedProviderCount > 0 ->
-                    appContext.getString(R.string.sync_no_providers)
-                else -> appContext.getString(R.string.sync_completed)
-            }
-            _snackbarMessage.emit(SnackbarEvent(message))
-        }
-    }
+    fun fetchAvailableModels() = providerModelSyncUi.fetchAvailableModels()
 
     // ---- Data Control: Export / Import ----
 
