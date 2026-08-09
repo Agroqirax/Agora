@@ -48,7 +48,6 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.withTimeoutOrNull
-private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
@@ -180,6 +179,11 @@ internal class ChatScrollCoordinator internal constructor(
         viewModel: ChatViewModel,
         haptics: AgoraHaptics,
     ) {
+        val latestCurrentConversationId by rememberUpdatedState(currentConversationId)
+        val latestCurrentConversation by rememberUpdatedState(currentConversation)
+        val latestLoadedMessagesConversationId by rememberUpdatedState(
+            loadedMessagesConversationId,
+        )
         val latestImeBottomAnchorState by rememberUpdatedState(imeBottomAnchorState)
         val latestImeBottomPx by rememberUpdatedState(imeBottomPx)
         LaunchedEffect(currentConversationId, imeBottomAnchorState.active) {
@@ -259,27 +263,17 @@ internal class ChatScrollCoordinator internal constructor(
                 }
 
                 if (request.kind == SwitchingRequestKind.CONVERSATION) {
-                    val resolved = withTimeoutOrNull(CONVERSATION_RESOLVE_TIMEOUT_MS) {
-                        snapshotFlow {
-                            Triple(
-                                currentConversationId,
-                                currentConversation?.id,
-                                loadedMessagesConversationId,
-                            )
-                        }.filter { (currentId, loadedConversationId, loadedMessagesId) ->
-                            currentId == targetConversationId &&
-                                loadedConversationId == targetConversationId &&
-                                loadedMessagesId == targetConversationId
-                        }.first()
-                    }
-                    if (resolved == null) {
-                        viewModel.failSwitchingScroll(request.id, "conversation did not resolve")
-                        terminalized = true
-                        // A projection deadline is not durable evidence that the selected
-                        // conversation disappeared. Release the cover and keep the selection;
-                        // Room can still publish a large graph after this UI-only timeout.
-                        return@LaunchedEffect
-                    }
+                    snapshotFlow {
+                        Triple(
+                            latestCurrentConversationId,
+                            latestCurrentConversation?.id,
+                            latestLoadedMessagesConversationId,
+                        )
+                    }.filter { (currentId, loadedConversationId, loadedMessagesId) ->
+                        currentId == targetConversationId &&
+                            loadedConversationId == targetConversationId &&
+                            loadedMessagesId == targetConversationId
+                    }.first()
                 } else if (currentConversationId != targetConversationId) {
                     viewModel.failSwitchingScroll(request.id, "conversation changed")
                     terminalized = true

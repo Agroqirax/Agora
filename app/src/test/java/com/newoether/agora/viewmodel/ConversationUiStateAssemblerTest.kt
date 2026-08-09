@@ -6,10 +6,15 @@ import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.Participant
+import com.newoether.agora.util.DebugLog
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -133,6 +138,52 @@ class ConversationUiStateAssemblerTest {
         assembler.markIdle("other")
         assertTrue(assembler.isLoading.value)
         assertEquals(CONVERSATION_ID, assembler.generatingInConversationId.value)
+    }
+
+    @Test
+    fun `current projection failure is reported without replacing the selection`() = runTest {
+        mockkObject(DebugLog)
+        every { DebugLog.e(any(), any(), any()) } returns Unit
+        try {
+            val conversations = mockk<ConversationRepository>()
+            coEvery { conversations.ensureRunRecovery() } throws IllegalStateException("failed")
+            val failedIds = mutableListOf<String>()
+            val assembler = ConversationUiStateAssembler(
+                conversations = conversations,
+                registry = mockk(),
+                executionCoordinator = mockk(),
+                currentConversationId = MutableStateFlow(CONVERSATION_ID),
+                appContext = mockk(relaxed = true),
+                scope = backgroundScope,
+                projectionDispatcher = StandardTestDispatcher(testScheduler),
+                onConversationLoadFailed = failedIds::add,
+            )
+            assembler.renderStore.replaceConversation(
+                allMessages = listOf(
+                    ChatMessage(
+                        id = "old-message",
+                        text = "old projection",
+                        participant = Participant.USER,
+                        status = MessageStatus.SUCCESS,
+                        timestamp = 1L,
+                    )
+                ),
+                selectedChildren = mapOf(null to "old-message"),
+            )
+            assembler.markActive(CONVERSATION_ID)
+
+            assembler.start()
+            runCurrent()
+
+            assertEquals(listOf(CONVERSATION_ID), failedIds)
+            assertNull(assembler.loadedMessagesConversationId.value)
+            assertFalse(assembler.isLoading.value)
+            assertNull(assembler.generatingInConversationId.value)
+            assertEquals(emptyList<ChatMessage>(), assembler.renderStore.allMessages)
+            assertEquals(emptyMap<String?, String>(), assembler.renderStore.selectedChildren)
+        } finally {
+            unmockkObject(DebugLog)
+        }
     }
 
     private fun generationState(

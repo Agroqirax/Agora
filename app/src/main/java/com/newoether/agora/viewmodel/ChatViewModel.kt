@@ -287,7 +287,7 @@ class ChatViewModel(
 
 
     private val scrollRequests = ScrollRequestCoordinator()
-    private val selectionController by lazy {
+    private val selectionController: ConversationSelectionController by lazy {
         ConversationSelectionController(
             scope = viewModelScope,
             conversations = convRepo,
@@ -425,6 +425,7 @@ class ChatViewModel(
         currentConversationId = currentConversationId,
         appContext = appContext,
         scope = viewModelScope,
+        onConversationLoadFailed = selectionController::failConversationLoad,
     )
     private val renderStore: ConversationRenderStore get() = conversationUi.renderStore
     val allMessages: StateFlow<List<ChatMessage>> = conversationUi.allMessages

@@ -4,6 +4,8 @@ import android.content.Context
 import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.util.DebugLog
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +41,7 @@ internal class ConversationUiStateAssembler(
     private val appContext: Context,
     private val scope: CoroutineScope,
     private val projectionDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val onConversationLoadFailed: (String) -> Unit = {},
 ) {
     val renderStore = ConversationRenderStore()
 
@@ -93,7 +96,22 @@ internal class ConversationUiStateAssembler(
             currentConversationId.collectLatest { id ->
                 _loadedMessagesConversationId.value = null
                 if (id != null) {
-                    collectConversation(id)
+                    try {
+                        collectConversation(id)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        DebugLog.e("ConversationUi", "Failed to load conversation projection", error)
+                        if (currentConversationId.value == id) {
+                            // The store deliberately retains the previous conversation under the
+                            // switching cover until the target's first atomic snapshot arrives.
+                            // A real load failure must retire that protected snapshot before the
+                            // owner releases the cover, or the old graph/loading mirror would be
+                            // exposed under the newly selected conversation.
+                            clearAllProjection()
+                            onConversationLoadFailed(id)
+                        }
+                    }
                 } else {
                     clearAllProjection()
                 }

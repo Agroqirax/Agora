@@ -7,22 +7,58 @@ import org.junit.Test
 
 class ConversationSwitchSafetySourceContractTest {
     @Test
-    fun `projection timeout releases switching cover without entering new chat`() {
+    fun `conversation switch observes current projection without a fixed deadline`() {
         val source = File(
             locateMainSourceRoot(),
             "com/newoether/agora/ui/chat/ChatScrollCoordinator.kt",
         ).readText()
-        val timeoutStart = source.indexOf("if (resolved == null)")
-        val nextBranch = source.indexOf("} else if", startIndex = timeoutStart)
 
-        assertTrue("conversation resolution timeout branch is missing", timeoutStart >= 0)
-        assertTrue("conversation resolution timeout branch is malformed", nextBranch > timeoutStart)
-        val timeoutBranch = source.substring(timeoutStart, nextBranch)
-        assertTrue(timeoutBranch.contains("failSwitchingScroll"))
+        assertFalse(
+            "conversation projection latency must not terminalize the switch on a timer",
+            source.contains("CONVERSATION_RESOLVE_TIMEOUT_MS"),
+        )
+        assertTrue(
+            "the switch effect must observe the latest selected conversation id",
+            source.contains(
+                "rememberUpdatedState(currentConversationId)",
+            ),
+        )
+        assertTrue(
+            "the switch effect must observe the latest durable conversation projection",
+            source.contains(
+                "rememberUpdatedState(currentConversation)",
+            ),
+        )
+        assertTrue(
+            "the switch effect must observe the latest Room message projection id",
+            Regex(
+                """rememberUpdatedState\(\s*loadedMessagesConversationId,?\s*\)""",
+            ).containsMatchIn(source),
+        )
         assertFalse(
             "projection latency must never be interpreted as a request to enter New Chat",
-            timeoutBranch.contains("createNewChat"),
+            source.contains("viewModel.createNewChat()"),
         )
+    }
+
+    @Test
+    fun `scroll to bottom visibility remembers every captured plain value`() {
+        val source = File(
+            locateMainSourceRoot(),
+            "com/newoether/agora/ui/chat/ChatApp.kt",
+        ).readText()
+        val rememberStart = source.indexOf("val showButton by remember(")
+        val derivedStart = source.indexOf("derivedStateOf", startIndex = rememberStart)
+        assertTrue("scroll button derived state must exist", rememberStart >= 0 && derivedStart > 0)
+        val rememberKeys = source.substring(rememberStart, derivedStart)
+
+        listOf(
+            "shareSelectionActive",
+            "isNearAbsoluteBottom",
+            "absoluteBottomScrollPhase",
+        ).forEach { key ->
+            assertTrue("scroll button must recreate its closure when $key changes", key in rememberKeys)
+        }
     }
 
     private fun locateMainSourceRoot(): File {

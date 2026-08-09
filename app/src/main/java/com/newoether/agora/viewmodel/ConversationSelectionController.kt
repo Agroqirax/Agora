@@ -252,6 +252,16 @@ internal class ConversationSelectionController(
         switching.complete(requestId)
     }
 
+    fun failConversationLoad(conversationId: String) {
+        val request = switching.request.value ?: return
+        if (
+            request.kind == SwitchingRequestKind.CONVERSATION &&
+            request.conversationId == conversationId
+        ) {
+            failSwitchingScroll(request.id, "conversation projection failed")
+        }
+    }
+
     private companion object {
         const val SWITCH_OVERLAY_FADE_MS = 200L
     }

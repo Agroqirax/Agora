@@ -45,6 +45,16 @@ interface ChatDao : ChatAutomationDao {
     @Query("SELECT * FROM messages WHERE conversationId = :conversationId ORDER BY timestamp ASC")
     fun getMessagesForConversation(conversationId: String): Flow<List<MessageEntity>>
 
+    @Query(
+        """
+        UPDATE messages
+        SET status = 'STOPPED'
+        WHERE conversationId = :conversationId
+          AND status IN ('SENDING', 'THINKING', 'TOOL_CALLING', 'TRANSCRIBING')
+        """
+    )
+    suspend fun stopStuckMessagesForConversation(conversationId: String): Int
+
     /**
      * UI projection of the message graph. Synthetic protocol rows are required for parent-path
      * traversal, but their text/segments can be very large and are never rendered. While an

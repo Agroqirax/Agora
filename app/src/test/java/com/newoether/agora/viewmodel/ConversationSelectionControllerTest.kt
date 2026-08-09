@@ -119,6 +119,31 @@ class ConversationSelectionControllerTest {
     }
 
     @Test
+    fun projectionFailureOnlyReleasesItsMatchingSwitchRequest() = runTest {
+        mockkObject(DebugLog)
+        every { DebugLog.e(any(), any()) } returns Unit
+        try {
+            val fixture = Fixture(backgroundScope)
+            coEvery { fixture.conversations.getConversation("conversation") } returns
+                ChatEntity("conversation", "Title")
+
+            fixture.controller.selectConversation("conversation")
+            runCurrent()
+            val request = checkNotNull(fixture.controller.switchingScrollRequest.value)
+
+            fixture.controller.failConversationLoad("stale-conversation")
+            assertEquals(request, fixture.controller.switchingScrollRequest.value)
+
+            fixture.controller.failConversationLoad("conversation")
+            assertNull(fixture.controller.switchingScrollRequest.value)
+            assertEquals("conversation", fixture.controller.currentConversationId.value)
+            assertFalse(fixture.controller.isNewChatMode.value)
+        } finally {
+            unmockkObject(DebugLog)
+        }
+    }
+
+    @Test
     fun branchSelectionCommitsRoomBeforePublishingReadyTarget() = runTest {
         val fixture = Fixture(backgroundScope)
         fixture.controller.publishAcceptedConversation("conversation")

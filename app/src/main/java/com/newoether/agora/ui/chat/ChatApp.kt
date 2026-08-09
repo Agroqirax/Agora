@@ -676,10 +676,7 @@ fun ChatApp(
                         }
                     }
 
-                    // The proximity/scroll phase states above are themselves recreated for each
-                    // conversation. Recreate this derived state with the same owner so its closure
-                    // never keeps reading a previous conversation's state objects or the initial
-                    // new-chat flag.
+                    // Recreate for every plain value captured by this derived state.
                     val regenerationScrollActive =
                         regenerationTransition?.conversationId == currentConversationId &&
                             regenerationTransition?.scrollFinished == false
@@ -688,6 +685,9 @@ fun ChatApp(
                         loadedMessagesConversationId,
                         isNewChatMode,
                         isSwitching,
+                        shareSelectionActive,
+                        isNearAbsoluteBottom,
+                        absoluteBottomScrollPhase,
                         listState,
                         streamingTailController,
                         regenerationScrollActive,
