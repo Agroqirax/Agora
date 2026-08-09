@@ -36,7 +36,6 @@ import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.apiModelName
-import com.newoether.agora.model.Participant
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.sandbox.SandboxManagerFactory
@@ -552,9 +551,17 @@ class ChatViewModel(
         foreground + automation
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
-    /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
-    private val generationFinalizer by lazy {
-        GenerationFinalizer(convRepo, ragManager::indexMessageForRag)
+    private val generationStopAdapter by lazy {
+        GenerationStopAdapter(
+            currentConversationId = currentConversationId,
+            registry = generationRegistry,
+            renderStore = renderStore,
+            finalizer = GenerationFinalizer(convRepo, ragManager::indexMessageForRag),
+            failureText = {
+                getApplication<Application>().getString(R.string.failed_to_generate)
+            },
+            onFailure = { message -> emitSnackbar(message) },
+        )
     }
 
     val isSwitching: StateFlow<Boolean> get() = selectionController.isSwitching
@@ -1049,67 +1056,7 @@ class ChatViewModel(
         }
     }
 
-    fun stopGeneration() {
-        // Stop the CURRENTLY-OPEN conversation's generation only. A background conversation's
-        // generation is intentionally not killed here — the user is asking to stop what they
-        // see. the state mailbox cancels that conversation's job + streamScope (not other
-        // conversations'), and finalizer persists STOPPED to the correct conversation id.
-        val id = currentConversationId.value ?: return
-        val state = generationRegistry.get(id) ?: return
-        state.requestStop { result ->
-            val stoppedMsg = result.stoppedMessage
-            val messages = if (stoppedMsg != null) {
-                listOf(stoppedMsg)
-            } else if (currentConversationId.value == result.conversationId) {
-                // streamingMessage was null — mark any in-flight model message in the open list directly.
-                runCatching {
-                    renderStore.allMessages.mapNotNull { m ->
-                        if (m.participant == Participant.MODEL &&
-                            (m.status == MessageStatus.SENDING || m.status == MessageStatus.THINKING ||
-                                m.status == MessageStatus.TOOL_CALLING || m.status == MessageStatus.TRANSCRIBING)
-                        ) {
-                            val stopped = m.copy(status = MessageStatus.STOPPED)
-                            renderStore.updateAllMessages { list ->
-                                list.map { if (it.id == m.id) stopped else it }
-                            }
-                            stopped
-                        } else null
-                    }
-                }.getOrElse { error ->
-                    DebugLog.e("AgoraVM", "Failed to snapshot stopped render rows", error)
-                    emptyList()
-                }
-            } else emptyList()
-            val finalizationEffect = result.finalizationEffect
-            if (finalizationEffect != null) {
-                // Release the STOPPED overlay once the terminal row is in Room — otherwise the
-                // stale snapshot lives on in state and resolvePath resurrects it as a ghost bubble.
-                generationFinalizer.launchStopFinalization(
-                    state.scope, finalizationEffect.identity, messages,
-                    onFinalized = { completion ->
-                        val outcome = state.finishStopFinalization(completion)
-                        // A delayed/duplicate callback is a no-op for process state and UI.
-                        if (!outcome.accepted) return@launchStopFinalization
-                        if (completion.success) {
-                            // Room invalidation and the state mirror are asynchronous. Commit the
-                            // exact STOPPED overlay before releasing the private state copy.
-                            if (
-                                stoppedMsg != null &&
-                                currentConversationId.value == result.conversationId
-                            ) {
-                                renderStore.commitTerminalStreamingMessage(stoppedMsg)
-                            }
-                            state.clearStoppedOverlay()
-                        } else {
-                            emitSnackbar(
-                                getApplication<Application>().getString(R.string.failed_to_generate),
-                            )
-                        }
-                    },
-                )
-            }
-        }
-    }
+    fun stopGeneration() = generationStopAdapter.stopVisibleConversation()
 
     fun regenerate(messageId: String): Boolean = generationController.regenerate(messageId)
 
