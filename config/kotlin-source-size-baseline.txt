@@ -10,5 +10,4 @@ app/src/main/java/com/newoether/agora/tool/ShellToolProvider.kt=1514
 app/src/main/java/com/newoether/agora/ui/chat/ChatApp.kt=2313
 app/src/main/java/com/newoether/agora/ui/chat/MessageList.kt=1181
 app/src/main/java/com/newoether/agora/ui/settings/SettingsModelsPage.kt=1004
-app/src/main/java/com/newoether/agora/ui/tasks/TasksScreen.kt=1113
 app/src/test/java/com/newoether/agora/ui/chat/MessageListLayoutTest.kt=1256
