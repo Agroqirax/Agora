@@ -133,6 +133,20 @@ class ChatViewModel(
             onFailure = { message -> _snackbarMessage.emit(SnackbarEvent(message)) },
         )
     }
+    private val conversationLifecycleController by lazy {
+        ConversationLifecycleController(
+            currentConversationId = currentConversationId,
+            conversations = convRepo,
+            scope = viewModelScope,
+            stopLoop = { conversationId -> loopManager.stopLoop(conversationId) },
+            withConversationLock = { conversationId, block ->
+                conversationExecutionCoordinator.withConversationLock(conversationId) { block() }
+            },
+            removeRuntime = generationRegistry::remove,
+            stopVisibleGeneration = generationStopAdapter::stopVisibleConversation,
+            openNewChat = selectionController::createNewChat,
+        )
+    }
 
     /** Embedding subsystem: model CRUD + RAG cache + single-message indexing + key resolution. */
     val ragManager = RagManager(
@@ -924,39 +938,18 @@ class ChatViewModel(
         conversationForkShareController.shareMessages(messageIds)
 
     fun renameConversation(id: String, newTitle: String) {
-        viewModelScope.launch {
-            convRepo.updateConversationTitle(id, newTitle)
-        }
+        conversationLifecycleController.rename(id, newTitle)
     }
 
     fun generateTitle(conversationId: String) = generationController.generateTitle(conversationId)
 
     fun setConversationSystemPrompt(id: String, promptId: String?) {
-        viewModelScope.launch {
-            val existing = convRepo.getConversation(id)
-            if (existing != null) {
-                convRepo.upsertConversation(existing.copy(systemPromptId = promptId))
-            }
-        }
+        conversationLifecycleController.setSystemPrompt(id, promptId)
     }
 
     fun setActiveModel(model: String) = selectionController.setActiveModel(model)
 
-    fun deleteConversation(id: String) {
-        if (currentConversationId.value == id) {
-            stopGeneration()
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            loopManager.stopLoop(id)
-            conversationExecutionCoordinator.withConversationLock(id) {
-                convRepo.deleteConversation(id)
-            }
-            generationRegistry.remove(id)
-            if (currentConversationId.value == id) {
-                withContext(Dispatchers.Main) { createNewChat() }
-            }
-        }
-    }
+    fun deleteConversation(id: String) = conversationLifecycleController.delete(id)
 
     /**
      * Deletes a message and all its descendants (BFS cascade).
