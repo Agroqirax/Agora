@@ -564,8 +564,12 @@ class ChatViewModel(
     val loadedMessagesConversationId: StateFlow<String?> =
         _loadedMessagesConversationId.asStateFlow()
 
-    private val _isSyncingModels = MutableStateFlow(false)
-    val isSyncingModels: StateFlow<Boolean> = _isSyncingModels.asStateFlow()
+    private val providerModelSync = ProviderModelSyncController(
+        providers = providerRegistry,
+        settings = settings,
+        scope = viewModelScope,
+    )
+    val isSyncingModels: StateFlow<Boolean> = providerModelSync.isSyncing
 
     // replay=0: with replay=1 an Activity recreation (rotation) re-collected the flow and
     // re-showed the last snackbar. The 1-slot buffer keeps tryEmit lossless for slow collectors;
@@ -1606,7 +1610,7 @@ class ChatViewModel(
      * Onboarding-focused model fetch for a single provider.
      *
      * Unlike [fetchAvailableModels] this carries no global side effects: no
-     * `_isSyncingModels` guard (so re-entry always refetches the latest key),
+     * full-sync admission guard (so re-entry always refetches the latest key),
      * no enabled-set intersection, and no snackbar. It is a plain suspend
      * function so the caller's coroutine owns its lifecycle — cancelling that
      * coroutine cooperatively aborts the in-flight network request, which keeps
@@ -1615,77 +1619,31 @@ class ChatViewModel(
      * flow updates the list. Returns the prefixed model ids, or empty on
      * failure / unconfigured provider.
      */
-    suspend fun fetchModelsForProvider(name: String): List<String> = providerRegistry.fetchModelsForProvider(name)
+    suspend fun fetchModelsForProvider(name: String): List<String> =
+        providerModelSync.fetchModelsForProvider(name)
 
-    fun computeProviderFingerprint(): String = providerRegistry.computeFingerprint()
+    fun computeProviderFingerprint(): String = providerModelSync.computeFingerprint()
 
     fun fetchAvailableModels() {
-        viewModelScope.launch {
-            if (_isSyncingModels.value) return@launch
-            _isSyncingModels.value = true
-            val failures = mutableListOf<ProviderModelSyncFailure>()
-            var successProviderCount = 0
-            var skippedProviderCount = 0
-            val failureLabels = ModelSyncFailureLabels(
-                noModels = appContext.getString(R.string.sync_error_no_models),
-                timeout = appContext.getString(R.string.sync_error_timeout),
-                invalidResponse = appContext.getString(R.string.sync_error_invalid_response),
-                unknown = appContext.getString(R.string.unknown_error),
-            )
-
-            try {
-                // Ensure custom providers are loaded into the providers map before iterating.
-                providerRegistry.ensureCustomProvidersRegistered()
-                providerRegistry.all.forEach { (name, _) ->
-                    if (name == Constants.PROVIDER_LOCAL) return@forEach
-
-                    try {
-                        if (!providerRegistry.isConfigured(name, settings.resolveActiveKey(name) ?: "")) {
-                            skippedProviderCount++
-                            settings.saveAvailableModels(name, emptyList())
-                            return@forEach
-                        }
-
-                        providerRegistry.fetchModelsForProvider(name)
-                        successProviderCount++
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        failures += ProviderModelSyncFailure(
-                            providerName = name,
-                            reason = modelSyncFailureReason(error, failureLabels),
-                        )
-                    }
-                }
-
-                val allKnownModels =
-                    settings.getAvailableModels().values.flatten().toSet() +
-                        settings.customModels.value
-                val newEnabled = settings.enabledModels.value.intersect(allKnownModels)
-                settings.setEnabledModels(newEnabled)
-
-                // A failed provider must remain eligible for automatic retry on the next visit.
-                if (failures.isEmpty()) {
-                    settings.saveLastModelsFetchFingerprint(computeProviderFingerprint())
-                }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                failures += ProviderModelSyncFailure(
-                    providerName = appContext.getString(R.string.models_title),
-                    reason = modelSyncFailureReason(error, failureLabels),
+        providerModelSync.start(
+            request = ProviderModelSyncRequest(
+                failureLabels = ModelSyncFailureLabels(
+                    noModels = appContext.getString(R.string.sync_error_no_models),
+                    timeout = appContext.getString(R.string.sync_error_timeout),
+                    invalidResponse = appContext.getString(R.string.sync_error_invalid_response),
+                    unknown = appContext.getString(R.string.unknown_error),
+                ),
+                globalProviderName = appContext.getString(R.string.models_title),
+            ),
+        ) { outcome ->
+            val message = providerModelSyncFailureMessage(outcome.failures) ?: when {
+                outcome.successfulProviderCount > 0 -> appContext.getString(
+                    R.string.sync_success_providers,
+                    outcome.successfulProviderCount,
                 )
-            } finally {
-                _isSyncingModels.value = false
-            }
-
-            val message = providerModelSyncFailureMessage(failures) ?: when {
-                successProviderCount > 0 ->
-                    appContext.getString(R.string.sync_success_providers, successProviderCount)
-                skippedProviderCount > 0 ->
+                outcome.skippedProviderCount > 0 ->
                     appContext.getString(R.string.sync_no_providers)
-                else ->
-                    appContext.getString(R.string.sync_completed)
+                else -> appContext.getString(R.string.sync_completed)
             }
             _snackbarMessage.emit(SnackbarEvent(message))
         }
