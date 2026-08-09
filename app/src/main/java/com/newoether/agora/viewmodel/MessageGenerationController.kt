@@ -25,7 +25,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -159,7 +158,6 @@ internal class MessageGenerationController(
     private val regenerationTransitions: RegenerationTransitionCoordinator,
     private val pauseConversationTasks: suspend (String) -> Unit = {},
 ) {
-    private val generationManager: GenerationManager get() = generationManagerProvider()
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
     private val compactController = ConversationCompactController(
         conversations = convRepo,
@@ -187,6 +185,15 @@ internal class MessageGenerationController(
         failureText = { appContext.getString(R.string.failed_to_generate) },
         toUiMessage = { it.toUiChatMessage(appContext) },
         onSnackbar = onSnackbar,
+    )
+    private val boundRunGenerationLauncher = BoundRunGenerationLauncher(
+        requestBuilder = requestBuilder,
+        settings = settings,
+        conversations = convRepo,
+        generationManagerProvider = generationManagerProvider,
+        compactController = compactController,
+        terminalSettlement = terminalSettlement,
+        toUiMessage = { it.toUiChatMessage(appContext) },
     )
     private val branchMutationService = ConversationBranchMutationService(
         scope = viewModelScope,
@@ -392,11 +399,23 @@ internal class MessageGenerationController(
                         streamingMessage = placeholder,
                     )
                 }
-                launchGeneration(
-                    genId, modelMessageId, startTime,
-                    isRegenerate = false, replaceMessageId = null,
-                    providerName, modelId, activeKey, myUiToken, myPersistId,
-                    state, runId = runId, pass = 0, callerTag = "regenerate"
+                boundRunGenerationLauncher.launch(
+                    BoundRunGenerationRequest(
+                        conversationId = genId,
+                        modelMessageId = modelMessageId,
+                        startTime = startTime,
+                        isRegenerate = false,
+                        replaceMessageId = null,
+                        providerName = providerName,
+                        modelId = modelId,
+                        activeKey = activeKey,
+                        uiToken = myUiToken,
+                        persistId = myPersistId,
+                        runId = runId,
+                        pass = 0,
+                        callerTag = "regenerate",
+                    ),
+                    state,
                 )
                 }
             } catch (e: CancellationException) {
@@ -451,122 +470,6 @@ internal class MessageGenerationController(
             regenerationTransitions.abort(transition.id)
         }
         return generationJob != null
-    }
-
-    // ==================================
-    // launchGeneration
-    // ==================================
-
-    /**
-     * Shared generation tail called by [sendMessage], [regenerate], and
-     * [editMessage]: resolves system prompt + conversation settings, builds
-     * [GenerationConfig]/[GenerationContext], and launches the provider stream.
-     *
-     * All three entry points converge here after their differing branch-setup
-     * heads, eliminating copy-pasted prompt-resolution / config-building /
-     * callback-wiring code.
-     */
-    private suspend fun launchGeneration(
-        currentId: String,
-        modelMessageId: String,
-        startTime: Long,
-        isRegenerate: Boolean,
-        replaceMessageId: String?,
-        providerName: String,
-        modelId: String,
-        activeKey: String,
-        uiToken: Long,
-        persistId: Long,
-        state: ConversationGenerationState,
-        runId: String,
-        pass: Int,
-        callerTag: String
-    ) {
-        val requestTrace = com.newoether.agora.api.HttpClient.RequestTrace(
-            requestId = modelMessageId,
-            origin = callerTag,
-        )
-        requestTrace.mark(
-            "prepare_start",
-            "acceptedDelayMs=${(System.currentTimeMillis() - startTime).coerceAtLeast(0L)}",
-        )
-        val resolved = requestBuilder.buildEffectiveSystemPrompt(currentId, modelId)
-        val effectiveSettings = requestBuilder.buildEffectiveConversationSettings(currentId)
-        // The already-loaded key is authoritative on the normal path. Only await DataStore during
-        // the startup race where the eager StateFlow still exposes its empty default; reading both
-        // preference flows on every send unnecessarily lengthened the visible Sending phase.
-        val freshKey = activeKey.takeIf { it.isNotBlank() }
-            ?: settings.awaitActiveKey(providerName)?.takeIf { it.isNotBlank() }
-            .orEmpty()
-        try {
-            val (config, genCtx) = requestBuilder.buildGenerationPair(
-                providerName, modelId, freshKey,
-                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-                effectiveSettings, currentId
-            )
-            requestTrace.mark("request_config_ready")
-            // No global slot: remote generations run concurrently (only the per-conversation
-            // lock above serializes same-conversation work); local model work is serialized
-            // inside LocalProvider via LocalModelSerializer. Stop therefore releases
-            // immediately -nothing is queued behind a held process-wide mutex.
-            generationManager.generate(
-                conversationId = currentId,
-                modelMessageId = modelMessageId,
-                startTime = startTime,
-                isRegenerate = isRegenerate,
-                replaceMessageId = replaceMessageId,
-                modelName = modelId,
-                runId = runId,
-                pass = pass,
-                ownerToken = uiToken,
-                config = config,
-                ctx = genCtx,
-                // The coroutine's own Job -reading state.generationJob here races the caller's
-                // assignment (the coroutine can start before `state.generationJob = launch{...`
-                // completes and observe the PREVIOUS job).
-                generationJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job],
-                callbacks = state.callbacksFor(uiToken, persistId).copy(
-                    onToolRoundPersisted = {
-                        compactController.automaticBeforeBoundary(
-                            currentId,
-                            modelId,
-                            effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
-                            state,
-                        )
-                    },
-                ),
-                streamScope = state.streamScope,
-                requestTrace = requestTrace,
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            DebugLog.e(
-                "AgoraVM",
-                "Generation failed in $callerTag errorType=${e.javaClass.simpleName}",
-            )
-            // A pre-stream failure (prompt/config build -e.g. RAG key resolution) would otherwise
-            // strand the SENDING placeholder row + streaming overlay until the conversation is
-            // reopened. The mailbox owns the atomic ERROR/Run terminal transaction.
-            runCatching {
-                val existing = convRepo.getMessagesForConversationSnapshot(currentId)
-                    .find { it.id == modelMessageId }
-                if (existing != null && existing.status == MessageStatus.SENDING) {
-                    terminalSettlement.finalizeBoundFailure(
-                        conversationId = currentId,
-                        runId = runId,
-                        pass = pass,
-                        uiToken = uiToken,
-                        state = state,
-                        failedMessage = existing.toUiChatMessage(appContext).copy(
-                            text = "Error: ${e.localizedMessage ?: "Failed to build the request."}",
-                            status = MessageStatus.ERROR,
-                        ),
-                        effectId = "request-finalize-$runId-$pass",
-                    )
-                }
-            }
-        }
     }
 
     // ==================================
@@ -698,11 +601,23 @@ internal class MessageGenerationController(
             // The durable branch and its UI projection are now committed. Only now may the
             // editor leave edit mode; completing earlier exposes the old branch for a frame.
             committed.complete(true)
-            launchGeneration(
-                genId, modelMessageId, startTime,
-                isRegenerate = false, replaceMessageId = null,
-                providerName, modelId, activeKey, myUiToken, myPersistId,
-                state, runId = runId, pass = 0, callerTag = "editMessage"
+            boundRunGenerationLauncher.launch(
+                BoundRunGenerationRequest(
+                    conversationId = genId,
+                    modelMessageId = modelMessageId,
+                    startTime = startTime,
+                    isRegenerate = false,
+                    replaceMessageId = null,
+                    providerName = providerName,
+                    modelId = modelId,
+                    activeKey = activeKey,
+                    uiToken = myUiToken,
+                    persistId = myPersistId,
+                    runId = runId,
+                    pass = 0,
+                    callerTag = "editMessage",
+                ),
+                state,
             )
             }
             } catch (e: CancellationException) {
@@ -1065,11 +980,23 @@ internal class MessageGenerationController(
                             .contextWindow ?: settings.maxContextWindow.value,
                         state = state,
                     )
-                    launchGeneration(
-                        genId, modelMessageId, committedPlaceholder.timestamp,
-                        isRegenerate = false, replaceMessageId = null,
-                        providerName, modelId, activeKey, myUiToken, myPersistId,
-                        state, runId = runId, pass = pass, callerTag = "guidanceBoundary",
+                    boundRunGenerationLauncher.launch(
+                        BoundRunGenerationRequest(
+                            conversationId = genId,
+                            modelMessageId = modelMessageId,
+                            startTime = committedPlaceholder.timestamp,
+                            isRegenerate = false,
+                            replaceMessageId = null,
+                            providerName = providerName,
+                            modelId = modelId,
+                            activeKey = activeKey,
+                            uiToken = myUiToken,
+                            persistId = myPersistId,
+                            runId = runId,
+                            pass = pass,
+                            callerTag = "guidanceBoundary",
+                        ),
+                        state,
                     )
                 }
             } catch (e: CancellationException) {
@@ -1477,11 +1404,23 @@ internal class MessageGenerationController(
                             state = state,
                         )
                     }
-                    launchGeneration(
-                        genId, modelMessageId, startTime,
-                        isRegenerate = false, replaceMessageId = null,
-                        providerName, modelId, activeKey, myUiToken, myPersistId,
-                        state, runId = runId, pass = 0, callerTag = "sendMessage"
+                    boundRunGenerationLauncher.launch(
+                        BoundRunGenerationRequest(
+                            conversationId = genId,
+                            modelMessageId = modelMessageId,
+                            startTime = startTime,
+                            isRegenerate = false,
+                            replaceMessageId = null,
+                            providerName = providerName,
+                            modelId = modelId,
+                            activeKey = activeKey,
+                            uiToken = myUiToken,
+                            persistId = myPersistId,
+                            runId = runId,
+                            pass = 0,
+                            callerTag = "sendMessage",
+                        ),
+                        state,
                     )
                     val lastMsg = convRepo.getMessagesForConversationSnapshot(genId)
                         .find { it.id == modelMessageId }
