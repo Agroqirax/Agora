@@ -4,11 +4,13 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.DrawerState
+import androidx.compose.material3.DrawerValue
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -20,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -34,6 +37,7 @@ import com.newoether.agora.ui.motion.closeWithMotionPolicy
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -258,6 +262,46 @@ internal fun DrawerAvailabilityEffect(
 ) {
     LaunchedEffect(drawerEnabled, motionPolicy.allowSpatialTransitions) {
         if (!drawerEnabled) drawerState.closeWithMotionPolicy(motionPolicy)
+    }
+}
+
+@Composable
+internal fun ChatNavigationEffects(
+    drawerState: DrawerState,
+    focusManager: FocusManager,
+    scope: CoroutineScope,
+    motionPolicy: AgoraMotionPolicy,
+    onNavigateBack: (() -> Unit)?,
+    conversationInteraction: ConversationInteractionProjection,
+    onCollapseComposer: () -> Unit,
+) {
+    BackHandler(
+        enabled = drawerState.currentValue != DrawerValue.Closed ||
+            drawerState.targetValue != DrawerValue.Closed,
+    ) {
+        focusManager.clearFocus()
+        scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
+    }
+    BackHandler(
+        enabled = onNavigateBack != null &&
+            drawerState.currentValue == DrawerValue.Closed &&
+            drawerState.targetValue == DrawerValue.Closed,
+    ) {
+        focusManager.clearFocus()
+        onNavigateBack?.invoke()
+    }
+    BackHandler(enabled = conversationInteraction.searchActive) {
+        conversationInteraction.dismissSearch()
+        focusManager.clearFocus()
+    }
+    BackHandler(enabled = conversationInteraction.shareSelectionActive) {
+        conversationInteraction.dismissShareSelection()
+    }
+    LaunchedEffect(drawerState.currentValue) {
+        if (drawerState.currentValue != DrawerValue.Closed) {
+            onCollapseComposer()
+            focusManager.clearFocus()
+        }
     }
 }
 

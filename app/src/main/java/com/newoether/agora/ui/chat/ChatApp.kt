@@ -1,6 +1,5 @@
 package com.newoether.agora.ui.chat
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
@@ -61,7 +60,6 @@ import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.common.rememberAgoraHaptics
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
-import com.newoether.agora.ui.motion.closeWithMotionPolicy
 import com.newoether.agora.ui.motion.openWithMotionPolicy
 import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.StableMessageList
@@ -334,32 +332,15 @@ fun ChatApp(
         viewModel = viewModel,
     )
 
-    BackHandler(enabled = drawerState.currentValue != DrawerValue.Closed || drawerState.targetValue != DrawerValue.Closed) {
-        focusManager.clearFocus()
-        scope.launch { drawerState.closeWithMotionPolicy(motionPolicy) }
-    }
-    BackHandler(
-        enabled = onNavigateBack != null &&
-            drawerState.currentValue == DrawerValue.Closed &&
-            drawerState.targetValue == DrawerValue.Closed,
-    ) {
-        focusManager.clearFocus()
-        onNavigateBack?.invoke()
-    }
-    BackHandler(enabled = conversationSearchActive) {
-        conversationInteraction.dismissSearch()
-        focusManager.clearFocus()
-    }
-    BackHandler(enabled = shareSelectionActive) {
-        conversationInteraction.dismissShareSelection()
-    }
-
-    LaunchedEffect(drawerState.currentValue) {
-        if (drawerState.currentValue != DrawerValue.Closed) {
-            isExpanded = false
-            focusManager.clearFocus()
-        }
-    }
+    ChatNavigationEffects(
+        drawerState = drawerState,
+        focusManager = focusManager,
+        scope = scope,
+        motionPolicy = motionPolicy,
+        onNavigateBack = onNavigateBack,
+        conversationInteraction = conversationInteraction,
+        onCollapseComposer = { isExpanded = false },
+    )
 
     AnsweringHapticEffect(
         messages = messagesState,
