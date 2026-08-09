@@ -151,6 +151,23 @@ class ContextCompactTest {
     }
 
     @Test
+    fun retainedContextIdsKeepCompactBoundaryAndVerbatimSuffixVisible() {
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            message("compact_boundary", "summary", Participant.MODEL),
+            message("u1", "new", Participant.USER),
+            message("a1", "answer", Participant.MODEL),
+        )
+
+        val retained = contextWindowRetainedMessageIds(history, tokenBudget = 4_096)
+
+        assertEquals(
+            linkedSetOf("compact_boundary", "u1", "a1"),
+            retained,
+        )
+    }
+
+    @Test
     fun compactSummaryRequestEndsWithEphemeralUserInputForStrictProviders() {
         val prefixEndingInAssistant = listOf(
             message("u0", "question", Participant.USER),

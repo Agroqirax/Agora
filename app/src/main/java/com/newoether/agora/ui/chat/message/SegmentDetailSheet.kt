@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -93,6 +94,7 @@ internal fun SegmentDetailSheet(
     onMediaClick: (List<String>, Int) -> Unit,
     titleOverride: String? = null,
     detailFooter: (@Composable () -> Unit)? = null,
+    handleBackInternally: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val liveSegs = remember(message.segments) {
@@ -168,6 +170,8 @@ internal fun SegmentDetailSheet(
         }
 
         fun dismiss() { dismissing = true; animateTo(0f) }
+
+        BackHandler(enabled = handleBackInternally && !dismissing) { dismiss() }
 
         // ── Grab: interrupt animation, sync raw to current visual position ──
         fun grabSheet() {
@@ -273,7 +277,7 @@ internal fun SegmentDetailSheet(
             onDismissRequest = { dismiss() },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
-                dismissOnBackPress = true,
+                dismissOnBackPress = !handleBackInternally,
                 dismissOnClickOutside = false,
                 decorFitsSystemWindows = false
             )

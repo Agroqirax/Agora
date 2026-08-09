@@ -605,6 +605,12 @@ class ChatViewModel(
             else generationRegistry.getOrCreate(conversationId).compacting
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val compactPreview: StateFlow<String> = _currentConversationId
+        .flatMapLatest { conversationId ->
+            if (conversationId == null) flowOf("")
+            else generationRegistry.getOrCreate(conversationId).compactPreview
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val pendingConversationSettings: StateFlow<ConversationSettings?> = _pendingConversationSettings.asStateFlow()
 
     fun setPendingConversationSettings(settings: ConversationSettings?) {

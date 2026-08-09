@@ -157,6 +157,13 @@ fun contextWindowRetainedMessageIds(messages: List<ChatMessage>, tokenBudget: In
     val retained = limitContext(canonicalContextMessages(messages), tokenBudget.coerceAtLeast(1))
     val firstRetainedId = retained.firstOrNull()?.id ?: return emptySet()
     val sourceAnchorId = firstRetainedId.removePrefix("context_summary_")
+    val originalSourceIndex = messages.indexOfFirst { it.id == sourceAnchorId }
+    if (originalSourceIndex >= 0) {
+        // A Compact is projected with a synthetic context_summary_ id and may then absorb the first
+        // same-role suffix row during canonicalization. Recover the durable boundary in the original
+        // graph so rollout visualization retains the Compact and every verbatim suffix message.
+        return messages.drop(originalSourceIndex).mapTo(linkedSetOf(), ChatMessage::id)
+    }
     val sourceIndex = compacted.indexOfFirst { it.id == sourceAnchorId }
     if (sourceIndex < 0) return retained.mapTo(linkedSetOf()) {
         it.id.removePrefix("context_summary_")

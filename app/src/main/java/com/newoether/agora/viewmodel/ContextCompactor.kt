@@ -75,6 +75,42 @@ sealed interface CompactResult {
     data class Failed(val message: String) : CompactResult
 }
 
+internal fun automaticCompactNeeded(
+    entities: List<MessageEntity>,
+    selectedChildren: Map<String?, String>,
+    contextLimit: Int,
+    retainLogicalMessages: Int,
+): Boolean {
+    val selectedPath = ConversationUiState.resolvePath(
+        allMessages = entities.map { it.toUiChatMessage { text -> text } },
+        streamingMsg = null,
+        selectedChildren = selectedChildren,
+    )
+    val entitiesById = entities.associateBy(MessageEntity::id)
+    return automaticCompactNeeded(
+        path = ApiPathAssembler.assemble(
+            selectedPath.mapNotNull { entitiesById[it.id] },
+            entities,
+        ).map { it.toUiChatMessage { text -> text } },
+        contextLimit = contextLimit,
+        retainLogicalMessages = retainLogicalMessages,
+    )
+}
+
+internal fun automaticCompactNeeded(
+    path: List<ChatMessage>,
+    contextLimit: Int,
+    retainLogicalMessages: Int,
+): Boolean {
+    if (path.isEmpty() || retainLogicalMessages < 0) return false
+    val nearest = path.indexOfLast { it.id.startsWith(Constants.COMPACT_MSG_PREFIX) }
+    val compactablePath = compactSplitMessages(path.drop(nearest.coerceAtLeast(-1) + 1))
+    val split = splitLogicalContext(compactablePath, retainLogicalMessages)
+    return split.prefix.isNotEmpty() &&
+        contextWindowUsage(path, contextLimit.coerceAtLeast(1)).estimatedTokenCount >=
+        contextLimit.coerceAtLeast(1)
+}
+
 /** Non-destructive context compaction. Original messages remain in the graph. */
 internal class ContextCompactor(
     private val conversations: ConversationRepository,
@@ -82,11 +118,20 @@ internal class ContextCompactor(
     private val providers: ProviderRegistry,
     private val pauseLoop: suspend (String) -> Unit,
 ) {
+    suspend fun automaticNeeded(conversationId: String, contextLimit: Int): Boolean =
+        automaticCompactNeeded(
+            conversations.getMessagesForConversationSnapshot(conversationId),
+            conversations.restoreBranchSelections(conversationId),
+            contextLimit,
+            settings.contextCompactRetainCount.value,
+        )
+
     suspend fun compactAutomatic(
         conversationId: String,
         fallbackModel: String,
         contextLimit: Int,
         compactRunId: String,
+        onSummaryChunk: (String) -> Unit = {},
     ): CompactResult {
         if (!settings.contextCompactEnabled.value) return CompactResult.NotNeeded
         return compact(
@@ -98,6 +143,7 @@ internal class ContextCompactor(
             ),
             threshold = contextLimit.coerceAtLeast(1),
             compactRunId = compactRunId,
+            onSummaryChunk = onSummaryChunk,
         )
     }
 
@@ -105,11 +151,13 @@ internal class ContextCompactor(
         conversationId: String,
         request: CompactRequest,
         compactRunId: String,
+        onSummaryChunk: (String) -> Unit = {},
     ): CompactResult = compact(
         conversationId,
         request,
         threshold = null,
         compactRunId = compactRunId,
+        onSummaryChunk = onSummaryChunk,
     )
 
     private suspend fun compact(
@@ -117,6 +165,7 @@ internal class ContextCompactor(
         request: CompactRequest,
         threshold: Int?,
         compactRunId: String,
+        onSummaryChunk: (String) -> Unit,
     ): CompactResult {
         require(compactRunId.isNotBlank())
         if (request.model.isBlank()) return CompactResult.Failed("Select a compact model")
@@ -192,7 +241,10 @@ internal class ContextCompactor(
         suspend fun collectResponse() {
             provider.generateResponse(buildCompactSummaryInput(input), config).collect { event ->
                 when (event) {
-                    is StreamEvent.TextChunk -> summary.append(event.text)
+                    is StreamEvent.TextChunk -> {
+                        summary.append(event.text)
+                        onSummaryChunk(event.text)
+                    }
                     is StreamEvent.Error -> error = event.message
                     else -> Unit
                 }

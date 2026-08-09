@@ -54,7 +54,7 @@ import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
 import com.newoether.agora.ui.chat.message.GroupedSegmentAutoExpansionController
 import com.newoether.agora.ui.chat.message.MessageItem
-import com.newoether.agora.ui.chat.message.ContextCompactPill
+import com.newoether.agora.ui.chat.message.ContextCompactProgressPill
 import com.newoether.agora.ui.chat.message.REGENERATION_ABORT_RESTORE_DURATION_MS
 import com.newoether.agora.ui.chat.message.REGENERATION_EXIT_DURATION_MS
 import com.newoether.agora.ui.chat.message.SegmentAppearanceRegistry
@@ -363,7 +363,7 @@ internal fun MessageList(
     state: LazyListState = rememberLazyListState(),
     userScrollEnabled: Boolean = true,
     isLoading: Boolean = false,
-    isCompacting: Boolean = false,
+    isCompacting: Boolean = false, compactPreview: String = "",
     isStopping: Boolean = false,
     isSwitching: Boolean = false,
     streamingAutoFollowEnabled: Boolean = isLoading && !isSwitching,
@@ -1155,18 +1155,18 @@ internal fun MessageList(
                                 }
                             }
                         }
-                        if (isCompacting && turn.key == turns.lastOrNull()?.key) {
-                            key("agora:context-compact-progress:$conversationId") {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 8.dp),
-                                    contentAlignment = Alignment.CenterStart,
-                                ) {
-                                    ContextCompactPill(inProgress = true)
-                                }
-                            }
-                        }
+                    }
+                }
+            }
+            if (isCompacting) {
+                item(key = "agora:context-compact-progress:$conversationId") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ContextCompactProgressPill(conversationId, compactPreview)
                     }
                 }
             }

@@ -1,10 +1,14 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.util.AttachmentFiles
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
@@ -37,6 +41,28 @@ data class GuidanceBatchLease(
         require(id.isNotBlank())
         require(batch.isNotEmpty())
     }
+}
+
+/** One queue drain becomes one durable user bubble while preserving FIFO content and ownership. */
+internal fun mergeQueuedGuidance(batch: List<QueuedSend>): QueuedSend {
+    require(batch.isNotEmpty())
+    val first = batch.first()
+    val attachmentItems = batch.flatMap { queued ->
+        queued.preparedAttachmentMetaJson
+            ?.let { raw -> Json.decodeFromString<AttachmentMeta>(raw).items }
+            .orEmpty()
+    }
+    return first.copy(
+        text = batch.joinToString(separator = "\n\n", transform = QueuedSend::text),
+        modelId = batch.last().modelId,
+        attachments = batch.flatMap(QueuedSend::attachments),
+        images = batch.flatMap(QueuedSend::images),
+        preparedImages = batch.flatMap(QueuedSend::preparedImages),
+        preparedAttachmentMetaJson = attachmentItems
+            .takeIf(List<*>::isNotEmpty)
+            ?.let { Json.encodeToString(AttachmentMeta(it)) },
+        preparedOwnedPaths = batch.flatMap(QueuedSend::preparedOwnedPaths),
+    )
 }
 
 /**

@@ -364,6 +364,9 @@ class TaskExecutionEngine(
                             fallbackModel = effectiveModelId,
                             contextLimit = contextLimit,
                             compactRunId = effect.compactRunId,
+                            onSummaryChunk = { chunk ->
+                                generationState.appendCompactPreview(effect.identity, chunk)
+                            },
                         )
                     }
                 ) {

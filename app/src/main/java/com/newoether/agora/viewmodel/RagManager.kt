@@ -32,6 +32,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 
+internal fun isEmbeddingMessageIdEligible(messageId: String): Boolean =
+    !messageId.startsWith(Constants.COMPACT_MSG_PREFIX) &&
+        !messageId.startsWith(Constants.TOOL_MSG_PREFIX) &&
+        !messageId.startsWith(Constants.RESULT_MSG_PREFIX)
+
 /**
  * Owns the embedding subsystem: embedding-model CRUD, the RAG cache (per-model
  * embedding of all messages), single-message indexing, and embedding key/base-URL
@@ -306,6 +311,7 @@ class RagManager(
 
     /** Index one message if [autoIndexEnabled]. Safe to call from any persist path. */
     fun indexMessageForRag(messageId: String, text: String) {
+        if (!isEmbeddingMessageIdEligible(messageId)) return
         if (!autoIndexEnabled) return
         scope.launch(Dispatchers.IO) {
             indexMessageForRagNow(messageId, text)

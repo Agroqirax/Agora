@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.StableModelAliases
@@ -38,6 +39,10 @@ import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.mikepenz.markdown.compose.components.markdownComponents
+
+internal fun usesExplicitDetailBackHandler(thinkingSegmentDisplayMode: String): Boolean =
+    ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
+        ThinkingSegmentDisplayModes.BOTTOM_SHEET
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -90,7 +95,7 @@ internal fun MessageItem(
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
     var showSegmentDetail by remember { mutableStateOf(false) }
-    var showThinkingSegmentsSheet by rememberSaveable(message.id) { mutableStateOf(false) }
+    var detailUsesExplicitBackHandler by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
     var selectedSegmentIndices by remember { mutableStateOf<List<Int>>(emptyList()) }
     var showInfoDialog by remember { mutableStateOf(false) }
@@ -209,9 +214,16 @@ internal fun MessageItem(
                     Modifier
                 }
                 if (message.isContextCompact()) {
-                    ContextCompactPill(
-                        onClick = { showCompactDetail = true },
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(contextAlpha),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ContextCompactPill(
+                            onClick = { showCompactDetail = true },
+                        )
+                    }
                 } else if (message.participant == Participant.USER) {
                     UserMessageBubble(
                         message = message,
@@ -272,14 +284,9 @@ internal fun MessageItem(
                         onSegmentSelected = { indices ->
                             selectedSegmentIndices = indices
                             selectedSegmentIndex = indices.firstOrNull() ?: -1
-                            if (
-                                ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
-                                    ThinkingSegmentDisplayModes.BOTTOM_SHEET
-                            ) {
-                                showThinkingSegmentsSheet = true
-                            } else {
-                                showSegmentDetail = true
-                            }
+                            detailUsesExplicitBackHandler =
+                                usesExplicitDetailBackHandler(thinkingSegmentDisplayMode)
+                            showSegmentDetail = true
                         },
                         onLayoutMutationStarted = onLayoutMutationStarted,
                         onLayoutMutationSettled = onLayoutMutationSettled,
@@ -321,20 +328,11 @@ internal fun MessageItem(
                     Text(stringResource(com.newoether.agora.R.string.delete))
                 }
             },
+            handleBackInternally = true,
             onDismiss = { showCompactDetail = false },
         )
     }
 
-    if (showThinkingSegmentsSheet) {
-        ThinkingSegmentsSheet(
-            message = message,
-            initialSegmentIndex = -1,
-            isStreaming = isStreaming,
-            markdownRenderContext = thoughtMarkdownRenderContext,
-            onMediaClick = onMediaClick,
-            onDismiss = { showThinkingSegmentsSheet = false },
-        )
-    }
     // Segment detail bottom sheet (self-contained draggable sheet + FSM).
     if (showSegmentDetail && selectedSegmentIndex >= 0) {
         SegmentDetailSheet(
@@ -344,6 +342,7 @@ internal fun MessageItem(
             isStreaming = isStreaming,
             markdownRenderContext = thoughtMarkdownRenderContext,
             onMediaClick = onMediaClick,
+            handleBackInternally = detailUsesExplicitBackHandler,
             onDismiss = { showSegmentDetail = false }
         )
     }
@@ -387,5 +386,44 @@ internal fun ContextCompactPill(
                 style = MaterialTheme.typography.labelLarge,
             )
         }
+    }
+}
+
+@Composable
+internal fun ContextCompactProgressPill(
+    conversationId: String?,
+    preview: String,
+) {
+    // This belongs to one live Compact effect. Do not restore an open preview into a later
+    // Compact operation for the same conversation after the progress item leaves composition.
+    var showDetail by remember(conversationId) { mutableStateOf(false) }
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val markdownAssets = rememberChatMarkdownAssets(textColor, searchHighlight = null)
+    val previewMessage = remember(conversationId, preview) {
+        ChatMessage(
+            id = "compact_progress_${conversationId.orEmpty()}",
+            text = preview,
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+            segments = listOf(MessageSegment(type = "thought", content = preview)),
+        )
+    }
+
+    ContextCompactPill(
+        inProgress = true,
+        onClick = { showDetail = true },
+    )
+    if (showDetail) {
+        SegmentDetailSheet(
+            message = previewMessage,
+            selectedSegmentIndex = 0,
+            selectedSegmentIndices = listOf(0),
+            isStreaming = true,
+            markdownRenderContext = markdownAssets.thoughtRenderContext,
+            onMediaClick = { _, _ -> },
+            titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
+            handleBackInternally = true,
+            onDismiss = { showDetail = false },
+        )
     }
 }

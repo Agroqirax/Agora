@@ -330,7 +330,7 @@ internal class MessageGenerationController(
         contextLimit: Int,
         state: ConversationGenerationState,
     ) {
-        if (!settings.contextCompactEnabled.value) return
+        if (!settings.contextCompactEnabled.value || !contextCompactor.automaticNeeded(genId, contextLimit)) return
         when (
             val execution = compactEffectCoordinator.executeAutomatic(state) { effect ->
                 val compactResult = contextCompactor.compactAutomatic(
@@ -338,6 +338,9 @@ internal class MessageGenerationController(
                     fallbackModel = modelId,
                     contextLimit = contextLimit,
                     compactRunId = effect.compactRunId,
+                    onSummaryChunk = { chunk ->
+                        state.appendCompactPreview(effect.identity, chunk)
+                    },
                 )
                 if (compactResult is CompactResult.Created) {
                     val all = convRepo.getMessagesForConversationSnapshot(genId)
@@ -511,6 +514,9 @@ internal class MessageGenerationController(
                         conversationId = conversationId,
                         request = request,
                         compactRunId = effect.compactRunId,
+                        onSummaryChunk = { chunk ->
+                            state.appendCompactPreview(effect.identity, chunk)
+                        },
                     )
                     if (result is CompactResult.Created) {
                         val all = convRepo.getMessagesForConversationSnapshot(conversationId)
@@ -1281,14 +1287,7 @@ internal class MessageGenerationController(
         return QueuedDrainClaim(lease, inputEffect)
     }
 
-    /**
-     * Batch drain: persists each queued send as its own user message, chained consecutively onto
-     * the conversation leaf, then launches a single generation replying to all of them (providers
-     * with strict role alternation see them merged by mergeConsecutiveSameRole). The batch answers
-     * with the model of the most recent queued send.
-     */
-
-    /** Drain only after the prior Run releases; every accepted batch enters a fresh Run. */
+    /** One FIFO lease becomes one durable user bubble after the prior Run releases. */
     internal suspend fun drainQueuedAfterGeneration(state: ConversationGenerationState) {
         val claim = state.queueMutationMutex.withLock {
             // Check permission before transferring the pending batch to an in-flight lease.
@@ -1339,6 +1338,8 @@ internal class MessageGenerationController(
                     graphCommitted
                 }
             try {
+                // The installed Job's setup boundary restores the exact lease if merge fails.
+                val queued = mergeQueuedGuidance(batch)
                 val myPersistId = state.nextPersistId()
                 executionCoordinator.withConversationLock(genId) {
                     val snapshot = convRepo.getMessagesForConversationSnapshot(genId)
@@ -1348,10 +1349,10 @@ internal class MessageGenerationController(
                         streamingMsg = null,
                         selectedChildren = selections,
                     )
-                    var parentId = path.lastOrNull()?.id
+                    val parentId = path.lastOrNull()?.id
                     val start = System.currentTimeMillis()
-                    val users = batch.mapIndexed { index, queued ->
-                        val entity = MessageEntity(
+                    val users = listOf(
+                        MessageEntity(
                             id = queued.id,
                             conversationId = genId,
                             parentId = parentId,
@@ -1360,15 +1361,13 @@ internal class MessageGenerationController(
                             thoughts = null,
                             status = MessageStatus.SUCCESS,
                             participant = Participant.USER,
-                            timestamp = start + index,
+                            timestamp = start,
                             attachmentMeta = queued.preparedAttachmentMetaJson,
                             runId = runId,
-                            runSequence = index.toLong(),
+                            runSequence = 0,
                             consumedAtPass = 0,
                         )
-                        parentId = entity.id
-                        entity
-                    }
+                    )
                     val modelMessageId = UUID.randomUUID().toString()
                     setupModelMessageId = modelMessageId
                     val placeholderEntity = MessageEntity(

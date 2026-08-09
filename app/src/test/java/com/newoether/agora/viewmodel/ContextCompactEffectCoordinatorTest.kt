@@ -27,6 +27,17 @@ class ContextCompactEffectCoordinatorTest {
             received = effect
             assertTrue(state.compacting.value)
             assertFalse(state.generating.value)
+            assertEquals("", state.compactPreview.value)
+            assertTrue(state.appendCompactPreview(effect.identity, "first"))
+            assertTrue(state.appendCompactPreview(effect.identity, " second"))
+            assertEquals("first second", state.compactPreview.value)
+            assertFalse(
+                state.appendCompactPreview(
+                    effect.identity.copy(effectId = "stale-compact"),
+                    " stale",
+                )
+            )
+            assertEquals("first second", state.compactPreview.value)
             CompactResult.Created("compact-message")
         }
 
@@ -45,6 +56,7 @@ class ContextCompactEffectCoordinatorTest {
             execution,
         )
         assertFalse(state.compacting.value)
+        assertEquals("", state.compactPreview.value)
         assertFalse(state.generating.value)
     }
 

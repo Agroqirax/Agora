@@ -74,6 +74,7 @@ class ConversationGenerationState(
     val generating = resources.generating
     val stopping = resources.stopping
     val compacting = resources.compacting
+    val compactPreview = resources.compactPreview
     val queuedSends = guidanceLeases.queuedSends
 
     /** Serializes durable intervention acceptance against slot release/queue drain. */
@@ -171,6 +172,10 @@ class ConversationGenerationState(
     suspend fun awaitCompactSettled() {
         compacting.first { isCompacting -> !isCompacting }
     }
+
+    /** Identified UI-only Compact output; stale effects cannot alter the active preview. */
+    fun appendCompactPreview(identity: RunEffectIdentity, delta: String): Boolean =
+        synchronized(genLock) { resources.appendCompactPreview(identity, delta) }
 
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
     // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly

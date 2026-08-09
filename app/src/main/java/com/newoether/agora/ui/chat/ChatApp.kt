@@ -421,11 +421,11 @@ fun ChatApp(
     val allMessagesState = viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isCompacting by viewModel.isCompacting.collectAsState()
+    val compactPreview by viewModel.compactPreview.collectAsState()
     val compactModel by viewModel.settings.contextCompactModel.collectAsState()
     val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
     val compactRetainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
     var showManualCompactDialog by rememberSaveable { mutableStateOf(false) }
-    var manualCompactError by remember { mutableStateOf<String?>(null) }
     val queuedSends by viewModel.queuedSends.collectAsState()
     val isStopping by viewModel.isStopping.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
@@ -1696,6 +1696,7 @@ fun ChatApp(
                                 // conversation generates — background conversations don't affect it.
                                 isLoading = isLoading,
                                 isCompacting = isCompacting,
+                                compactPreview = compactPreview,
                                 isStopping = isStopping,
                                 isSwitching = isSwitching,
                                 streamingAutoFollowEnabled =
@@ -2134,7 +2135,6 @@ fun ChatApp(
                         hasCompactBoundary = contextUsage.hasCompactBoundary,
                         canCompact = currentConversationId != null && !isLoading && !isSwitching && !isStopping,
                         onCompactClick = {
-                            manualCompactError = null
                             showManualCompactDialog = true
                         },
                         onAdvancedClick = { showAdvancedDialog = true },
@@ -2182,132 +2182,23 @@ fun ChatApp(
     }
 
     if (showManualCompactDialog) {
-        var model by remember(compactModel, selectedModel) {
-            mutableStateOf(compactModel ?: selectedModel)
-        }
-        var prompt by remember(compactPrompt) { mutableStateOf(compactPrompt) }
-        var retain by remember(compactRetainCount) { mutableStateOf(compactRetainCount.toString()) }
-        var modelMenu by remember { mutableStateOf(false) }
-        val unavailableModelError = stringResource(R.string.context_compact_select_available_model)
-        val emptyPromptError = stringResource(R.string.context_compact_prompt_empty)
-        val invalidRetainError = stringResource(R.string.context_compact_retain_invalid)
-        AlertDialog(
-            modifier = Modifier.clearFocusOnTap(),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
-            onDismissRequest = { if (!isCompacting) showManualCompactDialog = false },
-            title = {
-                Text(
-                    stringResource(R.string.context_compact_manual),
-                    fontWeight = FontWeight.Bold,
-                )
-            },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    ExposedDropdownMenuBox(
-                        expanded = modelMenu,
-                        onExpandedChange = { if (!isCompacting) modelMenu = it },
-                    ) {
-                        OutlinedTextField(
-                            value = modelAliases[model] ?: model,
-                            onValueChange = {},
-                            readOnly = true,
-                            enabled = !isCompacting,
-                            singleLine = true,
-                            label = { Text(stringResource(R.string.context_compact_model)) },
-                            trailingIcon = {
-                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = modelMenu)
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(
-                                    type = ExposedDropdownMenuAnchorType.PrimaryNotEditable,
-                                    enabled = !isCompacting,
-                                ),
-                        )
-                        ExposedDropdownMenu(
-                            expanded = modelMenu,
-                            onDismissRequest = { modelMenu = false },
-                        ) {
-                            enabledModels.sorted().forEach { candidate ->
-                                DropdownMenuItem(
-                                    text = { Text(modelAliases[candidate] ?: candidate) },
-                                    onClick = {
-                                        model = candidate
-                                        modelMenu = false
-                                        manualCompactError = null
-                                    },
-                                )
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = prompt,
-                        onValueChange = { prompt = it; manualCompactError = null },
-                        label = { Text(stringResource(R.string.context_compact_prompt)) },
-                        enabled = !isCompacting,
-                        minLines = 3,
-                        maxLines = 7,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    OutlinedTextField(
-                        value = retain,
-                        onValueChange = { retain = it.filter(Char::isDigit); manualCompactError = null },
-                        label = { Text(stringResource(R.string.context_compact_retain)) },
-                        enabled = !isCompacting,
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    manualCompactError?.let {
-                        Text(
-                            it,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+        ChatManualCompactDialog(
+            initialModel = compactModel ?: selectedModel,
+            initialPrompt = compactPrompt,
+            initialRetainCount = compactRetainCount,
+            enabledModels = enabledModels,
+            modelAliases = modelAliases,
+            isCompacting = isCompacting,
+            onCompact = { model, prompt, retainCount ->
+                showManualCompactDialog = false
+                scope.launch {
+                    val result = viewModel.compactContextManual(model, prompt, retainCount)
+                    if (result is com.newoether.agora.viewmodel.CompactResult.Failed) {
+                        viewModel.emitSnackbar(result.message)
                     }
                 }
             },
-            dismissButton = {
-                TextButton(
-                    onClick = { showManualCompactDialog = false },
-                    enabled = !isCompacting,
-                ) { Text(stringResource(R.string.provider_cancel)) }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !isCompacting,
-                    onClick = {
-                        val count = retain.toIntOrNull()
-                        when {
-                            model !in enabledModels -> manualCompactError = unavailableModelError
-                            prompt.isBlank() -> manualCompactError = emptyPromptError
-                            count == null -> manualCompactError = invalidRetainError
-                            else -> scope.launch {
-                                when (val result = viewModel.compactContextManual(model, prompt, count)) {
-                                    is com.newoether.agora.viewmodel.CompactResult.Failed -> {
-                                        manualCompactError = result.message
-                                    }
-                                    else -> showManualCompactDialog = false
-                                }
-                            }
-                        }
-                    },
-                ) {
-                    if (isCompacting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(18.dp),
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        Text(stringResource(R.string.context_compact))
-                    }
-                }
-            },
+            onDismiss = { showManualCompactDialog = false },
         )
     }
 }

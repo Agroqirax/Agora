@@ -1087,7 +1087,7 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId IN (SELECT id FROM messages WHERE conversationId = :conversationId)")
     suspend fun deleteEmbeddingsByConversation(conversationId: String)
 
-    @Query("DELETE FROM embeddings WHERE NOT EXISTS (SELECT 1 FROM messages WHERE messages.id = embeddings.messageId)")
+    @Query("DELETE FROM embeddings WHERE messageId LIKE 'compact_%' OR NOT EXISTS (SELECT 1 FROM messages WHERE messages.id = embeddings.messageId)")
     suspend fun deleteOrphanedEmbeddings()
 
     /** [query] must be pre-escaped for LIKE (see ConversationRepository.escapeLikePattern). */
@@ -1121,16 +1121,16 @@ interface ChatDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
-    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
     suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
 
     @Query("DELETE FROM embeddings WHERE modelId = :modelId")
     suspend fun deleteEmbeddingsByModel(modelId: String)
 
-    @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT COUNT(*) FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
     suspend fun getEmbeddingCountByModel(modelId: String): Int
 
-    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT COUNT(*) FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
     suspend fun getIndexableMessageCount(): Int
 
     @Query(
@@ -1142,7 +1142,7 @@ interface ChatDao {
           AND m.participant IN ('USER', 'MODEL')
           AND m.text != ''
           AND m.id NOT LIKE 'tool_%'
-          AND m.id NOT LIKE 'result_%'
+          AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'
           AND NOT EXISTS (
               SELECT 1 FROM embeddings e
               WHERE e.messageId = m.id AND e.modelId = :modelId
@@ -1161,10 +1161,10 @@ interface ChatDao {
     @Query("SELECT * FROM messages WHERE id IN (:ids)")
     suspend fun getMessagesByIds(ids: List<String>): List<MessageEntity>
 
-    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id IN (:ids) AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%'")
+    @Query("SELECT m.* FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id IN (:ids) AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
     suspend fun getSearchableMessagesByIds(ids: List<String>): List<MessageEntity>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id = :messageId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%')")
+    @Query("SELECT EXISTS(SELECT 1 FROM messages m INNER JOIN conversations c ON m.conversationId = c.id WHERE m.id = :messageId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%')")
     suspend fun isMessageSearchable(messageId: String): Boolean
 
     /** Atomically enforces the search-visibility invariant for incremental indexing. */

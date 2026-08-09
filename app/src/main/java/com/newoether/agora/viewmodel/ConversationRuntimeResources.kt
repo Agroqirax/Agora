@@ -3,6 +3,7 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.RunEffect
+import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunState
 import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.SlotReleaseReason
@@ -42,6 +43,10 @@ internal class ConversationRuntimeResources {
 
     private val _compacting = MutableStateFlow(false)
     val compacting: StateFlow<Boolean> = _compacting.asStateFlow()
+
+    private val _compactPreview = MutableStateFlow("")
+    val compactPreview: StateFlow<String> = _compactPreview.asStateFlow()
+    private var compactPreviewIdentity: RunEffectIdentity? = null
 
     private var generationJob: Job? = null
     private var uiGenToken = 0L
@@ -89,9 +94,13 @@ internal class ConversationRuntimeResources {
                 check(compactState.effectIdentity == effect.identity)
                 check(compactState.compactRunId == effect.compactRunId)
                 check(compactState.mode == effect.mode)
+                compactPreviewIdentity = effect.identity
+                _compactPreview.value = ""
                 _compacting.value = true
             }
         if (currentState !is RunState.Compacting && _compacting.value) {
+            compactPreviewIdentity = null
+            _compactPreview.value = ""
             _compacting.value = false
         }
 
@@ -156,6 +165,12 @@ internal class ConversationRuntimeResources {
         if (this.uiGenToken == uiToken) _isLoading.value = value
     }
 
+    fun appendCompactPreview(identity: RunEffectIdentity, delta: String): Boolean {
+        if (delta.isEmpty() || compactPreviewIdentity != identity) return false
+        _compactPreview.value += delta
+        return true
+    }
+
     fun streamMessageForClear(uiToken: Long): ChatMessage? = _streamingMessage.value
         ?.takeIf { this.uiGenToken == uiToken && it.status != MessageStatus.STOPPED }
 
@@ -189,6 +204,8 @@ internal class ConversationRuntimeResources {
         _isLoading.value = false
         _generating.value = false
         _stopping.value = false
+        compactPreviewIdentity = null
+        _compactPreview.value = ""
         _compacting.value = false
     }
 }
