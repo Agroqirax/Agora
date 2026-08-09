@@ -11,7 +11,11 @@ internal class HostKeyCaptureSession(
     val close: () -> Unit,
 )
 
-/** Performs the settings-page TOFU handshake without owning any saved device state. */
+/**
+ * Connects in capture mode and returns the server host key with its SHA-256 fingerprint for user
+ * review and pinning. The key exchange precedes authentication, so a bad password may still yield
+ * a valid key. This verifier owns no saved device state.
+ */
 internal class SshHostKeyVerifier(
     private val createSession: (
         host: String,

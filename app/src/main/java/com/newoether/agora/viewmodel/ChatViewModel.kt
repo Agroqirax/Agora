@@ -395,6 +395,11 @@ class ChatViewModel(
     val currentConversation: StateFlow<ChatConversation?> = currentConversationId
         .flatMapLatest { id -> if (id == null) flowOf(null) else convRepo.observeConversation(id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private val unreadGenerationAcknowledger = UnreadGenerationAcknowledger(
+        currentConversation = currentConversation,
+        conversations = convRepo,
+        scope = viewModelScope,
+    )
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     val currentLoop: StateFlow<com.newoether.agora.data.local.LoopEntity?> = currentConversationId
         .flatMapLatest { id ->
@@ -726,20 +731,7 @@ class ChatViewModel(
 
     init {
         startInitJobs()
-        viewModelScope.launch(Dispatchers.IO) {
-            // A completed generation marks its conversation unread in the same transaction as
-            // the terminal message. Selecting that conversation is the read boundary: observing
-            // its row here also covers completion while the conversation is already open.
-            currentConversation
-                .filterNotNull()
-                .filter { it.hasUnreadGeneration }
-                .collect { conversation ->
-                    convRepo.setConversationUnreadGeneration(
-                        id = conversation.id,
-                        unread = false,
-                    )
-                }
-        }
+        unreadGenerationAcknowledger.start()
         conversationUi.start()
 
         // Loop cycles for the open conversation use the regular Send path; the bridge waits for
@@ -832,12 +824,6 @@ class ChatViewModel(
         )
     }
 
-    /**
-     * Connects to an SSH host in capture mode and returns the server host key
-     * (base64) together with its SHA-256 fingerprint, for the user to review and
-     * pin. The host key is exchanged before authentication, so this succeeds even
-     * if the password is wrong — letting the user pin the key first.
-     */
     suspend fun verifySshHostKey(
         host: String, port: Int, user: String, password: String
     ): Result<Pair<String, String>> = sshHostKeyVerifier.verify(host, port, user, password)
