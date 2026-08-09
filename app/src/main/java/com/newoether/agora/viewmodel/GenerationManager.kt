@@ -27,33 +27,18 @@ import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
 import com.newoether.agora.api.util.projectGenerationStatusesForApi
 import com.newoether.agora.util.Constants
-import com.newoether.agora.tool.ImageGenToolProvider
-import com.newoether.agora.tool.MemoryToolProvider
-import com.newoether.agora.tool.RagToolProvider
-import com.newoether.agora.tool.ShellToolProvider
 import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.ToolExecutionEvent
-import com.newoether.agora.tool.ToolExecutionResult
-import com.newoether.agora.tool.ToolImageStore
-import com.newoether.agora.tool.ToolPresentationMetadata
-import com.newoether.agora.tool.WebSearchToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.util.UUID
 
@@ -75,47 +60,23 @@ class GenerationManager(
      *  Returns true to proceed, false to deny. */
     var onConfirmShellCommand: (suspend (server: String, summary: String) -> Boolean)? = null
 
-    private val memoryToolProvider = MemoryToolProvider(memoryManager)
-    private val webSearchToolProvider = WebSearchToolProvider()
-    private val ragToolProvider = RagToolProvider(conversations)
-    private val imageGenToolProvider = ImageGenToolProvider(app)
-    private val shellToolProvider = ShellToolProvider(
+    private val toolExecutor = GenerationToolExecutor.createDefault(
+        app = app,
+        conversations = conversations,
+        memoryManager = memoryManager,
         sandboxFactory = sandboxFactory,
-        imageStore = ToolImageStore(app),
-    ).also { stp ->
-        // Forward to the ViewModel-provided gate at call time (read the var lazily).
-        stp.confirm = { server, summary -> onConfirmShellCommand?.invoke(server, summary) ?: true }
-    }
-    private val builtInToolProviders: List<ToolProvider> = listOf(
-        memoryToolProvider, webSearchToolProvider, ragToolProvider, imageGenToolProvider, shellToolProvider
+        additionalProviders = additionalToolProviders,
+        confirmShellCommand = { server, summary ->
+            onConfirmShellCommand?.invoke(server, summary) ?: true
+        },
     )
-    private val toolProviders: List<ToolProvider> = builtInToolProviders + additionalToolProviders
     private val providerPassRunner = ProviderPassRunner()
     private val runFinalizationEffects = RunFinalizationEffectCoordinator()
 
-    private fun resolveToolPresentationMetadata(name: String): ToolPresentationMetadata? {
-        if (name.isBlank()) return null
-        for (provider in toolProviders) {
-            provider.presentationMetadata(name)?.let { return it }
-        }
-        return null
-    }
-
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
-        imageGenToolProvider.definitions(ctx)
+        toolExecutor.imageDefinitions(ctx)
 
     private val transcriptionManager = TranscriptionManager(providers, conversations, context)
-
-    companion object {
-        private val FILE_TOOL_NAMES = setOf(
-            "file_read",
-            "file_write",
-            "file_edit",
-            "file_glob",
-            "file_grep",
-            "view_image",
-        )
-    }
 
     private fun getProviderInstance(name: String): LlmProvider =
         requireRegisteredProvider(providers, name)
@@ -129,139 +90,26 @@ class GenerationManager(
     ): List<String> = imageProcessor.processImagesAndVideos(uris, sliceConfigs)
 
     fun buildMemoryTools(ctx: GenerationContext): List<ToolDefinition> =
-        memoryToolProvider.definitions(ctx)
+        toolExecutor.memoryDefinitions(ctx)
 
     fun buildWebSearchTool(ctx: GenerationContext): List<ToolDefinition> =
-        webSearchToolProvider.definitions(ctx)
+        toolExecutor.webSearchDefinitions(ctx)
 
     fun buildRagTool(ctx: GenerationContext): List<ToolDefinition> =
-        ragToolProvider.definitions(ctx)
+        toolExecutor.ragDefinitions(ctx)
 
-    fun buildShellTool(ctx: GenerationContext): List<ToolDefinition> {
-        val all = shellToolProvider.definitions(ctx)
-        return all.filter { it.function.name !in FILE_TOOL_NAMES }
-    }
+    fun buildShellTool(ctx: GenerationContext): List<ToolDefinition> =
+        toolExecutor.shellDefinitions(ctx)
 
-    fun buildFileTool(ctx: GenerationContext): List<ToolDefinition> {
-        val all = shellToolProvider.definitions(ctx)
-        return all.filter { it.function.name in FILE_TOOL_NAMES }
-    }
+    fun buildFileTool(ctx: GenerationContext): List<ToolDefinition> =
+        toolExecutor.fileDefinitions(ctx)
 
 
-    /** Semantic message search — delegates to [RagToolProvider], which owns the
+    /** Semantic message search — delegates to the RAG tool provider, which owns the
      *  embedding-search logic. Kept here as the entry point used by ChatViewModel's
      *  in-app conversation search. */
     suspend fun semanticSearch(query: String, limit: Int, ctx: GenerationContext): List<Pair<MessageEntity, Float>> =
-        ragToolProvider.semanticSearch(query, limit, ctx)
-
-    private suspend fun executeTool(
-        name: String,
-        arguments: String,
-        ctx: GenerationContext,
-        onEvent: suspend (ToolExecutionEvent) -> Unit,
-    ): ToolExecutionResult {
-        val completeArguments = arguments.ifBlank { "{}" }
-        val argumentsAreCompleteObject = runCatching {
-            Json.parseToJsonElement(completeArguments).jsonObject
-        }.isSuccess
-        if (!argumentsAreCompleteObject) {
-            return ToolExecutionResult(
-                text = "Error executing tool '$name': arguments are not a complete JSON object",
-                isError = true,
-            )
-        }
-        return try {
-            for (provider in toolProviders) {
-                if (provider.handles(name)) {
-                    // Tools run inline on the stream-consuming coroutine, so a tool that blocks
-                    // forever hangs the whole generation. withTimeout alone cannot bound a
-                    // provider stuck in non-cancellable blocking IO (it only requests
-                    // cancellation, then waits for the block to finish) — so the attempt runs
-                    // under a detached Job and the deadline waits only on await(), which is
-                    // always promptly cancellable. On timeout the attempt is cancelled and
-                    // abandoned (it dies at its next suspension point or IO-layer timeout) and
-                    // the tool loop continues with an error instead of hanging (#49).
-                    val attemptJob = Job()
-                    val attempt = CoroutineScope(currentCoroutineContext() + attemptJob).async {
-                        var completedResult: ToolExecutionResult? = null
-                        provider.executeEvents(name, completeArguments, ctx).collect { event ->
-                            if (event is ToolExecutionEvent.Completed) {
-                                completedResult = event.result
-                            }
-                            onEvent(event)
-                        }
-                        completedResult
-                            ?: ToolExecutionResult(
-                                text = "Error executing tool '$name': provider ended without a result",
-                                isError = true,
-                            )
-                    }
-                    try {
-                        return withTimeout(ctx.toolTimeoutMs) { attempt.await() }
-                    } finally {
-                        attemptJob.cancel()
-                    }
-                }
-            }
-            ToolExecutionResult(text = "Unknown tool: $name", isError = true)
-        } catch (e: TimeoutCancellationException) {
-            // A timeout is a recoverable tool failure, NOT a generation cancellation — return an
-            // error string so the model can react, instead of unwinding the whole generation.
-            ToolExecutionResult(
-                text = "Error executing tool '$name': timed out after ${ctx.toolTimeoutMs}ms",
-                isError = true,
-            )
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ToolExecutionResult(
-                text = "Error executing tool '$name': ${e.localizedMessage ?: "Unknown error"}",
-                isError = true,
-            )
-        }
-    }
-
-    private fun appendBoundedToolOutput(
-        current: String?,
-        delta: String,
-        maxChars: Int = 32 * 1024,
-    ): String {
-        if (delta.isEmpty()) return current.orEmpty()
-        val combined = current.orEmpty() + delta
-        return if (combined.length <= maxChars) combined
-        else combined.takeLast(maxChars)
-    }
-
-    private fun finalToolState(result: String): String {
-        if (result.isEmpty()) return com.newoether.agora.model.ToolExecutionStates.EMPTY
-        val resultObject = runCatching {
-            Json.parseToJsonElement(result).jsonObject
-        }.getOrNull()
-        val errorCode = (resultObject?.get("error") as? JsonPrimitive)?.content
-        if (errorCode == "no_results") {
-            return com.newoether.agora.model.ToolExecutionStates.EMPTY
-        }
-        if (
-            result.startsWith("Error", ignoreCase = true) ||
-            errorCode != null
-        ) {
-            return com.newoether.agora.model.ToolExecutionStates.FAILED
-        }
-        val isBackground = (resultObject?.get("background") as? JsonPrimitive)
-            ?.content
-            ?.toBooleanStrictOrNull() == true ||
-            (
-                (resultObject?.get("state") as? JsonPrimitive)
-                    ?.content
-                    ?.equals("running", ignoreCase = true) == true &&
-                    resultObject.get("job_id") != null
-                )
-        return if (isBackground) {
-            com.newoether.agora.model.ToolExecutionStates.BACKGROUND_RUNNING
-        } else {
-            com.newoether.agora.model.ToolExecutionStates.SUCCEEDED
-        }
-    }
+        toolExecutor.semanticSearch(query, limit, ctx)
 
     private fun applyUserTemplate(messages: List<ChatMessage>, prepend: String?, postpend: String?): List<ChatMessage> {
         return applyUserTemplateToMessages(messages, prepend, postpend)
@@ -431,7 +279,7 @@ class GenerationManager(
                 } else path
             }
 
-        val allTools = toolProviders.flatMap { it.definitions(ctx) }
+        val allTools = toolExecutor.definitions(ctx)
         val providerConfig = ProviderConfig(
             apiKey = config.apiKey,
             modelId = config.modelId,
@@ -724,7 +572,7 @@ class GenerationManager(
                 if (existingIndex != null) {
                     val existing = segments[existingIndex]
                     val resolvedName = name.ifBlank { existing.toolName.orEmpty() }
-                    val metadata = resolveToolPresentationMetadata(resolvedName)
+                    val metadata = toolExecutor.presentationMetadata(resolvedName)
                     segments[existingIndex] = existing.copy(
                         toolName = resolvedName.ifBlank { existing.toolName },
                         toolArgs = arguments,
@@ -743,7 +591,7 @@ class GenerationManager(
                 flushAnswerSegment()
                 flushThoughtSegment()
                 val index = segments.size
-                val metadata = resolveToolPresentationMetadata(name)
+                val metadata = toolExecutor.presentationMetadata(name)
                 segments += MessageSegment(
                     type = "tool",
                     toolName = name.ifBlank { null },
@@ -761,12 +609,21 @@ class GenerationManager(
             }
 
             suspend fun executeToolWithLiveSegment(
+                batchIdentity: RunEffectIdentity,
                 name: String,
                 arguments: String,
                 toolCallId: String,
-            ): ToolExecutionResult {
+            ): AuthorizedToolResult {
                 var lastToolUiEmitMs = 0L
-                return executeTool(name, arguments, ctx) { toolEvent ->
+                return toolExecutor.execute(
+                    AuthorizedToolCall(
+                        batchIdentity = batchIdentity,
+                        callId = toolCallId,
+                        name = name,
+                        arguments = arguments,
+                        context = ctx,
+                    ),
+                ) { toolEvent ->
                     val changed = when (toolEvent) {
                         is ToolExecutionEvent.OutputDelta -> {
                             updateToolSegment(toolCallId) { segment ->
@@ -818,7 +675,7 @@ class GenerationManager(
                     val index = checkNotNull(liveToolSegmentIndices[call.streamKey]) {
                         "Missing live segment for tool call ${call.streamKey}"
                     }
-                    val metadata = resolveToolPresentationMetadata(call.name)
+                    val metadata = toolExecutor.presentationMetadata(call.name)
                     segments[index] = segments[index].copy(
                         toolName = call.name,
                         toolArgs = call.arguments,
@@ -833,12 +690,16 @@ class GenerationManager(
                     publishStreamUpdate(forceCheckpoint = true)
                     lastEmitMs = System.currentTimeMillis()
 
-                    val result = executeToolWithLiveSegment(
-                        call.name,
-                        call.arguments,
-                        call.id,
+                    val executedCall = executeToolWithLiveSegment(
+                        batchIdentity = batchEffect.identity,
+                        name = call.name,
+                        arguments = call.arguments,
+                        toolCallId = call.id,
                     )
-                    generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
+                    check(executedCall.batchIdentity == batchEffect.identity)
+                    check(executedCall.callId == call.id)
+                    val result = executedCall.result
+                    generatedImages.addAll(toolExecutor.drainGeneratedImages(conversationId))
                     val clipped = result.text.take(Constants.MAX_TOOL_RESULT_LENGTH)
                     val clippedDisplayText = result.displayText
                         ?.take(Constants.MAX_TOOL_RESULT_LENGTH)
@@ -1294,7 +1155,7 @@ class GenerationManager(
             withContext(NonCancellable) {
                 // A cancellation can arrive as ImageGenToolProvider's withContext returns,
                 // after the file was queued but before the normal post-tool drain ran.
-                generatedImages.addAll(imageGenToolProvider.drainImages(conversationId))
+                generatedImages.addAll(toolExecutor.drainGeneratedImages(conversationId))
                 try {
                     val conversationExists = conversations.getConversation(conversationId) != null
                     if (conversationExists) {
