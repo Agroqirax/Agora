@@ -61,14 +61,6 @@ private sealed interface SendPlacement {
     data object Rejected : SendPlacement
 }
 
-private data class QueuedDrainClaim(
-    val lease: GuidanceBatchLease,
-    val inputEffect: RunEffect.PersistAcceptedInput,
-) {
-    val batch: List<QueuedSend> get() = lease.batch
-    val uiToken: Long get() = inputEffect.identity.ownerToken
-}
-
 /**
  * Result of delegating one automation (Loop) cycle to the foreground send path.
  *
@@ -218,6 +210,26 @@ internal class MessageGenerationController(
         onUserMessagePersisted = onUserMessagePersisted,
         onScrollToMessage = { onScrollToMessage(it) },
     )
+    private val queuedGuidanceDrainExecutor = QueuedGuidanceDrainExecutor(
+        conversations = convRepo,
+        settings = settings,
+        requestBuilder = requestBuilder,
+        executionCoordinator = executionCoordinator,
+        compactController = compactController,
+        terminalSettlement = terminalSettlement,
+        boundRunGenerationLauncher = boundRunGenerationLauncher,
+        toUiMessage = { it.toUiChatMessage(appContext) },
+        isConversationOpen = { currentConversationId.value == it },
+        projectGraph = { _, committedMessages, selectedChildren, streamingMessage ->
+            renderStore.commitGraph(
+                committedMessages = committedMessages,
+                selectedChildren = selectedChildren,
+                streamingMessage = streamingMessage,
+            )
+        },
+        onScrollToAbsoluteBottomAfter = onScrollToAbsoluteBottomAfter,
+        onUserMessagePersisted = onUserMessagePersisted,
+    )
     private val branchMutationService = ConversationBranchMutationService(
         scope = viewModelScope,
         conversations = convRepo,
@@ -325,7 +337,7 @@ internal class MessageGenerationController(
             targetUserMessageId = targetUserMessageId,
         ) ?: run {
             state.scope.launch {
-                releaseUnlaunchedSlotAndDrain(state, myUiToken)
+                queuedGuidanceDrainExecutor.releaseUnlaunchedSlotAndDrain(state, myUiToken)
             }
             return false
         }
@@ -606,325 +618,12 @@ internal class MessageGenerationController(
         }
     }
 
-    /** Release a claimed slot for which no generation Job was installed, then flush the WHOLE
-     * queue into its originating conversation. Installed Jobs release only from their completion
-     * hook so `CoroutineSettled` always means actual coroutine completion. */
-    private suspend fun releaseUnlaunchedSlotAndDrain(
-        state: ConversationGenerationState,
-        uiToken: Long,
-    ) = withContext(kotlinx.coroutines.NonCancellable) {
-        var drainClaim: QueuedDrainClaim? = null
-        state.queueMutationMutex.withLock {
-            if (state.endGeneration(uiToken)) {
-                // Suppression must be checked before the destructive take. A failed boundary
-                // deliberately leaves its memory-only guidance queued for a later real boundary.
-                if (state.consumeQueueDrainPermission()) {
-                    state.claimQueuedSends()?.let { lease ->
-                        drainClaim = claimQueuedDrain(state, lease)
-                    }
-                }
-            }
-        }
-        drainClaim?.let { sendQueuedBatch(state, it) }
-    }
-
-    /** Called only while [ConversationGenerationState.queueMutationMutex] is held. */
-    private suspend fun claimQueuedDrain(
-        state: ConversationGenerationState,
-        lease: GuidanceBatchLease,
-    ): QueuedDrainClaim? {
-        val proposedRunId = UUID.randomUUID().toString()
-        val transition = try {
-            state.commands.requestSend(
-                proposedRunId = proposedRunId,
-                effectId = "guidance-$proposedRunId",
-                directOnly = false,
-                // The queue has already transferred into [lease], so this is now an ordinary
-                // accepted-input claim rather than a recursive drain-first decision.
-                hasPendingGuidance = false,
-            )
-        } catch (error: Exception) {
-            state.settleGuidanceClaim(lease.id, durable = false)
-            throw error
-        }
-        val inputEffect = transition.effects
-            .filterIsInstance<RunEffect.PersistAcceptedInput>()
-            .singleOrNull()
-        if (!transition.accepted || inputEffect == null) {
-            state.settleGuidanceClaim(lease.id, durable = false)
-            return null
-        }
-        return QueuedDrainClaim(lease, inputEffect)
-    }
-
-    /** One FIFO lease becomes one durable user bubble after the prior Run releases. */
     internal suspend fun drainQueuedAfterGeneration(state: ConversationGenerationState) {
-        val claim = state.queueMutationMutex.withLock {
-            // Check permission before transferring the pending batch to an in-flight lease.
-            if (!state.consumeQueueDrainPermission()) return@withLock null
-            state.claimQueuedSends()?.let { lease -> claimQueuedDrain(state, lease) }
-        } ?: return
-        // Guidance is still memory-only. Its lease enters the normal fresh-Run Send contract.
-        sendQueuedBatch(state, claim)
+        queuedGuidanceDrainExecutor.drainAfterSettlement(state)
     }
 
     internal suspend fun drainQueuedAfterStop(state: ConversationGenerationState) =
         drainQueuedAfterGeneration(state)
-
-    private fun sendQueuedBatch(
-        state: ConversationGenerationState,
-        claim: QueuedDrainClaim,
-    ) {
-        val batch = claim.batch
-        val genId = state.conversationId
-        check(claim.inputEffect.identity.conversationId == genId)
-        val myUiToken = claim.uiToken
-        val runId = claim.inputEffect.identity.runId
-        val modelId = batch.last().modelId
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
-            state.settleGuidanceClaim(claim.lease.id, durable = false)
-            state.deferNextQueueDrain()
-            state.scope.launch {
-                releaseUnlaunchedSlotAndDrain(state, myUiToken)
-            }
-            return
-        }
-        state.loadingChange(myUiToken, true)
-        val jobBodyStarted = AtomicBoolean(false)
-        val generationJob = state.launchGenerationJob(myUiToken) {
-            jobBodyStarted.set(true)
-            var setupModelMessageId: String? = null
-            var graphCommitted = false
-            var runBound = false
-            var stopFinalizationClaimed = false
-            suspend fun reconcileGuidanceOwnership(): Boolean =
-                withContext(kotlinx.coroutines.NonCancellable) {
-                    if (!graphCommitted) {
-                        // Room cancellation may surface after an atomic transaction committed.
-                        // A fresh guidance Run exists iff that whole input graph exists.
-                        graphCommitted = convRepo.getRun(runId) != null
-                    }
-                    state.settleGuidanceClaim(claim.lease.id, durable = graphCommitted)
-                    graphCommitted
-                }
-            try {
-                // The installed Job's setup boundary restores the exact lease if merge fails.
-                val queued = mergeQueuedGuidance(batch)
-                val myPersistId = state.nextPersistId()
-                executionCoordinator.withConversationLock(genId) {
-                    val snapshot = convRepo.getMessagesForConversationSnapshot(genId)
-                    val selections = convRepo.restoreBranchSelections(genId)
-                    val path = ConversationUiState.resolvePath(
-                        snapshot.map { it.toUiChatMessage(appContext) },
-                        streamingMsg = null,
-                        selectedChildren = selections,
-                    )
-                    val parentId = path.lastOrNull()?.id
-                    val start = System.currentTimeMillis()
-                    val users = listOf(
-                        MessageEntity(
-                            id = queued.id,
-                            conversationId = genId,
-                            parentId = parentId,
-                            text = queued.text,
-                            images = queued.preparedImages,
-                            thoughts = null,
-                            status = MessageStatus.SUCCESS,
-                            participant = Participant.USER,
-                            timestamp = start,
-                            attachmentMeta = queued.preparedAttachmentMetaJson,
-                            runId = runId,
-                            runSequence = 0,
-                            consumedAtPass = 0,
-                        )
-                    )
-                    val modelMessageId = UUID.randomUUID().toString()
-                    setupModelMessageId = modelMessageId
-                    val placeholderEntity = MessageEntity(
-                        id = modelMessageId,
-                        conversationId = genId,
-                        parentId = users.last().id,
-                        text = "",
-                        thoughts = null,
-                        status = MessageStatus.SENDING,
-                        participant = Participant.MODEL,
-                        timestamp = start + users.size,
-                        modelName = modelId,
-                        runId = runId,
-                        runSequence = users.size.toLong(),
-                    )
-                    val selectionUpdates = buildMap<String?, String> {
-                        users.forEach { put(it.parentId, it.id) }
-                        put(users.last().id, modelMessageId)
-                    }
-                    val graphCommit = convRepo.createRunWithMessages(
-                        run = RunEntity(
-                            id = runId,
-                            conversationId = genId,
-                            parentRunId = path.lastOrNull()?.runId,
-                            status = RunStatus.ACTIVE,
-                            activeSlot = 1,
-                            startedAt = start,
-                            lastCheckpointAt = placeholderEntity.timestamp,
-                        ),
-                        messages = users + placeholderEntity,
-                        messageSelectionUpdates = selectionUpdates,
-                    )
-                    val committedUsers = graphCommit.messages.dropLast(1)
-                    val committedPlaceholder = graphCommit.messages.last()
-                    val committedSelections = graphCommit.messageSelections
-                    val pass = 0
-                    graphCommitted = true
-                    check(state.settleGuidanceClaim(claim.lease.id, durable = true))
-                    // Echo the same PersistAcceptedInput identity used by ordinary Send. Stop can
-                    // win while Room commits; in that order the durable fresh Run is stopped below
-                    // and the old STOPPED Run is never reused.
-                    val binding = withContext(kotlinx.coroutines.NonCancellable) {
-                        state.finishInputPersistence(claim.inputEffect.identity)
-                    }
-                    runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
-                    if (!runBound) {
-                        if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                            stopFinalizationClaimed = true
-                            terminalSettlement.settleLateBoundStop(state, binding)
-                        } else {
-                            // Runtime disposal is the only rejected durable edge; never requeue
-                            // the already-committed guidance or duplicate its user bubbles.
-                            withContext(kotlinx.coroutines.NonCancellable) {
-                                convRepo.finishStoppedGeneration(emptyList(), runId)
-                            }
-                        }
-                        return@withConversationLock
-                    }
-                    committedUsers.forEach { user ->
-                        if (user.text.isNotBlank()) {
-                            runCatching { onUserMessagePersisted(user.id, user.text) }
-                                .onFailure { error ->
-                                    DebugLog.w(
-                                        "MessageGenerationController",
-                                        "Failed to enqueue queued-message indexing for ${user.id}",
-                                        error,
-                                    )
-                                }
-                        }
-                        try {
-                            settings.incrementMessagesSent()
-                        } catch (error: Exception) {
-                            DebugLog.w(
-                                "MessageGenerationController",
-                                "Failed to increment the queued sent-message counter",
-                                error,
-                            )
-                        }
-                    }
-                    val placeholder = committedPlaceholder.toUiChatMessage(appContext)
-                    state.streamUpdate(myUiToken, placeholder)
-                    ifOpenOn(genId) {
-                        onScrollToAbsoluteBottomAfter(genId, committedUsers.last().id)
-                        renderStore.commitGraph(
-                            committedMessages =
-                                committedUsers.map { it.toUiChatMessage(appContext) } + placeholder,
-                            selectedChildren = committedSelections,
-                            streamingMessage = placeholder,
-                        )
-                    }
-                    // Eligibility is checked only after every guidance USER row is durable. The
-                    // placeholder remains below a created Compact boundary while provider
-                    // canonicalization omits it from the summary/suffix accounting.
-                    compactController.automaticBeforeBoundary(
-                        conversationId = genId,
-                        fallbackModel = modelId,
-                        contextLimit = requestBuilder.buildEffectiveConversationSettings(genId)
-                            .contextWindow ?: settings.maxContextWindow.value,
-                        state = state,
-                    )
-                    boundRunGenerationLauncher.launch(
-                        BoundRunGenerationRequest(
-                            conversationId = genId,
-                            modelMessageId = modelMessageId,
-                            startTime = committedPlaceholder.timestamp,
-                            isRegenerate = false,
-                            replaceMessageId = null,
-                            providerName = providerName,
-                            modelId = modelId,
-                            activeKey = activeKey,
-                            uiToken = myUiToken,
-                            persistId = myPersistId,
-                            runId = runId,
-                            pass = pass,
-                            callerTag = "guidanceBoundary",
-                        ),
-                        state,
-                    )
-                }
-            } catch (e: CancellationException) {
-                val durable = reconcileGuidanceOwnership()
-                if (durable && !runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        val binding = state.finishInputPersistence(claim.inputEffect.identity)
-                        stopFinalizationClaimed =
-                            terminalSettlement.settleCancelledDurableRun(state, binding)
-                        if (!stopFinalizationClaimed) {
-                            convRepo.finishStoppedGeneration(emptyList(), runId)
-                        }
-                    }
-                }
-                throw e
-            } catch (e: Exception) {
-                val durable = reconcileGuidanceOwnership()
-                if (durable && !runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        val binding = state.finishInputPersistence(claim.inputEffect.identity)
-                        runBound = binding is
-                            ConversationGenerationState.RunBindingOutcome.Active
-                        if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                            stopFinalizationClaimed = true
-                            terminalSettlement.settleLateBoundStop(state, binding)
-                        }
-                    }
-                } else if (!durable) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        state.commands.inputPersistenceFailed(claim.inputEffect.identity)
-                    }
-                }
-                terminalSettlement.failGenerationSetup(
-                    genId,
-                    runId,
-                    setupModelMessageId,
-                    myUiToken,
-                    state,
-                    e,
-                )
-                if (!durable) {
-                    // The guidance is still memory-only, so retain it for a later real boundary.
-                    // Suppress this generation's completion drain once; otherwise it would consume
-                    // the same batch, repeat the same setup failure, emit another snackbar, and
-                    // keep the UI in an unbounded generation loop.
-                    state.deferNextQueueDrain()
-                }
-            }
-        }
-        generationJob?.invokeOnCompletion {
-            if (!jobBodyStarted.get()) {
-                // Cancellation-before-start cannot reach the body reconciliation path.
-                state.settleGuidanceClaim(claim.lease.id, durable = false)
-            }
-        }
-        if (generationJob == null) {
-            // The slot was revoked between the claim and lazy-job installation. The guidance has
-            // no Room row yet. Requeue before waiting for the Stop barrier, then explicitly retry
-            // the handoff: onStopSettled may already have observed an empty queue at this edge.
-            state.settleGuidanceClaim(claim.lease.id, durable = false)
-            state.scope.launch {
-                state.awaitSendAvailable()
-                val retryClaim = state.queueMutationMutex.withLock {
-                    val retryLease = state.claimQueuedSends() ?: return@withLock null
-                    claimQueuedDrain(state, retryLease)
-                }
-                retryClaim?.let { sendQueuedBatch(state, it) }
-            }
-        }
-    }
 
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
@@ -933,7 +632,7 @@ internal class MessageGenerationController(
      * exact settlement, STOPPING waits for release, and IDLE emits one identified persistence
      * effect before generation launches. The installed Job's completion hook releases the slot and
      * requests queue drain; pre-launch failures release via
-     * [releaseUnlaunchedSlotAndDrain].
+     * [QueuedGuidanceDrainExecutor.releaseUnlaunchedSlotAndDrain].
      */
     private suspend fun sendInto(
         genId: String,
@@ -1033,7 +732,7 @@ internal class MessageGenerationController(
                             check(!directOnly)
                             val queued = enqueueAcceptedGuidance(pendingQueue.last().runId)
                             val lease = checkNotNull(state.claimQueuedSends())
-                            val claim = claimQueuedDrain(state, lease)
+                            val claim = queuedGuidanceDrainExecutor.claimUnderLock(state, lease)
                             if (claim != null) {
                                 SendPlacement.QueuedAndDrain(queued.id, claim)
                             } else {
@@ -1048,7 +747,7 @@ internal class MessageGenerationController(
                             val queued = enqueueAcceptedGuidance(effect.identity.runId)
                             if (!state.generating.value) {
                                 val lease = checkNotNull(state.claimQueuedSends())
-                                val claim = claimQueuedDrain(state, lease)
+                                val claim = queuedGuidanceDrainExecutor.claimUnderLock(state, lease)
                                 if (claim != null) {
                                     SendPlacement.QueuedAndDrain(queued.id, claim)
                                 } else {
@@ -1087,7 +786,7 @@ internal class MessageGenerationController(
             return SendAcceptance.Queued(placement.messageId, genId)
         }
         if (placement is SendPlacement.QueuedAndDrain) {
-            sendQueuedBatch(state, placement.claim)
+            queuedGuidanceDrainExecutor.launchClaim(state, placement.claim)
             return SendAcceptance.Queued(placement.messageId, genId)
         }
         val direct = placement as SendPlacement.Direct
