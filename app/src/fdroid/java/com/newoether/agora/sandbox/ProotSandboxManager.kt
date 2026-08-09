@@ -6,7 +6,6 @@ import android.os.Environment
 import android.util.Log
 import com.newoether.agora.R
 import com.newoether.agora.data.repository.SettingsRepository
-import com.newoether.agora.util.PortableGlobMatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -69,11 +68,14 @@ class ProotSandboxManager(
     private val homeMountDir: File = File(context.filesDir, "sandbox-home")
     private val homeMountPath = "/home/agora"
     private val sharedStorageMountPath = "/mnt/shared"
-    private val metadataDir: File = File(rootfsDir, "etc/agora")
-    private val baseWorldFile: File = File(metadataDir, "base-world")
-    private val explicitPackagesFile: File = File(metadataDir, "explicit-packages")
-    private val defaultBaseWorld = linkedSetOf("alpine-baselayout", "alpine-keys", "apk-tools", "busybox", "libc-utils")
-    private val packageNameRegex = Regex("^[A-Za-z0-9][A-Za-z0-9+_.:-]*$")
+    private val packageMetadata = AlpinePackageMetadataStore(rootfsDir)
+    private val pathResolver = SandboxPathResolver(
+        rootfsDir = rootfsDir,
+        homeMountDir = homeMountDir,
+        homeMountPath = homeMountPath,
+        sharedStorageMountPath = sharedStorageMountPath,
+        sharedStorageHostDir = { sharedStorageHostDir() },
+    )
 
     private val prootExecPath: String by lazy {
         // Force System.loadLibrary to trigger extraction from APK.
@@ -430,7 +432,7 @@ class ProotSandboxManager(
         val files = mutableListOf<String>()
         // null = legacy full recursion; <=0 = explicit unlimited; >=1 = max levels.
         val remaining = if (depth == null || depth <= 0) -1 else depth
-        walkVirtualFiles(base.file, files, base.physicalRoot.canonicalPath, base.virtualRoot, remaining)
+        pathResolver.walkVirtualFiles(base.file, files, base.physicalRoot.canonicalPath, base.virtualRoot, remaining)
         globMatch(files, pattern)
     }
 
@@ -441,7 +443,7 @@ class ProotSandboxManager(
             else {
                 val b = resolveSandboxPath(if (basePath.isBlank()) "/" else basePath)
                 val a = mutableListOf<String>()
-                walkVirtualFiles(b.file, a, b.physicalRoot.canonicalPath, b.virtualRoot)
+                pathResolver.walkVirtualFiles(b.file, a, b.physicalRoot.canonicalPath, b.virtualRoot)
                 a
             }
             val matches = mutableListOf<SandboxManager.GrepMatch>()
@@ -634,8 +636,7 @@ class ProotSandboxManager(
             return@withContext true
         }
 
-        val baseNames = readBaseWorld().map { worldPackageName(it) }.toSet()
-        if (requested in baseNames) {
+        if (packageMetadata.isBasePackage(requested)) {
             lastError = "Refusing to remove base package: $requested"
             _terminalOutput.value += "${lastError}\n"
             return@withContext false
@@ -758,343 +759,24 @@ class ProotSandboxManager(
         try { rootfsDir.walkTopDown().sumOf { it.length() } / (1024 * 1024) } catch (_: Throwable) { 0L }
     }
 
-    // ── Tar Extraction ──────────────────────────────────
-
-    private fun extractTarEntries(tar: org.apache.commons.compress.archivers.tar.TarArchiveInputStream, destDir: File) {
-        val destPrefix = destDir.canonicalPath + File.separator
-        // Reject any entry whose resolved path escapes destDir (Zip-Slip / path traversal).
-        fun safeChild(name: String): File? {
-            val f = File(destDir, name)
-            return if (f.canonicalPath == destDir.canonicalPath || f.canonicalPath.startsWith(destPrefix)) f else null
-        }
-        val symlinks = mutableListOf<Pair<String, String>>()
-        var entry = tar.nextEntry
-        while (entry != null) {
-            val outFile = safeChild(entry.name)
-            if (outFile == null) { entry = tar.nextEntry; continue }
-            when {
-                entry.isDirectory -> outFile.mkdirs()
-                entry.isSymbolicLink -> { outFile.parentFile?.mkdirs(); symlinks.add(entry.name to entry.linkName) }
-                entry.isFile -> { outFile.parentFile?.mkdirs(); outFile.outputStream().use { tar.copyTo(it) }; if (entry.mode and 0x40 != 0) outFile.setExecutable(true, false) }
-            }
-            entry = tar.nextEntry
-        }
-        for ((name, target) in symlinks) {
-            val outFile = safeChild(name) ?: continue; if (outFile.exists()) continue
-            val src = if (target.startsWith("/")) File(destDir, target.trimStart('/'))
-                      else File(outFile.parentFile ?: destDir, target)
-            // Containment check on the symlink source too.
-            if (src.canonicalPath != destDir.canonicalPath && !src.canonicalPath.startsWith(destPrefix)) continue
-            if (!src.exists()) continue
-            try {
-                if (src.isDirectory) src.walkTopDown().forEach { f -> val rel = f.relativeTo(src).path; val dst = File(outFile, rel); if (f.isDirectory) dst.mkdirs() else { dst.parentFile?.mkdirs(); f.copyTo(dst, true) } }
-                else { outFile.parentFile?.mkdirs(); src.copyTo(outFile, true) }
-            } catch (_: Throwable) {}
-        }
-    }
-
-    // ── APKINDEX Parsing ────────────────────────────────
-
-    private data class FullPkgEntry(val name: String, val version: String, val deps: List<String>)
-
-    /** Compare two Alpine-style package versions. Returns >0 if a > b, 0 if equal, <0 if a < b.
-     *  Alpine version format: {version}-r{revision}  (e.g. "3.5.2-r1", "1.2.3_pre1-r0").
-     *  -r{revision} is the package revision; if omitted, revision=0.
-     *  The version part is split into tokens: digit runs vs non-digit runs.
-     *  Tokens are compared numerically for digits, lexicographically for letters.
-     *  '_' (underscore) acts as a separator with lower priority than '.'. */
-    private fun compareAlpineVersions(a: String, b: String): Int {
-        fun splitVersion(v: String): Pair<String, Int> {
-            val ri = v.lastIndexOf("-r")
-            val base = if (ri >= 0) v.substring(0, ri) else v
-            val rev  = if (ri >= 0) v.substring(ri + 2).toIntOrNull() ?: 0 else 0
-            return base to rev
-        }
-        fun tokenise(ver: String): List<String> {
-            val tokens = mutableListOf<String>()
-            var i = 0
-            while (i < ver.length) {
-                if (ver[i] == '.' || ver[i] == '_' || ver[i] == '-') {
-                    tokens.add(ver[i].toString()); i++
-                } else if (ver[i].isDigit()) {
-                    val start = i; while (i < ver.length && ver[i].isDigit()) i++
-                    tokens.add(ver.substring(start, i))
-                } else {
-                    val start = i; while (i < ver.length && !ver[i].isDigit() && ver[i] != '.' && ver[i] != '_' && ver[i] != '-') i++
-                    tokens.add(ver.substring(start, i))
-                }
-            }
-            return tokens
-        }
-        fun tokenWeight(token: String): Int = when {
-            token == "~" -> -1
-            token.startsWith("alpha") -> -4
-            token.startsWith("beta")  -> -3
-            token.startsWith("pre")   -> -2
-            token.startsWith("rc")    -> -1
-            else -> 0
-        }
-        fun compareToken(ta: String, tb: String): Int? {
-            val aDig = ta.toIntOrNull()
-            val bDig = tb.toIntOrNull()
-            if (aDig != null && bDig != null) return aDig.compareTo(bDig)
-            // letter tokens: compare pre-release suffixes first, then lexicographically
-            val wa = tokenWeight(ta); val wb = tokenWeight(tb)
-            if (wa != 0 || wb != 0) return wa.compareTo(wb)
-            return ta.compareTo(tb)
-        }
-
-        val (baseA, revA) = splitVersion(a)
-        val (baseB, revB) = splitVersion(b)
-
-        val tokensA = tokenise(baseA)
-        val tokensB = tokenise(baseB)
-        val n = maxOf(tokensA.size, tokensB.size)
-        for (idx in 0 until n) {
-            val ta = tokensA.getOrElse(idx) { "" }
-            val tb = tokensB.getOrElse(idx) { "" }
-            if (ta == "_" && tb == "_") continue
-            if (ta == "_") return -1   // _ has lower priority than anything except another _
-            if (tb == "_") return 1
-            if (ta == tb) continue
-            val cmp = compareToken(ta, tb) ?: ta.compareTo(tb)
-            if (cmp != 0) return cmp
-        }
-        return revA.compareTo(revB)
-    }
-
-    private fun parseFullApkIndex(indexFile: File): Pair<Map<String, FullPkgEntry>, Map<String, String>> {
-        val result = mutableMapOf<String, FullPkgEntry>()
-        val soToPkg = mutableMapOf<String, String>()
-        java.util.zip.GZIPInputStream(indexFile.inputStream()).use { gz ->
-            org.apache.commons.compress.archivers.tar.TarArchiveInputStream(gz).use { tar ->
-                var entry = tar.nextEntry
-                while (entry != null) {
-                    if (entry.name == "APKINDEX") {
-                        val lines = tar.readBytes().toString(Charsets.UTF_8).lines()
-                        for (i in lines.indices) {
-                            val line = lines[i].trim()
-                            if (!line.startsWith("P:")) continue
-                            val name = line.substring(2).trim()
-                            var version = ""; var provider = ""
-                            val deps = mutableListOf<String>()
-                            val isSoEntry = name.startsWith("so:")
-                            for (j in i + 1 until minOf(i + 30, lines.size)) {
-                                val n = lines[j].trim()
-                                if (n.startsWith("C:")) break
-                                if (n.startsWith("V:")) version = n.substring(2).trim()
-                                if (n.startsWith("p:")) {
-                                    provider = n.substring(2).trim()
-                                    if (!isSoEntry) {
-                                        // p: lists all provides (so:libfoo.so.1=1.0 so:libbar.so.1=1.0)
-                                        for (prov in provider.split(Regex("\\s+"))) {
-                                            val pn = prov.takeWhile { it != '=' }
-                                            if (pn.isNotEmpty()) soToPkg[pn] = name
-                                        }
-                                    }
-                                }
-                                if (n.startsWith("D:")) deps.addAll(n.substring(2).trim().split(Regex("\\s+")).filter { it.isNotEmpty() })
-                            }
-                            if (isSoEntry && provider.isNotEmpty()) soToPkg[name] = provider
-                            else if (!isSoEntry && name.isNotEmpty() && version.isNotEmpty()) result[name] = FullPkgEntry(name, version, deps)
-                        }
-                    }
-                    entry = tar.nextEntry
-                }
-            }
-        }
-        return Pair(result, soToPkg)
-    }
-
     // ── Helpers ────────────────────────────────────────
 
-    private fun sanitizePackageName(packageName: String): String {
-        val trimmed = packageName.trim()
-        require(packageNameRegex.matches(trimmed)) { "Invalid package name: $packageName" }
-        return trimmed
-    }
+    private fun sanitizePackageName(packageName: String): String =
+        packageMetadata.sanitizePackageName(packageName)
 
     private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
-    private fun installedDbFile(): File = File(rootfsDir, "lib/apk/db/installed")
+    private fun readInstalledVersions(): LinkedHashMap<String, String> = packageMetadata.readInstalledVersions()
+    private fun captureBaseWorld(force: Boolean = false) = packageMetadata.captureBaseWorld(force)
+    private fun readExplicitPackages(): LinkedHashSet<String> = packageMetadata.readExplicitPackages()
+    private fun writeExplicitPackages(packages: Collection<String>) = packageMetadata.writeExplicitPackages(packages)
+    private fun ensurePackageMetadata() = packageMetadata.ensurePackageMetadata()
+    private fun normalizeWorld(explicitPackages: Set<String> = readExplicitPackages()) = packageMetadata.normalizeWorld(explicitPackages)
+    private fun addExplicitPackage(packageName: String) = packageMetadata.addExplicitPackage(packageName)
 
-    private fun readInstalledVersions(): LinkedHashMap<String, String> {
-        val installed = linkedMapOf<String, String>()
-        val db = installedDbFile()
-        if (!db.exists()) return installed
-        var name = ""
-        var version = ""
-        db.readLines(Charsets.UTF_8).forEach { line ->
-            when {
-                line.startsWith("P:") -> name = line.substring(2).trim()
-                line.startsWith("V:") -> version = line.substring(2).trim()
-                line.isBlank() -> {
-                    if (name.isNotEmpty()) installed[name] = version
-                    name = ""
-                    version = ""
-                }
-            }
-        }
-        if (name.isNotEmpty()) installed[name] = version
-        return installed
-    }
-
-    private fun worldFile(): File = File(rootfsDir, "etc/apk/world")
-
-    private fun readWorldLines(): LinkedHashSet<String> {
-        val world = worldFile()
-        if (!world.exists()) return linkedSetOf()
-        return world.readLines(Charsets.UTF_8)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .toCollection(linkedSetOf())
-    }
-
-    private fun writeWorldLines(lines: Collection<String>) {
-        val world = worldFile()
-        world.parentFile?.mkdirs()
-        world.writeText(lines.joinToString("\n", postfix = if (lines.isEmpty()) "" else "\n"), Charsets.UTF_8)
-    }
-
-    private fun worldPackageName(line: String): String {
-        val cleaned = line.trim().removePrefix("!")
-        val end = cleaned.indexOfFirst { it == '@' || it == '<' || it == '>' || it == '=' || it == '~' }
-        return if (end >= 0) cleaned.substring(0, end) else cleaned
-    }
-
-    private fun captureBaseWorld(force: Boolean = false) {
-        metadataDir.mkdirs()
-        if (!force && baseWorldFile.exists()) return
-        val current = readWorldLines()
-        val installed = readInstalledVersions().keys
-        val inferredBase = current.filter { worldPackageName(it) in defaultBaseWorld && worldPackageName(it) in installed }
-        val fallbackBase = defaultBaseWorld.filter { it in installed }
-        val base = when {
-            force && current.isNotEmpty() -> current
-            force -> fallbackBase.ifEmpty { defaultBaseWorld }
-            inferredBase.isNotEmpty() -> inferredBase
-            else -> current
-        }
-        baseWorldFile.writeText(base.joinToString("\n", postfix = if (base.isEmpty()) "" else "\n"), Charsets.UTF_8)
-    }
-
-    private fun readBaseWorld(): LinkedHashSet<String> {
-        captureBaseWorld()
-        return baseWorldFile.readLines(Charsets.UTF_8)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .toCollection(linkedSetOf())
-    }
-
-    private fun readExplicitPackages(): LinkedHashSet<String> {
-        if (!explicitPackagesFile.exists()) return linkedSetOf()
-        return explicitPackagesFile.readLines(Charsets.UTF_8)
-            .mapNotNull { runCatching { sanitizePackageName(it) }.getOrNull() }
-            .toCollection(linkedSetOf())
-    }
-
-    private fun writeExplicitPackages(packages: Collection<String>) {
-        metadataDir.mkdirs()
-        val clean = packages.mapNotNull { runCatching { sanitizePackageName(it) }.getOrNull() }.toCollection(linkedSetOf())
-        explicitPackagesFile.writeText(clean.joinToString("\n", postfix = if (clean.isEmpty()) "" else "\n"), Charsets.UTF_8)
-    }
-
-    private fun ensurePackageMetadata() {
-        if (!rootfsDir.isDirectory) return
-        metadataDir.mkdirs()
-        captureBaseWorld()
-        if (!explicitPackagesFile.exists()) {
-            val baseNames = readBaseWorld().map { worldPackageName(it) }.toSet()
-            val migratedExplicit = readWorldLines()
-                .map { worldPackageName(it) }
-                .filter { it !in baseNames }
-                .mapNotNull { runCatching { sanitizePackageName(it) }.getOrNull() }
-                .toCollection(linkedSetOf())
-            writeExplicitPackages(migratedExplicit)
-        }
-        normalizeWorld()
-    }
-
-    private fun normalizeWorld(explicitPackages: Set<String> = readExplicitPackages()) {
-        metadataDir.mkdirs()
-        val base = readBaseWorld()
-        val baseNames = base.map { worldPackageName(it) }.toSet()
-        val normalized = linkedSetOf<String>()
-        normalized.addAll(base)
-        explicitPackages
-            .mapNotNull { runCatching { sanitizePackageName(it) }.getOrNull() }
-            .filter { it !in baseNames }
-            .forEach { normalized.add(it) }
-        writeWorldLines(normalized)
-    }
-
-    private fun addExplicitPackage(packageName: String) {
-        val name = sanitizePackageName(packageName)
-        ensurePackageMetadata()
-        val next = readExplicitPackages().apply { add(name) }
-        writeExplicitPackages(next)
-        normalizeWorld(next)
-    }
-
-    private data class ResolvedSandboxPath(
-        val file: File,
-        val physicalRoot: File,
-        val virtualRoot: String
-    )
-
-    private fun ensureSandboxMountTargets() {
-        homeMountDir.mkdirs()
-        File(rootfsDir, homeMountPath.trimStart('/')).mkdirs()
-        File(rootfsDir, sharedStorageMountPath.trimStart('/')).mkdirs()
-    }
-
-    private fun normalizeVirtualPath(path: String): String {
-        val raw = path.trim().replace('\\', '/')
-        val absolute = if (raw.isBlank()) "/" else if (raw.startsWith("/")) raw else "/$raw"
-        val collapsed = absolute.replace(Regex("/+"), "/")
-        return if (collapsed.length > 1) collapsed.trimEnd('/') else collapsed
-    }
-
-    private fun resolveSandboxPath(path: String): ResolvedSandboxPath {
-        val normalized = normalizeVirtualPath(path)
-        if (normalized == homeMountPath || normalized.startsWith("$homeMountPath/")) {
-            ensureSandboxMountTargets()
-            val root = homeMountDir.canonicalFile
-            val suffix = normalized.removePrefix(homeMountPath).trimStart('/')
-            val resolved = File(root, suffix).canonicalFile
-            require(resolved.absolutePath == root.absolutePath || resolved.absolutePath.startsWith(root.absolutePath + File.separator)) {
-                "Path traversal: $path"
-            }
-            return ResolvedSandboxPath(resolved, root, homeMountPath)
-        }
-        if (
-            normalized == sharedStorageMountPath ||
-            normalized.startsWith("$sharedStorageMountPath/")
-        ) {
-            val root = sharedStorageHostDir()
-                ?: throw SecurityException(
-                    "Shared storage is not mounted. Enable it and grant all-files access first.",
-                )
-            val suffix = normalized.removePrefix(sharedStorageMountPath).trimStart('/')
-            val resolved = File(root, suffix).canonicalFile
-            require(
-                resolved.absolutePath == root.absolutePath ||
-                    resolved.absolutePath.startsWith(root.absolutePath + File.separator),
-            ) {
-                "Path traversal: $path"
-            }
-            return ResolvedSandboxPath(resolved, root, sharedStorageMountPath)
-        }
-
-        val root = rootfsDir.canonicalFile
-        val resolved = File(root, normalized.trimStart('/')).canonicalFile
-        require(resolved.absolutePath == root.absolutePath || resolved.absolutePath.startsWith(root.absolutePath + File.separator)) {
-            "Path traversal: $path"
-        }
-        return ResolvedSandboxPath(resolved, root, "/")
-    }
-
-    private fun resolvePath(path: String): File = resolveSandboxPath(path).file
+    private fun ensureSandboxMountTargets() = pathResolver.ensureSandboxMountTargets()
+    private fun resolveSandboxPath(path: String): ResolvedSandboxPath = pathResolver.resolveSandboxPath(path)
+    private fun resolvePath(path: String): File = pathResolver.resolvePath(path)
 
     private fun sharedStorageHostDir(): File? {
         if (!settings.sandboxSharedStorageEnabled.value) return null
@@ -1110,40 +792,6 @@ class ProotSandboxManager(
         return Environment.getExternalStorageDirectory()
             ?.canonicalFile
             ?.takeIf { it.isDirectory && it.canRead() }
-    }
-
-    // remaining: levels still allowed including the current dir's files. -1 = unlimited;
-    // 1 = only this dir's files (no descent); >1 = descend with one fewer level.
-    private fun walkVirtualFiles(
-        dir: File,
-        result: MutableList<String>,
-        physicalRootAbsPath: String,
-        virtualRoot: String,
-        remaining: Int = -1
-    ) {
-        try { dir.listFiles()?.forEach {
-            if (it.isDirectory) {
-                if (remaining < 0 || remaining > 1) {
-                    walkVirtualFiles(it, result, physicalRootAbsPath, virtualRoot, if (remaining < 0) -1 else remaining - 1)
-                }
-            } else {
-                val path = try { it.canonicalPath } catch (_: Exception) { it.absolutePath }
-                val rel = path.removePrefix(physicalRootAbsPath).removePrefix(File.separator).replace(File.separatorChar, '/')
-                val prefix = if (virtualRoot == "/") "" else virtualRoot.trimEnd('/')
-                result.add("$prefix/$rel")
-            }
-        } } catch (_: Throwable) {}
-    }
-
-    private fun globMatch(files: List<String>, pattern: String): List<String> {
-        val cleanPattern = pattern.trim().replace('\\', '/')
-        val adjusted = when {
-            cleanPattern.isBlank() -> "/**"
-            cleanPattern.startsWith("/") -> cleanPattern
-            cleanPattern.contains("/") -> "/$cleanPattern"
-            else -> "/**/$cleanPattern"
-        }
-        return files.filter { file -> PortableGlobMatcher.matches(adjusted, file) }
     }
 
     private companion object {
