@@ -65,20 +65,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicLong
-
-enum class AnimatedScrollDestination {
-    MESSAGE,
-    ABSOLUTE_BOTTOM,
-}
-
-data class AnimatedScrollRequest(
-    val id: Long,
-    val conversationId: String,
-    val targetMessageId: String?,
-    val destination: AnimatedScrollDestination = AnimatedScrollDestination.MESSAGE,
-    val attachedOnly: Boolean = false,
-)
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class ChatViewModel(
@@ -330,59 +316,44 @@ class ChatViewModel(
 
 
 
-    private val animatedScrollIds = AtomicLong(0L)
+    private val scrollRequests = ScrollRequestCoordinator()
 
     /** Callback invoked when any send path (manual/queue/loop) accepts a message.
      *  ChatApp wires this to trigger a single haptics.confirm() for all three paths. */
     @Volatile var onSendAccepted: ((conversationId: String, messageId: String) -> Unit)? = null
-    private val _animatedScrollRequest = MutableStateFlow<AnimatedScrollRequest?>(null)
     val animatedScrollRequest: StateFlow<AnimatedScrollRequest?> =
-        _animatedScrollRequest.asStateFlow()
+        scrollRequests.request
 
     /** One-shot: set when sendMessage creates a new conversation so the conversation-open
      *  auto-scroll skips once (the send's scroll-to-message already handles it), preventing
      *  a double scroll on the first message of a new chat. Consumed by ChatApp. */
-    @Volatile
-    var suppressNextOpenScroll: Boolean = false
+    var suppressNextOpenScroll: Boolean
+        get() = scrollRequests.suppressNextOpenScroll
+        set(value) { scrollRequests.suppressNextOpenScroll = value }
 
     /** When true, draft write-backs are suppressed to prevent feedback loops while
      *  programmatically loading a stored draft into the composer field. */
-    @Volatile
-    var loadingDraft: Boolean = false
+    var loadingDraft: Boolean
+        get() = scrollRequests.loadingDraft
+        set(value) { scrollRequests.loadingDraft = value }
 
     fun triggerScrollToMessage(messageId: String? = null) {
-        val conversationId = _currentConversationId.value ?: return
-        _animatedScrollRequest.value = AnimatedScrollRequest(
-            id = animatedScrollIds.incrementAndGet(),
-            conversationId = conversationId,
-            targetMessageId = messageId,
-        )
+        scrollRequests.requestMessage(_currentConversationId.value, messageId)
     }
 
     fun triggerScrollToAbsoluteBottomAfter(conversationId: String, messageId: String) {
-        _animatedScrollRequest.value = AnimatedScrollRequest(
-            id = animatedScrollIds.incrementAndGet(),
-            conversationId = conversationId,
-            targetMessageId = messageId,
-            destination = AnimatedScrollDestination.ABSOLUTE_BOTTOM,
-        )
+        scrollRequests.requestAbsoluteBottomAfter(conversationId, messageId)
     }
 
     fun triggerScrollToAttachedBottomAfter(conversationId: String, messageId: String) {
-        _animatedScrollRequest.value = AnimatedScrollRequest(
-            id = animatedScrollIds.incrementAndGet(),
+        scrollRequests.requestAbsoluteBottomAfter(
             conversationId = conversationId,
-            targetMessageId = messageId,
-            destination = AnimatedScrollDestination.ABSOLUTE_BOTTOM,
+            messageId = messageId,
             attachedOnly = true,
         )
     }
 
-    fun completeAnimatedScroll(requestId: Long) {
-        if (_animatedScrollRequest.value?.id == requestId) {
-            _animatedScrollRequest.value = null
-        }
-    }
+    fun completeAnimatedScroll(requestId: Long) = scrollRequests.complete(requestId)
 
     private val _currentActiveModel = MutableStateFlow<String?>(null)
     val currentActiveModel = kotlinx.coroutines.flow.combine(_currentActiveModel, settings.selectedModel) { active, default ->
@@ -1021,7 +992,7 @@ class ChatViewModel(
         _newChatEntryId.value += 1L
         _isNewChatMode.value = true
         _isTransitioningToNewChat.value = true
-        _animatedScrollRequest.value = null
+        scrollRequests.clear()
         switchingJob = viewModelScope.launch {
             try {
                 kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
@@ -1052,7 +1023,7 @@ class ChatViewModel(
         )
         previousJob?.cancel()
         _isTransitioningToNewChat.value = false
-        _animatedScrollRequest.value = null
+        scrollRequests.clear()
         switchingJob = viewModelScope.launch {
             try {
                 kotlinx.coroutines.delay(SWITCH_OVERLAY_FADE_MS) // Allow overlay to fade in
