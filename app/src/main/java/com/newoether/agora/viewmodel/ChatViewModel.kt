@@ -65,7 +65,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -82,24 +81,6 @@ data class AnimatedScrollRequest(
     val targetMessageId: String?,
     val destination: AnimatedScrollDestination = AnimatedScrollDestination.MESSAGE,
     val attachedOnly: Boolean = false,
-)
-
-data class LoadedComposerDraft(
-    val text: String,
-    val attachments: List<SelectedAttachment>,
-    val revision: Long,
-)
-
-data class DraftPersistResult(
-    val revision: Long,
-    val succeeded: Boolean,
-    val matchesRequested: Boolean,
-)
-
-private data class PersistedComposerDraft(
-    val text: String,
-    val attachments: List<SelectedAttachment>,
-    val revision: Long,
 )
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -151,6 +132,7 @@ class ChatViewModel(
      * receive the repository (not raw DAO) for a uniform boundary.
      */
     private val convRepo: ConversationRepository = conversationRepository
+    private val composerDrafts = ComposerDraftController(conversationRepository)
     private val conversationForkShare =
         ConversationForkShareService(
             conversationRepository,
@@ -1615,7 +1597,7 @@ class ChatViewModel(
                 // MessageEntity already owns these paths, and repository cleanup rechecks every
                 // remaining message/draft reference before deleting anything.
                 viewModelScope.launch(Dispatchers.IO) {
-                    reclaimDraftAttachmentFiles(attachmentsToReclaim)
+                    composerDrafts.reclaimAttachments(attachmentsToReclaim)
                 }
             }
         }
@@ -1740,158 +1722,25 @@ class ChatViewModel(
 
     // ── Per-conversation draft persistence ─────────────────────
 
-    private val draftPersistenceMutex = Mutex()
-    private val persistedComposerDrafts = mutableMapOf<String, PersistedComposerDraft>()
-
-    /**
-     * Persists one revision-checked composer snapshot. Once a write starts it is atomic with
-     * respect to cancellation; newer UI snapshots wait behind the mutex instead of overtaking it.
-     */
     suspend fun persistDraft(
         conversationId: String,
         expectedRevision: Long,
         text: String,
         attachments: List<SelectedAttachment>,
         explicitlyRemovedAttachments: List<SelectedAttachment> = emptyList(),
-    ): DraftPersistResult = withContext(Dispatchers.IO + NonCancellable) {
-        draftPersistenceMutex.withLock {
-            val current = try {
-                persistedComposerDrafts[conversationId]
-                    ?: readComposerDraft(conversationId).also {
-                        persistedComposerDrafts[conversationId] = it
-                    }
-            } catch (e: Exception) {
-                DebugLog.e("ChatViewModel", "Failed to read draft for $conversationId", e)
-                return@withLock DraftPersistResult(
-                    revision = persistedComposerDrafts[conversationId]?.revision
-                        ?: expectedRevision,
-                    succeeded = false,
-                    matchesRequested = false,
-                )
-            }
-            if (current.revision != expectedRevision) {
-                reclaimDraftAttachmentFiles(explicitlyRemovedAttachments)
-                return@withLock DraftPersistResult(
-                    revision = current.revision,
-                    succeeded = true,
-                    matchesRequested =
-                        current.text == text && current.attachments == attachments,
-                )
-            }
+    ): DraftPersistResult = composerDrafts.persist(
+        conversationId = conversationId,
+        expectedRevision = expectedRevision,
+        text = text,
+        attachments = attachments,
+        explicitlyRemovedAttachments = explicitlyRemovedAttachments,
+    )
 
-            if (current.text == text && current.attachments == attachments) {
-                reclaimDraftAttachmentFiles(explicitlyRemovedAttachments)
-                return@withLock DraftPersistResult(
-                    revision = current.revision,
-                    succeeded = true,
-                    matchesRequested = true,
-                )
-            }
-
-            try {
-                val json = if (attachments.isEmpty()) {
-                    null
-                } else {
-                    Json.encodeToString(attachments)
-                }
-                convRepo.updateDraft(conversationId, text, json)
-                val next = PersistedComposerDraft(
-                    text = text,
-                    attachments = attachments,
-                    revision = current.revision + 1L,
-                )
-                persistedComposerDrafts[conversationId] = next
-                reclaimDraftAttachmentFiles(
-                    current.attachments + explicitlyRemovedAttachments,
-                )
-                DraftPersistResult(
-                    revision = next.revision,
-                    succeeded = true,
-                    matchesRequested = true,
-                )
-            } catch (e: Exception) {
-                DebugLog.e("ChatViewModel", "Failed to persist draft for $conversationId", e)
-                DraftPersistResult(
-                    revision = current.revision,
-                    succeeded = false,
-                    matchesRequested = false,
-                )
-            }
-        }
-    }
-
-    /**
-     * A successfully accepted send owns the submitted files through either its durable
-     * MessageEntity or its in-memory queued-guidance entry. Force-clearing advances the revision,
-     * invalidating every older UI tail-flush.
-     */
     private suspend fun clearAcceptedComposerDraft(
         conversationId: String,
-    ): List<SelectedAttachment> =
-        withContext(Dispatchers.IO + NonCancellable) {
-            draftPersistenceMutex.withLock {
-                try {
-                    val current = persistedComposerDrafts[conversationId]
-                        ?: readComposerDraft(conversationId)
-                    convRepo.updateDraft(conversationId, "", null)
-                    persistedComposerDrafts[conversationId] = PersistedComposerDraft(
-                        text = "",
-                        attachments = emptyList(),
-                        revision = current.revision + 1L,
-                    )
-                    current.attachments
-                } catch (e: Exception) {
-                    DebugLog.e(
-                        "ChatViewModel",
-                        "Failed to clear accepted draft for $conversationId",
-                        e,
-                    )
-                    emptyList()
-                }
-            }
-        }
+    ): List<SelectedAttachment> = composerDrafts.clearAccepted(conversationId)
 
-    /** Loads and revision-tags the stored draft under the same serialization boundary as writes. */
     suspend fun loadDraft(
         conversationId: String,
-    ): LoadedComposerDraft = withContext(Dispatchers.IO) {
-        draftPersistenceMutex.withLock {
-            val loaded = readComposerDraft(conversationId)
-            persistedComposerDrafts[conversationId] = loaded
-            LoadedComposerDraft(
-                text = loaded.text,
-                attachments = loaded.attachments,
-                revision = loaded.revision,
-            )
-        }
-    }
-
-    private suspend fun readComposerDraft(conversationId: String): PersistedComposerDraft {
-        val priorRevision = persistedComposerDrafts[conversationId]?.revision ?: 0L
-        val entity = convRepo.getConversation(conversationId)
-        val attachments: List<SelectedAttachment> = try {
-            entity?.draftAttachments
-                ?.let { Json.decodeFromString<List<SelectedAttachment>>(it) }
-                ?: emptyList()
-        } catch (e: Exception) {
-            DebugLog.w("ChatViewModel", "Failed to deserialize draft attachments for $conversationId", e)
-            emptyList()
-        }
-        return PersistedComposerDraft(
-            text = entity?.draftText.orEmpty(),
-            attachments = attachments,
-            revision = priorRevision,
-        )
-    }
-
-    private suspend fun reclaimDraftAttachmentFiles(attachments: List<SelectedAttachment>) {
-        if (attachments.isEmpty()) return
-        try {
-            convRepo.deleteUnreferencedDraftAttachmentFiles(attachments)
-        } catch (e: Exception) {
-            // The durable reference update already succeeded. A cleanup failure may leak a private
-            // file, but must never roll the draft back to a now-invalid attachment.
-            DebugLog.w("ChatViewModel", "Failed to reclaim draft attachment files", e)
-        }
-    }
+    ): LoadedComposerDraft = composerDrafts.load(conversationId)
 }
