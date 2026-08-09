@@ -103,7 +103,6 @@ private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
-private const val SHARE_ERROR_DETAIL_TOKEN = "__AGORA_SHARE_ERROR_DETAIL__"
 private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
 private const val DRAFT_PERSIST_RETRY_COUNT = 2
 private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
@@ -153,31 +152,7 @@ fun ChatApp(
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val motionPolicy = LocalAgoraMotionPolicy.current
-    val shareChooserTitle = stringResource(R.string.conversation_share)
-    val shareFailureTemplate = stringResource(
-        R.string.conversation_share_failed,
-        SHARE_ERROR_DETAIL_TOKEN,
-    )
-
-    LaunchedEffect(viewModel, context, shareChooserTitle, shareFailureTemplate) {
-        viewModel.conversationShareText.collect { text ->
-            try {
-                launchConversationShare(
-                    context = context,
-                    text = text,
-                    chooserTitle = shareChooserTitle,
-                )
-            } catch (e: Exception) {
-                DebugLog.e("ChatShare", "Unable to launch conversation share", e)
-                viewModel.emitSnackbar(
-                    shareFailureTemplate.replace(
-                        SHARE_ERROR_DETAIL_TOKEN,
-                        e.localizedMessage ?: e.javaClass.simpleName,
-                    )
-                )
-            }
-        }
-    }
+    ConversationShareEffect(viewModel, context)
 
     val latestDrawerEnabled by rememberUpdatedState(drawerEnabled)
     val drawerState = rememberDrawerState(
@@ -190,9 +165,7 @@ fun ChatApp(
             allowed
         }
     )
-    LaunchedEffect(drawerEnabled, motionPolicy.allowSpatialTransitions) {
-        if (!drawerEnabled) drawerState.closeWithMotionPolicy(motionPolicy)
-    }
+    DrawerAvailabilityEffect(drawerEnabled, motionPolicy, drawerState)
 
     val conversations by viewModel.conversations.collectAsState()
     // Defer value reads to the narrow composition regions that actually render messages. The
@@ -281,10 +254,7 @@ fun ChatApp(
     // notifySendAccepted, the single choke point for Direct + Queued send acceptances. Wiring the
     // haptics there gives every accepted send exactly one confirm(), independent of which path
     // triggered it or which scroll policy applies.
-    DisposableEffect(haptics) {
-        viewModel.onSendAccepted = { _, _ -> haptics.confirm() }
-        onDispose { viewModel.onSendAccepted = null }
-    }
+    SendAcceptedHapticBindingEffect(viewModel, haptics)
 
 
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
@@ -297,23 +267,13 @@ fun ChatApp(
     // former hand-rolled clock, which wrote animation state DURING composition (Compose forbids
     // that — it makes the frame's output depend on when it happened to be composed) and ticked on
     // a fixed 16ms sleep that drifts against the real refresh rate.
-    val spacerProgress = remember { Animatable(0f) }
-    val spacerEasing = remember { CubicBezierEasing(0.15f, 0.5f, 0.25f, 1.0f) }
-    LaunchedEffect(isExpanded, motionPolicy.allowSpatialTransitions) {
-        if (isExpanded) {
-            if (motionPolicy.allowSpatialTransitions) {
-                spacerProgress.snapTo(0f)
-                spacerProgress.animateTo(1f, tween(400, easing = spacerEasing))
-            } else {
-                spacerProgress.snapTo(1f)
-            }
-        } else {
-            spacerProgress.snapTo(0f)
-        }
-    }
-    val isExpandAnimating = spacerProgress.isRunning
-    val outerSpacerHeightPx: Float =
-        if (isExpanded) with(density) { 44.dp.toPx() } * (1f - spacerProgress.value) else 0f
+    val composerSpacerAnimation = rememberComposerSpacerAnimation(
+        isExpanded = isExpanded,
+        allowSpatialTransitions = motionPolicy.allowSpatialTransitions,
+        expandedHeightPx = with(density) { 44.dp.toPx() },
+    )
+    val isExpandAnimating = composerSpacerAnimation.isRunning
+    val outerSpacerHeightPx = composerSpacerAnimation.outerHeightPx
 
     val windowSize = LocalWindowInfo.current.containerSize
     val windowHeightDp = with(density) {
@@ -332,14 +292,14 @@ fun ChatApp(
     // at the very bottom. Snackbar must clear: nav bar + IME + Surface outer padding + Box
     // bottom padding + Row height/margin + a small gap.
     val bottomInset = maxOf(navBarBottom, imeBottom)
-    val expandedCapsuleOffset = bottomInset + 74.dp
-    val targetSnackbarOffset = if (drawerProgress <= 0.5f) {
-        if (isExpanded) expandedCapsuleOffset else (bottomBarHeight - 4.dp).coerceAtLeast(0.dp)
-    } else {
-        val t = ((drawerProgress - 0.5f) * 2f).coerceIn(0f, 1f)
-        (bottomBarHeight.value + (settingsButtonTopDp - bottomBarHeight.value) * t).dp
-    }
-    LaunchedEffect(targetSnackbarOffset) { onSnackbarOffsetChanged(targetSnackbarOffset) }
+    SnackbarOffsetEffect(
+        drawerProgress = drawerProgress,
+        isExpanded = isExpanded,
+        bottomBarHeight = bottomBarHeight,
+        settingsButtonTopDp = settingsButtonTopDp,
+        bottomInset = bottomInset,
+        onOffsetChanged = onSnackbarOffsetChanged,
+    )
     val listState = rememberLazyListState()
     var absoluteBottomScrollPhase by remember(currentConversationId) {
         mutableStateOf(AbsoluteBottomScrollPhase.IDLE)
