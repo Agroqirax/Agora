@@ -17,8 +17,6 @@ import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
-import com.newoether.agora.data.EmbeddingModelConfig
-import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
 
@@ -207,7 +205,7 @@ class ChatViewModel(
             checkUpdate = UpdateChecker::check,
             onUpdateFound = { _updateDialogData.value = it },
             isCaching = { ragManager.cachingProgress.value.containsKey(it) },
-            cacheMessages = ::cacheMessagesForModel,
+            cacheMessages = ragManager::cacheMessagesForModel,
             cacheReminder = { notCached, total, action ->
                 SnackbarEvent(
                     getApplication<Application>().getString(
@@ -257,7 +255,7 @@ class ChatViewModel(
     private val semanticSearchService by lazy {
         SemanticSearchService(
             settings = settings,
-            activeEmbeddingConfig = { activeEmbeddingModel.value },
+            activeEmbeddingConfig = { ragManager.activeEmbeddingModel.value },
             resolveEmbeddingApiKey = ragManager::resolveEmbeddingApiKey,
             search = generationManager::semanticSearch,
         )
@@ -347,12 +345,6 @@ class ChatViewModel(
     
 
         
-    // Embedding subsystem state lives in [ragManager]; exposed here for the UI.
-    val activeEmbeddingModel get() = ragManager.activeEmbeddingModel
-    val cachingProgress get() = ragManager.cachingProgress
-    val cacheCounts get() = ragManager.cacheCounts
-    fun loadCacheCounts() = ragManager.loadCacheCounts()
-
     // ── Remote shell command confirmation gate ───────────────────────────
     /** Shell-command confirmation policy + pending-prompt handshake (see [ShellConfirmationController]). */
     val pendingShellCommand: StateFlow<ShellConfirmationController.PendingShellCommand?>
@@ -781,30 +773,8 @@ class ChatViewModel(
             UpdateChecker.check(getCurrentVersion())
         }
     }
-    fun addEmbeddingModel(config: EmbeddingModelConfig) = ragManager.addEmbeddingModel(config)
-    fun deleteEmbeddingModel(id: String) = ragManager.deleteEmbeddingModel(id)
-    fun renameEmbeddingModel(id: String, newName: String, batchSize: Int? = null) =
-        ragManager.renameEmbeddingModel(id, newName, batchSize)
-    fun setActiveEmbeddingModel(id: String) = ragManager.setActiveEmbeddingModel(id)
-    fun cacheMessagesForModel(modelId: String, recache: Boolean = false, silent: Boolean = false) =
-        ragManager.cacheMessagesForModel(modelId, recache, silent)
-
-    fun isLocalModelIdTaken(modelId: String, excludeId: String? = null) =
-        modelManager.isLocalModelIdTaken(modelId, excludeId)
-    fun addLocalChatModel(config: LocalChatModelConfig) = modelManager.addLocalChatModel(config)
-    fun deleteLocalChatModel(uuid: String) = modelManager.deleteLocalChatModel(uuid)
-    fun updateLocalChatModel(
-        uuid: String, newModelId: String, newAlias: String, nCtx: Int, temperature: Float, topP: Float, maxTokens: Int,
-        mmprojPath: String = ""
-    ) = modelManager.updateLocalChatModel(uuid, newModelId, newAlias, nCtx, temperature, topP, maxTokens, mmprojPath)
-
     suspend fun semanticSearch(query: String, limit: Int = 20) =
         semanticSearchService.search(query, limit)
-
-    fun resolveEmbeddingKeyForProviderExact(targetProvider: String) =
-        ragManager.resolveEmbeddingKeyForProviderExact(targetProvider)
-
-    fun indexMessageForRag(messageId: String, text: String) = ragManager.indexMessageForRag(messageId, text)
     suspend fun searchMessages(query: String, limit: Int = 20) = convRepo.searchMessages(query, limit)
     // ── Auto Backup ───────────────────────────────────────────
     fun setAutoBackupEnabled(enabled: Boolean) = dataControl.setAutoBackupEnabled(enabled)

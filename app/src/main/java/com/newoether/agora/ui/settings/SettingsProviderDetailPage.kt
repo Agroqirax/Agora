@@ -499,12 +499,12 @@ fun SettingsProviderDetailPage(
                 val id = modelId.trim(); idError = null; formError = null
                 if (id.isBlank()) { idError = "ID is required"; return@TextButton }
                 if (!idRegex.matches(id)) { idError = "Only a-z, 0-9, . _ - allowed"; return@TextButton }
-                if (viewModel.isLocalModelIdTaken(id)) { idError = "Already in use"; return@TextButton }
+                if (viewModel.modelManager.isLocalModelIdTaken(id)) { idError = "Already in use"; return@TextButton }
                 val n = nCtx.toIntOrNull()?.takeIf { it > 0 } ?: run { formError = "Context size must be positive"; return@TextButton }
                 val t = temperature.toFloatOrNull()?.takeIf { it in 0f..2f } ?: run { formError = "Temperature must be 0–2"; return@TextButton }
                 val p = topP.toFloatOrNull()?.takeIf { it in 0f..1f } ?: run { formError = "Top P must be 0–1"; return@TextButton }
                 val m = maxTokens.toIntOrNull()?.takeIf { it > 0 } ?: run { formError = "Max tokens must be positive"; return@TextButton }
-                viewModel.addLocalChatModel(LocalChatModelConfig(modelId = id, alias = modelAlias.ifBlank { id }, localFilePath = copiedFilePath!!, mmprojPath = addMmprojPath.trim(), nCtx = n, temperature = t, topP = p, maxTokens = m))
+                viewModel.modelManager.addLocalChatModel(LocalChatModelConfig(modelId = id, alias = modelAlias.ifBlank { id }, localFilePath = copiedFilePath!!, mmprojPath = addMmprojPath.trim(), nCtx = n, temperature = t, topP = p, maxTokens = m))
                 showAddModelDialog = false; copiedFilePath = null
             }) { Text(stringResource(R.string.add)) } },
             dismissButton = { TextButton(onClick = {
@@ -568,12 +568,12 @@ fun SettingsProviderDetailPage(
                 val id = editModelId.trim(); editIdError = null; editFormError = null
                 if (id.isBlank()) { editIdError = "ID is required"; return@TextButton }
                 if (!idRegex.matches(id)) { editIdError = "Only a-z, 0-9, . _ - allowed"; return@TextButton }
-                if (viewModel.isLocalModelIdTaken(id, excludeId = model.id)) { editIdError = "Already in use"; return@TextButton }
+                if (viewModel.modelManager.isLocalModelIdTaken(id, excludeId = model.id)) { editIdError = "Already in use"; return@TextButton }
                 val n = editNCtx.toIntOrNull()?.takeIf { it > 0 } ?: run { editFormError = "Context size must be positive"; return@TextButton }
                 val t = editTemp.toFloatOrNull()?.takeIf { it in 0f..2f } ?: run { editFormError = "Temperature must be 0–2"; return@TextButton }
                 val p = editTopP.toFloatOrNull()?.takeIf { it in 0f..1f } ?: run { editFormError = "Top P must be 0–1"; return@TextButton }
                 val m = editMaxTokens.toIntOrNull()?.takeIf { it > 0 } ?: run { editFormError = "Max tokens must be positive"; return@TextButton }
-                viewModel.updateLocalChatModel(model.id, id, editAlias.ifBlank { id }, n, t, p, m, mmprojPath = editMmprojPath.trim())
+                viewModel.modelManager.updateLocalChatModel(model.id, id, editAlias.ifBlank { id }, n, t, p, m, mmprojPath = editMmprojPath.trim())
                 showEditModelDialog = null
             }) { Text(stringResource(R.string.save)) } },
             dismissButton = { TextButton(onClick = {
@@ -585,7 +585,7 @@ fun SettingsProviderDetailPage(
 
     // Delete model confirm
     showDeleteModelConfirm?.let { model ->
-        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteModelConfirm = null }, title = { Text(stringResource(R.string.local_chat_delete_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.local_chat_delete_text, model.alias)) }, confirmButton = { TextButton(onClick = { viewModel.deleteLocalChatModel(model.id); showDeleteModelConfirm = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton(onClick = { showDeleteModelConfirm = null }) { Text(stringResource(R.string.cancel)) } })
+        AlertDialog(containerColor = MaterialTheme.colorScheme.surfaceContainer, onDismissRequest = { showDeleteModelConfirm = null }, title = { Text(stringResource(R.string.local_chat_delete_title), fontWeight = FontWeight.Bold) }, text = { Text(stringResource(R.string.local_chat_delete_text, model.alias)) }, confirmButton = { TextButton(onClick = { viewModel.modelManager.deleteLocalChatModel(model.id); showDeleteModelConfirm = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton(onClick = { showDeleteModelConfirm = null }) { Text(stringResource(R.string.cancel)) } })
     }
 
     // API Key dialog

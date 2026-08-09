@@ -50,13 +50,13 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val manualSearchMethod by viewModel.settings.manualSearchMethod.collectAsState()
     val embeddingModels by viewModel.settings.embeddingModels.collectAsState()
     val activeEmbeddingModelId by viewModel.settings.activeEmbeddingModelId.collectAsState()
-    val cachingProgress by viewModel.cachingProgress.collectAsState()
-    val cacheCounts by viewModel.cacheCounts.collectAsState()
+    val cachingProgress by viewModel.ragManager.cachingProgress.collectAsState()
+    val cacheCounts by viewModel.ragManager.cacheCounts.collectAsState()
     val searchContextWindow by viewModel.settings.searchContextWindow.collectAsState()
     val searchMatchLimit by viewModel.settings.searchMatchLimit.collectAsState()
     val ragThreshold by viewModel.settings.ragThreshold.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.loadCacheCounts() }
+    LaunchedEffect(Unit) { viewModel.ragManager.loadCacheCounts() }
     var showRemoteDialog by remember { mutableStateOf(false) }
     var showLocalDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<String?>(null) }
@@ -263,7 +263,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                     leadingContent = {
                                         RadioButton(
                                             selected = isActive,
-                                            onClick = { viewModel.setActiveEmbeddingModel(model.id) }
+                                            onClick = { viewModel.ragManager.setActiveEmbeddingModel(model.id) }
                                         )
                                     },
                                     trailingContent = {
@@ -273,7 +273,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                     if (allCached) {
                                                         showRecacheConfirm = model.id
                                                     } else {
-                                                        viewModel.cacheMessagesForModel(model.id)
+                                                        viewModel.ragManager.cacheMessagesForModel(model.id)
                                                     }
                                                 }) { Text(if (allCached) stringResource(R.string.recache_action) else stringResource(R.string.cache_action)) }
                                             }
@@ -317,7 +317,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             }
                                         }
                                     },
-                                    modifier = Modifier.clickable { viewModel.setActiveEmbeddingModel(model.id) }
+                                    modifier = Modifier.clickable { viewModel.ragManager.setActiveEmbeddingModel(model.id) }
                                 )
                             }
                         }
@@ -330,7 +330,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             TextButton(onClick = {
                                 remoteState.prepareForNew(
                                     embeddingProviders[0],
-                                    viewModel.resolveEmbeddingKeyForProviderExact(Constants.PROVIDER_OPENAI)?.key ?: ""
+                                    viewModel.ragManager.resolveEmbeddingKeyForProviderExact(Constants.PROVIDER_OPENAI)?.key ?: ""
                                 )
                                 showRemoteDialog = true
                             }) { Text(stringResource(R.string.add_remote_model)) }
@@ -597,7 +597,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 confirmButton = {
                     TextButton(onClick = {
                         if (localName.isNotBlank() && localFilePath.isNotBlank()) {
-                            viewModel.addEmbeddingModel(
+                            viewModel.ragManager.addEmbeddingModel(
                                 com.newoether.agora.data.EmbeddingModelConfig(
                                     name = localName,
                                     type = com.newoether.agora.data.EmbeddingModelType.LOCAL,
@@ -632,7 +632,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 text = { Text(stringResource(R.string.recache_confirm_message)) },
                 confirmButton = {
                     TextButton(onClick = {
-                        viewModel.cacheMessagesForModel(modelId, recache = true)
+                        viewModel.ragManager.cacheMessagesForModel(modelId, recache = true)
                         showRecacheConfirm = null
                     }) { Text(stringResource(R.string.recache_action)) }
                 },
@@ -651,7 +651,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 text = { Text(stringResource(R.string.delete_model_confirm)) },
                 confirmButton = {
                     TextButton(onClick = {
-                        viewModel.deleteEmbeddingModel(modelId)
+                        viewModel.ragManager.deleteEmbeddingModel(modelId)
                         showDeleteDialog = null
                     }) { Text(stringResource(R.string.delete)) }
                 },
@@ -697,7 +697,7 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 confirmButton = {
                     TextButton(onClick = {
                         if (renameText.isNotBlank()) {
-                            viewModel.renameEmbeddingModel(modelId, renameText, editBatchSize.toIntOrNull() ?: 8)
+                            viewModel.ragManager.renameEmbeddingModel(modelId, renameText, editBatchSize.toIntOrNull() ?: 8)
                             showRenameDialog = null
                         }
                     }) { Text(stringResource(R.string.save)) }

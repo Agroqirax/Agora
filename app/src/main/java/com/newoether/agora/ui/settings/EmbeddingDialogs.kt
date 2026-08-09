@@ -117,7 +117,7 @@ internal fun AddRemoteEmbeddingDialog(
                                             // Auto-fill the configured key for the selected provider
                                             // (OpenAI, OpenRouter, …), replacing a key that was
                                             // auto-filled for the previously selected provider.
-                                            viewModel.resolveEmbeddingKeyForProviderExact(p.name)?.key?.let { state.apiKeys[idx] = it }
+                                            viewModel.ragManager.resolveEmbeddingKeyForProviderExact(p.name)?.key?.let { state.apiKeys[idx] = it }
                                             if (p.models.isNotEmpty()) {
                                                 state.modelName = p.models.first()
                                                 state.isCustomModel = false
@@ -280,7 +280,7 @@ internal fun AddRemoteEmbeddingDialog(
                     scope.launch {
                         val result = viewModel.testRemoteEmbedding(finalModel, state.baseUrl, state.apiKeys[state.selectedProviderIdx])
                         if (result != null && result.startsWith("OK")) {
-                            viewModel.addEmbeddingModel(
+                            viewModel.ragManager.addEmbeddingModel(
                                 com.newoether.agora.data.EmbeddingModelConfig(
                                     name = finalName,
                                     type = com.newoether.agora.data.EmbeddingModelType.REMOTE,

@@ -243,8 +243,8 @@ fun WelcomeScreen(
                         showGgufError = true
                     } else {
                         val (modelId, aliasName, path) = imported
-                        localChatModels.forEach { viewModel.deleteLocalChatModel(it.id) }
-                        viewModel.addLocalChatModel(
+                        localChatModels.forEach { viewModel.modelManager.deleteLocalChatModel(it.id) }
+                        viewModel.modelManager.addLocalChatModel(
                             LocalChatModelConfig(
                                 modelId = modelId,
                                 alias = aliasName,
