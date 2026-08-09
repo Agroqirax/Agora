@@ -32,7 +32,6 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.AttachmentItem
-import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
@@ -64,7 +63,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
@@ -117,8 +115,6 @@ class ChatViewModel(
     companion object {
         /** Overlay fade duration for conversation-switch transitions. */
         private const val SWITCH_OVERLAY_FADE_MS = 200L
-        /** Keeps startup database scans bounded even for very large chat histories. */
-        private const val DATABASE_SCAN_PAGE_SIZE = 64
         /** Auto-delete period tiers in hours: 7 days, 30 days, 365 days. */
         private val AUTO_DELETE_TIERS_HOURS = listOf(168, 720, 8760)
     }
@@ -132,6 +128,10 @@ class ChatViewModel(
      */
     private val convRepo: ConversationRepository = conversationRepository
     private val composerDrafts = ComposerDraftController(conversationRepository)
+    private val attachmentOrphanSweeper = AttachmentOrphanSweeper(
+        conversations = conversationRepository,
+        filesDirectory = application.filesDir,
+    )
     private val conversationForkShare =
         ConversationForkShareService(
             conversationRepository,
@@ -250,88 +250,7 @@ class ChatViewModel(
         // private copies. The 1h age guard means a copy racing this sweep is never deleted.
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val referenced = HashSet<String>()
-                var afterMessageId: String? = null
-                while (true) {
-                    val page = convRepo.getMessageAttachmentReferencesPage(
-                        afterId = afterMessageId,
-                        limit = DATABASE_SCAN_PAGE_SIZE,
-                    )
-                    page.forEach { message ->
-                        message.images.forEach { referenced.add(it.removePrefix("file://")) }
-                        message.attachmentMeta?.let { json ->
-                            runCatching { Json.decodeFromString<AttachmentMeta>(json) }.getOrNull()
-                                ?.items?.forEach { item ->
-                                    item.originalUri?.takeIf { it.startsWith("file://") }
-                                        ?.let { referenced.add(it.removePrefix("file://")) }
-                                }
-                        }
-                    }
-                    afterMessageId = page.lastOrNull()?.id
-                    if (page.size < DATABASE_SCAN_PAGE_SIZE) break
-                }
-
-                var afterConversationId: String? = null
-                while (true) {
-                    val page = convRepo.getConversationDraftAttachmentReferencesPage(
-                        afterId = afterConversationId,
-                        limit = DATABASE_SCAN_PAGE_SIZE,
-                    )
-                    page.forEach { conversation ->
-                        val json = conversation.draftAttachments
-                        runCatching { Json.decodeFromString<List<SelectedAttachment>>(json) }.getOrNull()
-                            ?.forEach { att ->
-                                att.localPath?.let { referenced.add(it) }
-                                att.processedFrames?.forEach { referenced.add(it) }
-                                att.preRenderedPaths?.forEach { referenced.add(it) }
-                        }
-                    }
-                    afterConversationId = page.lastOrNull()?.id
-                    if (page.size < DATABASE_SCAN_PAGE_SIZE) break
-                }
-
-                val minAgeMs = 60 * 60 * 1000L
-                val now = System.currentTimeMillis()
-                val prefixes = arrayOf("att_", "vid_", "img_", "pdf_")
-                getApplication<Application>().filesDir.listFiles { f ->
-                    f.isFile && prefixes.any { p -> f.name.startsWith(p) }
-                }?.forEach { f ->
-                    if (f.absolutePath !in referenced && now - f.lastModified() > minAgeMs) {
-                        runCatching { f.delete() }
-                    }
-                }
-                java.io.File(
-                    getApplication<Application>().filesDir,
-                    "images",
-                ).listFiles { file ->
-                    file.isFile && file.name.startsWith("camera_")
-                }?.forEach { file ->
-                    if (
-                        file.absolutePath !in referenced &&
-                        now - file.lastModified() > minAgeMs
-                    ) {
-                        runCatching { file.delete() }
-                    }
-                }
-                listOf(
-                    java.io.File(
-                        getApplication<Application>().filesDir,
-                        "run-inputs",
-                    ),
-                    java.io.File(
-                        getApplication<Application>().filesDir,
-                        "fork-attachments",
-                    ),
-                ).forEach { directory ->
-                    directory.listFiles { file -> file.isFile }?.forEach { file ->
-                        if (
-                            file.absolutePath !in referenced &&
-                            now - file.lastModified() > minAgeMs
-                        ) {
-                            runCatching { file.delete() }
-                        }
-                    }
-                }
+                attachmentOrphanSweeper.sweep()
             } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
         }
         // ── Auto Backup ──────────────────────────────────────────
