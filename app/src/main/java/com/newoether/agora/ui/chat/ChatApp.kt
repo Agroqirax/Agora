@@ -1,9 +1,5 @@
 package com.newoether.agora.ui.chat
 
-import android.app.Activity
-import android.content.ClipData
-import android.content.Context
-import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -24,15 +20,12 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -43,7 +36,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onSizeChanged
@@ -57,9 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.FileProvider
 import com.newoether.agora.R
 import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.api.util.contextWindowUsage
@@ -73,7 +63,6 @@ import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
 import com.newoether.agora.ui.chat.bottombar.LoopStatusBackdrop
 import com.newoether.agora.ui.chat.bottombar.PendingAttachmentRemoval
-import com.newoether.agora.ui.chat.message.hasActiveAnswerSegment
 import com.newoether.agora.ui.components.AnimatedBlobBackground
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.TypewriterMode
@@ -83,7 +72,6 @@ import com.newoether.agora.ui.common.rememberAgoraHaptics
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.motion.closeWithMotionPolicy
 import com.newoether.agora.ui.motion.openWithMotionPolicy
-import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.OpenAiServiceTiers
 import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
@@ -93,10 +81,7 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.RegenerationTransitionStage
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
@@ -106,7 +91,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
 private val SEND_FEEDBACK_SCROLL_SPEC = DefaultFeedbackScrollSpec.copy(
@@ -119,9 +103,7 @@ private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
-private const val INLINE_SHARE_LIMIT_BYTES = 256 * 1024
 private const val SHARE_ERROR_DETAIL_TOKEN = "__AGORA_SHARE_ERROR_DETAIL__"
-private const val STREAM_SCROLL_RESUME_DELAY_MS = 160L
 private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
 private const val DRAFT_PERSIST_RETRY_COUNT = 2
 private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
@@ -143,208 +125,6 @@ internal fun composerDraftWriteDelayMillis(
         DRAFT_TEXT_DEBOUNCE_MS
     }
 
-internal data class NewChatMotionPolicy(
-    val animateBackground: Boolean,
-    val animateWelcomeText: Boolean,
-)
-
-internal fun newChatMotionPolicy(
-    reduceMotion: Boolean,
-    isNewChatMode: Boolean,
-    isLoading: Boolean,
-    isSwitching: Boolean,
-    newChatEntryId: Long,
-): NewChatMotionPolicy {
-    if (reduceMotion) {
-        return NewChatMotionPolicy(
-            animateBackground = false,
-            animateWelcomeText = false,
-        )
-    }
-    return NewChatMotionPolicy(
-        animateBackground = isNewChatMode && !isLoading && !isSwitching,
-        animateWelcomeText = newChatEntryId == 1L,
-    )
-}
-
-/**
- * Text/argument growth within an existing message tree can be coalesced while LazyColumn owns a
- * scroll animation. Structural changes remain immediate so a new thinking/tool block or lifecycle
- * state is never hidden behind the gate.
- */
-internal fun sameStreamingRenderStructure(
-    previous: List<ChatMessage>,
-    next: List<ChatMessage>,
-): Boolean {
-    if (previous.size != next.size) return false
-    return previous.indices.all { index ->
-        val before = previous[index]
-        val after = next[index]
-        if (before === after) return@all true
-        if (
-            before.id != after.id ||
-            before.parentId != after.parentId ||
-            before.participant != after.participant ||
-            before.status != after.status ||
-            before.images.size != after.images.size ||
-            before.retryText != after.retryText ||
-            before.thoughts.isNullOrBlank() != after.thoughts.isNullOrBlank()
-        ) {
-            return@all false
-        }
-        val beforeSegments = before.segments
-        val afterSegments = after.segments
-        if (beforeSegments == null || afterSegments == null) {
-            return@all beforeSegments == null && afterSegments == null
-        }
-        if (beforeSegments.size != afterSegments.size) return@all false
-        beforeSegments.indices.all { segmentIndex ->
-            val beforeSegment = beforeSegments[segmentIndex]
-            val afterSegment = afterSegments[segmentIndex]
-            beforeSegment.type == afterSegment.type &&
-                beforeSegment.toolCallId == afterSegment.toolCallId &&
-                beforeSegment.toolName == afterSegment.toolName &&
-                beforeSegment.toolState == afterSegment.toolState &&
-                (beforeSegment.toolResult == null) == (afterSegment.toolResult == null)
-        }
-    }
-}
-
-@Composable
-private fun rememberScrollIsolatedMessages(
-    conversationId: String?,
-    upstream: State<List<ChatMessage>>,
-    listState: LazyListState,
-    bypassScrollIsolation: Boolean,
-): State<List<ChatMessage>> {
-    val rendered = remember(conversationId, upstream) {
-        mutableStateOf(upstream.value)
-    }
-    val latestBypassScrollIsolation by rememberUpdatedState(bypassScrollIsolation)
-    LaunchedEffect(conversationId, upstream, listState) {
-        coroutineScope {
-            var latest = upstream.value
-            var deferred = listState.isScrollInProgress
-            var hasOwnedScroll = listState.isScrollInProgress
-            var resumeJob: Job? = null
-
-            launch {
-                snapshotFlow {
-                    listState.isScrollInProgress to latestBypassScrollIsolation
-                }
-                    .distinctUntilChanged()
-                    .collect { (scrolling, bypass) ->
-                        resumeJob?.cancel()
-                        if (bypass) {
-                            deferred = false
-                            hasOwnedScroll = false
-                            if (rendered.value !== latest) rendered.value = latest
-                        } else if (scrolling) {
-                            hasOwnedScroll = true
-                            deferred = true
-                        } else if (hasOwnedScroll) {
-                            deferred = true
-                            resumeJob = launch {
-                                delay(STREAM_SCROLL_RESUME_DELAY_MS)
-                                deferred = false
-                                hasOwnedScroll = false
-                                if (rendered.value !== latest) {
-                                    rendered.value = latest
-                                }
-                            }
-                        } else {
-                            // Initial idle observation: do not impose a synthetic 160 ms delay on
-                            // the first provider token.
-                            deferred = false
-                        }
-                    }
-            }
-
-            launch {
-                snapshotFlow { upstream.value }
-                    .distinctUntilChanged()
-                    .collect { next ->
-                        latest = next
-                        if (
-                            latestBypassScrollIsolation ||
-                            !deferred ||
-                            !sameStreamingRenderStructure(rendered.value, next)
-                        ) {
-                            rendered.value = next
-                        }
-                    }
-            }
-        }
-    }
-    return rendered
-}
-
-private suspend fun launchConversationShare(
-    context: Context,
-    text: String,
-    chooserTitle: String,
-) {
-    val sendIntent = withContext(Dispatchers.IO) {
-        val utf8 = text.toByteArray(Charsets.UTF_8)
-        if (utf8.size <= INLINE_SHARE_LIMIT_BYTES) {
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
-            }
-        } else {
-            val shareDirectory = File(context.cacheDir, "shared").apply { mkdirs() }
-            val file = File.createTempFile("agora_conversation_", ".md", shareDirectory).apply {
-                writeBytes(utf8)
-            }
-            val uri = FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file,
-            )
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/markdown"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                clipData = ClipData.newRawUri("Agora conversation", uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-        }
-    }
-    withContext(Dispatchers.Main.immediate) {
-        val chooser = Intent.createChooser(sendIntent, chooserTitle)
-        if (context !is Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(chooser)
-    }
-}
-
-@Composable
-private fun AnsweringHapticEffect(
-    messages: State<List<com.newoether.agora.model.ChatMessage>>,
-    isLoading: Boolean,
-    generatingInConversationId: String?,
-    currentConversationId: String?,
-    hapticsEnabled: Boolean,
-    haptics: com.newoether.agora.ui.common.AgoraHaptics,
-) {
-    // Keep the 20 Hz streaming-message read inside this tiny restart group. Reading it at the top
-    // of ChatApp invalidates the drawer, composer, backgrounds, and every overlay for each token.
-    val answeringHapticActive = isLoading &&
-        generatingInConversationId == currentConversationId &&
-        messages.value.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
-            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
-        } == true
-    val appInForeground by com.newoether.agora.service.AppForegroundTracker.foreground.collectAsState()
-    DisposableEffect(answeringHapticActive, hapticsEnabled, appInForeground, haptics) {
-        if (answeringHapticActive && hapticsEnabled && appInForeground) {
-            haptics.startAnsweringTexture()
-        }
-        onDispose {
-            haptics.stopAnsweringTexture()
-        }
-    }
-}
-
-// isVisibleAnswerSegment() / hasActiveAnswerSegment() are shared (internal) from
-// MessageItemSegments.kt.
 
 @OptIn(
     ExperimentalMaterial3Api::class,
