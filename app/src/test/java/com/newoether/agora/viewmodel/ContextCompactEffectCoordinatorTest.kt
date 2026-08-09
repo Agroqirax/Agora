@@ -80,7 +80,7 @@ class ContextCompactEffectCoordinatorTest {
             pass = 3,
             effectId = "finalize-run-3",
         )
-        state.requestRunFinalization(
+        state.commands.requestRunFinalization(
             finalizationIdentity,
             RunStatus.COMPLETED,
             RunEndReason.MODEL_COMPLETED,
@@ -134,9 +134,9 @@ class ContextCompactEffectCoordinatorTest {
 
         assertFalse(state.compacting.value)
         assertFalse(state.generating.value)
-        val next = state.requestManualCompact("compact-run-next", "compact-effect-next")
+        val next = state.commands.requestManualCompact("compact-run-next", "compact-effect-next")
         assertTrue(next != null)
-        state.finishCompact(
+        state.commands.finishCompact(
             requireNotNull(next).identity,
             com.newoether.agora.model.CompactOutcome.NOT_NEEDED,
         )

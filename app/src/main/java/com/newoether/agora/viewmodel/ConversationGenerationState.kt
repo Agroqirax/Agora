@@ -1,18 +1,13 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.CompactMode
-import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ConversationRuntimeReducer
 import com.newoether.agora.model.ConversationRuntimeTrace
 import com.newoether.agora.model.ConversationRuntimeTraceEntry
-import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
-import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunState
-import com.newoether.agora.model.RunStatus
 import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.SlotReleaseReason
 import com.newoether.agora.model.Transition
@@ -55,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference
  * ## Slot lifecycle (requestSend / replacement compatibility / endGeneration / stop)
  *
  * Ordinary foreground Send, queued-guidance placement, and headless Task/Loop Send enter
- * [requestSend]'s sequential mailbox. [acquireForSend] remains only as a legacy test adapter;
+ * [commands]' sequential mailbox port. [acquireForSend] remains only as a legacy test adapter;
  * [tryAcquireForReplacement] remains the idle-only regenerate/edit adapter. [endGeneration] and
  * [stop] submit through the same mailbox. [endGeneration] releases token-gated ownership; Stop
  * establishes the terminal cutoff, then cancels only this conversation's owned generation Job and
@@ -91,6 +86,12 @@ class ConversationGenerationState(
     private val runtimeTrace = ConversationRuntimeTrace()
     /** Foreground/headless Send, Stop, tool-effect, and Compact lifecycle commands enter here. */
     private val commandMailbox = ConversationCommandMailbox(scope, ::reduceMailboxCommand)
+    internal val commands = ConversationRuntimeCommandPort(
+        conversationId = conversationId,
+        mailbox = commandMailbox,
+        nextOwnerToken = resources::nextUiToken,
+        currentRunIdentity = { runState.identityOrNull() },
+    )
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
     fun captureUiToken(): Long = synchronized(genLock) { resources.captureUiToken() }
@@ -136,157 +137,19 @@ class ConversationGenerationState(
 
     fun currentRunId(): String? = synchronized(genLock) { runState.identityOrNull()?.runId }
 
-    /**
-     * Submit one ordinary foreground Send placement decision to this conversation's mailbox.
-     * Cancellation before the caller receives a direct claim emits an identified abandonment
-     * command, so a Preparing slot cannot be stranded without a generation Job.
-     */
-    suspend fun requestSend(
-        proposedRunId: String,
-        effectId: String,
-        directOnly: Boolean,
-        hasPendingGuidance: Boolean,
-    ): Transition {
-        require(proposedRunId.isNotBlank())
-        require(effectId.isNotBlank())
-        return commandMailbox.submit(
-            commandFactory = ConversationCommandFactory {
-                ConversationCommand.SendRequested(
-                    identity = RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = resources.nextUiToken(),
-                        runId = proposedRunId,
-                        pass = 0,
-                        effectId = effectId,
-                    ),
-                    directOnly = directOnly,
-                    hasPendingGuidance = hasPendingGuidance,
-                )
-            },
-            cancellationCommand = { transition ->
-                transition.effects
-                    .filterIsInstance<RunEffect.PersistAcceptedInput>()
-                    .singleOrNull()
-                    ?.let { effect -> ConversationCommand.SendLaunchAbandoned(effect.identity) }
-            },
-        )
-    }
-
     /** Echo the exact Room acceptance effect back through the mailbox. */
-    suspend fun finishInputPersistence(identity: RunEffectIdentity): RunBindingOutcome {
-        val transition = commandMailbox.submit(
-            ConversationCommandFactory { ConversationCommand.InputPersisted(identity) },
-        )
-        return transition.bindingOutcome()
-    }
+    suspend fun finishInputPersistence(identity: RunEffectIdentity): RunBindingOutcome =
+        commands.finishInputPersistence(identity).bindingOutcome()
 
     suspend fun inputPersisted(identity: RunEffectIdentity): Boolean =
         finishInputPersistence(identity) is RunBindingOutcome.Active
-
-    /** Report failure of the exact accepted-input persistence effect without releasing its Job. */
-    suspend fun inputPersistenceFailed(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
-        ConversationCommandFactory { ConversationCommand.InputPersistenceFailed(identity) },
-    ).accepted
-
-    /** Release an exact direct-Send claim that could not install any owning coroutine. */
-    suspend fun abandonSendLaunch(identity: RunEffectIdentity): Boolean = commandMailbox.submit(
-        ConversationCommandFactory { ConversationCommand.SendLaunchAbandoned(identity) },
-    ).accepted
-
-    /** Authorize one exact validated Provider tool batch. */
-    suspend fun requestToolBatch(
-        providerOutcomeIdentity: RunEffectIdentity,
-    ): RunEffect.ExecuteToolBatch? = withContext(NonCancellable) {
-        commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.ToolBatchRequested(providerOutcomeIdentity)
-            },
-        ).effects.filterIsInstance<RunEffect.ExecuteToolBatch>().singleOrNull()
-    }
-
-    /** Close one exact tool batch and authorize its atomic protocol-round commit. */
-    suspend fun completeToolBatch(
-        batchIdentity: RunEffectIdentity,
-    ): RunEffect.CommitToolRound? = withContext(NonCancellable) {
-        commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.ToolBatchCompleted(batchIdentity)
-            },
-        ).effects.filterIsInstance<RunEffect.CommitToolRound>().singleOrNull()
-    }
-
-    /** Echo the exact Room tool-round result; only success authorizes another Provider pass. */
-    suspend fun finishToolRoundCommit(
-        commitIdentity: RunEffectIdentity,
-        success: Boolean,
-    ): RunEffect? = withContext(NonCancellable) {
-        commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.ToolRoundCommitted(commitIdentity, success)
-            },
-        ).effects.singleOrNull()
-    }
-
-    /** Authorize exactly one Provider pass for the current Run/pass. */
-    suspend fun requestProviderPass(
-        identity: RunEffectIdentity,
-    ): RunEffect.StartProviderPass? = commandMailbox.submit(
-        commandFactory = ConversationCommandFactory {
-            ConversationCommand.ProviderPassRequested(identity)
-        },
-        cancellationCommand = { transition ->
-            transition.effects.filterIsInstance<RunEffect.StartProviderPass>()
-                .singleOrNull()
-                ?.let { effect ->
-                    ConversationCommand.ProviderPassCompleted(
-                        effect.identity,
-                        ProviderPassResult.CANCELLED,
-                    )
-                }
-        },
-    ).effects.filterIsInstance<RunEffect.StartProviderPass>().singleOrNull()
-
-    /** Accept the closed semantic outcome of the exact currently-running Provider pass. */
-    suspend fun finishProviderPass(
-        identity: RunEffectIdentity,
-        result: ProviderPassResult,
-    ): RunEffect.ProviderPassAccepted? = withContext(NonCancellable) {
-        commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.ProviderPassCompleted(identity, result)
-            },
-        ).effects.filterIsInstance<RunEffect.ProviderPassAccepted>().singleOrNull()
-    }
-
-    /** Move the exact active Run into mailbox-owned normal finalization. */
-    suspend fun requestRunFinalization(
-        identity: RunEffectIdentity,
-        status: RunStatus,
-        reason: RunEndReason,
-        markConversationUnread: Boolean,
-    ): RunEffect.FinalizeRun? = withContext(NonCancellable) {
-        commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.FinalizationRequested(
-                    identity = identity,
-                    status = status,
-                    reason = reason,
-                    markConversationUnread = markConversationUnread,
-                )
-            },
-        ).effects.filterIsInstance<RunEffect.FinalizeRun>().singleOrNull()
-    }
 
     /** Echo the exact Room finalization result; release requires both durable and Job barriers. */
     suspend fun finishRunFinalization(
         identity: RunEffectIdentity,
         success: Boolean,
     ): RunFinalizationOutcome = withContext(NonCancellable) {
-        val transition = commandMailbox.submit(
-            ConversationCommandFactory {
-                ConversationCommand.FinalizationCompleted(identity, success)
-            },
-        )
+        val transition = commands.finishRunFinalization(identity, success)
         if (!transition.accepted) return@withContext RunFinalizationOutcome.REJECTED
         if (!success) return@withContext RunFinalizationOutcome.FAILED
         val release = transition.effects.filterIsInstance<RunEffect.ReleaseSlot>().singleOrNull()
@@ -296,90 +159,6 @@ class ConversationGenerationState(
         onQueueDrainRequested?.invoke(this@ConversationGenerationState)
         RunFinalizationOutcome.SETTLED
     }
-
-    /** Claim an idle-only manual Compact without presenting it as a generation Run. */
-    suspend fun requestManualCompact(
-        compactRunId: String,
-        effectId: String,
-    ): RunEffect.RunCompact? {
-        require(compactRunId.isNotBlank())
-        require(effectId.isNotBlank())
-        return commandMailbox.submit(
-            commandFactory = ConversationCommandFactory {
-                ConversationCommand.CompactRequested(
-                    identity = RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = resources.nextUiToken().coerceAtLeast(1),
-                        runId = compactRunId,
-                        pass = 0,
-                        effectId = effectId,
-                    ),
-                    compactRunId = compactRunId,
-                    mode = CompactMode.MANUAL,
-                )
-            },
-            cancellationCommand = { transition ->
-                transition.effects.filterIsInstance<RunEffect.RunCompact>()
-                    .singleOrNull()
-                    ?.let { effect ->
-                        ConversationCommand.CompactCompleted(
-                            effect.identity,
-                            CompactOutcome.FAILED,
-                        )
-                    }
-            },
-        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
-    }
-
-    /** Claim an automatic Compact for the exact currently-active Run/pass. */
-    suspend fun requestAutomaticCompact(
-        compactRunId: String,
-        effectId: String,
-    ): RunEffect.RunCompact? {
-        require(compactRunId.isNotBlank())
-        require(effectId.isNotBlank())
-        return commandMailbox.submit(
-            commandFactory = ConversationCommandFactory {
-                val currentIdentity = runState.identityOrNull()
-                val effectIdentity = if (currentIdentity?.runId != null) {
-                    currentIdentity.effectIdentity(effectId)
-                } else {
-                    RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = resources.nextUiToken().coerceAtLeast(1),
-                        runId = "unbound_$compactRunId",
-                        pass = 0,
-                        effectId = effectId,
-                    )
-                }
-                ConversationCommand.CompactRequested(
-                    identity = effectIdentity,
-                    compactRunId = compactRunId,
-                    mode = CompactMode.AUTOMATIC,
-                )
-            },
-            cancellationCommand = { transition ->
-                transition.effects.filterIsInstance<RunEffect.RunCompact>()
-                    .singleOrNull()
-                    ?.let { effect ->
-                        ConversationCommand.CompactCompleted(
-                            effect.identity,
-                            CompactOutcome.FAILED,
-                        )
-                    }
-            },
-        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
-    }
-
-    /** Settle one exact Compact result; stale, duplicate, and post-Stop results are rejected. */
-    suspend fun finishCompact(
-        identity: RunEffectIdentity,
-        outcome: CompactOutcome,
-    ): Transition = commandMailbox.submit(
-        ConversationCommandFactory {
-            ConversationCommand.CompactCompleted(identity, outcome)
-        },
-    )
 
     /** Wait until neither a generation nor an idle manual Compact owns this conversation. */
     suspend fun awaitSendAvailable() {
@@ -398,7 +177,7 @@ class ConversationGenerationState(
     // one generation owns a conversation's tree at a time.
 
     /**
-     * Legacy test/setup claim. Production Send/Task/Loop paths use [requestSend]. If the slot is
+     * Legacy test/setup claim. Production Send/Task/Loop paths use [commands]. If the slot is
      * free, marks this conversation
      * generating (advancing the UI token so any just-finished generation's late callbacks are gated
      * out), flips it active in the registry, and returns the captured token. If a generation is
@@ -604,18 +383,18 @@ class ConversationGenerationState(
         onLoadingChange = { loadingChange(uiToken, it) },
         onStreamClear = { streamClear(uiToken) },
         isLatestPersist = { isLatestPersist(persistId) },
-        onProviderPassRequested = ::requestProviderPass,
-        onProviderPassCompleted = ::finishProviderPass,
-        onRunFinalizationRequested = ::requestRunFinalization,
+        onProviderPassRequested = commands::requestProviderPass,
+        onProviderPassCompleted = commands::finishProviderPass,
+        onRunFinalizationRequested = commands::requestRunFinalization,
         onRunFinalizationCompleted = { identity, success ->
             finishRunFinalization(identity, success).accepted
         },
         // Steering: lets the tool loop see a mid-generation queued send and end at the next
         // round boundary, so the queue flushes without waiting out the whole tool loop.
         hasQueuedSends = { queuedSends.value.isNotEmpty() },
-        onToolBatchRequested = ::requestToolBatch,
-        onToolBatchCompleted = ::completeToolBatch,
-        onToolRoundCommitted = ::finishToolRoundCommit,
+        onToolBatchRequested = commands::requestToolBatch,
+        onToolBatchCompleted = commands::completeToolBatch,
+        onToolRoundCommitted = commands::finishToolRoundCommit,
     )
 
     // ── Stop / finalization ───────────────────────────────────────────────
@@ -859,15 +638,6 @@ class ConversationGenerationState(
         if (transition.accepted) runState = transition.newState
         return transition
     }
-
-    private fun RuntimeRunIdentity.effectIdentity(effectId: String): RunEffectIdentity =
-        RunEffectIdentity(
-            conversationId = conversationId,
-            ownerToken = ownerToken,
-            runId = requireNotNull(runId),
-            pass = pass,
-            effectId = effectId,
-        )
 
     private fun Transition.bindingOutcome(): RunBindingOutcome {
         if (!accepted) return RunBindingOutcome.Rejected

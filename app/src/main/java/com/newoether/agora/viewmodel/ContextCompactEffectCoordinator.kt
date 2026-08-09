@@ -42,9 +42,9 @@ internal class ContextCompactEffectCoordinator(
         val effect = when (mode) {
             CompactMode.MANUAL -> state.queueMutationMutex.withLock {
                 if (state.queuedSends.value.isNotEmpty()) null
-                else state.requestManualCompact(compactRunId, effectId)
+                else state.commands.requestManualCompact(compactRunId, effectId)
             }
-            CompactMode.AUTOMATIC -> state.requestAutomaticCompact(compactRunId, effectId)
+            CompactMode.AUTOMATIC -> state.commands.requestAutomaticCompact(compactRunId, effectId)
         } ?: return Execution.Busy
 
         val result = try {
@@ -59,7 +59,7 @@ internal class ContextCompactEffectCoordinator(
 
         val outcome = result.toRuntimeOutcome()
         val transition = withContext(NonCancellable) {
-            state.finishCompact(effect.identity, outcome)
+            state.commands.finishCompact(effect.identity, outcome)
         }
         if (!transition.accepted) {
             // Stop cancels an automatic Compact's installed generation Job. If cancellation has
@@ -88,7 +88,7 @@ internal class ContextCompactEffectCoordinator(
     ) {
         withContext(NonCancellable) {
             try {
-                state.finishCompact(effect.identity, CompactOutcome.FAILED)
+                state.commands.finishCompact(effect.identity, CompactOutcome.FAILED)
             } catch (_: Exception) {
                 // Preserve the originating cancellation/effect failure when runtime disposal has
                 // already closed the mailbox. No later continuation can be authorized there.

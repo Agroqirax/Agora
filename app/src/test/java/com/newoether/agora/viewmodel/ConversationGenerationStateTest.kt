@@ -151,7 +151,7 @@ class ConversationGenerationStateTest {
     fun mailboxSend_claimsPreparingAndBindsOnlyItsExactPersistenceResult() = runBlocking {
         val state = ConversationGenerationState("conversation")
 
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "run",
             effectId = "send",
             directOnly = false,
@@ -170,7 +170,7 @@ class ConversationGenerationStateTest {
     @Test
     fun StopBeforeInputPersistence_rejectsTheLateMailboxResult() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "run",
             effectId = "send",
             directOnly = false,
@@ -189,7 +189,7 @@ class ConversationGenerationStateTest {
     @Test
     fun StopDuringRoomCommit_bindsTheDurableRunAndReturnsItsExactStopEffect() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "run",
             effectId = "send",
             directOnly = false,
@@ -236,7 +236,7 @@ class ConversationGenerationStateTest {
     @Test
     fun mailboxInputFailure_remainsOwnedUntilTheGenerationCoroutineSettles() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "run",
             effectId = "send",
             directOnly = false,
@@ -244,7 +244,7 @@ class ConversationGenerationStateTest {
         )
         val effect = requested.effects.single() as RunEffect.PersistAcceptedInput
 
-        assertTrue(state.inputPersistenceFailed(effect.identity))
+        assertTrue(state.commands.inputPersistenceFailed(effect.identity))
         assertTrue(state.generating.value)
         assertNull(state.acquireForSend())
         assertTrue(state.endGeneration(effect.identity.ownerToken))
@@ -257,7 +257,7 @@ class ConversationGenerationStateTest {
         val token = state.acquireForSend()!!
         state.bindRun(token, "active-run", pass = 2)
 
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "unused-run",
             effectId = "guidance",
             directOnly = false,
@@ -275,7 +275,7 @@ class ConversationGenerationStateTest {
     @Test
     fun preparingSendAcceptsMemoryGuidanceForItsProposedFreshRun() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val first = state.requestSend(
+        val first = state.commands.requestSend(
             proposedRunId = "preparing-run",
             effectId = "first",
             directOnly = false,
@@ -283,7 +283,7 @@ class ConversationGenerationStateTest {
         )
         val firstEffect = first.effects.single() as RunEffect.PersistAcceptedInput
 
-        val second = state.requestSend(
+        val second = state.commands.requestSend(
             proposedRunId = "unused-second-run",
             effectId = "guidance",
             directOnly = false,
@@ -588,7 +588,7 @@ class ConversationGenerationStateTest {
         )
         val lease = state.claimQueuedSends()!!
 
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "fresh-run",
             effectId = "guidance-fresh-run",
             directOnly = false,
@@ -617,9 +617,9 @@ class ConversationGenerationStateTest {
             effectId = "provider-2-0",
         )
 
-        val batch = state.requestToolBatch(providerIdentity)!!
-        val commit = state.completeToolBatch(batch.identity)!!
-        val continuation = state.finishToolRoundCommit(commit.identity, success = true)
+        val batch = state.commands.requestToolBatch(providerIdentity)!!
+        val commit = state.commands.completeToolBatch(batch.identity)!!
+        val continuation = state.commands.finishToolRoundCommit(commit.identity, success = true)
 
         assertEquals(RunEffect.ContinueProviderPass(commit.identity), continuation)
         assertEquals(
@@ -643,7 +643,7 @@ class ConversationGenerationStateTest {
             onRegistryIdle = { registryIdleCount += 1 },
         )
 
-        val effect = state.requestManualCompact(
+        val effect = state.commands.requestManualCompact(
             compactRunId = "compact-run",
             effectId = "compact-effect",
         )!!
@@ -651,8 +651,8 @@ class ConversationGenerationStateTest {
         assertTrue(state.compacting.value)
         assertFalse(state.generating.value)
         assertNull(state.currentRunId())
-        assertNull(state.requestManualCompact("other-compact", "other-effect"))
-        val waiting = state.requestSend(
+        assertNull(state.commands.requestManualCompact("other-compact", "other-effect"))
+        val waiting = state.commands.requestSend(
             proposedRunId = "send-run",
             effectId = "send-effect",
             directOnly = false,
@@ -666,7 +666,7 @@ class ConversationGenerationStateTest {
         }
         assertFalse(available.isCompleted)
 
-        val settled = state.finishCompact(effect.identity, CompactOutcome.CREATED)
+        val settled = state.commands.finishCompact(effect.identity, CompactOutcome.CREATED)
 
         assertTrue(settled.accepted)
         available.await()
@@ -675,14 +675,14 @@ class ConversationGenerationStateTest {
         assertFalse(state.generating.value)
         assertEquals(0, registryActiveCount)
         assertEquals(0, registryIdleCount)
-        val retried = state.requestSend(
+        val retried = state.commands.requestSend(
             proposedRunId = "send-run",
             effectId = "send-effect",
             directOnly = false,
             hasPendingGuidance = false,
         )
         val input = retried.effects.single() as RunEffect.PersistAcceptedInput
-        assertTrue(state.abandonSendLaunch(input.identity))
+        assertTrue(state.commands.abandonSendLaunch(input.identity))
         assertEquals(
             listOf(
                 "CompactRequested",
@@ -702,7 +702,7 @@ class ConversationGenerationStateTest {
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 2)
 
-        val effect = state.requestAutomaticCompact(
+        val effect = state.commands.requestAutomaticCompact(
             compactRunId = "compact-run",
             effectId = "compact-effect",
         )!!
@@ -710,7 +710,7 @@ class ConversationGenerationStateTest {
         assertTrue(state.compacting.value)
         assertTrue(state.generating.value)
         assertEquals("run", state.currentRunId())
-        val settled = state.finishCompact(effect.identity, CompactOutcome.NOT_NEEDED)
+        val settled = state.commands.finishCompact(effect.identity, CompactOutcome.NOT_NEEDED)
         assertTrue(settled.accepted)
         assertEquals(
             RunEffect.ResumeAfterCompact(effect.identity, CompactOutcome.NOT_NEEDED),
@@ -727,11 +727,11 @@ class ConversationGenerationStateTest {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 2)
-        val compact = state.requestAutomaticCompact(
+        val compact = state.commands.requestAutomaticCompact(
             compactRunId = "compact-run",
             effectId = "compact-effect",
         )!!
-        val requested = state.requestSend(
+        val requested = state.commands.requestSend(
             proposedRunId = "unused-send-run",
             effectId = "guidance-effect",
             directOnly = false,
@@ -739,10 +739,10 @@ class ConversationGenerationStateTest {
         )
         assertTrue(requested.effects.single() is RunEffect.AwaitCompactSettlement)
 
-        state.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
+        state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
         state.awaitCompactSettled()
         assertTrue(state.generating.value)
-        val retried = state.requestSend(
+        val retried = state.commands.requestSend(
             proposedRunId = "unused-send-run",
             effectId = "guidance-effect",
             directOnly = false,
@@ -770,7 +770,7 @@ class ConversationGenerationStateTest {
         val state = active.state
         val settled = CompletableDeferred<Unit>()
         state.onStopSettled = { settled.complete(Unit) }
-        val effect = state.requestAutomaticCompact(
+        val effect = state.commands.requestAutomaticCompact(
             compactRunId = "compact-run",
             effectId = "compact-effect",
         )!!
@@ -779,7 +779,7 @@ class ConversationGenerationStateTest {
 
         assertFalse(state.compacting.value)
         assertTrue(state.stopping.value)
-        assertFalse(state.finishCompact(effect.identity, CompactOutcome.CREATED).accepted)
+        assertFalse(state.commands.finishCompact(effect.identity, CompactOutcome.CREATED).accepted)
         assertEquals(
             ConversationGenerationState.StopFinalizationOutcome.RECORDED,
             state.finishStopFinalization(stopped.completion(success = true)),
@@ -804,18 +804,18 @@ class ConversationGenerationStateTest {
             effectId = "provider-2-0",
         )
 
-        assertEquals(identity, state.requestProviderPass(identity)?.identity)
+        assertEquals(identity, state.commands.requestProviderPass(identity)?.identity)
         assertNull(
-            state.finishProviderPass(
+            state.commands.finishProviderPass(
                 identity.copy(effectId = "provider-2-old"),
                 ProviderPassResult.COMPLETED_TEXT,
             ),
         )
         assertEquals(
             RunEffect.ProviderPassAccepted(identity, ProviderPassResult.COMPLETED_TEXT),
-            state.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT),
+            state.commands.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT),
         )
-        assertNull(state.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT))
+        assertNull(state.commands.finishProviderPass(identity, ProviderPassResult.COMPLETED_TEXT))
         assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
     }
 
@@ -835,7 +835,7 @@ class ConversationGenerationStateTest {
             pass = 0,
             effectId = "finalize-run-0",
         )
-        val effect = state.requestRunFinalization(
+        val effect = state.commands.requestRunFinalization(
             identity,
             RunStatus.COMPLETED,
             RunEndReason.MODEL_COMPLETED,
@@ -868,7 +868,7 @@ class ConversationGenerationStateTest {
             pass = 0,
             effectId = "finalize-run-0",
         )
-        state.requestRunFinalization(
+        state.commands.requestRunFinalization(
             identity,
             RunStatus.FAILED,
             RunEndReason.PROVIDER_ERROR,
@@ -959,7 +959,7 @@ class ConversationGenerationStateTest {
             pass = pass,
             effectId = "finalize-$runId-$pass",
         )
-        val effect = state.requestRunFinalization(
+        val effect = state.commands.requestRunFinalization(
             identity,
             RunStatus.COMPLETED,
             RunEndReason.MODEL_COMPLETED,

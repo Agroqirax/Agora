@@ -21,7 +21,7 @@ internal object AutomationRuntimeAdmission {
         proposedRunId: String,
         effectId: String,
     ): Decision = state.queueMutationMutex.withLock {
-        val transition = state.requestSend(
+        val transition = state.commands.requestSend(
             proposedRunId = proposedRunId,
             effectId = effectId,
             directOnly = true,

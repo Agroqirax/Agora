@@ -465,7 +465,7 @@ internal class MessageGenerationController(
         failedMessage: ChatMessage,
         effectId: String,
     ): Boolean {
-        val requested = state.requestRunFinalization(
+        val requested = state.commands.requestRunFinalization(
             identity = RunEffectIdentity(
                 conversationId = conversationId,
                 ownerToken = uiToken,
@@ -1259,7 +1259,7 @@ internal class MessageGenerationController(
     ): QueuedDrainClaim? {
         val proposedRunId = UUID.randomUUID().toString()
         val transition = try {
-            state.requestSend(
+            state.commands.requestSend(
                 proposedRunId = proposedRunId,
                 effectId = "guidance-$proposedRunId",
                 directOnly = false,
@@ -1502,7 +1502,7 @@ internal class MessageGenerationController(
                     }
                 } else if (!durable) {
                     withContext(kotlinx.coroutines.NonCancellable) {
-                        state.inputPersistenceFailed(claim.inputEffect.identity)
+                        state.commands.inputPersistenceFailed(claim.inputEffect.identity)
                     }
                 }
                 failGenerationSetup(genId, runId, setupModelMessageId, myUiToken, state, e)
@@ -1625,7 +1625,7 @@ internal class MessageGenerationController(
             while (placement == null) {
                 val decision = state.queueMutationMutex.withLock {
                     val pendingQueue = state.queuedSends.value
-                    val transition = state.requestSend(
+                    val transition = state.commands.requestSend(
                         proposedRunId = proposedRunId,
                         effectId = sendEffectId,
                         directOnly = directOnly,
@@ -1912,7 +1912,7 @@ internal class MessageGenerationController(
                 if (!durable) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         runCatching {
-                            state.inputPersistenceFailed(direct.inputEffect.identity)
+                            state.commands.inputPersistenceFailed(direct.inputEffect.identity)
                         }
                     }
                 } else {

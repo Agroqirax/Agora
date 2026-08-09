@@ -346,7 +346,7 @@ class TaskExecutionEngine(
             val currentJob = currentCoroutineContext()[Job]
             if (currentJob == null || !generationState.attachGenerationJob(uiToken, currentJob)) {
                 withContext(NonCancellable) {
-                    if (generationState.abandonSendLaunch(acceptedInputEffect.identity)) {
+                    if (generationState.commands.abandonSendLaunch(acceptedInputEffect.identity)) {
                         generationState.onQueueDrainRequested?.invoke(generationState)
                     }
                 }
@@ -492,7 +492,9 @@ class TaskExecutionEngine(
             if (!runCreated && inputEffect != null) {
                 withContext(NonCancellable) {
                     runCreated = convRepo.getRun(runId) != null
-                    if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
+                    if (!runCreated) {
+                        generationState.commands.inputPersistenceFailed(inputEffect.identity)
+                    }
                 }
             }
             withContext(NonCancellable) {
@@ -557,7 +559,9 @@ class TaskExecutionEngine(
             if (!runCreated && inputEffect != null) {
                 withContext(NonCancellable) {
                     runCreated = convRepo.getRun(runId) != null
-                    if (!runCreated) generationState.inputPersistenceFailed(inputEffect.identity)
+                    if (!runCreated) {
+                        generationState.commands.inputPersistenceFailed(inputEffect.identity)
+                    }
                 }
             }
             if (
@@ -605,7 +609,7 @@ class TaskExecutionEngine(
                         pass = 0,
                         effectId = "finalize-$runId-0",
                     )
-                    val effect = generationState.requestRunFinalization(
+                    val effect = generationState.commands.requestRunFinalization(
                         identity = effectIdentity,
                         status = RunStatus.FAILED,
                         reason = RunEndReason.PROVIDER_ERROR,

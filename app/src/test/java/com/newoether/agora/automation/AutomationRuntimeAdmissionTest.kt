@@ -52,7 +52,7 @@ class AutomationRuntimeAdmissionTest {
         val accepted = AutomationRuntimeAdmission.request(state, "run", "automation-send")
             as AutomationRuntimeAdmission.Decision.Accepted
 
-        assertTrue(state.abandonSendLaunch(accepted.inputEffect.identity))
+        assertTrue(state.commands.abandonSendLaunch(accepted.inputEffect.identity))
         assertFalse(state.generating.value)
         assertFalse(state.inputPersisted(accepted.inputEffect.identity))
     }
@@ -82,14 +82,14 @@ class AutomationRuntimeAdmissionTest {
     @Test
     fun manualCompact_returnsBusyWithoutCreatingAnAutomationRun() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val compact = state.requestManualCompact("compact-run", "compact-effect")!!
+        val compact = state.commands.requestManualCompact("compact-run", "compact-effect")!!
 
         val decision = AutomationRuntimeAdmission.request(state, "new-run", "automation-send")
 
         assertSame(AutomationRuntimeAdmission.Decision.Busy, decision)
         assertTrue(state.compacting.value)
         assertFalse(state.generating.value)
-        assertTrue(state.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED).accepted)
+        assertTrue(state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED).accepted)
     }
 
     private suspend fun finalizeBoundRun(
@@ -104,7 +104,7 @@ class AutomationRuntimeAdmissionTest {
             pass = 0,
             effectId = "finalize-$runId-0",
         )
-        state.requestRunFinalization(
+        state.commands.requestRunFinalization(
             identity,
             RunStatus.COMPLETED,
             RunEndReason.MODEL_COMPLETED,
