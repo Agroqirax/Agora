@@ -55,7 +55,7 @@ internal data class AuthorizedToolResult(
 internal class GenerationToolExecutor private constructor(
     private val providers: List<ToolProvider>,
     private val imageGenProvider: ImageGenToolProvider?,
-) {
+) : GenerationToolDefinitionSource {
     companion object {
         private val FILE_TOOL_NAMES = setOf(
             "file_read",
@@ -97,7 +97,7 @@ internal class GenerationToolExecutor private constructor(
             GenerationToolExecutor(providers, imageGenProvider = null)
     }
 
-    fun definitions(context: GenerationContext): List<ToolDefinition> =
+    override fun definitions(context: GenerationContext): List<ToolDefinition> =
         providers.flatMap { it.definitions(context) }
 
     fun imageDefinitions(context: GenerationContext): List<ToolDefinition> =

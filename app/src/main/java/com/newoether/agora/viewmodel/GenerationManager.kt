@@ -3,7 +3,6 @@ package com.newoether.agora.viewmodel
 import android.app.Application
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.LlmProvider
-import com.newoether.agora.api.ProviderConfig
 import com.newoether.agora.api.StreamEvent
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.data.MemoryManager
@@ -25,7 +24,6 @@ import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
-import com.newoether.agora.api.util.projectGenerationStatusesForApi
 import com.newoether.agora.util.Constants
 import com.newoether.agora.tool.ToolProvider
 import com.newoether.agora.tool.ToolExecutionEvent
@@ -72,6 +70,7 @@ class GenerationManager(
     )
     private val providerPassRunner = ProviderPassRunner()
     private val runFinalizationEffects = RunFinalizationEffectCoordinator()
+    private val apiPathBuilder = GenerationApiPathBuilder(conversations, toolExecutor)
 
     fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
         toolExecutor.imageDefinitions(ctx)
@@ -166,143 +165,6 @@ class GenerationManager(
             ))
         }
         return result.ifEmpty { null }
-    }
-
-    private suspend fun buildApiPath(
-        parentId: String?,
-        conversationId: String,
-        isRegenerate: Boolean,
-        replaceMessageId: String?,
-        config: GenerationConfig,
-        ctx: GenerationContext,
-        loadedMessages: List<MessageEntity>? = null,
-    ): Pair<List<ChatMessage>, ProviderConfig> = withContext(Dispatchers.Default) {
-        val dbMessages = loadedMessages
-            ?: conversations.getMessagesForConversationSnapshot(conversationId)
-        val messagesById = dbMessages.associateBy { it.id }
-        val pathEntities = mutableListOf<MessageEntity>()
-        var currId: String? = parentId
-        while (currId != null) {
-            val msg = messagesById[currId] ?: break
-            pathEntities.add(0, msg)
-            if (msg.id.startsWith(Constants.COMPACT_MSG_PREFIX)) break
-            currId = msg.parentId
-        }
-        // Inject each persisted tool protocol row exactly once. A queued intervention may have a
-        // result_ ancestor while that same round is also reachable as a side chain of the visible
-        // model message; ApiPathAssembler owns that overlap and prevents duplicate replay.
-        val expanded = ApiPathAssembler.assemble(pathEntities, dbMessages)
-        val toolHistoryCompactor = ToolRoundHistoryCompactor()
-        val currentPath = expanded.map {
-            val decodedSegments = it.toolCallJson?.let { json ->
-                try {
-                    Json.decodeFromString<List<MessageSegment>>(json)
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            val segs = if (
-                decodedSegments != null &&
-                it.id.startsWith(Constants.TOOL_MSG_PREFIX)
-            ) {
-                toolHistoryCompactor.compact(it.runId, decodedSegments)
-            } else {
-                decodedSegments
-            }
-            val toolCall = segs?.lastOrNull { s -> s.type == "tool" }?.let { s ->
-                ToolCallData(
-                    toolName = s.toolName ?: "",
-                    arguments = s.toolArgs ?: "{}",
-                    result = s.toolResult ?: "",
-                    signature = s.signature,
-                    toolCallId = s.toolCallId,
-                    resultImages = s.toolImages,
-                    displayName = s.toolDisplayName,
-                    resultText = s.toolResultText,
-                    structuredResult = s.toolStructuredResult,
-                )
-            }
-            val meta = it.attachmentMeta?.let { json -> try { Json.decodeFromString<com.newoether.agora.model.AttachmentMeta>(json) } catch (_: Exception) { null } }
-            val attachmentText = if (meta != null) {
-                meta.items.mapNotNull { item ->
-                    val content = item.textContent
-                    val transcription = item.transcription
-                    val includeTranscription = ctx.imageTranscriptionEnabled && transcription != null && transcription.isNotBlank()
-                    when {
-                        content != null -> {
-                            val label = item.fileName ?: "file"
-                            "\n\n--- File: $label ---\n$content"
-                        }
-                        includeTranscription -> {
-                            val label = item.fileName ?: "image"
-                            "\n\n--- Image Transcription: $label ---\n$transcription"
-                        }
-                        else -> null
-                    }
-                }.joinToString("")
-            } else ""
-            val combinedText = if (attachmentText.isNotBlank()) it.text + attachmentText else it.text
-            val hasTranscription = ctx.imageTranscriptionEnabled && meta != null && meta.items.any { item -> !item.transcription.isNullOrBlank() }
-            val effectiveImages = if (hasTranscription) emptyList() else it.images
-            ChatMessage(
-                id = it.id,
-                parentId = it.parentId,
-                text = combinedText,
-                images = effectiveImages,
-                thoughts = it.thoughts,
-                thoughtTitle = it.thoughtTitle,
-                tokenCount = it.tokenCount,
-                tokenUsage = TokenUsage.fromPersisted(
-                    totalTokenCount = it.tokenCount,
-                    inputTokenCount = it.inputTokenCount,
-                    cachedInputTokenCount = it.cachedInputTokenCount,
-                    uncachedInputTokenCount = it.uncachedInputTokenCount,
-                    outputTokenCount = it.outputTokenCount,
-                    reasoningTokenCount = it.reasoningTokenCount,
-                ),
-                status = it.status,
-                participant = it.participant,
-                timestamp = it.timestamp,
-                thoughtTimeMs = it.thoughtTimeMs,
-                modelName = it.modelName,
-                segments = segs,
-                toolCall = toolCall,
-                runId = it.runId,
-                runSequence = it.runSequence,
-                consumedAtPass = it.consumedAtPass,
-            )
-        }.let(::projectGenerationStatusesForApi)
-            .let { path ->
-                if (isRegenerate && replaceMessageId != null) {
-                    val oldIdx = path.indexOfFirst { it.id == replaceMessageId }
-                    if (oldIdx >= 0) path.take(oldIdx) else path
-                } else path
-            }
-
-        val allTools = toolExecutor.definitions(ctx)
-        val providerConfig = ProviderConfig(
-            apiKey = config.apiKey,
-            modelId = config.modelId,
-            systemPrompt = config.effectiveSystemPrompt,
-            maxContextWindow = config.maxContextWindow,
-            codeExecutionEnabled = config.codeExecutionEnabled,
-            googleSearchEnabled = config.googleSearchEnabled,
-            thinkingEnabled = config.thinkingEnabled,
-            thinkingLevel = config.thinkingLevel,
-            thinkingBudgetEnabled = config.thinkingBudgetEnabled,
-            thinkingBudgetTokens = config.thinkingBudgetTokens,
-            openAiServiceTier = config.openAiServiceTier,
-            baseUrl = config.baseUrl,
-            tools = allTools,
-            userPrepend = config.userPrepend,
-            userPostpend = config.userPostpend,
-            temperature = config.temperature,
-            maxTokens = config.maxTokens,
-            topP = config.topP,
-            frequencyPenalty = config.frequencyPenalty,
-            presencePenalty = config.presencePenalty
-        )
-        Pair(currentPath, providerConfig)
     }
 
     suspend fun generate(
@@ -470,14 +332,16 @@ class GenerationManager(
             }
 
             if (currentStatus != MessageStatus.ERROR) {
-            val (currentPath, rawProviderConfig) = buildApiPath(
-                parentId,
-                conversationId,
-                isRegenerate,
-                replaceMessageId,
-                config,
-                ctx,
-                loadedMessages,
+            val (currentPath, rawProviderConfig) = apiPathBuilder.build(
+                GenerationApiPathRequest(
+                    parentId = parentId,
+                    conversationId = conversationId,
+                    isRegenerate = isRegenerate,
+                    replaceMessageId = replaceMessageId,
+                    config = config,
+                    context = ctx,
+                    loadedMessages = loadedMessages,
+                ),
             )
             requestTrace?.mark(
                 "api_path_ready",
@@ -1067,14 +931,16 @@ class GenerationManager(
                     )
                 }
                 callbacks.onToolRoundPersisted()
-                toolPath = buildApiPath(
-                    resultMsgs.last().first,
-                    conversationId,
-                    false,
-                    null,
-                    config,
-                    ctx,
-                ).first
+                toolPath = apiPathBuilder.build(
+                    GenerationApiPathRequest(
+                        parentId = resultMsgs.last().first,
+                        conversationId = conversationId,
+                        isRegenerate = false,
+                        replaceMessageId = null,
+                        config = config,
+                        context = ctx,
+                    ),
+                ).messages
 
                 toolCallData = null
                 toolCallDataList = emptyList()
