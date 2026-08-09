@@ -42,7 +42,6 @@ import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.sandbox.SandboxManager
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.service.AgoraForegroundService
-import com.newoether.agora.service.AutoBackupWorker
 import com.newoether.agora.ui.settings.ImportStrategy
 import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
@@ -79,7 +78,7 @@ class ChatViewModel(
     private val appContext: Context,
     private val sandboxFactory: SandboxManagerFactory? = null,
     // All injected via AppContainer/ChatViewModelFactory — the single construction site.
-    val autoBackupManager: AutoBackupManager,
+    autoBackupManager: AutoBackupManager,
     conversationRepository: ConversationRepository,
     settingsRepository: SettingsRepository,
     // Process-scoped generation singletons, shared with background task execution.
@@ -101,8 +100,6 @@ class ChatViewModel(
     companion object {
         /** Overlay fade duration for conversation-switch transitions. */
         private const val SWITCH_OVERLAY_FADE_MS = 200L
-        /** Auto-delete period tiers in hours: 7 days, 30 days, 365 days. */
-        private val AUTO_DELETE_TIERS_HOURS = listOf(168, 720, 8760)
     }
 
     val settings: SettingsRepository = settingsRepository
@@ -117,6 +114,14 @@ class ChatViewModel(
     private val attachmentOrphanSweeper = AttachmentOrphanSweeper(
         conversations = conversationRepository,
         filesDirectory = application.filesDir,
+    )
+    private val dataControl = DataControlController(
+        conversations = conversationRepository,
+        memory = memoryManager,
+        settings = settingsRepository,
+        backupManager = autoBackupManager,
+        backupSchedule = AndroidAutoBackupSchedulePort(application),
+        scope = viewModelScope,
     )
     private val conversationForkShare =
         ConversationForkShareService(
@@ -148,7 +153,7 @@ class ChatViewModel(
         memoryManager = memoryManager,
         scope = viewModelScope,
         emitSnackbar = { _snackbarMessage.emit(it) },
-        onDataChanged = { refreshDataCounts() },
+        onDataChanged = dataControl::refreshCounts,
         automationExecutionGate = automationExecutionGate,
         quiesceAutomation = {
             taskManager.cancelAllExecutionsForImport()
@@ -239,16 +244,7 @@ class ChatViewModel(
                 attachmentOrphanSweeper.sweep()
             } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
         }
-        // ── Auto Backup ──────────────────────────────────────────
-        try {
-            AutoBackupWorker.schedule(getApplication())
-        } catch (e: Exception) {
-            // Losing periodic backups silently would be data-loss-adjacent — log it.
-            DebugLog.e("ChatViewModel", "AutoBackupWorker.schedule failed", e)
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            try { autoBackupManager.checkAndBackup() } catch (e: Exception) { DebugLog.e("ChatViewModel", "Auto backup check failed", e) }
-        }
+        dataControl.startAutoBackup()
         // Sync local chat models into available models
         viewModelScope.launch {
             var lastLocalIds: List<String>? = null
@@ -307,7 +303,7 @@ class ChatViewModel(
         taskExecutionEngine.detachForegroundSendBridge(generationCallbackOwner)
         sandboxManager?.close()
         generationRegistry.detachUiCallbacks(generationCallbackOwner)
-        autoBackupManager.destroy()
+        dataControl.destroy()
     }
 
     /** Nullable on purpose: the provider settings page recomposes one frame after a custom
@@ -722,14 +718,9 @@ class ChatViewModel(
     val gptImportResult get() = importExport.gptImportResult
 
 
-    private val _conversationCount = MutableStateFlow(0)
-    val conversationCount: StateFlow<Int> = _conversationCount.asStateFlow()
-
-    private val _memoryCount = MutableStateFlow(0)
-    val memoryCount: StateFlow<Int> = _memoryCount.asStateFlow()
-
-    private val _systemPromptCount = MutableStateFlow(0)
-    val systemPromptCount: StateFlow<Int> = _systemPromptCount.asStateFlow()
+    val conversationCount: StateFlow<Int> = dataControl.conversationCount
+    val memoryCount: StateFlow<Int> = dataControl.memoryCount
+    val systemPromptCount: StateFlow<Int> = dataControl.systemPromptCount
 
     init {
         startInitJobs()
@@ -893,46 +884,12 @@ class ChatViewModel(
     fun indexMessageForRag(messageId: String, text: String) = ragManager.indexMessageForRag(messageId, text)
     suspend fun searchMessages(query: String, limit: Int = 20) = convRepo.searchMessages(query, limit)
     // ── Auto Backup ───────────────────────────────────────────
-    fun setAutoBackupEnabled(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) {
-            settings.saveAutoBackupEnabled(enabled)
-            if (enabled) {
-                try { AutoBackupWorker.schedule(getApplication()) } catch (_: Exception) {}
-            } else {
-                try { AutoBackupWorker.cancel(getApplication()) } catch (_: Exception) {}
-            }
-        }
-    }
-    fun setAutoBackupPeriodHours(hours: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            settings.saveAutoBackupPeriodHours(hours)
-            // Enforce: auto-delete period must be strictly greater than backup period
-            val deleteTiers = AUTO_DELETE_TIERS_HOURS
-            val deleteHours = settings.autoDeletePeriodHours.value
-            if (deleteHours <= hours) {
-                val nextDelete = deleteTiers.firstOrNull { it > hours } ?: AUTO_DELETE_TIERS_HOURS.last()
-                settings.saveAutoDeletePeriodHours(nextDelete)
-            }
-        }
-    }
-    fun setAutoBackupCategories(categories: String) {
-        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoBackupCategories(categories) }
-    }
-    fun setAutoBackupDirectory(path: String) {
-        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoBackupDirectory(path) }
-    }
-    fun setAutoDeleteEnabled(enabled: Boolean) {
-        viewModelScope.launch(Dispatchers.IO) { settings.saveAutoDeleteEnabled(enabled) }
-    }
-    fun setAutoDeletePeriodHours(hours: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val backupHours = settings.autoBackupPeriodHours.value
-            val deleteTiers = AUTO_DELETE_TIERS_HOURS
-            // Find the smallest valid delete tier that is > backupHours, and >= the requested hours
-            val minValid = deleteTiers.firstOrNull { it > backupHours } ?: AUTO_DELETE_TIERS_HOURS.last()
-            settings.saveAutoDeletePeriodHours(maxOf(hours, minValid))
-        }
-    }
+    fun setAutoBackupEnabled(enabled: Boolean) = dataControl.setAutoBackupEnabled(enabled)
+    fun setAutoBackupPeriodHours(hours: Int) = dataControl.setAutoBackupPeriodHours(hours)
+    fun setAutoBackupCategories(categories: String) = dataControl.setAutoBackupCategories(categories)
+    fun setAutoBackupDirectory(path: String) = dataControl.setAutoBackupDirectory(path)
+    fun setAutoDeleteEnabled(enabled: Boolean) = dataControl.setAutoDeleteEnabled(enabled)
+    fun setAutoDeletePeriodHours(hours: Int) = dataControl.setAutoDeletePeriodHours(hours)
     fun addShellDevice(device: ShellDeviceConfig) {
         settings.addShellDevice(device)
     }
@@ -1409,14 +1366,7 @@ class ChatViewModel(
 
     // ---- Data Control: Export / Import ----
 
-    fun refreshDataCounts() {
-        viewModelScope.launch(Dispatchers.IO) {
-            _conversationCount.value = convRepo.getAllConversationsList().size
-            _memoryCount.value = memoryManager.listFiles().size +
-                (if (memoryManager.getActiveMemory().isNotEmpty()) 1 else 0)
-            _systemPromptCount.value = settings.getSystemPrompts().size
-        }
-    }
+    fun refreshDataCounts() = dataControl.refreshCounts()
 
     fun exportData(uri: Uri, categories: Set<DataExporter.ExportCategory>, includeApiKeys: Boolean) =
         importExport.exportData(uri, categories, includeApiKeys)
