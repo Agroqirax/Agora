@@ -1,0 +1,21 @@
+# Temporary exact caps for Kotlin sources that exceeded 999 physical lines on 2026-08-09.
+# Do not add new entries or raise a recorded count. Remove an entry once its file reaches 999.
+app/src/fdroid/java/com/newoether/agora/sandbox/ProotSandboxManager.kt=1153
+app/src/main/java/com/newoether/agora/MainActivity.kt=1138
+app/src/main/java/com/newoether/agora/api/anthropic/AnthropicProvider.kt=1037
+app/src/main/java/com/newoether/agora/data/DataImporter.kt=1509
+app/src/main/java/com/newoether/agora/data/SettingsManager.kt=1369
+app/src/main/java/com/newoether/agora/data/local/ChatDatabase.kt=1587
+app/src/main/java/com/newoether/agora/model/RunLifecycle.kt=1389
+app/src/main/java/com/newoether/agora/tool/ShellToolProvider.kt=1514
+app/src/main/java/com/newoether/agora/ui/chat/ChatApp.kt=2313
+app/src/main/java/com/newoether/agora/ui/chat/MessageList.kt=1181
+app/src/main/java/com/newoether/agora/ui/settings/SettingsModelsPage.kt=1004
+app/src/main/java/com/newoether/agora/ui/tasks/TasksScreen.kt=1712
+app/src/main/java/com/newoether/agora/viewmodel/ChatViewModel.kt=1897
+app/src/main/java/com/newoether/agora/viewmodel/ConversationGenerationState.kt=1080
+app/src/main/java/com/newoether/agora/viewmodel/GenerationManager.kt=1689
+app/src/main/java/com/newoether/agora/viewmodel/MessageGenerationController.kt=2108
+app/src/test/java/com/newoether/agora/model/ConversationRuntimeReducerTest.kt=1433
+app/src/test/java/com/newoether/agora/ui/chat/MessageListLayoutTest.kt=1256
+app/src/test/java/com/newoether/agora/viewmodel/ConversationGenerationStateTest.kt=1145

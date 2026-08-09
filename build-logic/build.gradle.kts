@@ -10,6 +10,7 @@ dependencies {
     // ASM is used to rewrite the offending bytecode at compile time.
     implementation("org.ow2.asm:asm:9.7")
     implementation("org.ow2.asm:asm-commons:9.7")
+    testImplementation("junit:junit:4.13.2")
 }
 
 gradlePlugin {
@@ -17,6 +18,10 @@ gradlePlugin {
         create("removeFirstLastFix") {
             id = "buildlogic.removefirstlast-fix"
             implementationClass = "buildlogic.RemoveFirstLastFixPlugin"
+        }
+        create("kotlinSourceSize") {
+            id = "buildlogic.kotlin-source-size"
+            implementationClass = "buildlogic.KotlinSourceSizePlugin"
         }
     }
 }

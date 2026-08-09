@@ -42,8 +42,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Test and verify Kotlin source budget
+        run: |
+          chmod +x ./gradlew
+          ./gradlew -p build-logic test
+          ./gradlew verifyKotlinFileSize
+
       - name: Build F-Droid Release APK
-        run: chmod +x ./gradlew && ./gradlew assembleFdroidRelease
+        run: ./gradlew assembleFdroidRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
