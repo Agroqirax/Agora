@@ -43,7 +43,6 @@ import com.newoether.agora.ui.settings.ImportStrategy
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.util.PdfPageRenderer
 import com.newoether.agora.util.SnackbarEvent
-import com.newoether.agora.util.SshClient
 import com.newoether.agora.util.UpdateChecker
 import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.Dispatchers
@@ -830,6 +829,14 @@ class ChatViewModel(
         settings.updateShellDevice(device)
     }
 
+    private val sshHostKeyVerifier = SshHostKeyVerifier()
+    private val remoteEmbeddingConnectionTester by lazy {
+        RemoteEmbeddingConnectionTester(
+            resolveApiKey = ragManager::resolveEmbeddingApiKey,
+            resolveBaseUrl = ragManager::resolveEmbeddingBaseUrl,
+        )
+    }
+
     /**
      * Connects to an SSH host in capture mode and returns the server host key
      * (base64) together with its SHA-256 fingerprint, for the user to review and
@@ -838,35 +845,13 @@ class ChatViewModel(
      */
     suspend fun verifySshHostKey(
         host: String, port: Int, user: String, password: String
-    ): Result<Pair<String, String>> = kotlinx.coroutines.withContext(Dispatchers.IO) {
-        if (host.isBlank()) return@withContext Result.failure(Exception("Host is empty"))
-        val client = SshClient(
-            host, port, user.ifBlank { "root" }, password,
-            pinnedHostKey = "", allowUnknownHostKey = true
-        )
-        try {
-            client.executeCommand("true")
-        } catch (_: Exception) {
-            // Ignore — the host key is captured during the handshake regardless of auth result.
-        } finally {
-            client.close()
-        }
-        val key = client.capturedHostKey
-        if (key.isNullOrBlank()) Result.failure(Exception("Could not reach host or no host key presented"))
-        else Result.success(key to SshClient.fingerprintSha256(key))
-    }
-    suspend fun testRemoteEmbedding(modelName: String, baseUrl: String, apiKey: String = ""): String? {
-        val effectiveKey = apiKey.ifBlank { ragManager.resolveEmbeddingApiKey() ?: "" }
-        val url = baseUrl.ifBlank { ragManager.resolveEmbeddingBaseUrl() }
-        return withContext(Dispatchers.IO) {
-            try {
-                val result = EmbeddingClient.computeEmbedding("test connection", effectiveKey, modelName, url)
-                if (result != null) "OK (dim=${result.size})" else "Request failed. Check API key, URL, and model name."
-            } catch (e: Exception) {
-                e.message ?: "Error"
-            }
-        }
-    }
+    ): Result<Pair<String, String>> = sshHostKeyVerifier.verify(host, port, user, password)
+
+    suspend fun testRemoteEmbedding(
+        modelName: String,
+        baseUrl: String,
+        apiKey: String = "",
+    ): String? = remoteEmbeddingConnectionTester.test(modelName, baseUrl, apiKey)
 
     fun createNewChat() = selectionController.createNewChat()
 
