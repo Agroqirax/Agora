@@ -469,7 +469,7 @@ fun WelcomeScreen(
                                 }
                                 PAGE_AUTO_BACKUP -> AutoBackupPage(
                                     enabled = autoBackupEnabled,
-                                    onToggle = { viewModel.setAutoBackupEnabled(it) },
+                                    onToggle = { viewModel.dataControl.setAutoBackupEnabled(it) },
                                     modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp).alpha(contentAlpha)
                                 )
                                 else -> {

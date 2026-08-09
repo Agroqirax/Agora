@@ -89,7 +89,7 @@ class ChatViewModel(
      */
     private val convRepo: ConversationRepository = conversationRepository
     private val composerDrafts = ComposerDraftController(conversationRepository)
-    private val dataControl = DataControlController(
+    val dataControl = DataControlController(
         conversations = conversationRepository,
         memory = memoryManager,
         settings = settingsRepository,
@@ -721,10 +721,6 @@ class ChatViewModel(
     fun failSwitchingScroll(requestId: Long, reason: String) =
         selectionController.failSwitchingScroll(requestId, reason)
 
-    val conversationCount: StateFlow<Int> = dataControl.conversationCount
-    val memoryCount: StateFlow<Int> = dataControl.memoryCount
-    val systemPromptCount: StateFlow<Int> = dataControl.systemPromptCount
-
     init {
         startInitJobs()
         unreadGenerationAcknowledger.start()
@@ -776,13 +772,6 @@ class ChatViewModel(
     suspend fun semanticSearch(query: String, limit: Int = 20) =
         semanticSearchService.search(query, limit)
     suspend fun searchMessages(query: String, limit: Int = 20) = convRepo.searchMessages(query, limit)
-    // ── Auto Backup ───────────────────────────────────────────
-    fun setAutoBackupEnabled(enabled: Boolean) = dataControl.setAutoBackupEnabled(enabled)
-    fun setAutoBackupPeriodHours(hours: Int) = dataControl.setAutoBackupPeriodHours(hours)
-    fun setAutoBackupCategories(categories: String) = dataControl.setAutoBackupCategories(categories)
-    fun setAutoBackupDirectory(path: String) = dataControl.setAutoBackupDirectory(path)
-    fun setAutoDeleteEnabled(enabled: Boolean) = dataControl.setAutoDeleteEnabled(enabled)
-    fun setAutoDeletePeriodHours(hours: Int) = dataControl.setAutoDeletePeriodHours(hours)
     fun addShellDevice(device: ShellDeviceConfig) {
         settings.addShellDevice(device)
     }
@@ -892,10 +881,6 @@ class ChatViewModel(
     fun computeProviderFingerprint(): String = providerModelSyncUi.computeFingerprint()
 
     fun fetchAvailableModels() = providerModelSyncUi.fetchAvailableModels()
-
-    // ---- Data Control: Export / Import ----
-
-    fun refreshDataCounts() = dataControl.refreshCounts()
 
     // ── Per-conversation draft persistence ─────────────────────
 

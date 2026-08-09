@@ -44,9 +44,9 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    val conversationCount by viewModel.conversationCount.collectAsState()
-    val memoryCount by viewModel.memoryCount.collectAsState()
-    val promptCount by viewModel.systemPromptCount.collectAsState()
+    val conversationCount by viewModel.dataControl.conversationCount.collectAsState()
+    val memoryCount by viewModel.dataControl.memoryCount.collectAsState()
+    val promptCount by viewModel.dataControl.systemPromptCount.collectAsState()
     val exportProgress by viewModel.importExport.exportProgress.collectAsState()
     val importProgress by viewModel.importExport.importProgress.collectAsState()
     val importManifest by viewModel.importExport.importManifest.collectAsState()
@@ -85,7 +85,7 @@ fun SettingsDataControlPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val isExporting = exportProgress != null
     val isImporting = importProgress != null
 
-    LaunchedEffect(Unit) { viewModel.refreshDataCounts() }
+    LaunchedEffect(Unit) { viewModel.dataControl.refreshCounts() }
 
     // Capture export selections so they survive the SAF picker flow
     var pendingExportCategories by remember { mutableStateOf<Set<DataExporter.ExportCategory>>(emptySet()) }

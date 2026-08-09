@@ -67,9 +67,9 @@ internal fun AutoBackupSection(viewModel: ChatViewModel) {
                     Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.primary)
                 },
                 trailingContent = {
-                    Switch(checked = autoBackupEnabled, onCheckedChange = { viewModel.setAutoBackupEnabled(it) })
+                    Switch(checked = autoBackupEnabled, onCheckedChange = { viewModel.dataControl.setAutoBackupEnabled(it) })
                 },
-                modifier = Modifier.clickable { viewModel.setAutoBackupEnabled(!autoBackupEnabled) }
+                modifier = Modifier.clickable { viewModel.dataControl.setAutoBackupEnabled(!autoBackupEnabled) }
             )
         }
 
@@ -78,7 +78,7 @@ internal fun AutoBackupSection(viewModel: ChatViewModel) {
             add {
                 AutoBackupPeriodDropdown(
                     currentHours = autoBackupPeriodHours,
-                    onSelect = { viewModel.setAutoBackupPeriodHours(it) }
+                    onSelect = { viewModel.dataControl.setAutoBackupPeriodHours(it) }
                 )
             }
 
@@ -97,9 +97,9 @@ internal fun AutoBackupSection(viewModel: ChatViewModel) {
                         Icon(Icons.Default.AutoDelete, null, tint = MaterialTheme.colorScheme.primary)
                     },
                     trailingContent = {
-                        Switch(checked = autoDeleteEnabled, onCheckedChange = { viewModel.setAutoDeleteEnabled(it) })
+                        Switch(checked = autoDeleteEnabled, onCheckedChange = { viewModel.dataControl.setAutoDeleteEnabled(it) })
                     },
-                    modifier = Modifier.clickable { viewModel.setAutoDeleteEnabled(!autoDeleteEnabled) }
+                    modifier = Modifier.clickable { viewModel.dataControl.setAutoDeleteEnabled(!autoDeleteEnabled) }
                 )
             }
 
@@ -109,7 +109,7 @@ internal fun AutoBackupSection(viewModel: ChatViewModel) {
                     AutoDeletePeriodDropdown(
                         currentHours = autoDeletePeriodHours,
                         backupHours = autoBackupPeriodHours,
-                        onSelect = { viewModel.setAutoDeletePeriodHours(it) }
+                        onSelect = { viewModel.dataControl.setAutoDeletePeriodHours(it) }
                     )
                 }
             }
@@ -200,7 +200,7 @@ private fun AutoBackupDirectoryItem(viewModel: ChatViewModel) {
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
-            viewModel.setAutoBackupDirectory(uri.toString())
+            viewModel.dataControl.setAutoBackupDirectory(uri.toString())
         }
     }
 
@@ -243,7 +243,7 @@ private fun AutoBackupCategoriesItem(viewModel: ChatViewModel) {
             selectedKeys = selectedKeys,
             onDismiss = { showDialog = false },
             onConfirm = { newKeys ->
-                viewModel.setAutoBackupCategories(newKeys.joinToString(","))
+                viewModel.dataControl.setAutoBackupCategories(newKeys.joinToString(","))
                 showDialog = false
             }
         )

@@ -28,7 +28,7 @@ internal class AndroidAutoBackupSchedulePort(
 }
 
 /** Owns Data Control counts and the automatic-backup/delete settings lifecycle. */
-internal class DataControlController(
+class DataControlController internal constructor(
     private val conversations: ConversationRepository,
     private val memory: MemoryManager,
     private val settings: SettingsRepository,
@@ -46,7 +46,7 @@ internal class DataControlController(
     private val _systemPromptCount = MutableStateFlow(0)
     val systemPromptCount: StateFlow<Int> = _systemPromptCount.asStateFlow()
 
-    fun startAutoBackup() {
+    internal fun startAutoBackup() {
         try {
             backupSchedule.schedule()
         } catch (error: Exception) {
@@ -61,7 +61,7 @@ internal class DataControlController(
         }
     }
 
-    fun destroy() {
+    internal fun destroy() {
         backupManager.destroy()
     }
 
