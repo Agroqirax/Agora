@@ -123,7 +123,8 @@ fun ChatApp(
     val compactModel by viewModel.settings.contextCompactModel.collectAsState()
     val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
     val compactRetainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
-    var showManualCompactDialog by rememberSaveable { mutableStateOf(false) }
+    val manualCompactDialogVisible = rememberSaveable { mutableStateOf(false) }
+    val dialogState = rememberChatAppDialogState(manualCompactDialogVisible)
     val queuedSends by viewModel.queuedSends.collectAsState()
     val isStopping by viewModel.isStopping.collectAsState()
     val currentConversationId by viewModel.currentConversationId.collectAsState()
@@ -202,11 +203,6 @@ fun ChatApp(
     SendAcceptedHapticBindingEffect(viewModel, haptics)
 
 
-    var showRenameDialog by remember { mutableStateOf<String?>(null) }
-    var conversationToRename by remember { mutableStateOf("") }
-    var showDeleteConfirmDialog by remember { mutableStateOf<String?>(null) }
-    var showPromptDialog by remember { mutableStateOf(false) }
-    var showAdvancedDialog by remember { mutableStateOf(false) }
     var isExpanded by remember { mutableStateOf(false) }
     // Composer-expand spacer collapse (44dp → 0). An Animatable driven from an effect replaces the
     // former hand-rolled clock, which wrote animation state DURING composition (Compose forbids
@@ -390,8 +386,8 @@ fun ChatApp(
                 onSettingsButtonTop = { settingsButtonTopDp = it },
                 onOpenSettings = onOpenSettings,
                 onOpenTasks = { onOpenTasks(null) },
-                onRequestRename = { id, title -> showRenameDialog = id; conversationToRename = title },
-                onRequestDelete = { id -> showDeleteConfirmDialog = id },
+                onRequestRename = dialogState::requestRename,
+                onRequestDelete = dialogState::requestDelete,
             )
         }
     ) {
@@ -471,7 +467,7 @@ fun ChatApp(
                         onSearchClick = {
                             conversationInteraction.activateSearch()
                         },
-                        onSystemPromptClick = { showPromptDialog = true },
+                        onSystemPromptClick = dialogState::showPrompt,
                         onForkConversation = {
                             viewModel.forkConversationFrom()
                         },
@@ -990,9 +986,9 @@ fun ChatApp(
                         hasCompactBoundary = contextUsage.hasCompactBoundary,
                         canCompact = currentConversationId != null && !isLoading && !isSwitching && !isStopping,
                         onCompactClick = {
-                            showManualCompactDialog = true
+                            dialogState.showManualCompact()
                         },
-                        onAdvancedClick = { showAdvancedDialog = true },
+                        onAdvancedClick = dialogState::showAdvanced,
                         queuedSends = queuedSends,
                         onRemoveQueuedSend = viewModel::removeQueuedSend,
                         isStopping = isStopping,
@@ -1006,54 +1002,17 @@ fun ChatApp(
         }
         }
 
-    showRenameDialog?.let { id ->
-        ChatRenameDialog(
-            initialName = conversationToRename,
-            onSave = { newName ->
-                viewModel.renameConversation(id, newName)
-                showRenameDialog = null
-            },
-            onDismiss = { showRenameDialog = null }
-        )
-    }
-
-    showDeleteConfirmDialog?.let { id ->
-        ChatDeleteConfirmDialog(
-            onConfirm = {
-                haptics.destructiveConfirmed()
-                viewModel.deleteConversation(id)
-                showDeleteConfirmDialog = null
-            },
-            onDismiss = { showDeleteConfirmDialog = null }
-        )
-    }
-
-    if (showPromptDialog) {
-        ChatSystemPromptDialog(viewModel = viewModel, onDismiss = { showPromptDialog = false })
-    }
-
-    if (showAdvancedDialog) {
-        ChatAdvancedSettingsDialog(viewModel = viewModel, onDismiss = { showAdvancedDialog = false })
-    }
-
-    if (showManualCompactDialog) {
-        ChatManualCompactDialog(
-            initialModel = compactModel ?: selectedModel,
-            initialPrompt = compactPrompt,
-            initialRetainCount = compactRetainCount,
-            enabledModels = enabledModels,
-            modelAliases = modelAliases,
-            isCompacting = isCompacting,
-            onCompact = { model, prompt, retainCount ->
-                showManualCompactDialog = false
-                scope.launch {
-                    val result = viewModel.compactContextManual(model, prompt, retainCount)
-                    if (result is com.newoether.agora.viewmodel.CompactResult.Failed) {
-                        viewModel.emitSnackbar(result.message)
-                    }
-                }
-            },
-            onDismiss = { showManualCompactDialog = false },
-        )
-    }
+    ChatAppDialogHost(
+        state = dialogState,
+        viewModel = viewModel,
+        haptics = haptics,
+        scope = scope,
+        compactModel = compactModel,
+        selectedModel = selectedModel,
+        compactPrompt = compactPrompt,
+        compactRetainCount = compactRetainCount,
+        enabledModels = enabledModels,
+        modelAliases = modelAliases,
+        isCompacting = isCompacting,
+    )
 }
