@@ -58,11 +58,9 @@ import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ContextBudget
-import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
 import com.newoether.agora.ui.chat.bottombar.ChatBottomBar
 import com.newoether.agora.ui.chat.bottombar.LoopStatusBackdrop
-import com.newoether.agora.ui.chat.bottombar.PendingAttachmentRemoval
 import com.newoether.agora.ui.components.AnimatedBlobBackground
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.TypewriterMode
@@ -81,15 +79,12 @@ import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.viewmodel.RegenerationTransitionStage
 import com.newoether.agora.viewmodel.SwitchingRequestKind
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 private val SCROLL_EASING = CubicBezierEasing(0.3f, 0.0f, 0.0f, 1.0f)
@@ -103,28 +98,6 @@ private const val CONVERSATION_RESOLVE_TIMEOUT_MS = 2_000L
 private const val SCROLL_SETTLE_TIMEOUT_MS = 8_000L
 private const val STABLE_LAYOUT_SAMPLES = 3
 private const val LAYOUT_SAMPLE_INTERVAL_MS = 32L
-private const val DRAFT_TEXT_DEBOUNCE_MS = 300L
-private const val DRAFT_PERSIST_RETRY_COUNT = 2
-private const val DRAFT_PERSIST_RETRY_DELAY_MS = 80L
-
-private data class ComposerDraftUiSnapshot(
-    val text: String,
-    val attachments: List<SelectedAttachment>,
-    val removals: List<PendingAttachmentRemoval>,
-)
-
-internal fun composerDraftWriteDelayMillis(
-    previousAttachments: List<SelectedAttachment>,
-    nextAttachments: List<SelectedAttachment>,
-    hasPendingRemovals: Boolean,
-): Long =
-    if (previousAttachments != nextAttachments || hasPendingRemovals) {
-        0L
-    } else {
-        DRAFT_TEXT_DEBOUNCE_MS
-    }
-
-
 @OptIn(
     ExperimentalMaterial3Api::class,
     ExperimentalFoundationApi::class,
@@ -894,118 +867,12 @@ fun ChatApp(
         }
     }
 
-    // One effect owns both loading and persistence for exactly one conversation. This prevents
-    // the former pair of independent effects from cancelling a debounced tail write during a
-    // fast switch. Attachment mutations bypass the text debounce; cancellation performs a final
-    // non-cancellable flush before the next conversation is allowed to bind the shared composer.
-    LaunchedEffect(currentConversationId) {
-        val draftId = currentConversationId
-        if (draftId == null) {
-            // New-chat screen: clear the composer so a draft from the previous conversation
-            // doesn't carry over.
-            viewModel.loadingDraft = true
-            try {
-                composer.bindDraftOwner(null)
-                textFieldState.edit { replace(0, length, "") }
-                composer.selectedAttachments = emptyList()
-            } finally {
-                viewModel.loadingDraft = false
-            }
-            return@LaunchedEffect
-        }
-
-        viewModel.loadingDraft = true
-        val loadedDraft = try {
-            viewModel.loadDraft(draftId)
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            DebugLog.e("AgoraUI", "Failed to load composer draft for $draftId", error)
-            com.newoether.agora.viewmodel.LoadedComposerDraft(
-                text = "",
-                attachments = emptyList(),
-                revision = 0L,
-            )
-        }
-        try {
-            composer.bindDraftOwner(draftId)
-            textFieldState.edit {
-                replace(0, length, loadedDraft.text)
-            }
-            composer.selectedAttachments = loadedDraft.attachments
-        } finally {
-            viewModel.loadingDraft = false
-        }
-
-        var revision = loadedDraft.revision
-        var persistedAttachments = loadedDraft.attachments
-
-        fun captureDraft(): ComposerDraftUiSnapshot = ComposerDraftUiSnapshot(
-            text = textFieldState.text.toString(),
-            attachments = composer.selectedAttachments,
-            removals = composer.attachmentRemovalsFor(draftId),
-        )
-        var latestSnapshot = captureDraft()
-
-        suspend fun persistSnapshot(snapshot: ComposerDraftUiSnapshot) {
-            var failureCount = 0
-            while (true) {
-                val result = viewModel.persistDraft(
-                    conversationId = draftId,
-                    expectedRevision = revision,
-                    text = snapshot.text,
-                    attachments = snapshot.attachments,
-                    explicitlyRemovedAttachments =
-                        snapshot.removals.map(PendingAttachmentRemoval::attachment),
-                )
-                revision = result.revision
-                if (result.succeeded) {
-                    if (result.matchesRequested) {
-                        persistedAttachments = snapshot.attachments
-                        composer.acknowledgeAttachmentRemovals(
-                            snapshot.removals
-                                .mapTo(linkedSetOf(), PendingAttachmentRemoval::id),
-                        )
-                    }
-                    // A revision mismatch means a newer owner (most commonly accepted Send)
-                    // already committed state. Never retry the stale snapshot over that state.
-                    return
-                }
-                if (failureCount >= DRAFT_PERSIST_RETRY_COUNT) return
-                failureCount += 1
-                delay(DRAFT_PERSIST_RETRY_DELAY_MS * failureCount)
-            }
-        }
-
-        try {
-            snapshotFlow { captureDraft() }
-                .distinctUntilChanged()
-                .collectLatest { snapshot ->
-                    // Retain a conversation-owned copy before any debounce suspension. A new
-                    // LaunchedEffect may bind the shared composer while this one is cancelling.
-                    latestSnapshot = snapshot
-                    val delayMillis = composerDraftWriteDelayMillis(
-                        previousAttachments = persistedAttachments,
-                        nextAttachments = snapshot.attachments,
-                        hasPendingRemovals = snapshot.removals.isNotEmpty(),
-                    )
-                    if (delayMillis > 0L) delay(delayMillis)
-                    persistSnapshot(snapshot)
-                }
-        } finally {
-            // LaunchedEffect cancellation normally remains cancellable. The final snapshot must
-            // outlive a navigation/recomposition cancellation so its conversation cannot retain
-            // stale text or attachment references.
-            val finalSnapshot = if (composer.isDraftOwner(draftId)) {
-                captureDraft()
-            } else {
-                latestSnapshot
-            }
-            withContext(NonCancellable) {
-                persistSnapshot(finalSnapshot)
-            }
-        }
-    }
+    ComposerDraftLifecycleEffect(
+        currentConversationId = currentConversationId,
+        viewModel = viewModel,
+        composer = composer,
+        textFieldState = textFieldState,
+    )
 
     val animatedScrollRequest by viewModel.animatedScrollRequest.collectAsState()
     LaunchedEffect(
