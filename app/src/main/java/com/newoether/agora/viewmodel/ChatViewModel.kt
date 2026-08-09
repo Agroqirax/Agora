@@ -98,10 +98,6 @@ class ChatViewModel(
      */
     private val convRepo: ConversationRepository = conversationRepository
     private val composerDrafts = ComposerDraftController(conversationRepository)
-    private val attachmentOrphanSweeper = AttachmentOrphanSweeper(
-        conversations = conversationRepository,
-        filesDirectory = application.filesDir,
-    )
     private val dataControl = DataControlController(
         conversations = conversationRepository,
         memory = memoryManager,
@@ -208,52 +204,40 @@ class ChatViewModel(
         settings = settings,
         scope = viewModelScope,
     )
+    private val startupMaintenance by lazy {
+        val attachmentSweeper = AttachmentOrphanSweeper(convRepo, application.filesDir)
+        StartupMaintenanceCoordinator(
+            settings = settings,
+            conversations = convRepo,
+            scope = viewModelScope,
+            currentVersion = ::getCurrentVersion,
+            checkUpdate = UpdateChecker::check,
+            onUpdateFound = { _updateDialogData.value = it },
+            isCaching = { ragManager.cachingProgress.value.containsKey(it) },
+            cacheMessages = ::cacheMessagesForModel,
+            cacheReminder = { notCached, total, action ->
+                SnackbarEvent(
+                    getApplication<Application>().getString(
+                        R.string.messages_not_cached,
+                        notCached,
+                        total,
+                    ),
+                    getApplication<Application>().getString(R.string.cache_now),
+                    action,
+                )
+            },
+            emitSnackbar = _snackbarMessage::emit,
+            sweepAttachments = attachmentSweeper::sweep,
+            onAttachmentSweepFailure = { error ->
+                DebugLog.d("ChatViewModel", "Attachment orphan sweep error", error)
+            },
+            startAutoBackup = dataControl::startAutoBackup,
+        )
+    }
 
     private fun startInitJobs() {
         proxySettingsSynchronizer.start()
-        // Auto-check for updates on launch (at most once per day)
-        viewModelScope.launch(Dispatchers.IO) {
-            if (settings.getAutoUpdateCheck()) {
-                val lastCheck = settings.getLastUpdateCheckTime()
-                val now = System.currentTimeMillis()
-                if (now - lastCheck > 24 * 60 * 60 * 1000L) {
-                    settings.saveLastUpdateCheckTime(now)
-                    val info = UpdateChecker.check(getCurrentVersion())
-                    if (info != null) {
-                        _updateDialogData.value = info
-                    }
-                }
-            }
-        }
-        viewModelScope.launch(Dispatchers.IO) {
-            val models = settings.getEmbeddingModels()
-            val activeId = settings.getActiveEmbeddingModelId()
-            val active = models.find { it.id == activeId } ?: return@launch
-            val total = convRepo.getIndexableMessageCount()
-            val cached = convRepo.getEmbeddingCountByModel(active.id)
-            val notCached = (total - cached).coerceAtLeast(0)
-            if (notCached > 0 && !ragManager.cachingProgress.value.containsKey(active.id)) {
-                _snackbarMessage.emit(SnackbarEvent(
-                    getApplication<Application>().getString(R.string.messages_not_cached, notCached, total),
-                    getApplication<Application>().getString(R.string.cache_now)
-                ) { cacheMessagesForModel(active.id) })
-            }
-        }
-        // Clean up orphaned embeddings (messages that no longer exist)
-        viewModelScope.launch(Dispatchers.IO) {
-            convRepo.deleteOrphanedEmbeddings()
-        }
-        // Sweep orphaned attachment files left in filesDir or run-inputs by a process death,
-        // interrupted Edit, or the v18 removal of v17's cloned Regenerate inputs. A file is junk
-        // only when nothing references it: a stored message's images, its attachmentMeta
-        // originalUri (the video-playback / file-open source), or any conversation draft's
-        // private copies. The 1h age guard means a copy racing this sweep is never deleted.
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                attachmentOrphanSweeper.sweep()
-            } catch (e: Exception) { DebugLog.d("ChatViewModel", "Attachment orphan sweep error", e) }
-        }
-        dataControl.startAutoBackup()
+        startupMaintenance.start()
         localModelCatalogSynchronizer.start()
         // Provider map / model-list sync jobs now run on the process-scoped registry
         // (launched once in AppContainer), so they survive ViewModel recreation.
