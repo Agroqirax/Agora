@@ -3,6 +3,8 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.model.ConversationCommand
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
@@ -79,5 +81,40 @@ class ConversationStateRegistryTest {
         assertFalse(
             state.runtimeTraceSnapshot().any { it.commandType == "StopRequested" },
         )
+    }
+
+    @Test
+    fun repeatedUiReplacementKeepsOnlyTheLatestPendingDrainHandoff() = runBlocking {
+        val registry = ConversationStateRegistry()
+        val firstOwner = Any()
+        val secondOwner = Any()
+        var firstDrainCount = 0
+        var secondDrainCount = 0
+        registry.attachUiCallbacks(firstOwner) { state ->
+            state.onQueueDrainRequested = { firstDrainCount += 1 }
+        }
+        val state = registry.getOrCreate("conversation")
+        val token = state.acquireForSend()!!
+        state.enqueueSend(QueuedSend("guidance", "text", "model", emptyList(), "run"))
+
+        registry.detachUiCallbacks(firstOwner)
+        assertEquals(1, registry.pendingDrainHandoffCount())
+
+        registry.attachUiCallbacks(secondOwner) { boundState ->
+            boundState.onQueueDrainRequested = { secondDrainCount += 1 }
+        }
+        assertEquals(0, registry.pendingDrainHandoffCount())
+        registry.detachUiCallbacks(secondOwner)
+        assertEquals(1, registry.pendingDrainHandoffCount())
+
+        assertTrue(state.endGeneration(token))
+        withTimeout(5_000) {
+            while (secondDrainCount == 0) yield()
+        }
+
+        assertEquals(0, firstDrainCount)
+        assertEquals(1, secondDrainCount)
+        assertEquals(0, registry.pendingDrainHandoffCount())
+        registry.remove("conversation")
     }
 }
