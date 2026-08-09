@@ -5,9 +5,13 @@ import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.util.DebugLog
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkObject
+import io.mockk.unmockkObject
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -91,6 +95,27 @@ class ConversationSelectionControllerTest {
         assertEquals(0, fixture.clearGraphCount)
         assertEquals(SwitchingRequestKind.CONVERSATION, fixture.controller
             .switchingScrollRequest.value?.kind)
+    }
+
+    @Test
+    fun missingTargetDoesNotReplaceTheCurrentConversation() = runTest {
+        mockkObject(DebugLog)
+        every { DebugLog.e(any(), any()) } returns Unit
+        try {
+            val fixture = Fixture(backgroundScope)
+            fixture.controller.publishAcceptedConversation("current")
+            coEvery { fixture.conversations.getConversation("missing") } returns null
+
+            fixture.controller.selectConversation("missing")
+            runCurrent()
+
+            assertEquals("current", fixture.controller.currentConversationId.value)
+            assertFalse(fixture.controller.isNewChatMode.value)
+            assertNull(fixture.controller.switchingScrollRequest.value)
+            coVerify(exactly = 1) { fixture.conversations.getConversation("missing") }
+        } finally {
+            unmockkObject(DebugLog)
+        }
     }
 
     @Test

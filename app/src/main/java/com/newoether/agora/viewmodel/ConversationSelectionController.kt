@@ -136,13 +136,16 @@ internal class ConversationSelectionController(
             try {
                 fadeDelay()
                 if (!switching.isCurrent(request.id)) return@launch
+                val conversation = conversations.getConversation(conversationId)
+                if (!switching.isCurrent(request.id)) return@launch
+                if (conversation == null) {
+                    failSwitchingScroll(request.id, "conversation disappeared")
+                    return@launch
+                }
                 _isNewChatMode.value = false
                 _currentConversationId.value = conversationId
-                val conversation = conversations.getConversation(conversationId)
-                if (switching.isCurrent(request.id)) {
-                    _activeModelOverride.value = conversation?.modelId
-                    switching.markConversationReady(request.id)
-                }
+                _activeModelOverride.value = conversation.modelId
+                switching.markConversationReady(request.id)
             } catch (error: CancellationException) {
                 if (switching.isCurrent(request.id)) {
                     failSwitchingScroll(request.id, "conversation switch cancelled")

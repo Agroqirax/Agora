@@ -275,7 +275,9 @@ internal class ChatScrollCoordinator internal constructor(
                     if (resolved == null) {
                         viewModel.failSwitchingScroll(request.id, "conversation did not resolve")
                         terminalized = true
-                        viewModel.createNewChat()
+                        // A projection deadline is not durable evidence that the selected
+                        // conversation disappeared. Release the cover and keep the selection;
+                        // Room can still publish a large graph after this UI-only timeout.
                         return@LaunchedEffect
                     }
                 } else if (currentConversationId != targetConversationId) {
