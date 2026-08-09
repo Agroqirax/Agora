@@ -72,3 +72,26 @@ internal class StreamingCheckpointWriter(
         writerJob.cancelAndJoin()
     }
 }
+
+/** Call-scoped owner of checkpoint throttling and the single durable writer lane. */
+internal class GenerationStreamingCheckpoints(
+    scope: CoroutineScope,
+    private val isLatestPersist: () -> Boolean,
+    persist: suspend (ChatMessage) -> Boolean,
+    onFailure: (Exception) -> Unit,
+) {
+    private val gate = StreamingCheckpointGate()
+    private val writer = StreamingCheckpointWriter(
+        scope = scope,
+        persist = { message -> isLatestPersist() && persist(message) },
+        onFailure = onFailure,
+    )
+
+    suspend fun persist(message: ChatMessage, force: Boolean = false) {
+        if (!isLatestPersist()) return
+        if (!gate.shouldCheckpoint(System.currentTimeMillis(), force)) return
+        if (force) writer.flush(message) else writer.enqueue(message)
+    }
+
+    suspend fun close() = writer.cancelAndJoin()
+}

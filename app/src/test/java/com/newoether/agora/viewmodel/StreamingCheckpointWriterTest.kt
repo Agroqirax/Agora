@@ -45,6 +45,27 @@ class StreamingCheckpointWriterTest {
         assertTrue(persisted.size <= 3)
     }
 
+    @Test
+    fun generationCheckpointOwnerRechecksLatestIdentityAtTheWriterBoundary() = runBlocking {
+        var latestChecks = 0
+        val persisted = mutableListOf<String>()
+        val checkpoints = GenerationStreamingCheckpoints(
+            scope = this,
+            isLatestPersist = { ++latestChecks == 1 },
+            persist = { message ->
+                persisted += message.text
+                true
+            },
+            onFailure = { throw AssertionError(it) },
+        )
+
+        checkpoints.persist(message("stale"), force = true)
+        checkpoints.close()
+
+        assertTrue(latestChecks >= 2)
+        assertTrue(persisted.isEmpty())
+    }
+
     private fun message(text: String) = ChatMessage(
         id = "model",
         text = text,

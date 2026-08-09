@@ -4,7 +4,6 @@ import android.app.Application
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.LlmProvider
 import com.newoether.agora.api.StreamEvent
-import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.data.MemoryManager
 
 import com.newoether.agora.data.local.MessageEntity
@@ -13,8 +12,6 @@ import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
-import com.newoether.agora.model.ProviderPassResult
-import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RequestTokenUsageAccumulator
 import com.newoether.agora.model.TokenUsage
@@ -68,17 +65,20 @@ class GenerationManager(
             onConfirmShellCommand?.invoke(server, summary) ?: true
         },
     )
-    private val providerPassRunner = ProviderPassRunner()
-    private val runFinalizationEffects = RunFinalizationEffectCoordinator()
+    private val providerPassEffects = ProviderPassEffectExecutor()
+    private val runFinalizationExecutor = GenerationRunFinalizationExecutor(conversations)
     private val apiPathBuilder = GenerationApiPathBuilder(conversations, toolExecutor)
+    private val completionEffects = GenerationCompletionEffectsExecutor(
+        isAppInForeground = { AppForegroundTracker.isInForeground },
+        releaseForegroundLease = AgoraForegroundService::release,
+        notify = { text, conversationId ->
+            AgoraForegroundService.showCompletionNotification(app, text, conversationId)
+        },
+    )
 
-    fun buildImageGenTool(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.imageDefinitions(ctx)
-
-    private val transcriptionManager = TranscriptionManager(providers, conversations, context)
-
-    private fun getProviderInstance(name: String): LlmProvider =
-        requireRegisteredProvider(providers, name)
+    private val transcriptionStage = GenerationTranscriptionStage(
+        TranscriptionManager(providers, conversations, context),
+    )
 
     // Image/video frame extraction lives in ImageProcessor (single source of truth).
     private val imageProcessor = ImageProcessor(app)
@@ -88,84 +88,11 @@ class GenerationManager(
         sliceConfigs: Map<String, VideoSliceConfig> = emptyMap()
     ): List<String> = imageProcessor.processImagesAndVideos(uris, sliceConfigs)
 
-    fun buildMemoryTools(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.memoryDefinitions(ctx)
-
-    fun buildWebSearchTool(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.webSearchDefinitions(ctx)
-
-    fun buildRagTool(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.ragDefinitions(ctx)
-
-    fun buildShellTool(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.shellDefinitions(ctx)
-
-    fun buildFileTool(ctx: GenerationContext): List<ToolDefinition> =
-        toolExecutor.fileDefinitions(ctx)
-
-
     /** Semantic message search — delegates to the RAG tool provider, which owns the
      *  embedding-search logic. Kept here as the entry point used by ChatViewModel's
      *  in-app conversation search. */
     suspend fun semanticSearch(query: String, limit: Int, ctx: GenerationContext): List<Pair<MessageEntity, Float>> =
         toolExecutor.semanticSearch(query, limit, ctx)
-
-    private fun applyUserTemplate(messages: List<ChatMessage>, prepend: String?, postpend: String?): List<ChatMessage> {
-        return applyUserTemplateToMessages(messages, prepend, postpend)
-    }
-
-    private fun appendMergedSegment(target: MutableList<MessageSegment>, segment: MessageSegment) {
-        val last = target.lastOrNull()
-        val canMerge = last != null &&
-            last.type == segment.type &&
-            (
-                segment.type == "answer" ||
-                    (
-                        segment.type == "thought" &&
-                            last.signature == null &&
-                            segment.signature == null
-                        )
-                )
-        if (canMerge) {
-            target[target.lastIndex] = last.copy(
-                content = last.content + segment.content,
-                signature = segment.signature ?: last.signature,
-                signatureProvider = segment.signatureProvider ?: last.signatureProvider,
-                durationMs = mergeDurationMs(last.durationMs, segment.durationMs)
-            )
-        } else {
-            target.add(segment)
-        }
-    }
-
-    private fun mergeDurationMs(first: Long?, second: Long?): Long? {
-        val merged = (first ?: 0L) + (second ?: 0L)
-        return merged.takeIf { it > 0L }
-    }
-
-    private fun buildLiveSegments(
-        flushed: List<MessageSegment>,
-        answerBuf: StringBuilder,
-        thoughtBuf: StringBuilder,
-        signature: String? = null,
-        signatureProvider: String? = null,
-        thoughtDurationMs: Long? = null
-    ): List<MessageSegment>? {
-        val result = flushed.toMutableList()
-        if (answerBuf.isNotEmpty()) {
-            appendMergedSegment(result, MessageSegment(type = "answer", content = answerBuf.toString()))
-        }
-        if (thoughtBuf.isNotEmpty()) {
-            appendMergedSegment(result, MessageSegment(
-                type = "thought",
-                content = thoughtBuf.toString(),
-                signature = signature,
-                signatureProvider = signatureProvider,
-                durationMs = thoughtDurationMs
-            ))
-        }
-        return result.ifEmpty { null }
-    }
 
     suspend fun generate(
         conversationId: String,
@@ -200,10 +127,7 @@ class GenerationManager(
         var totalTokenCount = 0
         var totalTokenUsage: TokenUsage? = null
         val tokenUsageAccumulator = RequestTokenUsageAccumulator()
-        var totalThoughtTimeMs: Long? = null
-        var cumulativeThoughtMs: Long = 0
-        var currentThoughtStartMs: Long? = null
-        var currentThoughtDurationMs: Long = 0
+        val thoughtTiming = GenerationThoughtTiming()
         var currentStatus = MessageStatus.SENDING
         var retryText: String? = null
         val segments = mutableListOf(MessageSegment(type = "answer"))
@@ -216,14 +140,12 @@ class GenerationManager(
         var parentId: String? = null
         var modelRunSequence = -1L
         var toolPath = emptyList<ChatMessage>()
-        var latestTranscriptionSnapshot: ChatMessage? = null
-        var transcriptionReturned = false
-        val checkpointGate = StreamingCheckpointGate()
-        val checkpointWriter = StreamingCheckpointWriter(
+        val transcriptionExecution = transcriptionStage.newExecution()
+        val checkpoints = GenerationStreamingCheckpoints(
             scope = CoroutineScope(currentCoroutineContext()),
+            isLatestPersist = isLatestPersist,
             persist = { message ->
-                isLatestPersist() &&
-                    conversations.updateStreamingMessageCheckpoint(message)
+                conversations.updateStreamingMessageCheckpoint(message)
             },
             onFailure = { error ->
                 DebugLog.e("AgoraVM", "Failed to persist streaming checkpoint", error)
@@ -231,22 +153,14 @@ class GenerationManager(
         )
         var terminalPersisted = false
 
-        suspend fun persistStreamingCheckpoint(message: ChatMessage, force: Boolean = false) {
-            if (!isLatestPersist()) return
-            val now = System.currentTimeMillis()
-            if (!checkpointGate.shouldCheckpoint(now, force)) return
-            if (force) checkpointWriter.flush(message) else checkpointWriter.enqueue(message)
-        }
-
         fun adoptIncompleteTranscriptionSnapshot() {
-            if (transcriptionReturned) return
-            latestTranscriptionSnapshot?.let { snapshot ->
+            transcriptionExecution.incompleteSnapshot()?.let { snapshot ->
                 totalText = snapshot.text
                 totalThoughts = snapshot.thoughts.orEmpty()
                 totalThoughtTitle = snapshot.thoughtTitle
                 totalTokenCount = snapshot.tokenCount
                 totalTokenUsage = snapshot.tokenUsage
-                totalThoughtTimeMs = snapshot.thoughtTimeMs
+                thoughtTiming.adoptTotalDuration(snapshot.thoughtTimeMs)
                 generatedImages.clear()
                 generatedImages.addAll(snapshot.images)
                 segments.clear()
@@ -254,24 +168,8 @@ class GenerationManager(
             }
         }
 
-        fun liveThoughtDurationMs(): Long? {
-            val liveElapsed = currentThoughtStartMs?.let { System.currentTimeMillis() - it } ?: 0L
-            return (currentThoughtDurationMs + liveElapsed).takeIf { it > 0L }
-        }
-
-        fun finishCurrentThoughtTiming() {
-            val startedAt = currentThoughtStartMs ?: return
-            val elapsed = System.currentTimeMillis() - startedAt
-            if (elapsed > 0L) {
-                cumulativeThoughtMs += elapsed
-                currentThoughtDurationMs += elapsed
-                totalThoughtTimeMs = cumulativeThoughtMs
-            }
-            currentThoughtStartMs = null
-        }
-
         try {
-            val provider = getProviderInstance(config.providerName)
+            val provider = requireRegisteredProvider(providers, config.providerName)
             onLoadingChange(true)
             // Slot ownership (generating flag / active set) is claimed synchronously by the
             // controller before this coroutine runs — GenerationManager no longer touches it.
@@ -297,38 +195,26 @@ class GenerationManager(
             }
 
             // Stage 1: Image Transcription
-            var transcriptionPerformed = false
-            if (ctx.imageTranscriptionEnabled && ctx.transcriptionModelId.isNotEmpty()) {
-                val targets = transcriptionManager.collectTargets(conversationId, parentId)
-                if (targets.isNotEmpty()) {
-                    val (transcriptionSegments, transcriptionError) = transcriptionManager.transcribe(
-                        targets, conversationId,
-                        ctx.transcriptionProviderName, ctx.transcriptionModelId,
-                        ctx.transcriptionApiKey, ctx.transcriptionBaseUrl,
-                        ctx.imageTranscriptionPrompt,
-                        generationJob, modelMessageId, startTime
-                    ) { snapshot ->
-                        latestTranscriptionSnapshot = snapshot
-                        onStreamUpdate(snapshot)
-                        persistStreamingCheckpoint(snapshot)
-                    }
-                    transcriptionReturned = true
-                    latestTranscriptionSnapshot?.let {
-                        // The last chunk may arrive inside the throttle window and then be followed
-                        // by a long provider pause, so seal the transcription stage explicitly.
-                        persistStreamingCheckpoint(it, force = true)
-                    }
-                    if (transcriptionSegments.isNotEmpty()) {
-                        segments.addAll(0, transcriptionSegments)
-                    }
-                    if (transcriptionError != null) {
-                        totalText = transcriptionError
-                        currentStatus = MessageStatus.ERROR
-                        transcriptionPerformed = true
-                    } else {
-                        transcriptionPerformed = true
-                    }
-                }
+            val transcription = transcriptionExecution.execute(
+                request = GenerationTranscriptionStageRequest(
+                    conversationId = conversationId,
+                    parentId = parentId,
+                    context = ctx,
+                    generationJob = generationJob,
+                    modelMessageId = modelMessageId,
+                    startTime = startTime,
+                ),
+                onSnapshot = { snapshot, forceCheckpoint ->
+                    onStreamUpdate(snapshot)
+                    checkpoints.persist(snapshot, forceCheckpoint)
+                },
+            )
+            if (transcription.segments.isNotEmpty()) {
+                segments.addAll(0, transcription.segments)
+            }
+            if (transcription.error != null) {
+                totalText = transcription.error
+                currentStatus = MessageStatus.ERROR
             }
 
             if (currentStatus != MessageStatus.ERROR) {
@@ -347,7 +233,11 @@ class GenerationManager(
                 "api_path_ready",
                 "messages=${currentPath.size} tools=${rawProviderConfig.tools.orEmpty().size}",
             )
-            val providerConfig = if (transcriptionPerformed) rawProviderConfig.copy(includeImages = false) else rawProviderConfig
+            val providerConfig = if (transcription.performed) {
+                rawProviderConfig.copy(includeImages = false)
+            } else {
+                rawProviderConfig
+            }
 
             var toolCallData: ToolCallData? = null
             var toolCallDataList: List<ToolCallData> = emptyList()
@@ -366,7 +256,7 @@ class GenerationManager(
                 thoughtTitle = totalThoughtTitle, tokenCount = totalTokenCount,
                 tokenUsage = totalTokenUsage,
                 status = currentStatus, participant = Participant.MODEL,
-                timestamp = startTime, thoughtTimeMs = totalThoughtTimeMs,
+                timestamp = startTime, thoughtTimeMs = thoughtTiming.totalDurationMs,
                 modelName = modelName, toolCall = toolCallData,
                 images = generatedImages.toList(),
                 segments = buildLiveSegments(
@@ -375,7 +265,7 @@ class GenerationManager(
                     currentThoughtBuf,
                     currentThoughtSignature,
                     currentThoughtSignatureProvider,
-                    liveThoughtDurationMs()
+                    thoughtTiming.liveDurationMs()
                 ),
                 retryText = retryText,
                 runId = runId,
@@ -389,7 +279,7 @@ class GenerationManager(
                     firstUiPublishPending = false
                     requestTrace?.mark("first_ui_publish")
                 }
-                persistStreamingCheckpoint(snapshot, force = forceCheckpoint)
+                checkpoints.persist(snapshot, force = forceCheckpoint)
             }
 
             fun flushAnswerSegment() {
@@ -400,20 +290,20 @@ class GenerationManager(
             }
 
             fun flushThoughtSegment() {
-                finishCurrentThoughtTiming()
+                thoughtTiming.finishCurrent()
                 if (currentThoughtBuf.isNotEmpty()) {
                     appendMergedSegment(segments, MessageSegment(
                         type = "thought",
                         content = currentThoughtBuf.toString(),
                         signature = currentThoughtSignature,
                         signatureProvider = currentThoughtSignatureProvider,
-                        durationMs = currentThoughtDurationMs.takeIf { it > 0L }
+                        durationMs = thoughtTiming.currentDurationMs.takeIf { it > 0L }
                     ))
                     currentThoughtBuf = StringBuilder()
                     currentThoughtSignature = null
                     currentThoughtSignatureProvider = null
                 }
-                currentThoughtDurationMs = 0L
+                thoughtTiming.resetCurrentDuration()
             }
 
             fun updateToolSegment(
@@ -626,9 +516,7 @@ class GenerationManager(
                         flushAnswerSegment()
                         currentStatus = MessageStatus.THINKING
                         retryText = null
-                        if (currentThoughtStartMs == null) {
-                            currentThoughtStartMs = System.currentTimeMillis()
-                        }
+                        thoughtTiming.ensureStarted()
                         if (totalThoughts.isEmpty()) totalThoughts = thinkingPlaceholder
                         if (event.thought.isNotEmpty()) {
                             currentThoughtBuf.append(event.thought)
@@ -647,9 +535,7 @@ class GenerationManager(
                         totalTokenCount = totalTokenUsage?.totalTokenCount ?: 0
                         if (totalText.isEmpty() && event.thoughtsTokenCount > 0) {
                             currentStatus = MessageStatus.THINKING
-                            if (currentThoughtStartMs == null) {
-                                currentThoughtStartMs = System.currentTimeMillis()
-                            }
+                            thoughtTiming.ensureStarted()
                             if (totalThoughts.isEmpty()) totalThoughts = thinkingPlaceholder
                         }
                     }
@@ -732,7 +618,6 @@ class GenerationManager(
                 onFirstEvent: (() -> Unit)? = null,
             ): ProviderPassOutcome {
                 tokenUsageAccumulator.beginRequest()
-                var firstEventPending = onFirstEvent != null
                 val proposedIdentity = RunEffectIdentity(
                     conversationId = conversationId,
                     ownerToken = ownerToken,
@@ -740,33 +625,23 @@ class GenerationManager(
                     pass = pass,
                     effectId = "provider-$pass-${providerRequestOrdinal++}",
                 )
-                val startEffect = callbacks.onProviderPassRequested(proposedIdentity)
-                    ?.takeIf { it.identity == proposedIdentity }
-                    ?: throw CancellationException(
-                        "Provider pass ${proposedIdentity.effectId} is no longer authorized",
-                    )
                 try {
-                    return providerPassRunner.run(
-                        identity = startEffect.identity,
-                        provider = provider,
-                        messages = messages,
-                        config = providerConfig,
-                    ) { event ->
-                        if (firstEventPending) {
-                            firstEventPending = false
-                            onFirstEvent?.invoke()
-                        }
-                        handleStreamEvent(event)
-                    }
-                } catch (error: Exception) {
-                    // ProviderPassRunner normally closes cancellation/error into an outcome. This
-                    // path covers a consumer failure before it can do so, ensuring the mailbox
-                    // never retains a phantom Running pass.
-                    callbacks.onProviderPassCompleted(
-                        startEffect.identity,
-                        ProviderPassResult.FAILED,
+                    return providerPassEffects.execute(
+                        request = ProviderPassExecutionRequest(
+                            proposedIdentity = proposedIdentity,
+                            provider = provider,
+                            messages = messages,
+                            config = providerConfig,
+                        ),
+                        callbacks = ProviderPassExecutionCallbacks(
+                            requestEffect = callbacks.onProviderPassRequested,
+                            returnConsumerFailure = { identity, result ->
+                                callbacks.onProviderPassCompleted(identity, result)
+                            },
+                            onFirstEvent = onFirstEvent,
+                            onEvent = ::handleStreamEvent,
+                        ),
                     )
-                    throw error
                 } finally {
                     tokenUsageAccumulator.finishRequest()
                     totalTokenUsage = tokenUsageAccumulator.snapshot()
@@ -775,14 +650,7 @@ class GenerationManager(
             }
 
             suspend fun acceptProviderPass(outcome: ProviderPassOutcome) {
-                val result = when (outcome) {
-                    is ProviderPassOutcome.CompletedText -> ProviderPassResult.COMPLETED_TEXT
-                    is ProviderPassOutcome.CompletedToolCalls ->
-                        ProviderPassResult.COMPLETED_TOOL_CALLS
-                    is ProviderPassOutcome.Truncated -> ProviderPassResult.TRUNCATED
-                    is ProviderPassOutcome.Failed -> ProviderPassResult.FAILED
-                    is ProviderPassOutcome.Cancelled -> ProviderPassResult.CANCELLED
-                }
+                val result = outcome.resultType()
                 callbacks.onProviderPassCompleted(outcome.identity, result)
                     ?.takeIf { it.identity == outcome.identity && it.result == result }
                     ?: throw CancellationException(
@@ -814,12 +682,16 @@ class GenerationManager(
                 projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages),
                 providerConfig.includeImages,
             )
-            val apiPath = applyUserTemplate(projectedPath, config.userPrepend, config.userPostpend)
+            val apiPath = applyUserTemplateToMessages(
+                projectedPath,
+                config.userPrepend,
+                config.userPostpend,
+            )
             requestTrace?.mark("provider_dispatch")
             acceptProviderPass(collectProviderRequest(apiPath) {
                 requestTrace?.mark("first_semantic_event")
             })
-            finishCurrentThoughtTiming()
+            thoughtTiming.finishCurrent()
             if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
             // Publish the final in-memory snapshot without waiting for another Room round trip.
             // The terminal transaction below persists this exact state after fencing the
@@ -961,9 +833,13 @@ class GenerationManager(
                     projectAssistantImagesToLatestUserMessage(toolPath, providerConfig.includeImages),
                     providerConfig.includeImages,
                 )
-                val apiToolPath = applyUserTemplate(projectedToolPath, config.userPrepend, config.userPostpend)
+                val apiToolPath = applyUserTemplateToMessages(
+                    projectedToolPath,
+                    config.userPrepend,
+                    config.userPostpend,
+                )
                 acceptProviderPass(collectProviderRequest(apiToolPath))
-                finishCurrentThoughtTiming()
+                thoughtTiming.finishCurrent()
                 if (currentStatus != MessageStatus.ERROR) executeAcceptedToolBatch()
                 // Publish the round's final UI state immediately. The next loop boundary or the
                 // terminal transaction supplies durability, so blocking here would only duplicate
@@ -1013,7 +889,7 @@ class GenerationManager(
             // this join, an older SENDING snapshot could finish after SUCCESS/STOPPED and revive
             // the exact UI state the terminal write just closed.
             withContext(NonCancellable) {
-                checkpointWriter.cancelAndJoin()
+                checkpoints.close()
             }
             // The mailbox, rather than a mutable token check in this finally block, chooses the
             // one terminal effect that may write Room. A concurrent Stop wins by entering
@@ -1025,35 +901,31 @@ class GenerationManager(
                 try {
                     val conversationExists = conversations.getConversation(conversationId) != null
                     if (conversationExists) {
-                        finishCurrentThoughtTiming()
-                        val finalSegments = buildLiveSegments(
-                            segments,
-                            currentAnswerBuf,
-                            currentThoughtBuf,
-                            currentThoughtSignature,
-                            currentThoughtSignatureProvider,
-                            currentThoughtDurationMs.takeIf { it > 0L },
-                        ) ?: segments.toList().ifEmpty { null }
+                        thoughtTiming.finishCurrent()
                         // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
                         // text column — together they can exceed the 2MB CursorWindow otherwise.
-                        val finalMessage = ChatMessage(
-                            id = modelMessageId,
+                        val finalMessage = GenerationFinalSnapshot(
+                            messageId = modelMessageId,
                             parentId = parentId,
-                            text = MessagePersistenceGuard.clipText(totalText),
+                            text = totalText,
                             images = generatedImages.toList(),
-                            thoughts = totalThoughts.ifBlank { null },
+                            thoughts = totalThoughts,
                             thoughtTitle = totalThoughtTitle,
                             tokenCount = totalTokenCount,
                             tokenUsage = totalTokenUsage,
                             status = currentStatus,
-                            participant = Participant.MODEL,
                             timestamp = startTime,
-                            thoughtTimeMs = totalThoughtTimeMs,
+                            thoughtTimeMs = thoughtTiming.totalDurationMs,
                             modelName = modelName,
-                            segments = finalSegments,
+                            flushedSegments = segments.toList(),
+                            answerBuffer = currentAnswerBuf.toString(),
+                            thoughtBuffer = currentThoughtBuf.toString(),
+                            thoughtSignature = currentThoughtSignature,
+                            thoughtSignatureProvider = currentThoughtSignatureProvider,
+                            thoughtDurationMs = thoughtTiming.currentDurationMs.takeIf { it > 0L },
                             runId = runId,
                             runSequence = modelRunSequence,
-                        )
+                        ).toMessage()
                         val terminalDisposition = generationTerminalDisposition(
                             messageStatus = currentStatus,
                             hasPendingGuidance = callbacks.hasQueuedSends(),
@@ -1065,46 +937,28 @@ class GenerationManager(
                             pass = pass,
                             effectId = "finalize-$runId-$pass",
                         )
-                        val finalizationEffect = callbacks.onRunFinalizationRequested(
-                            finalizationIdentity,
-                            terminalDisposition.runStatus,
-                            terminalDisposition.endReason,
-                            terminalDisposition.markConversationUnread,
-                        )?.takeIf { effect ->
-                            effect.identity == finalizationIdentity &&
-                                effect.status == terminalDisposition.runStatus &&
-                                effect.reason == terminalDisposition.endReason &&
-                                effect.markConversationUnread ==
-                                terminalDisposition.markConversationUnread
-                        }
-                        if (finalizationEffect != null) {
-                            val result = runFinalizationEffects.execute(finalizationEffect) { effect ->
-                                conversations.finishGeneration(
-                                    finalMessage,
-                                    effect.identity.conversationId,
-                                    effect.identity.runId,
-                                    effect.status,
-                                    effect.reason,
-                                    markConversationUnread = effect.markConversationUnread,
-                                )
-                            }
-                            val durableSuccess =
-                                result is RunFinalizationEffectCoordinator.Result.Succeeded
-                            terminalPersisted =
-                                callbacks.onRunFinalizationCompleted(
-                                    finalizationEffect.identity,
-                                    durableSuccess,
-                                ) && durableSuccess
+                        val outcome = runFinalizationExecutor.execute(
+                            request = GenerationRunFinalizationRequest(
+                                identity = finalizationIdentity,
+                                message = finalMessage,
+                                status = terminalDisposition.runStatus,
+                                reason = terminalDisposition.endReason,
+                                markConversationUnread = terminalDisposition.markConversationUnread,
+                            ),
+                            callbacks = callbacks.runFinalizationCallbacks(),
+                        )
+                        if (outcome is GenerationRunFinalizationOutcome.Settled) {
+                            terminalPersisted = outcome.terminalPersisted
                             // Keep the exact final snapshot as the overlay even when Room failed.
                             // It remains non-authoritative, but gives a later explicit Stop the
                             // complete content to persist instead of an older SENDING checkpoint.
                             onStreamUpdate(finalMessage)
                             if (!terminalPersisted) {
                                 val failure =
-                                    (result as? RunFinalizationEffectCoordinator.Result.Failed)
+                                    (outcome.durableResult as? RunFinalizationEffectCoordinator.Result.Failed)
                                         ?.lastFailure
                                 val message =
-                                    "Terminal generation effect failed after ${result.attempts} attempts: " +
+                                    "Terminal generation effect failed after ${outcome.durableResult.attempts} attempts: " +
                                         "message=$modelMessageId run=$runId status=$currentStatus"
                                 if (failure != null) DebugLog.e("AgoraVM", message, failure)
                                 else DebugLog.e("AgoraVM", message)
@@ -1115,43 +969,18 @@ class GenerationManager(
                     DebugLog.e("AgoraVM", "Failed to execute terminal generation effect", e)
                 }
             }
-            // Movable tail (cancellable, no suspension points): runs to completion even
-            // on cancellation because none of these suspend. Kept OUT of NonCancellable
-            // so a heavy RAG-indexing callback or notification can't pin the generation.
-            // RAG indexing hook — fire-and-forget; the persist above already committed.
-            try {
-                if (terminalPersisted && totalText.isNotBlank()) {
-                    onMessagePersisted?.invoke(modelMessageId, totalText)
-                }
-            } catch (_: Exception) { /* indexing must never break terminal cleanup */ }
-            // Terminal UI cleanup. Token-gated at the sink (in ChatViewModel), so they
-            // no-op when this generation was stopped/superseded — only the still-current
-            // generation resets the loading/streaming/generating-id UI state.
-            if (terminalPersisted) {
-                onStreamClear()
-                onLoadingChange(false)
-            }
-            // The installed Job's completion hook reports CoroutineSettled through the mailbox;
-            // only its accepted release clears the active set and requests queue drain.
-            if (foregroundLeaseAcquired) {
-                AgoraForegroundService.release(modelMessageId)
-            }
-            // A queued user intervention ends this provider pass but not the generation cycle.
-            // The controller immediately drains that queue into the next pass. Notify only after
-            // the final pass, otherwise accepting a steering message produces a false "response
-            // ready" notification while Agora is still generating its actual answer.
-            val generationCycleComplete =
-                currentStatus == MessageStatus.SUCCESS &&
-                    !interruptedForQueuedSend &&
-                    !callbacks.hasQueuedSends()
-            if (
-                terminalPersisted &&
-                !AppForegroundTracker.isInForeground &&
-                generationCycleComplete &&
-                totalText.isNotBlank()
-            ) {
-                AgoraForegroundService.showCompletionNotification(app, totalText, conversationId)
-            }
+            completionEffects.execute(
+                request = GenerationCompletionEffectsRequest(
+                    terminalPersisted = terminalPersisted,
+                    status = currentStatus,
+                    interruptedForQueuedSend = interruptedForQueuedSend,
+                    text = totalText,
+                    conversationId = conversationId,
+                    modelMessageId = modelMessageId,
+                    foregroundLeaseAcquired = foregroundLeaseAcquired,
+                ),
+                callbacks = callbacks.completionEffectsCallbacks(onMessagePersisted),
+            )
         }
     }
 }
