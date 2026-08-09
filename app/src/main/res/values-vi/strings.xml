@@ -1014,6 +1014,9 @@
     <string name="tool_background_job_running">Tác vụ nền %1$s đang chạy</string>
     <string name="tool_execution_stopped">Đã dừng thực thi công cụ</string>
     <string name="tool_exit_code">Thoát %1$d</string>
+    <string name="tool_exit">Thoát</string>
+    <string name="tool_shell_returned_code">Trả về %1$d</string>
+    <string name="tool_shell_returned">Trả về</string>
     <string name="tool_found_no_matches">Không tìm thấy kết quả phù hợp</string>
     <string name="tool_line_count">%1$d dòng</string>
     <string name="tool_listing_shell_jobs">Đang liệt kê tác vụ shell…</string>
@@ -1060,7 +1063,7 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
-    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>

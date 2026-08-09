@@ -224,7 +224,7 @@ class ToolPresentationResolverTest {
             ),
         )
 
-        assertEquals(ToolPresentationState.SUCCEEDED, presentation.state)
+        assertEquals(ToolPresentationState.COMPLETED, presentation.state)
         assertEquals(0, presentation.exitCode)
     }
 
@@ -273,6 +273,74 @@ class ToolPresentationResolverTest {
 
         assertEquals("actual", presentation.device)
         assertEquals("done", shellOutputText(presentation))
+    }
+
+    @Test
+    fun durableForegroundShellUnwrapsTerminalExitAndOutput() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolArgs = """{"command":"printf done"}""",
+                toolResult = """
+                    {
+                      "type":"execute_shell_command",
+                      "server":"conch",
+                      "job_id":"job-1",
+                      "result":{"state":"succeeded","exit_code":0,"output":"done"}
+                    }
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals(ToolPresentationState.COMPLETED, presentation.state)
+        assertEquals(ShellPresentationStatus.Exit(0), shellPresentationStatus(presentation))
+        assertEquals(0, presentation.exitCode)
+        assertEquals("done", shellOutputText(presentation))
+        assertEquals("conch", presentation.device)
+        assertEquals("job-1", presentation.jobId)
+    }
+
+    @Test
+    fun shellPresentationHasOnlyExecutingOrExitStates() {
+        val running = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = "partial",
+            ),
+        )
+        val terminalWithoutCode = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolResult = """{"type":"execute_shell_command","output":"done"}""",
+            ),
+        )
+
+        assertEquals(ShellPresentationStatus.Executing, shellPresentationStatus(running))
+        assertEquals(
+            ShellPresentationStatus.Exit(code = null),
+            shellPresentationStatus(terminalWithoutCode),
+        )
+        assertEquals("done", shellOutputText(terminalWithoutCode))
+    }
+
+    @Test
+    fun shellOutputFallsBackToSeparateStdoutAndStderr() {
+        val presentation = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolResult = """
+                    {"type":"execute_shell_command","exit_code":2,"stdout":"out","stderr":"err"}
+                """.trimIndent(),
+            ),
+        )
+
+        assertEquals("out\nerr", shellOutputText(presentation))
+        assertEquals(ShellPresentationStatus.Exit(2), shellPresentationStatus(presentation))
     }
 
     @Test
@@ -339,6 +407,6 @@ class ToolPresentationResolverTest {
         assertEquals("Human summary", presentation.rawTextResult)
         assertEquals("""{"value":7}""", presentation.rawStructuredResult)
         assertEquals("Filesystem", presentation.device)
-        assertEquals(ToolPresentationState.SUCCEEDED, presentation.state)
+        assertEquals(ToolPresentationState.COMPLETED, presentation.state)
     }
 }

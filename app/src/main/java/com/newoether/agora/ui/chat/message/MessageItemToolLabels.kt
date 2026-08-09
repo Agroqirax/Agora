@@ -105,6 +105,9 @@ internal fun toolSummary(segment: MessageSegment): String {
 
 @Composable
 internal fun toolSummary(presentation: ToolPresentation): String {
+    if (presentation.kind == ToolKind.SHELL_EXECUTE) {
+        return shellToolSummary(presentation)
+    }
     val subject = presentation.subject
     return when (presentation.state) {
         ToolPresentationState.FAILED -> when {
@@ -129,7 +132,7 @@ internal fun toolSummary(presentation: ToolPresentation): String {
         ToolPresentationState.CALLING,
         ToolPresentationState.RUNNING -> runningSummary(presentation, subject)
         ToolPresentationState.EMPTY -> emptySummary(presentation, subject)
-        ToolPresentationState.SUCCEEDED -> completedSummary(presentation, subject)
+        ToolPresentationState.COMPLETED -> completedSummary(presentation, subject)
     }
 }
 
@@ -250,6 +253,40 @@ private fun runningSummary(
     ToolKind.UNKNOWN -> stringResource(R.string.tool_calling_ellipsis)
 }
 
+internal sealed interface ShellPresentationStatus {
+    data object Executing : ShellPresentationStatus
+    data class Exit(val code: Int?) : ShellPresentationStatus
+}
+
+internal fun shellPresentationStatus(presentation: ToolPresentation): ShellPresentationStatus =
+    if (presentation.isActive) {
+        ShellPresentationStatus.Executing
+    } else {
+        ShellPresentationStatus.Exit(presentation.exitCode)
+    }
+
+@Composable
+internal fun shellToolSummary(presentation: ToolPresentation): String =
+    when (val status = shellPresentationStatus(presentation)) {
+        ShellPresentationStatus.Executing -> optionalSubjectSummary(
+            singleLineShellCommand(presentation.subject),
+            R.string.tool_executing_shell,
+            R.string.tool_progress_executing,
+        )
+        is ShellPresentationStatus.Exit -> status.code?.let { code ->
+            stringResource(R.string.tool_shell_returned_code, code)
+        } ?: stringResource(R.string.tool_shell_returned)
+    }
+
+@Composable
+internal fun shellExecutionSummary(presentation: ToolPresentation): String =
+    when (val status = shellPresentationStatus(presentation)) {
+        ShellPresentationStatus.Executing -> stringResource(R.string.tool_state_executing)
+        is ShellPresentationStatus.Exit -> status.code?.let { code ->
+            stringResource(R.string.tool_exit_code, code)
+        } ?: stringResource(R.string.tool_exit)
+    }
+
 internal fun singleLineShellCommand(
     command: String?,
     maxCharacters: Int = 120,
@@ -284,7 +321,7 @@ private fun emptySummary(
     )
     ToolKind.CONVERSATION_LIST -> stringResource(R.string.tool_listed_no_conversations)
     ToolKind.SHELL_LIST -> stringResource(R.string.tool_shell_list_done)
-    ToolKind.SHELL_EXECUTE -> stringResource(R.string.tool_shell_execution_completed)
+    ToolKind.SHELL_EXECUTE -> shellExecutionSummary(presentation)
     ToolKind.SHELL_JOB_LIST -> stringResource(R.string.tool_no_shell_jobs)
     ToolKind.FILE_READ -> optionalSubjectSummary(
         subject,
@@ -362,14 +399,7 @@ private fun completedSummary(
         R.string.tool_shell_list_count,
         presentation.count ?: 0,
     )
-    ToolKind.SHELL_EXECUTE -> when (presentation.exitCode) {
-        0 -> stringResource(R.string.tool_shell_executed_successfully)
-        null -> stringResource(R.string.tool_shell_execution_completed)
-        else -> stringResource(
-            R.string.tool_shell_returned_exit_code,
-            presentation.exitCode,
-        )
-    }
+    ToolKind.SHELL_EXECUTE -> shellExecutionSummary(presentation)
     ToolKind.SHELL_JOB_LIST -> stringResource(
         R.string.tool_shell_job_count,
         presentation.count ?: 0,

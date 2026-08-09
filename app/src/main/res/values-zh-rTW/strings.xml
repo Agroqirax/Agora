@@ -657,6 +657,9 @@
     <string name="tool_found_no_matches">找不到符合項目</string>
     <string name="file_path_unknown">未知檔案</string>
     <string name="tool_exit_code">結束碼 %1$d</string>
+    <string name="tool_exit">結束</string>
+    <string name="tool_shell_returned_code">傳回 %1$d</string>
+    <string name="tool_shell_returned">傳回</string>
     <string name="tool_line_count">%1$d 行</string>
     <string name="tool_web_result">結果 %1$d</string>
     <!-- New tool display names (P0) -->
@@ -1062,7 +1065,7 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
-    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">正在壓縮上下文…</string>
     <string name="context_compact_select_available_model">請選擇可用模型</string>

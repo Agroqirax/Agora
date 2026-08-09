@@ -1008,6 +1008,9 @@
     <string name="tool_background_job_running">La tarea en segundo plano %1$s está en ejecución</string>
     <string name="tool_execution_stopped">Ejecución de herramienta detenida</string>
     <string name="tool_exit_code">Salida %1$d</string>
+    <string name="tool_exit">Salida</string>
+    <string name="tool_shell_returned_code">Devuelto %1$d</string>
+    <string name="tool_shell_returned">Devuelto</string>
     <string name="tool_found_no_matches">No se encontraron coincidencias</string>
     <string name="tool_line_count">%1$d líneas</string>
     <string name="tool_listing_shell_jobs">Listando tareas de shell…</string>
@@ -1054,7 +1057,7 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
-    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>

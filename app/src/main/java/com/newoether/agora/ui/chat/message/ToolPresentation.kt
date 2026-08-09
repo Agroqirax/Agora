@@ -47,7 +47,7 @@ internal enum class ToolKind {
 internal enum class ToolPresentationState {
     CALLING,
     RUNNING,
-    SUCCEEDED,
+    COMPLETED,
     EMPTY,
     FAILED,
     STOPPED,
@@ -90,9 +90,10 @@ internal object ToolPresentationResolver {
         val resultElement = parseElement(
             segment.toolStructuredResult ?: segment.toolResult,
         )
-        val resultObject = resultElement as? JsonObject
-        val errorCode = resultObject.string("error")
-        val exitCode = resultObject.int("exit_code")
+        val resultEnvelope = resultElement as? JsonObject
+        val resultObject = effectiveResultObject(kind, resultEnvelope)
+        val errorCode = resultObject.string("error") ?: resultEnvelope.string("error")
+        val exitCode = resultObject.int("exit_code") ?: resultEnvelope.int("exit_code")
         val explicitState = stateFromWire(segment.toolState)
         // Until a result arrives, arguments can still be a JSON prefix and can also contain a very
         // large file payload. Never strictly parse that growing buffer on the UI thread. The
@@ -102,9 +103,9 @@ internal object ToolPresentationResolver {
             segment.toolResult == null && segment.toolStructuredResult == null
         val args = if (argumentsAwaitingResult) null else parseObject(segment.toolArgs)
         val streamingHints = StreamingToolArgumentHintResolver.resolve(kind, segment.toolArgs)
-        val background = resultObject.boolean("background") == true ||
+        val background = resultEnvelope.boolean("background") == true ||
             resultObject.string("state").equals("running", ignoreCase = true) &&
-            resultObject.string("job_id") != null
+            (resultObject.string("job_id") ?: resultEnvelope.string("job_id")) != null
         val nonZeroShellExit = kind == ToolKind.SHELL_EXECUTE &&
             exitCode != null &&
             exitCode != 0
@@ -134,32 +135,45 @@ internal object ToolPresentationResolver {
             background -> ToolPresentationState.BACKGROUND_RUNNING
             explicitState == ToolPresentationState.STOPPED -> ToolPresentationState.STOPPED
             nonZeroShellExit -> ToolPresentationState.FAILED
-            else -> explicitState ?: ToolPresentationState.SUCCEEDED
+            else -> explicitState ?: ToolPresentationState.COMPLETED
         }
         return ToolPresentation(
             toolName = toolName,
             kind = kind,
             state = state,
             arguments = args,
-            result = resultElement,
+            result = resultObject ?: resultElement,
             rawArguments = segment.toolArgs,
             rawResult = segment.toolResult,
             rawTextResult = segment.toolResultText,
             rawStructuredResult = segment.toolStructuredResult,
             liveOutput = segment.toolProgress,
             subject = normalizeToolSummarySubject(
-                subject(kind, args, resultObject) ?: streamingHints.subject,
+                subject(kind, args, resultObject)
+                    ?: subject(kind, args, resultEnvelope)
+                    ?: streamingHints.subject,
             ),
-            device = resultObject.string("server")
+            device = resultEnvelope.string("server")
+                ?: resultObject.string("server")
                 ?: segment.toolTarget
                 ?: args.string("server")
                 ?: streamingHints.server,
             count = count,
             errorMessage = error,
             exitCode = exitCode,
-            jobId = resultObject.string("job_id"),
+            jobId = resultEnvelope.string("job_id") ?: resultObject.string("job_id"),
             outputLength = resultObject.string("output")?.length,
         )
+    }
+
+    /** Durable foreground Shell results wrap the terminal job payload in a `result` envelope. */
+    private fun effectiveResultObject(
+        kind: ToolKind,
+        envelope: JsonObject?,
+    ): JsonObject? {
+        if (envelope == null) return null
+        if (kind != ToolKind.SHELL_EXECUTE && kind != ToolKind.SHELL_JOB_GET) return envelope
+        return envelope["result"] as? JsonObject ?: envelope
     }
 
     private fun kindFor(name: String): ToolKind = when (name) {
@@ -197,7 +211,7 @@ internal object ToolPresentationResolver {
     private fun stateFromWire(value: String?): ToolPresentationState? = when (value) {
         ToolExecutionStates.CALLING -> ToolPresentationState.CALLING
         ToolExecutionStates.RUNNING -> ToolPresentationState.RUNNING
-        ToolExecutionStates.SUCCEEDED -> ToolPresentationState.SUCCEEDED
+        ToolExecutionStates.SUCCEEDED -> ToolPresentationState.COMPLETED
         ToolExecutionStates.EMPTY -> ToolPresentationState.EMPTY
         ToolExecutionStates.FAILED -> ToolPresentationState.FAILED
         ToolExecutionStates.STOPPED -> ToolPresentationState.STOPPED

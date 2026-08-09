@@ -1008,6 +1008,9 @@
     <string name="tool_background_job_running">Фоновая задача %1$s выполняется</string>
     <string name="tool_execution_stopped">Выполнение инструмента остановлено</string>
     <string name="tool_exit_code">Код выхода %1$d</string>
+    <string name="tool_exit">Выход</string>
+    <string name="tool_shell_returned_code">Возврат %1$d</string>
+    <string name="tool_shell_returned">Возврат</string>
     <string name="tool_found_no_matches">Совпадений не найдено</string>
     <string name="tool_line_count">%1$d строк</string>
     <string name="tool_listing_shell_jobs">Получение списка задач оболочки…</string>
@@ -1054,7 +1057,7 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
-    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>

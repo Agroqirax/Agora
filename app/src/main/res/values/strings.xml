@@ -104,6 +104,9 @@
     <string name="tool_found_no_matches">No matches found</string>
     <string name="file_path_unknown">Unknown file</string>
     <string name="tool_exit_code">Exit %1$d</string>
+    <string name="tool_exit">Exit</string>
+    <string name="tool_shell_returned_code">Returned %1$d</string>
+    <string name="tool_shell_returned">Returned</string>
     <string name="tool_line_count">%1$d lines</string>
     <string name="tool_web_result">Result %1$d</string>
     <!-- New tool display names (P0) -->
@@ -1055,7 +1058,7 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
-    <string name="context_compact_retain">Recent logical messages to keep</string>
+    <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>

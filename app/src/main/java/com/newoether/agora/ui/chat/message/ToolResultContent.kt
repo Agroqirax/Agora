@@ -120,7 +120,7 @@ internal fun ToolDetailContent(
             stringResource(R.string.tool_execution_stopped),
         )
         ToolPresentationState.EMPTY,
-        ToolPresentationState.SUCCEEDED -> ToolCompletedContent(presentation)
+        ToolPresentationState.COMPLETED -> ToolCompletedContent(presentation)
     }
 }
 
@@ -377,7 +377,7 @@ private fun FileGrepResult(presentation: ToolPresentation) {
                             color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         ) {
                             Text(
-                                text = match.line?.toString() ?: "–",
+                                text = match.line?.toString() ?: "\u2014",
                                 style = ChatType.meta,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -432,29 +432,17 @@ private fun ShellResult(
 
 @Composable
 private fun shellStatusLabel(presentation: ToolPresentation): String {
-    val resultState = (presentation.result as? JsonObject)
-        .string("state")
-        ?.replaceFirstChar { it.uppercaseChar() }
-    return when (presentation.state) {
-        ToolPresentationState.CALLING,
-        ToolPresentationState.RUNNING -> stringResource(R.string.tool_state_executing)
-        ToolPresentationState.BACKGROUND_RUNNING ->
-            resultState ?: stringResource(R.string.tool_state_running)
-        ToolPresentationState.FAILED -> presentation.exitCode?.let {
-            stringResource(R.string.tool_exit_code, it)
-        } ?: stringResource(R.string.tool_state_failed)
-        ToolPresentationState.STOPPED -> stringResource(R.string.tool_state_stopped)
-        ToolPresentationState.EMPTY,
-        ToolPresentationState.SUCCEEDED -> presentation.exitCode?.let {
-            stringResource(R.string.tool_exit_code, it)
-        } ?: resultState ?: stringResource(R.string.tool_state_succeeded)
-    }
+    return shellExecutionSummary(presentation)
 }
 
 internal fun shellOutputText(presentation: ToolPresentation): String? {
-    val completedOutput = (presentation.result as? JsonObject)
-        .string("output")
-        ?.takeIf { it.isNotBlank() }
+    val result = presentation.result as? JsonObject
+    val completedOutput = result.string("output")
+        ?.takeIf(String::isNotBlank)
+        ?: listOfNotNull(
+            result.string("stdout")?.takeIf(String::isNotBlank),
+            result.string("stderr")?.takeIf(String::isNotBlank),
+        ).takeIf(List<String>::isNotEmpty)?.joinToString("\n")
     if (completedOutput != null) return completedOutput
 
     return presentation.liveOutput
