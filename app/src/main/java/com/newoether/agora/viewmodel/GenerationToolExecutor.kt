@@ -44,6 +44,10 @@ internal data class AuthorizedToolResult(
     val result: ToolExecutionResult,
 )
 
+internal interface GenerationToolPresentationSource {
+    fun presentationMetadata(name: String): ToolPresentationMetadata?
+}
+
 /**
  * Executes one tool call from an already mailbox-authorized batch.
  *
@@ -55,7 +59,7 @@ internal data class AuthorizedToolResult(
 internal class GenerationToolExecutor private constructor(
     private val providers: List<ToolProvider>,
     private val imageGenProvider: ImageGenToolProvider?,
-) : GenerationToolDefinitionSource {
+) : GenerationToolDefinitionSource, GenerationToolPresentationSource {
     companion object {
         private val FILE_TOOL_NAMES = setOf(
             "file_read",
@@ -122,7 +126,7 @@ internal class GenerationToolExecutor private constructor(
             .flatMap { it.definitions(context) }
             .filter { it.function.name in FILE_TOOL_NAMES }
 
-    fun presentationMetadata(name: String): ToolPresentationMetadata? {
+    override fun presentationMetadata(name: String): ToolPresentationMetadata? {
         if (name.isBlank()) return null
         for (provider in providers) {
             provider.presentationMetadata(name)?.let { return it }

@@ -8,7 +8,6 @@ import com.newoether.agora.data.MemoryManager
 
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessagePersistenceGuard
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -21,9 +20,7 @@ import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
 import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
 import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
-import com.newoether.agora.util.Constants
 import com.newoether.agora.tool.ToolProvider
-import com.newoether.agora.tool.ToolExecutionEvent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +29,6 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import java.io.File
-import java.util.UUID
 
 private const val STREAM_UI_UPDATE_INTERVAL_MS = 50L
 private const val TOOL_UI_UPDATE_INTERVAL_MS = 50L
@@ -66,6 +59,8 @@ class GenerationManager(
         },
     )
     private val providerPassEffects = ProviderPassEffectExecutor()
+    private val toolBatchEffects = GenerationToolBatchEffectExecutor(toolExecutor)
+    private val toolRoundBuilder = GenerationToolRoundBuilder()
     private val runFinalizationExecutor = GenerationRunFinalizationExecutor(conversations)
     private val apiPathBuilder = GenerationApiPathBuilder(conversations, toolExecutor)
     private val completionEffects = GenerationCompletionEffectsExecutor(
@@ -130,8 +125,7 @@ class GenerationManager(
         val thoughtTiming = GenerationThoughtTiming()
         var currentStatus = MessageStatus.SENDING
         var retryText: String? = null
-        val segments = mutableListOf(MessageSegment(type = "answer"))
-        val liveToolSegmentIndices = mutableMapOf<String, Int>()
+        val toolOverlay = GenerationToolOverlay(toolExecutor, config.providerName)
         val generatedImages = mutableListOf<String>()
         var currentAnswerBuf = StringBuilder()
         var currentThoughtBuf = StringBuilder()
@@ -163,8 +157,7 @@ class GenerationManager(
                 thoughtTiming.adoptTotalDuration(snapshot.thoughtTimeMs)
                 generatedImages.clear()
                 generatedImages.addAll(snapshot.images)
-                segments.clear()
-                segments.addAll(snapshot.segments.orEmpty())
+                toolOverlay.replaceAll(snapshot.segments.orEmpty())
             }
         }
 
@@ -210,7 +203,7 @@ class GenerationManager(
                 },
             )
             if (transcription.segments.isNotEmpty()) {
-                segments.addAll(0, transcription.segments)
+                toolOverlay.prependAll(transcription.segments)
             }
             if (transcription.error != null) {
                 totalText = transcription.error
@@ -260,7 +253,7 @@ class GenerationManager(
                 modelName = modelName, toolCall = toolCallData,
                 images = generatedImages.toList(),
                 segments = buildLiveSegments(
-                    segments,
+                    toolOverlay.snapshot(),
                     currentAnswerBuf,
                     currentThoughtBuf,
                     currentThoughtSignature,
@@ -284,7 +277,9 @@ class GenerationManager(
 
             fun flushAnswerSegment() {
                 if (currentAnswerBuf.isNotEmpty()) {
-                    appendMergedSegment(segments, MessageSegment(type = "answer", content = currentAnswerBuf.toString()))
+                    toolOverlay.append(
+                        MessageSegment(type = "answer", content = currentAnswerBuf.toString()),
+                    )
                     currentAnswerBuf = StringBuilder()
                 }
             }
@@ -292,27 +287,20 @@ class GenerationManager(
             fun flushThoughtSegment() {
                 thoughtTiming.finishCurrent()
                 if (currentThoughtBuf.isNotEmpty()) {
-                    appendMergedSegment(segments, MessageSegment(
-                        type = "thought",
-                        content = currentThoughtBuf.toString(),
-                        signature = currentThoughtSignature,
-                        signatureProvider = currentThoughtSignatureProvider,
-                        durationMs = thoughtTiming.currentDurationMs.takeIf { it > 0L }
-                    ))
+                    toolOverlay.append(
+                        MessageSegment(
+                            type = "thought",
+                            content = currentThoughtBuf.toString(),
+                            signature = currentThoughtSignature,
+                            signatureProvider = currentThoughtSignatureProvider,
+                            durationMs = thoughtTiming.currentDurationMs.takeIf { it > 0L },
+                        ),
+                    )
                     currentThoughtBuf = StringBuilder()
                     currentThoughtSignature = null
                     currentThoughtSignatureProvider = null
                 }
                 thoughtTiming.resetCurrentDuration()
-            }
-
-            fun updateToolSegment(
-                toolCallId: String,
-                update: (MessageSegment) -> MessageSegment,
-            ): MessageSegment? {
-                val index = segments.indexOfLast { it.toolCallId == toolCallId }
-                if (index < 0) return null
-                return update(segments[index]).also { segments[index] = it }
             }
 
             fun upsertStreamingToolSegment(
@@ -321,101 +309,12 @@ class GenerationManager(
                 name: String,
                 arguments: String,
                 signature: String?,
-            ): Pair<Int, Boolean> {
-                val existingIndex = liveToolSegmentIndices[streamKey]
-                if (existingIndex != null) {
-                    val existing = segments[existingIndex]
-                    val resolvedName = name.ifBlank { existing.toolName.orEmpty() }
-                    val metadata = toolExecutor.presentationMetadata(resolvedName)
-                    segments[existingIndex] = existing.copy(
-                        toolName = resolvedName.ifBlank { existing.toolName },
-                        toolArgs = arguments,
-                        toolCallId = toolCallId ?: existing.toolCallId ?: streamKey,
-                        signature = signature ?: existing.signature,
-                        signatureProvider = provider.name.takeIf {
-                            signature != null || existing.signature != null
-                        },
-                        toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
-                        toolTarget = metadata?.target ?: existing.toolTarget,
-                        toolDisplayName = metadata?.displayName ?: existing.toolDisplayName,
-                    )
-                    return existingIndex to false
+            ): Boolean {
+                if (!toolOverlay.hasStream(streamKey)) {
+                    flushAnswerSegment()
+                    flushThoughtSegment()
                 }
-
-                flushAnswerSegment()
-                flushThoughtSegment()
-                val index = segments.size
-                val metadata = toolExecutor.presentationMetadata(name)
-                segments += MessageSegment(
-                    type = "tool",
-                    toolName = name.ifBlank { null },
-                    toolArgs = arguments,
-                    toolResult = null,
-                    toolCallId = toolCallId ?: streamKey,
-                    signature = signature,
-                    signatureProvider = provider.name.takeIf { signature != null },
-                    toolState = com.newoether.agora.model.ToolExecutionStates.CALLING,
-                    toolTarget = metadata?.target,
-                    toolDisplayName = metadata?.displayName,
-                )
-                liveToolSegmentIndices[streamKey] = index
-                return index to true
-            }
-
-            suspend fun executeToolWithLiveSegment(
-                batchIdentity: RunEffectIdentity,
-                name: String,
-                arguments: String,
-                toolCallId: String,
-            ): AuthorizedToolResult {
-                var lastToolUiEmitMs = 0L
-                return toolExecutor.execute(
-                    AuthorizedToolCall(
-                        batchIdentity = batchIdentity,
-                        callId = toolCallId,
-                        name = name,
-                        arguments = arguments,
-                        context = ctx,
-                    ),
-                ) { toolEvent ->
-                    val changed = when (toolEvent) {
-                        is ToolExecutionEvent.OutputDelta -> {
-                            updateToolSegment(toolCallId) { segment ->
-                                segment.copy(
-                                    toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
-                                    toolProgress = appendBoundedToolOutput(
-                                        segment.toolProgress,
-                                        toolEvent.text,
-                                    ),
-                                )
-                            }
-                            true
-                        }
-                        is ToolExecutionEvent.TargetResolved -> {
-                            updateToolSegment(toolCallId) { segment ->
-                                segment.copy(toolTarget = toolEvent.target)
-                            }
-                            true
-                        }
-                        is ToolExecutionEvent.Progress -> {
-                            updateToolSegment(toolCallId) { segment ->
-                                segment.copy(
-                                    toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
-                                )
-                            }
-                            true
-                        }
-                        is ToolExecutionEvent.Completed -> false
-                    }
-                    if (changed) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastToolUiEmitMs >= TOOL_UI_UPDATE_INTERVAL_MS) {
-                            publishStreamUpdate()
-                            lastEmitMs = now
-                            lastToolUiEmitMs = now
-                        }
-                    }
-                }
+                return toolOverlay.upsert(streamKey, toolCallId, name, arguments, signature)
             }
 
             suspend fun executeAcceptedToolBatch() {
@@ -423,71 +322,20 @@ class GenerationManager(
                 val batchEffect = toolRoundEffects.requireBatchEffect()
                 val calls = completedToolCalls.values.toList()
                 completedToolCalls.clear()
-                val results = mutableListOf<ToolCallData>()
-
-                for (call in calls) {
-                    val index = checkNotNull(liveToolSegmentIndices[call.streamKey]) {
-                        "Missing live segment for tool call ${call.streamKey}"
-                    }
-                    val metadata = toolExecutor.presentationMetadata(call.name)
-                    segments[index] = segments[index].copy(
-                        toolName = call.name,
-                        toolArgs = call.arguments,
-                        toolCallId = call.id,
-                        signature = call.signature,
-                        signatureProvider = provider.name.takeIf { call.signature != null },
-                        toolState = com.newoether.agora.model.ToolExecutionStates.RUNNING,
-                        toolTarget = metadata?.target ?: segments[index].toolTarget,
-                        toolDisplayName = metadata?.displayName ?: segments[index].toolDisplayName,
-                    )
-                    currentStatus = MessageStatus.TOOL_CALLING
-                    publishStreamUpdate(forceCheckpoint = true)
-                    lastEmitMs = System.currentTimeMillis()
-
-                    val executedCall = executeToolWithLiveSegment(
-                        batchIdentity = batchEffect.identity,
-                        name = call.name,
-                        arguments = call.arguments,
-                        toolCallId = call.id,
-                    )
-                    check(executedCall.batchIdentity == batchEffect.identity)
-                    check(executedCall.callId == call.id)
-                    val result = executedCall.result
-                    generatedImages.addAll(toolExecutor.drainGeneratedImages(conversationId))
-                    val clipped = result.text.take(Constants.MAX_TOOL_RESULT_LENGTH)
-                    val clippedDisplayText = result.displayText
-                        ?.take(Constants.MAX_TOOL_RESULT_LENGTH)
-                    val clippedStructuredResult = result.structuredContent
-                        ?.take(Constants.MAX_TOOL_RESULT_LENGTH)
-                    segments[index] = segments[index].copy(
-                        toolResult = clipped,
-                        toolResultText = clippedDisplayText,
-                        toolStructuredResult = clippedStructuredResult,
-                        toolState = if (result.isError) {
-                            com.newoether.agora.model.ToolExecutionStates.FAILED
-                        } else {
-                            finalToolState(result.text)
-                        },
-                        toolImages = result.images,
-                    )
-                    roundToolSegments.add(segments[index])
-                    results += ToolCallData(
-                        toolName = call.name,
-                        arguments = call.arguments,
-                        result = clipped,
-                        signature = call.signature,
-                        toolCallId = call.id,
-                        resultImages = result.images,
-                        displayName = segments[index].toolDisplayName,
-                        resultText = clippedDisplayText,
-                        structuredResult = clippedStructuredResult,
-                    )
-                    publishStreamUpdate()
-                    lastEmitMs = System.currentTimeMillis()
-                }
-
-                toolCallData = results.firstOrNull()
-                toolCallDataList = results
+                currentStatus = MessageStatus.TOOL_CALLING
+                val outcome = toolBatchEffects.execute(
+                    request = AuthorizedToolBatchRequest(batchEffect, calls, ctx, conversationId),
+                    overlay = toolOverlay,
+                    callbacks = ToolBatchProgressCallbacks(
+                        publish = ::publishStreamUpdate,
+                        onPublishedAt = { lastEmitMs = it },
+                    ),
+                )
+                check(outcome.identity == batchEffect.identity)
+                generatedImages.addAll(outcome.generatedImages)
+                roundToolSegments.addAll(outcome.segments)
+                toolCallData = outcome.calls.firstOrNull()
+                toolCallDataList = outcome.calls
                 toolRoundEffects.completeBatch(batchEffect.identity)
                 currentStatus = MessageStatus.SENDING
                 publishStreamUpdate(forceCheckpoint = true)
@@ -546,23 +394,14 @@ class GenerationManager(
                     is StreamEvent.Error -> {
                         flushThoughtSegment()
                         retryText = null
-                        liveToolSegmentIndices.forEach { (streamKey, index) ->
-                            if (
-                                streamKey !in completedToolCalls &&
-                                segments[index].toolResult == null
-                            ) {
-                                segments[index] = segments[index].copy(
-                                    toolState = com.newoether.agora.model.ToolExecutionStates.FAILED,
-                                )
-                            }
-                        }
+                        toolOverlay.failIncompleteStreams(completedToolCalls.keys)
                         currentStatus = MessageStatus.ERROR
                         if (totalText.isBlank()) {
                             totalText = event.message
                         }
                     }
                     is StreamEvent.ToolCallUpdate -> {
-                        val (_, created) = upsertStreamingToolSegment(
+                        val created = upsertStreamingToolSegment(
                             streamKey = event.streamKey,
                             toolCallId = event.id,
                             name = event.name,
@@ -709,103 +548,33 @@ class GenerationManager(
                 val roundToolList = roundToolSegments.toList()
                 roundToolSegments.clear()
                 val thoughtSegs = toolRoundThoughtSegments(
-                    segments = segments,
+                    segments = toolOverlay.snapshot(),
                     fromIndex = toolRoundSegmentCursor,
                 )
                 val txedSegments = if (thoughtSegs.isNotEmpty()) thoughtSegs + roundToolList else roundToolList
-                toolRoundSegmentCursor = segments.size
+                toolRoundSegmentCursor = toolOverlay.size
                 val prevLastId = if (toolRound == 1) modelMessageId else toolPath.lastOrNull()?.id
-                val toolMsgId = "${Constants.TOOL_MSG_PREFIX}${UUID.randomUUID()}"
-                val toolMsgSegs = txedSegments.ifEmpty { null }
                 val tcds = toolCallDataList
-                val allSegments = toolMsgSegs ?: tcds.map { tc ->
-                    MessageSegment(
-                        type = "tool",
-                        toolName = tc.toolName,
-                        toolArgs = tc.arguments,
-                        toolResult = tc.result,
-                        signature = tc.signature,
-                        signatureProvider = provider.name.takeIf { tc.signature != null },
-                        toolCallId = tc.toolCallId,
-                        toolDisplayName = tc.displayName,
-                        toolResultText = tc.resultText,
-                        toolStructuredResult = tc.structuredResult,
-                        toolImages = tc.resultImages,
-                    )
-                }
-                // Bound the aggregate: a model message row crams every tool round into one
-                // toolCallJson column, so many rounds × a clipped 100KB result can still exceed the
-                // 2MB CursorWindow. The guard halves the largest results until it fits (#51).
-                val allSegmentsJson = MessagePersistenceGuard.encodeSegmentsBounded(allSegments)
-                val resultMsgs = tcds.map { tcData ->
-                    val rid = "${Constants.RESULT_MSG_PREFIX}${UUID.randomUUID()}"
-                    // API-facing message: carry the RAW tool result, matching the persisted row
-                    // below. Display formatting (SearchResultFormatter) is applied in the UI
-                    // layer only — a localized pretty-print here would mean the model sees
-                    // different context in-flight vs after a reload.
-                    rid to ChatMessage(
-                        id = rid, parentId = toolMsgId,
-                        text = tcData.result,
-                        images = tcData.resultImages.map { it.path },
-                        participant = Participant.USER, status = MessageStatus.SUCCESS,
-                        toolCall = tcData,
-                        runId = runId,
-                    )
-                }
-                toolPath = toolPath.toMutableList().apply {
-                    add(ChatMessage(
-                        id = toolMsgId, parentId = prevLastId,
-                        text = "", participant = Participant.MODEL,
-                        status = MessageStatus.SUCCESS, toolCall = tcds.first(),
-                        segments = toolMsgSegs,
-                        runId = runId,
-                    ))
-                    for ((_, msg) in resultMsgs) add(msg)
-                }
-                val toolRoundTimestamp = System.currentTimeMillis()
-                val toolRoundEntities = buildList {
-                    add(MessageEntity(
-                        id = toolMsgId, conversationId = conversationId, parentId = prevLastId,
-                        text = "", thoughts = null, status = MessageStatus.SUCCESS,
-                        participant = Participant.MODEL, timestamp = toolRoundTimestamp,
-                        modelName = modelName, toolCallJson = allSegmentsJson, runId = runId,
-                    ))
-                    resultMsgs.forEachIndexed { index, entry ->
-                        val (rid, _) = entry
-                        add(MessageEntity(
-                            id = rid, conversationId = conversationId, parentId = toolMsgId,
-                            text = tcds[index].result, thoughts = null, status = MessageStatus.SUCCESS,
-                            images = tcds[index].resultImages.map { it.path },
-                            participant = Participant.USER, timestamp = toolRoundTimestamp + index + 1,
-                            modelName = modelName, runId = runId,
-                            toolCallJson = Json.encodeToString(listOf(
-                                MessageSegment(
-                                    type = "tool",
-                                    toolName = tcds[index].toolName,
-                                    toolArgs = tcds[index].arguments,
-                                    toolResult = tcds[index].result,
-                                    signature = tcds[index].signature,
-                                    signatureProvider = provider.name.takeIf { tcds[index].signature != null },
-                                    toolCallId = tcds[index].toolCallId,
-                                    toolDisplayName = tcds[index].displayName,
-                                    toolResultText = tcds[index].resultText,
-                                    toolStructuredResult = tcds[index].structuredResult,
-                                    toolImages = tcds[index].resultImages,
-                                )
-                            ))
-                        ))
-                    }
-                }
+                val round = toolRoundBuilder.build(
+                    previousMessageId = prevLastId,
+                    conversationId = conversationId,
+                    runId = runId,
+                    modelName = modelName,
+                    providerName = provider.name,
+                    calls = tcds,
+                    completedSegments = txedSegments,
+                )
+                toolPath = toolPath + round.pathMessages
                 toolRoundEffects.commitRound { commitIdentity ->
                     conversations.appendToolRoundToRun(
-                        messages = toolRoundEntities,
+                        messages = round.entities,
                         expectedPass = commitIdentity.pass,
                     )
                 }
                 callbacks.onToolRoundPersisted()
                 toolPath = apiPathBuilder.build(
                     GenerationApiPathRequest(
-                        parentId = resultMsgs.last().first,
+                        parentId = round.lastResultId,
                         conversationId = conversationId,
                         isRegenerate = false,
                         replaceMessageId = null,
@@ -867,14 +636,7 @@ class GenerationManager(
             // mid-transcription, copy the latest durable/UI snapshot into the terminal accumulator
             // so the final upsert does not overwrite that checkpoint with empty content.
             adoptIncompleteTranscriptionSnapshot()
-            segments.indices.forEach { index ->
-                val segment = segments[index]
-                if (segment.type == "tool" && segment.toolResult == null) {
-                    segments[index] = segment.copy(
-                        toolState = com.newoether.agora.model.ToolExecutionStates.STOPPED,
-                    )
-                }
-            }
+            toolOverlay.stopIncompleteTools()
             currentStatus = MessageStatus.STOPPED
             throw e
         } catch (e: Exception) {
@@ -917,7 +679,7 @@ class GenerationManager(
                             timestamp = startTime,
                             thoughtTimeMs = thoughtTiming.totalDurationMs,
                             modelName = modelName,
-                            flushedSegments = segments.toList(),
+                            flushedSegments = toolOverlay.snapshot(),
                             answerBuffer = currentAnswerBuf.toString(),
                             thoughtBuffer = currentThoughtBuf.toString(),
                             thoughtSignature = currentThoughtSignature,
