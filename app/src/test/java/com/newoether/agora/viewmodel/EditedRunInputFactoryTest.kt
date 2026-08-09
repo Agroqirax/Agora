@@ -50,7 +50,7 @@ class EditedRunInputFactoryTest {
             consumedAtPass = 0,
         )
 
-        val edited = MessageGenerationController.EditedRunInputFactory.create(
+        val edited = EditedRunInputFactory.create(
             source = source,
             id = "edited",
             parentId = "previous",

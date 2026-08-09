@@ -6,8 +6,6 @@ import com.newoether.agora.R
 import com.newoether.agora.api.local.LocalProvider
 import com.newoether.agora.automation.ConversationExecutionCoordinator
 import com.newoether.agora.data.ConversationSettings
-import com.newoether.agora.data.MessageAttachmentCloneSession
-import com.newoether.agora.data.cloneAttachmentMeta
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
@@ -194,6 +192,31 @@ internal class MessageGenerationController(
         compactController = compactController,
         terminalSettlement = terminalSettlement,
         toUiMessage = { it.toUiChatMessage(appContext) },
+    )
+    private val editService = ConversationEditService(
+        conversations = convRepo,
+        executionCoordinator = executionCoordinator,
+        inputCloner = EditedRunInputCloner(
+            java.io.File(application.filesDir, "run-inputs"),
+        ),
+        terminalSettlement = terminalSettlement,
+        boundRunGenerationLauncher = boundRunGenerationLauncher,
+        toUiMessage = { it.toUiChatMessage(appContext) },
+        isConversationOpen = { currentConversationId.value == it },
+        projectGraph = { _, committedMessages, selectedChildren, streamingMessage ->
+            renderStore.commitGraph(
+                committedMessages = committedMessages,
+                selectedChildren = selectedChildren,
+                streamingMessage = streamingMessage,
+            )
+        },
+        awaitProjectedPath = { conversationId, messageId ->
+            combine(messages, currentConversationId) { path, openConversationId ->
+                openConversationId != conversationId || path.any { it.id == messageId }
+            }.first { projectedOrClosed -> projectedOrClosed }
+        },
+        onUserMessagePersisted = onUserMessagePersisted,
+        onScrollToMessage = { onScrollToMessage(it) },
     )
     private val branchMutationService = ConversationBranchMutationService(
         scope = viewModelScope,
@@ -487,183 +510,18 @@ internal class MessageGenerationController(
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
         val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return false
-        val visiblePath = messages.value
-        val messageToEdit = visiblePath.find { it.id == messageId } ?: return false
-        if (messageToEdit.participant != Participant.USER) return false
-        val sourceRunId = messageToEdit.runId ?: return false
-        val inputBoundary = visiblePath
-            .filter {
-                it.runId == sourceRunId &&
-                    it.participant == Participant.USER &&
-                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            }
-            .minWithOrNull(
-                compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-                    .thenBy { it.timestamp }
-                    .thenBy { it.id }
-            )
-        if (inputBoundary?.id != messageId) return false
-
-        // Edit is idle-only by product rule; enforce it atomically below the UI gate.
-        val myUiToken = state.tryAcquireForReplacement() ?: return false
-        val runId = UUID.randomUUID().toString()
-        val committed = CompletableDeferred<Boolean>()
-        val job = state.launchGenerationJob(myUiToken) {
-            val myPersistId = state.nextPersistId()
-            var setupModelMessageId: String? = null
-            var graphCommitted = false
-            var runBound = false
-            var stopFinalizationClaimed = false
-            try {
-            executionCoordinator.withConversationLock(genId) lock@ {
-            val persistedMessages = convRepo.getMessagesForConversationSnapshot(genId)
-            val persistedSource = persistedMessages.find { it.id == messageId } ?: return@lock
-            if (persistedSource.runId != sourceRunId) return@lock
-            val sourceRun = convRepo.getRun(sourceRunId) ?: return@lock
-            val newUser = cloneEditedRunInputs(
-                sourceInputs = listOf(persistedSource),
-                destinationRunId = runId,
-                textOverrides = mapOf(persistedSource.id to newText),
-            ).single()
-            val modelMessageId = UUID.randomUUID().toString()
-            setupModelMessageId = modelMessageId
-            val startTime = newUser.timestamp + 1
-            val modelEntity = MessageEntity(
-                id = modelMessageId, conversationId = genId, parentId = newUser.id,
-                text = "", thoughts = null, status = MessageStatus.SENDING, participant = Participant.MODEL, timestamp = startTime,
-                modelName = modelId, runId = runId, runSequence = 1,
-            )
-            val graphCommit = convRepo.createRunWithMessages(
-                RunEntity(
-                    id = runId,
-                    conversationId = genId,
-                    parentRunId = sourceRun.parentRunId,
-                    status = RunStatus.ACTIVE,
-                    activeSlot = 1,
-                    startedAt = newUser.timestamp,
-                    lastCheckpointAt = startTime,
-                ),
-                listOf(newUser, modelEntity),
-                messageSelectionUpdates = mapOf(
-                    newUser.parentId to newUser.id,
-                    newUser.id to modelEntity.id,
-                ),
-            )
-            graphCommitted = true
-            val binding = state.bindPersistedRun(myUiToken, runId)
-            runBound = binding is ConversationGenerationState.RunBindingOutcome.Active
-            if (!runBound) {
-                if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                    stopFinalizationClaimed = true
-                    terminalSettlement.settleLateBoundStop(state, binding)
-                } else {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        convRepo.finishStoppedGeneration(emptyList(), runId)
-                    }
-                }
-                committed.complete(true)
-                return@lock
-            }
-            val selectedAfterModelEdit = graphCommit.messageSelections
-            runCatching { onUserMessagePersisted(newUser.id, newText) }
-                .onFailure { error ->
-                    DebugLog.w(
-                        "MessageGenerationController",
-                        "Failed to enqueue edited-message indexing for ${newUser.id}",
-                        error,
-                    )
-                }
-            // Commit the streaming overlay and replacement graph as one render snapshot.
-            val placeholder = ChatMessage(
-                id = modelMessageId, parentId = newUser.id, text = "", participant = Participant.MODEL,
-                status = MessageStatus.SENDING, timestamp = startTime, modelName = modelId,
-                runId = runId, runSequence = 1,
-            )
-            state.streamUpdate(myUiToken, placeholder)
-            ifOpenOn(genId) {
-                renderStore.commitGraph(
-                    committedMessages =
-                        listOf(newUser.toUiChatMessage(appContext), placeholder),
-                    selectedChildren = selectedAfterModelEdit,
-                    streamingMessage = placeholder,
-                )
-                onScrollToMessage(newUser.id)
-            }
-            if (currentConversationId.value == genId) {
-                // The three projection inputs are independent StateFlows. Await the combined
-                // visible path so the UI cannot leave edit mode against an intermediate snapshot
-                // that still resolves to the source branch.
-                combine(messages, currentConversationId) { path, openConversationId ->
-                    openConversationId != genId || path.any { it.id == newUser.id }
-                }.first { projectedOrClosed -> projectedOrClosed }
-            }
-            // The durable branch and its UI projection are now committed. Only now may the
-            // editor leave edit mode; completing earlier exposes the old branch for a frame.
-            committed.complete(true)
-            boundRunGenerationLauncher.launch(
-                BoundRunGenerationRequest(
-                    conversationId = genId,
-                    modelMessageId = modelMessageId,
-                    startTime = startTime,
-                    isRegenerate = false,
-                    replaceMessageId = null,
-                    providerName = providerName,
-                    modelId = modelId,
-                    activeKey = activeKey,
-                    uiToken = myUiToken,
-                    persistId = myPersistId,
-                    runId = runId,
-                    pass = 0,
-                    callerTag = "editMessage",
-                ),
-                state,
-            )
-            }
-            } catch (e: CancellationException) {
-                if (!runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        if (convRepo.getRun(runId) != null) {
-                            graphCommitted = true
-                            val binding = state.bindPersistedRun(myUiToken, runId)
-                            stopFinalizationClaimed =
-                                terminalSettlement.settleCancelledDurableRun(state, binding)
-                            if (!stopFinalizationClaimed) {
-                                convRepo.finishStoppedGeneration(emptyList(), runId)
-                            }
-                        }
-                    }
-                }
-                throw e
-            } catch (e: Exception) {
-                if (!runBound && !stopFinalizationClaimed) {
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        if (convRepo.getRun(runId) != null) {
-                            graphCommitted = true
-                            val binding = state.bindPersistedRun(myUiToken, runId)
-                            runBound = binding is
-                                ConversationGenerationState.RunBindingOutcome.Active
-                            if (binding is ConversationGenerationState.RunBindingOutcome.Stopping) {
-                                stopFinalizationClaimed = true
-                                terminalSettlement.settleLateBoundStop(state, binding)
-                            }
-                        }
-                    }
-                }
-                terminalSettlement.failGenerationSetup(
-                    conversationId = genId,
-                    runId = runId,
-                    modelMessageId = setupModelMessageId,
-                    uiToken = myUiToken,
-                    state = state,
-                    error = e,
-                )
-            } finally {
-                if (!committed.isCompleted) committed.complete(graphCommitted)
-            }
-        }
-        if (job == null) return false
-        return committed.await()
+        return editService.edit(
+            ConversationEditRequest(
+                conversationId = genId,
+                messageId = messageId,
+                newText = newText,
+                modelId = modelId,
+                providerName = providerName,
+                activeKey = activeKey,
+                visiblePath = messages.value.toList(),
+            ),
+            state,
+        )
     }
 
     // ==================================
@@ -1563,74 +1421,6 @@ internal class MessageGenerationController(
         }
         val modelMessageId = createdModelMessageId ?: return AutomationSendOutcome.SlotBusy
         return AutomationSendOutcome.Delivered(modelMessageId)
-    }
-
-    // ==================================
-    // generateTitle
-    // ==================================
-
-    private suspend fun cloneEditedRunInputs(
-        sourceInputs: List<MessageEntity>,
-        destinationRunId: String,
-        textOverrides: Map<String, String> = emptyMap(),
-    ): List<MessageEntity> = withContext(Dispatchers.IO) {
-        require(sourceInputs.isNotEmpty())
-        val attachmentClones = MessageAttachmentCloneSession(
-            java.io.File(application.filesDir, "run-inputs")
-        )
-
-        try {
-            val now = System.currentTimeMillis()
-            var parentId = sourceInputs.first().parentId
-            sourceInputs.mapIndexed { index, source ->
-                val cloned = EditedRunInputFactory.create(
-                    source = source,
-                    id = UUID.randomUUID().toString(),
-                    parentId = parentId,
-                    text = textOverrides[source.id] ?: source.text,
-                    timestamp = now + index,
-                    destinationRunId = destinationRunId,
-                    runSequence = index.toLong(),
-                    cloneBackingPath = { path ->
-                        attachmentClones.cloneBackingPath("edited-run-inputs", path)
-                    },
-                )
-                parentId = cloned.id
-                cloned
-            }.also { attachmentClones.commit() }
-        } catch (e: Exception) {
-            attachmentClones.rollback()
-            throw e
-        }
-    }
-
-    internal object EditedRunInputFactory {
-        fun create(
-            source: MessageEntity,
-            id: String,
-            parentId: String?,
-            text: String,
-            timestamp: Long,
-            destinationRunId: String,
-            runSequence: Long,
-            cloneBackingPath: (String) -> String,
-        ): MessageEntity {
-            val clonedMeta = source.attachmentMeta?.let { raw ->
-                cloneAttachmentMeta(raw, cloneBackingPath)
-            }
-            return source.copy(
-                id = id,
-                parentId = parentId,
-                text = text,
-                images = source.images.map(cloneBackingPath),
-                status = MessageStatus.SUCCESS,
-                timestamp = timestamp,
-                attachmentMeta = clonedMeta,
-                runId = destinationRunId,
-                runSequence = runSequence,
-                consumedAtPass = 0,
-            )
-        }
     }
 
     fun generateTitle(conversationId: String) {
