@@ -46,7 +46,6 @@ import com.newoether.agora.util.SnackbarEvent
 import com.newoether.agora.util.UpdateChecker
 import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -674,6 +673,13 @@ class ChatViewModel(
             pauseConversationTasks = { conversationId -> loopManager.stopLoop(conversationId) },
         )
     }
+    private val composerSendAdapter by lazy {
+        ComposerSendAdapter(
+            send = generationController::sendMessage,
+            drafts = composerDrafts,
+            scope = viewModelScope,
+        )
+    }
 
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
@@ -928,27 +934,7 @@ class ChatViewModel(
         images: List<String> = emptyList(),
         attachments: List<SelectedAttachment> = emptyList(),
         onAccepted: suspend () -> Unit = {},
-    ): SendAcceptance? =
-        generationController.sendMessage(text, images, attachments) { acceptance ->
-            // Acceptance transfers attachment ownership before the composer clears. Direct sends
-            // are already Room-owned; queued guidance remains memory-owned until its later drain.
-            // Invalidate older draft revisions, clear the exact submitted UI, and only then let
-            // the Controller publish the bubble/banner and its scroll request.
-            val attachmentsToReclaim = withContext(NonCancellable) {
-                clearAcceptedComposerDraft(acceptance.conversationId)
-            }
-            withContext(Dispatchers.Main.immediate + NonCancellable) {
-                onAccepted()
-            }
-            if (attachmentsToReclaim.isNotEmpty() && acceptance.hasDurableAttachmentOwner()) {
-                // Reclamation is no longer part of the visible Send handshake. The durable
-                // MessageEntity already owns these paths, and repository cleanup rechecks every
-                // remaining message/draft reference before deleting anything.
-                viewModelScope.launch(Dispatchers.IO) {
-                    composerDrafts.reclaimAttachments(attachmentsToReclaim)
-                }
-            }
-        }
+    ): SendAcceptance? = composerSendAdapter.sendMessage(text, images, attachments, onAccepted)
 
     /**
      * Onboarding-focused model fetch for a single provider.
@@ -1030,10 +1016,6 @@ class ChatViewModel(
         attachments = attachments,
         explicitlyRemovedAttachments = explicitlyRemovedAttachments,
     )
-
-    private suspend fun clearAcceptedComposerDraft(
-        conversationId: String,
-    ): List<SelectedAttachment> = composerDrafts.clearAccepted(conversationId)
 
     suspend fun loadDraft(
         conversationId: String,
