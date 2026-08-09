@@ -75,6 +75,26 @@ sealed interface CompactResult {
     data class Failed(val message: String) : CompactResult
 }
 
+/** Narrow operation port used by the application-level Compact effect executor. */
+internal interface ContextCompactOperation {
+    suspend fun automaticNeeded(conversationId: String, contextLimit: Int): Boolean
+
+    suspend fun compactAutomatic(
+        conversationId: String,
+        fallbackModel: String,
+        contextLimit: Int,
+        compactRunId: String,
+        onSummaryChunk: (String) -> Unit = {},
+    ): CompactResult
+
+    suspend fun compactManual(
+        conversationId: String,
+        request: CompactRequest,
+        compactRunId: String,
+        onSummaryChunk: (String) -> Unit = {},
+    ): CompactResult
+}
+
 internal fun automaticCompactNeeded(
     entities: List<MessageEntity>,
     selectedChildren: Map<String?, String>,
@@ -117,21 +137,21 @@ internal class ContextCompactor(
     private val settings: SettingsRepository,
     private val providers: ProviderRegistry,
     private val pauseLoop: suspend (String) -> Unit,
-) {
-    suspend fun automaticNeeded(conversationId: String, contextLimit: Int): Boolean =
-        automaticCompactNeeded(
+) : ContextCompactOperation {
+    override suspend fun automaticNeeded(conversationId: String, contextLimit: Int): Boolean =
+        settings.contextCompactEnabled.value && automaticCompactNeeded(
             conversations.getMessagesForConversationSnapshot(conversationId),
             conversations.restoreBranchSelections(conversationId),
             contextLimit,
             settings.contextCompactRetainCount.value,
         )
 
-    suspend fun compactAutomatic(
+    override suspend fun compactAutomatic(
         conversationId: String,
         fallbackModel: String,
         contextLimit: Int,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit = {},
+        onSummaryChunk: (String) -> Unit,
     ): CompactResult {
         if (!settings.contextCompactEnabled.value) return CompactResult.NotNeeded
         return compact(
@@ -147,11 +167,11 @@ internal class ContextCompactor(
         )
     }
 
-    suspend fun compactManual(
+    override suspend fun compactManual(
         conversationId: String,
         request: CompactRequest,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit = {},
+        onSummaryChunk: (String) -> Unit,
     ): CompactResult = compact(
         conversationId,
         request,

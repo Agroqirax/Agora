@@ -267,14 +267,25 @@ internal class MessageGenerationController(
 ) {
     private val generationManager: GenerationManager get() = generationManagerProvider()
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
-    private val contextCompactor = ContextCompactor(
+    private val compactController = ConversationCompactController(
         conversations = convRepo,
-        settings = settings,
-        providers = providerRegistry,
-        pauseLoop = pauseConversationTasks,
+        executionCoordinator = executionCoordinator,
+        operation = ContextCompactor(
+            conversations = convRepo,
+            settings = settings,
+            providers = providerRegistry,
+            pauseLoop = pauseConversationTasks,
+        ),
+        projectGraph = { conversationId, all, selected ->
+            ifOpenOn(conversationId) {
+                renderStore.replaceGraph(
+                    allMessages = all.map { it.toUiChatMessage(appContext) },
+                    selectedChildren = selected,
+                )
+            }
+        },
     )
     private val acceptedInputGraphWriter = AcceptedInputGraphWriter(convRepo)
-    private val compactEffectCoordinator = ContextCompactEffectCoordinator()
     private val stopFinalizer = GenerationFinalizer(convRepo) { _, _ -> }
     private val runFinalizationEffects = RunFinalizationEffectCoordinator()
 
@@ -321,62 +332,6 @@ internal class MessageGenerationController(
                 true
             }
             ConversationGenerationState.RunBindingOutcome.Rejected -> false
-        }
-    }
-
-    private suspend fun compactBeforeBoundaryIfNeeded(
-        genId: String,
-        modelId: String,
-        contextLimit: Int,
-        state: ConversationGenerationState,
-    ) {
-        if (!settings.contextCompactEnabled.value || !contextCompactor.automaticNeeded(genId, contextLimit)) return
-        when (
-            val execution = compactEffectCoordinator.executeAutomatic(state) { effect ->
-                val compactResult = contextCompactor.compactAutomatic(
-                    conversationId = genId,
-                    fallbackModel = modelId,
-                    contextLimit = contextLimit,
-                    compactRunId = effect.compactRunId,
-                    onSummaryChunk = { chunk ->
-                        state.appendCompactPreview(effect.identity, chunk)
-                    },
-                )
-                if (compactResult is CompactResult.Created) {
-                    val all = convRepo.getMessagesForConversationSnapshot(genId)
-                    val selected = convRepo.restoreBranchSelections(genId)
-                    ifOpenOn(genId) {
-                        renderStore.replaceGraph(
-                            allMessages = all.map { it.toUiChatMessage(appContext) },
-                            selectedChildren = selected,
-                        )
-                    }
-                }
-                compactResult
-            }
-        ) {
-            is ContextCompactEffectCoordinator.Execution.Settled -> when (
-                val result = execution.result
-            ) {
-                is CompactResult.Failed -> throw IllegalStateException(
-                    "Automatic context compact failed: ${result.message}",
-                )
-                is CompactResult.Created,
-                CompactResult.NotNeeded,
-                -> Unit
-            }
-            ContextCompactEffectCoordinator.Execution.Busy -> {
-                if (state.stopping.value) {
-                    throw CancellationException("Automatic context compact was stopped")
-                }
-                error("Automatic context compact was not admitted for the active Run")
-            }
-            ContextCompactEffectCoordinator.Execution.Superseded -> {
-                if (state.stopping.value) {
-                    throw CancellationException("Automatic context compact was superseded by Stop")
-                }
-                error("Automatic context compact result was superseded")
-            }
         }
     }
 
@@ -503,41 +458,11 @@ internal class MessageGenerationController(
     suspend fun compactManual(request: CompactRequest): CompactResult {
         val conversationId = currentConversationId.value
             ?: return CompactResult.Failed("Open a conversation first")
-        val state = registry.getOrCreate(conversationId)
-        return when (
-            val execution = compactEffectCoordinator.executeManual(state) { effect ->
-                executionCoordinator.withConversationLock(conversationId) {
-                    if (convRepo.getLiveRun(conversationId) != null) {
-                        return@withConversationLock CompactResult.Failed("Conversation is busy")
-                    }
-                    val result = contextCompactor.compactManual(
-                        conversationId = conversationId,
-                        request = request,
-                        compactRunId = effect.compactRunId,
-                        onSummaryChunk = { chunk ->
-                            state.appendCompactPreview(effect.identity, chunk)
-                        },
-                    )
-                    if (result is CompactResult.Created) {
-                        val all = convRepo.getMessagesForConversationSnapshot(conversationId)
-                        val selected = convRepo.restoreBranchSelections(conversationId)
-                        ifOpenOn(conversationId) {
-                            renderStore.replaceGraph(
-                                allMessages = all.map { it.toUiChatMessage(appContext) },
-                                selectedChildren = selected,
-                            )
-                        }
-                    }
-                    result
-                }
-            }
-        ) {
-            is ContextCompactEffectCoordinator.Execution.Settled -> execution.result
-            ContextCompactEffectCoordinator.Execution.Busy ->
-                CompactResult.Failed("Wait for the current generation or context compact to finish")
-            ContextCompactEffectCoordinator.Execution.Superseded ->
-                CompactResult.Failed("Context compact was interrupted")
-        }
+        return compactController.manual(
+            conversationId = conversationId,
+            request = request,
+            state = registry.getOrCreate(conversationId),
+        )
     }
 
     // ==================================
@@ -931,7 +856,7 @@ internal class MessageGenerationController(
                 generationJob = kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job],
                 callbacks = state.callbacksFor(uiToken, persistId).copy(
                     onToolRoundPersisted = {
-                        compactBeforeBoundaryIfNeeded(
+                        compactController.automaticBeforeBoundary(
                             currentId,
                             modelId,
                             effectiveSettings.contextWindow ?: settings.maxContextWindow.value,
@@ -1461,9 +1386,9 @@ internal class MessageGenerationController(
                     // Eligibility is checked only after every guidance USER row is durable. The
                     // placeholder remains below a created Compact boundary while provider
                     // canonicalization omits it from the summary/suffix accounting.
-                    compactBeforeBoundaryIfNeeded(
-                        genId = genId,
-                        modelId = modelId,
+                    compactController.automaticBeforeBoundary(
+                        conversationId = genId,
+                        fallbackModel = modelId,
                         contextLimit = requestBuilder.buildEffectiveConversationSettings(genId)
                             .contextWindow ?: settings.maxContextWindow.value,
                         state = state,
@@ -1864,9 +1789,9 @@ internal class MessageGenerationController(
                         // The USER row is now durably accepted and visible; Compact, when needed,
                         // runs before this placeholder's provider pass and then continuation
                         // resumes automatically in the same installed generation Job.
-                        compactBeforeBoundaryIfNeeded(
-                            genId = genId,
-                            modelId = modelId,
+                        compactController.automaticBeforeBoundary(
+                            conversationId = genId,
+                            fallbackModel = modelId,
                             contextLimit = requestBuilder.buildEffectiveConversationSettings(genId)
                                 .contextWindow ?: settings.maxContextWindow.value,
                             state = state,
