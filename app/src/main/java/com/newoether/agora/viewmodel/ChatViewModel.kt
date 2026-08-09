@@ -56,7 +56,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
@@ -550,19 +549,18 @@ class ChatViewModel(
         viewModelScope.launch { loopManager.stopLoop(id) }
     }
 
-    private val renderStore = ConversationRenderStore()
-    val allMessages: StateFlow<List<ChatMessage>> = renderStore.snapshot
-        .map { it.allMessages }
-        .distinctUntilChanged()
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    /**
-     * Identity of the conversation whose first Room message snapshot has been installed into
-     * [renderStore]. This stays meaningful for an empty conversation, unlike checking whether
-     * the list is non-empty, and prevents a switch from settling against the previous tree.
-     */
-    private val _loadedMessagesConversationId = MutableStateFlow<String?>(null)
+    private val conversationUi = ConversationUiStateAssembler(
+        conversations = convRepo,
+        registry = generationRegistry,
+        executionCoordinator = conversationExecutionCoordinator,
+        currentConversationId = _currentConversationId,
+        appContext = appContext,
+        scope = viewModelScope,
+    )
+    private val renderStore: ConversationRenderStore get() = conversationUi.renderStore
+    val allMessages: StateFlow<List<ChatMessage>> = conversationUi.allMessages
     val loadedMessagesConversationId: StateFlow<String?> =
-        _loadedMessagesConversationId.asStateFlow()
+        conversationUi.loadedMessagesConversationId
 
     private val providerModelSync = ProviderModelSyncController(
         providers = providerRegistry,
@@ -613,27 +611,11 @@ class ChatViewModel(
     fun showFilePreview(fileName: String, content: String) = mediaPreview.showFile(fileName, content)
     fun clearPreviews() = mediaPreview.clear()
 
-    val messages: StateFlow<List<ChatMessage>> = renderStore.snapshot.mapLatest { snapshot ->
-        // Single source of truth for the visible-path walk: the tested
-        // ConversationUiState.resolvePath (covered by ConversationUiStateTest).
-        withContext(Dispatchers.Default) {
-            ConversationUiState.resolvePath(
-                snapshot.allMessages,
-                snapshot.streamingMessage,
-                snapshot.selectedChildren,
-            )
-        }
-    }.distinctUntilChanged()
-    .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    val totalTokens: StateFlow<Int> = renderStore.snapshot.map { snapshot ->
-        snapshot.allMessages.sumOf { it.tokenCount }
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
-
-    private val _isLoading = MutableStateFlow(false)
-    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
-    private val _generatingInConversationId = MutableStateFlow<String?>(null)
-    val generatingInConversationId: StateFlow<String?> = _generatingInConversationId.asStateFlow()
+    val messages: StateFlow<List<ChatMessage>> = conversationUi.messages
+    val totalTokens: StateFlow<Int> = conversationUi.totalTokens
+    val isLoading: StateFlow<Boolean> = conversationUi.isLoading
+    val generatingInConversationId: StateFlow<String?> =
+        conversationUi.generatingInConversationId
 
     /** Per-conversation generation state registry. Each conversation owns an independent
      *  ConversationGenerationState; the global loading/render mirrors
@@ -642,27 +624,14 @@ class ChatViewModel(
     private val generationCallbacksAttached = Unit.also {
         generationRegistry.attachUiCallbacks(generationCallbackOwner) { state ->
             state.onActive = { conversationId ->
-                if (_currentConversationId.value == conversationId) {
-                    // Publish the state transition synchronously with the slot claim. Besides
-                    // making the Stop button immediate, this closes the one-frame window where
-                    // an in-progress edit could remain open after a normal composer Send.
-                    _isLoading.value = true
-                    _generatingInConversationId.value = conversationId
-                }
+                // Publish synchronously with the slot claim so Stop and edit closure are immediate.
+                conversationUi.markActive(conversationId)
             }
             state.onIdle = { conversationId ->
-                if (_currentConversationId.value == conversationId) {
-                    _isLoading.value = false
-                    _generatingInConversationId.value = null
-                }
+                conversationUi.markIdle(conversationId)
             }
             state.onStreamCommit = { conversationId, message ->
-                if (_currentConversationId.value == conversationId) {
-                    // Normal/error completion needs the same atomic overlay -> persisted-row
-                    // handoff as Stop. Independent updates let a queued Room SENDING projection
-                    // land between them and leave the row stuck in Answering after loading exits.
-                    renderStore.commitTerminalStreamingMessage(message)
-                }
+                conversationUi.commitTerminalStreamingMessage(conversationId, message)
             }
             state.onQueueDrainRequested = { settledState ->
                 settledState.scope.launch {
@@ -681,23 +650,13 @@ class ChatViewModel(
 
     /** Every conversation currently mutating its message tree through foreground generation or
      * headless Task/Loop execution. Drawer rows use this per-id set instead of the open
-     * conversation's `_isLoading` mirror. */
+     * conversation's open UI loading mirror. */
     val generatingConversationIds: StateFlow<Set<String>> = combine(
         generationRegistry.activeConversationIds,
         conversationExecutionCoordinator.activeAutomationConversationIds,
     ) { foreground, automation ->
         foreground + automation
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-
-    private val generationMirror = ConversationGenerationMirror(
-        currentConversationId = _currentConversationId,
-        onSnapshot = { conversationId, snapshot ->
-            renderStore.setStreamingMessage(snapshot.streamingMessage)
-            _isLoading.value = snapshot.isLoading
-            _generatingInConversationId.value =
-                if (snapshot.isGenerating) conversationId else null
-        },
-    )
 
     /** Stop-finalization helper shared by the controller and the ViewModel's stop path. */
     private val generationFinalizer by lazy {
@@ -898,97 +857,7 @@ class ChatViewModel(
                     )
                 }
         }
-        viewModelScope.launch {
-            _currentConversationId.collectLatest { id ->
-                _loadedMessagesConversationId.value = null
-                if (id != null) {
-                    coroutineScope {
-                        // Do not expose Room's pre-recovery graph to Compose. Recovery marks the
-                        // model row, its unfinished tool segments, and its Run terminal in one
-                        // transaction, so the first rendered snapshot is already self-consistent.
-                        convRepo.ensureRunRecovery()
-                        val switchScope = this
-                        val state = generationRegistry.getOrCreate(id)
-                        // Fix stuck sending states when loading a conversation. Read THIS conversation's
-                        // own slot (state.generating), not the _isLoading mirror of the open
-                        // conversation: at switch time the mirror still reflects the previous
-                        // conversation, so a background generation in the target conversation would
-                        // be misread as idle and its in-flight SENDING message wrongly marked STOPPED.
-                        //
-                        // The registry only knows about FOREGROUND generations. A headless Task/Loop
-                        // run writes to Room without ever claiming a registry slot, so opening its
-                        // conversation mid-run used to mark the live message STOPPED — the execution
-                        // log opening as "generation stopped" while it was still generating.
-                        val automationRunning =
-                            id in conversationExecutionCoordinator.activeAutomationConversationIds.value
-                        if (!state.generating.value && !automationRunning) {
-                            convRepo.fixStuckMessages(id)
-                        }
-
-                        // Restore selected branches
-                        val conversation = convRepo.getConversation(id)
-                        val restoredChildren = withContext(Dispatchers.Default) {
-                            conversation?.selectedBranchesJson?.let { raw ->
-                                runCatching {
-                                    Json.decodeFromString<Map<String, String>>(raw)
-                                        .mapKeys { (key, _) -> if (key == "null") null else key }
-                                }.getOrNull()
-                            }.orEmpty()
-                        }
-                        var generationMirrorStarted = false
-                        state.streamingMessage
-                            .map { message -> message?.id }
-                            .distinctUntilChanged()
-                            .flatMapLatest { streamingMessageId ->
-                                convRepo.getUiMessagesForConversation(id, streamingMessageId)
-                            }
-                            .distinctUntilChanged()
-                            .mapLatest { entities ->
-                                // Room republishes the complete list for every persisted stream
-                                // checkpoint. JSON/format projection is CPU work, and stale
-                                // projections should be cancelled when a newer snapshot arrives.
-                                withContext(Dispatchers.Default) {
-                                    entities.map { entity ->
-                                        entity.toUiChatMessage(appContext)
-                                    }
-                                }
-                            }
-                            .collect { mapped ->
-                            if (!generationMirrorStarted) {
-                                // Conversation graph + selected edges become visible as one
-                                // snapshot. The previous conversation can never be paired with
-                                // this conversation's selections, even for one combine frame.
-                                renderStore.replaceConversation(
-                                    allMessages = mapped,
-                                    selectedChildren = restoredChildren,
-                                )
-                            } else {
-                                // Room checkpoints replace message payloads but preserve the
-                                // current in-process selection and streaming overlay.
-                                renderStore.setAllMessages(mapped)
-                            }
-                            _loadedMessagesConversationId.value = id
-                            if (!generationMirrorStarted) {
-                                generationMirrorStarted = true
-                                // Publish the target conversation's generation overlay only AFTER its
-                                // Room messages and branch selections are installed. Otherwise the
-                                // overlay alone can make `messages` non-empty, release the switching
-                                // scrim early, and render it against the previous conversation's tree.
-                                generationMirror.publishCurrent(id, state)
-                                switchScope.launch {
-                                    generationMirror.collect(id, state)
-                                }
-                            }
-                            }
-                    }
-                } else {
-                    renderStore.clear()
-                    _loadedMessagesConversationId.value = null
-                    _isLoading.value = false
-                    _generatingInConversationId.value = null
-                }
-            }
-        }
+        conversationUi.start()
 
         // Register the foreground-send bridge so loop cycles on this open conversation
         // go through the controller's regular send path (bubble animation + scroll + haptics).
@@ -1241,8 +1110,7 @@ class ChatViewModel(
                 _currentConversationId.value = null
                 _currentActiveModel.value = null
                 _pendingConversationSettings.value = null
-                renderStore.clear()
-                _loadedMessagesConversationId.value = null
+                conversationUi.clearConversationGraph()
             } finally {
                 if (switchingCoordinator.complete(request.id)) {
                     _isTransitioningToNewChat.value = false
