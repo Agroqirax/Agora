@@ -11,6 +11,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
@@ -90,6 +91,43 @@ private data class StreamingMarkdownInput(
     val content: String,
     val isStreaming: Boolean,
 )
+
+/**
+ * Latest-value commit gate used while an embedded code block owns a horizontal gesture.
+ *
+ * Parsing continues and conflates normally, but Compose keeps the currently measured tree until
+ * every active interaction ends. The newest completed snapshot is then committed exactly once.
+ */
+internal class StreamingInteractionCommitGate<T : Any> {
+    private val activeOwners = mutableSetOf<Any>()
+    private var pending: T? = null
+
+    fun offer(value: T): T? {
+        if (activeOwners.isNotEmpty()) {
+            pending = value
+            return null
+        }
+        return value
+    }
+
+    fun setActive(owner: Any, active: Boolean): T? {
+        if (active) {
+            activeOwners += owner
+            return null
+        }
+        activeOwners -= owner
+        if (activeOwners.isNotEmpty()) return null
+        return pending.also { pending = null }
+    }
+}
+
+@Stable
+internal interface StreamingMarkdownInteractionController {
+    fun setCodeBlockScrolling(owner: Any, active: Boolean)
+}
+
+internal val LocalStreamingMarkdownInteractionController =
+    staticCompositionLocalOf<StreamingMarkdownInteractionController?> { null }
 
 /**
  * Identifies the final visible source position in the live Markdown block. Markdown text
@@ -336,10 +374,12 @@ private class StreamingMarkdownRenderState(
     flavour: MarkdownFlavourDescriptor,
     initialContent: String,
     initialIsStreaming: Boolean,
-) {
+) : StreamingMarkdownInteractionController {
     private val document = IncrementalMarkdownDocument(flavour)
     private val inputs = Channel<StreamingMarkdownInput>(Channel.CONFLATED)
     private val offeredRevision = AtomicLong(0L)
+    private val interactionCommitGate =
+        StreamingInteractionCommitGate<StreamingMarkdownSnapshot>()
     private val _snapshot = MutableStateFlow(
         StreamingMarkdownSnapshot(
             inputContent = initialContent,
@@ -354,6 +394,10 @@ private class StreamingMarkdownRenderState(
     fun offer(content: String, isStreaming: Boolean) {
         val revision = offeredRevision.incrementAndGet()
         inputs.trySend(StreamingMarkdownInput(revision, content, isStreaming))
+    }
+
+    override fun setCodeBlockScrolling(owner: Any, active: Boolean) {
+        interactionCommitGate.setActive(owner, active)?.let { _snapshot.value = it }
     }
 
     suspend fun run() {
@@ -394,7 +438,7 @@ private class StreamingMarkdownRenderState(
             // semantics anyway: if tokens arrived during parsing, keep the previous measured tree
             // until the newest parse succeeds instead of flashing this stale snapshot.
             if (offeredRevision.get() == input.revision) {
-                _snapshot.value = next
+                interactionCommitGate.offer(next)?.let { _snapshot.value = it }
                 lastRenderedAtMs = SystemClock.uptimeMillis()
             }
         }
@@ -406,7 +450,7 @@ private class StreamingMarkdownRenderState(
 }
 
 @Composable
-internal fun StreamingMarkdownDocument(
+internal fun ChatStreamingMarkdown(
     content: String,
     isStreaming: Boolean,
     renderContext: ChatMarkdownRenderContext,
@@ -453,27 +497,32 @@ internal fun StreamingMarkdownDocument(
     }
 
     val snapshot by state.snapshot.collectAsState()
-    MarkdownSelectionHost(selectionEnabled) {
-        Column(modifier = modifier) {
-            snapshot.stableBlocks.forEach { block ->
-                key(block.startOffset, block.identity) {
-                    StableMarkdownBlockContent(block, renderContext)
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalStreamingMarkdownInteractionController provides state,
+    ) {
+        MarkdownSelectionHost(selectionEnabled) {
+            Column(modifier = modifier) {
+                snapshot.stableBlocks.forEach { block ->
+                    key(block.startOffset, block.identity) {
+                        StableMarkdownBlockContent(block, renderContext)
+                    }
                 }
-            }
-            snapshot.liveBlock?.let { block ->
-                // The key is the tail's document start, not its changing content. Appending text
-                // and terminalization therefore retain the same Markdown subtree and fade clocks.
-                key("live-tail", block.startOffset) {
-                    androidx.compose.runtime.CompositionLocalProvider(
-                        LocalStreamingGlyphFadeSpec provides StreamingGlyphFadeSpec(
-                            lastVisibleSourceOffset = block.lastVisibleSourceOffset,
-                        )
-                    ) {
-                        ParsedMarkdownBlockContent(
-                            sourceContent = block.sourceContent,
-                            root = block.root,
-                            renderContext = renderContext,
-                        )
+                snapshot.liveBlock?.let { block ->
+                    // The key is the tail's document start, not its changing content. Appending
+                    // text and terminalization retain the Markdown subtree, fade clocks, and the
+                    // code block's horizontal ScrollState.
+                    key("live-tail", block.startOffset) {
+                        androidx.compose.runtime.CompositionLocalProvider(
+                            LocalStreamingGlyphFadeSpec provides StreamingGlyphFadeSpec(
+                                lastVisibleSourceOffset = block.lastVisibleSourceOffset,
+                            )
+                        ) {
+                            ParsedMarkdownBlockContent(
+                                sourceContent = block.sourceContent,
+                                root = block.root,
+                                renderContext = renderContext,
+                            )
+                        }
                     }
                 }
             }

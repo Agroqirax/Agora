@@ -440,7 +440,7 @@ internal fun AssistantMessageContent(
                                 appearanceRegistry = segmentAppearanceRegistry,
                                 isStreaming = isStreaming,
                             ) {
-                                StreamingMarkdownDocument(
+                                ChatStreamingMarkdown(
                                     content = answerBodyText,
                                     isStreaming = isStreaming,
                                     renderContext = renderContext,
@@ -449,7 +449,7 @@ internal fun AssistantMessageContent(
                                 )
                             }
                         } else {
-                            StreamingMarkdownDocument(
+                            ChatStreamingMarkdown(
                                 content = answerBodyText,
                                 isStreaming = isStreaming,
                                 renderContext = renderContext,

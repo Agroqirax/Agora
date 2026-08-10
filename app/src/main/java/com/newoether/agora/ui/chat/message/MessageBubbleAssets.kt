@@ -14,11 +14,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -70,6 +73,7 @@ import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.findChildOfType
 import org.intellij.markdown.flavours.gfm.GFMTokenTypes.CELL
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
  * The memoized markdown rendering assets shared by a single [MessageItem]: the main
@@ -787,6 +791,24 @@ private fun SearchHighlightedMarkdownCodeText(
         )
     }
 
+    val horizontalScrollState = rememberScrollState()
+    val interactionController = LocalStreamingMarkdownInteractionController.current
+    val interactionOwner = remember { Any() }
+    if (interactionController != null) {
+        LaunchedEffect(interactionController, interactionOwner, horizontalScrollState) {
+            snapshotFlow { horizontalScrollState.isScrollInProgress }
+                .distinctUntilChanged()
+                .collect { active ->
+                    interactionController.setCodeBlockScrolling(interactionOwner, active)
+                }
+        }
+        DisposableEffect(interactionController, interactionOwner) {
+            onDispose {
+                interactionController.setCodeBlockScrolling(interactionOwner, active = false)
+            }
+        }
+    }
+
     MarkdownCodeBackground(
         color = LocalMarkdownColors.current.codeBackground,
         shape = RoundedCornerShape(LocalMarkdownDimens.current.codeBackgroundCornerSize),
@@ -801,7 +823,7 @@ private fun SearchHighlightedMarkdownCodeText(
             text = renderedText,
             style = style,
             modifier = Modifier
-                .horizontalScroll(rememberScrollState())
+                .horizontalScroll(horizontalScrollState)
                 .padding(LocalMarkdownPadding.current.codeBlock)
                 .onGloballyPositioned { coordinates = it },
             onTextLayout = { layoutResult = it },

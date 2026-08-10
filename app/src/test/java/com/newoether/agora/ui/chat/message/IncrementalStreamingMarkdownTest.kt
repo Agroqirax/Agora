@@ -9,6 +9,7 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -181,6 +182,32 @@ class IncrementalStreamingMarkdownTest {
             longArrayOf(1_000L, 1_000L, 1_000L, 1_000L),
             promoted.birthTimesMs,
         )
+    }
+
+    @Test
+    fun interactionCommitGate_holdsOnlyTheLatestSnapshotUntilGestureEnds() {
+        val gate = StreamingInteractionCommitGate<String>()
+        val codeBlock = Any()
+
+        assertEquals("initial", gate.offer("initial"))
+        assertNull(gate.setActive(codeBlock, active = true))
+        assertNull(gate.offer("stream one"))
+        assertNull(gate.offer("stream two"))
+        assertEquals("stream two", gate.setActive(codeBlock, active = false))
+        assertEquals("terminal", gate.offer("terminal"))
+    }
+
+    @Test
+    fun interactionCommitGate_waitsForEveryActiveCodeBlockOwner() {
+        val gate = StreamingInteractionCommitGate<String>()
+        val first = Any()
+        val second = Any()
+
+        gate.setActive(first, active = true)
+        gate.setActive(second, active = true)
+        assertNull(gate.offer("latest"))
+        assertNull(gate.setActive(first, active = false))
+        assertEquals("latest", gate.setActive(second, active = false))
     }
 
     private fun Int.splitsSurrogatePair(text: String): Boolean =

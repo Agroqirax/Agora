@@ -707,7 +707,7 @@ private fun StreamingDetailMarkdownReveal(
         revealKey = revealKey,
         modifier = Modifier.fillMaxWidth(),
     ) { revealModifier, onReady ->
-        StreamingMarkdownDocument(
+        ChatStreamingMarkdown(
             content = content,
             isStreaming = isStreaming,
             renderContext = renderContext,
