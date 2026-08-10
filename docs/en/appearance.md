@@ -1,75 +1,23 @@
 # Appearance
 
-Customize Agora's look and feel — theme mode, color scheme, and style.
+Open **Settings → Appearance** to configure how Agora looks and presents generated content.
 
-## Theme Mode
+## Theme and typography
 
-Choose between light and dark appearance.
+- Follow the system theme or choose light/dark mode and an available color scheme.
+- Use the system font, Agora's bundled font, or import a custom font.
+- Toggle dynamic color where the device and build support it.
 
-| Mode | Description |
-|------|-------------|
-| **System** | Follow your device's system theme (default) |
-| **Light** | Always use light theme |
-| **Dark** | Always use dark theme |
+## Chat presentation
 
-Changes take effect immediately.
+- Show or hide detailed token usage.
+- Display thinking segments as cards or bottom sheets.
+- Display thinking and tool activity as a timeline, grouped blocks, or compact blocks.
+- In card mode, optionally expand the currently active group automatically.
+- Enable or disable haptic feedback.
 
----
+## Motion and effects
 
-## Color Scheme
+The blur setting applies to the chat-list area beneath the top toolbar. **Reduce motion** removes or shortens supported transitions and decorative motion; it does not change message generation or data behavior.
 
-Choose from a curated set of color palettes built on Material 3 design principles.
-
-| Scheme | Character |
-|--------|-----------|
-| **Midnight** | Deep blue tones, calm and professional (default) |
-| **Nordic** | Cool teal and slate, clean and minimal |
-| **Forest** | Warm greens and earth tones, natural feel |
-| **Sunset** | Orange and warm tones, energetic |
-| **Rose** | Pink and rose accents, soft and warm |
-| **Lavender** | Purple and violet hues, elegant |
-| **Slate** | Neutral grays and blues, understated |
-| **Ocean** | Deep blue and cyan, refreshing |
-
-Each scheme has both light and dark variants.
-
----
-
-## Scheme Style
-
-The scheme style determines *how* colors from the chosen palette are applied to UI elements.
-
-| Style | Effect |
-|-------|--------|
-| **Tonal Spot** | Primary color accents on key surfaces (default) |
-| **Expressive** | Bold use of accent colors throughout |
-| **Vibrant** | High-saturation colors, lively appearance |
-| **Neutral** | Minimal color, mostly surface tones |
-
----
-
-## Blur Effects
-
-Toggle **Enable Blur Effects** to control background blur and gradient blur throughout the UI. When disabled, blur effects are replaced with solid colors, which can improve performance on lower-end devices.
-
-!!! tip "Performance"
-    Disable blur effects if you notice UI lag during scrolling or animation on older devices.
-
----
-
-## Reduce Motion
-
-Enable **Reduce motion** to stop the continuously moving background on the new-chat screen and show the welcome text without its typing effect. Loading indicators and state-transition feedback remain enabled.
-
-This preference is included in settings export and import.
-
----
-
-## Dynamic Color (Android 12+)
-
-When enabled on devices running Android 12 or higher, Agora extracts a color palette from your system wallpaper and applies it automatically.
-
-This overrides the manual **Color Scheme** selection. Disable it to use a custom scheme.
-
-!!! info "Availability"
-    Dynamic Color requires Android 12 (API 31) or higher. On older devices, the toggle is hidden.
+Changes take effect through the shared appearance settings and may require the relevant screen to be recreated before every surface reflects them.

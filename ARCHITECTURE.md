@@ -47,6 +47,7 @@ those instances instead of building competing stacks.
 | `app/src/main/java/.../api` | Provider protocol adapters and streaming event model |
 | `app/src/main/java/.../tool` | Memory, RAG, web, shell, image, and automation tools |
 | `app/src/main/java/.../data` | Room, DataStore, backup, import/export, attachment ownership |
+| `app/src/main/java/.../mcp` | MCP transports, protocol client, server registry, and tool discovery |
 | `app/src/main/java/.../automation` | Tasks, loops, scheduling, execution serialization |
 | `app/src/main/java/.../service` | Foreground generation and WorkManager entry points |
 | `app/src/main/java/.../sandbox` | Shared sandbox interfaces |
@@ -81,7 +82,7 @@ The pure reducer is the single authority for in-process Run state. The controlle
 manager, Stop finalizer, task engine, and Room transactions execute identified effect bodies but
 cannot release or retarget a Run without returning the exact result command. A few graph-building
 and guidance-storage adapters remain outside the pure core; their bounded ownership is recorded in
-`docs/development/conversation-runtime-refactor-baseline.md`.
+`development-docs/conversation-runtime-refactor-baseline.md`.
 
 Room remains the durable source of truth. The live message is an overlay for the
 currently selected branch; it does not become a second durable message graph.
@@ -125,8 +126,12 @@ of the per-conversation runtime state.
 ## 4. Generation pipeline
 
 `GenerationRequestBuilder` prepares provider configuration, context, tools, memory,
-attachments, and optional transcription. A Provider owns retry and semantic termination for one
-stream. `ProviderPassRunner` collects exactly one such stream and closes it as an identity-bearing
+attachments, and optional transcription. `ProviderMessageProjector` is the lossless Room-to-
+provider projection for durable text, attachments, and synthetic tool rows; both generation and
+Compact consume it. `ConversationContextProjector` uses that same projection plus fixed system/tool
+costs for the UI token estimate and roll-out boundary, so the indicator does not maintain a second
+message-count model. A Provider owns retry and semantic termination for one stream.
+`ProviderPassRunner` collects exactly one such stream and closes it as an identity-bearing
 `CompletedText`, `CompletedToolCalls`, `Truncated`, `Failed`, or `Cancelled` outcome. Before network
 execution, the mailbox must emit the exact `StartProviderPass` effect; the closed outcome returns as
 `ProviderPassCompleted`, and only the reducer's exact `ProviderPassAccepted` effect may be consumed.
@@ -192,18 +197,19 @@ late exact Run identity is adopted by the existing `Stopping` state. That transi
 identified `FinalizeStop`; the coroutine and persistence barriers still both have to settle. The
 normal commit race therefore cannot bypass the mailbox or attach work to the stopped Run.
 
-Manual Compact claims only `Idle` and does not activate the generation registry or Stop button.
-Its short admission check shares the queue-mutation mutex, so it cannot overtake pending-guidance
-lease transfer; pending guidance wins and manual Compact reports busy without changing it.
-Automatic Compact temporarily owns the exact active Run/pass, and only its exact
-`CompactCompleted` result may emit `ResumeAfterCompact`; Stop can instead move that Run directly
-to `Stopping`, making the late Compact result stale. Both foreground and Task executors use the
-same `ContextCompactEffectCoordinator`. The external compactor still performs the existing
-non-destructive selected-graph calculation and one Room Compact-boundary transaction, using the
-durable Compact Run id supplied by the identified effect. A normal Send arriving during Compact
-waits only for that Compact result and then re-enters the mailbox: manual settlement exposes Idle,
-while automatic settlement exposes Active and accepts normal memory guidance. Direct-only
-automation receives busy and creates no input.
+Manual Compact claims `Idle` as an identity-bearing `RunState.Compacting`, activates the ordinary
+generating/loading projection, and installs its coroutine as the conversation's generation Job.
+The composer therefore follows the standard contract: empty input exposes Stop, while non-empty
+text or attachments enter the existing `AcceptGuidance` FIFO and drain through a fresh normal Send
+after Compact releases the slot. Automatic pre-send Compact first publishes its durable capsule,
+then returns to the unchanged send path so the accepted user input is queued without duplication.
+
+Compact inside an already-active Run temporarily owns that exact Run/pass, and only its exact
+`CompactCompleted` result may emit `ResumeAfterCompact`; Stop can instead move the Run directly to
+`Stopping`, making a late Compact result stale. Foreground and Task executors use the same
+`ContextCompactEffectCoordinator`. The compactor performs a non-destructive selected-graph
+calculation and one Room Compact-boundary transaction using the durable Compact Run id supplied by
+the identified effect. Direct-only automation receives busy and creates no input.
 
 Startup recovery now uses the same pure runtime contract: Room reads ordered `ACTIVE`/`STOPPING`
 snapshots, reduces each through `Recover`, executes the exact `RecoverDurableRun` transaction, and
@@ -345,9 +351,10 @@ Tool providers are capability-oriented:
 - memory file operations;
 - conversation search/RAG;
 - web search and fetch;
-- remote shell and file operations;
+- remote shell and file operations, including durable Conch jobs;
+- discovered MCP server tools;
 - image generation;
-- foreground-only automation creation and control.
+- persistent Task and conversation Loop automation controls.
 
 Provider signatures are opaque protocol state. A segment records the originating
 provider, and signatures must never be replayed into another provider protocol.
@@ -376,14 +383,18 @@ The local persistence declarations are split by responsibility without creating 
 
 - `ChatEntities.kt` contains Room entities, converters, query projections, and pure tool-round
   validation;
-- `ChatDao.kt` is the sole `@Dao` and owns graph/Run/Compact/embedding/export declarations plus
-  cross-domain transactions;
-- `ChatAutomationDao.kt` is a stateless inherited declaration surface for Task and Loop rows;
+- `ChatDao.kt` is the sole `@Dao`, extends the two stateless declaration surfaces below, and owns
+  common graph/Run/embedding/export declarations plus cross-domain transactions;
+- `ChatContextCompactDao.kt` owns the atomic Compact insertion, settlement, recompact, deletion,
+  branch-rewiring, and dedicated-Run declarations;
+- `ChatAutomationDao.kt` owns the inherited Task and Loop row declarations;
 - `ChatDatabase.kt` is only the v22 Room composition root and migration chain.
 
-DataStore holds user settings, provider/model configuration, encrypted API-key
-references, appearance, generation defaults, tool toggles, backup settings, and
-per-conversation overrides.
+DataStore holds user settings, provider/model configuration, API-key references, appearance,
+generation defaults, tool toggles, backup settings, and per-conversation overrides. `SecretCrypto`
+normally wraps secrets with an Android Keystore AES-256-GCM key, but legacy plaintext is accepted
+and encryption failure deliberately falls back to plaintext to avoid data loss; security/privacy
+documentation must not describe the envelope as an unconditional invariant.
 
 The filesystem holds processed attachments, fork-owned attachment copies, memory
 Markdown files, local models, sandbox files, imports, exports, and backups. File
@@ -421,8 +432,12 @@ The F-Droid sandbox runs commands with concurrent output collection and an actua
 wall-clock timeout. The shared glob matcher is implemented without API-26-only
 `java.nio.file` APIs so the API 24 minimum remains real.
 
-Remote shell traffic uses the Conch protocol, encrypted payloads, host-key trust, and
-streamed tool output. Android-compatible Base64 APIs are used on every supported SDK.
+Remote shell supports Conch HTTP jobs and direct SSH with host-key trust. Conch requests use signed ephemeral-key/AES-GCM application-layer protection when an API key is configured; blank-key servers receive plain JSON and rely on HTTPS for transport confidentiality. Commands start as durable jobs: foreground execution is a bounded wait
+on the same process, and a timeout returns its job id instead of killing or replaying it. Separate
+list/get/wait/stop/ack operations manage surviving jobs. Terminal jobs are acknowledged only after the
+exact tool result is committed to Room; server retention remains the cleanup fallback when an
+acknowledgement cannot be delivered. Android-compatible Base64 APIs are used on every supported
+SDK.
 
 ## 10. Data portability and recovery
 
@@ -453,7 +468,7 @@ Every handwritten Kotlin source in main, test, flavor, and build-logic source se
 999 physical lines by `verifyKotlinFileSize`. The task is wired into Gradle `check`, Android
 `preBuild`, `build.ps1`, and CI. Generated/build output, caches, and the vendored `thirdparty` tree
 are excluded; the temporary migration baseline is empty. The exact counting and baseline rules are
-documented in `docs/development/kotlin-source-size-policy.md`.
+documented in `development-docs/kotlin-source-size-policy.md`.
 
 High-risk changes require focused tests in addition to the full gate:
 

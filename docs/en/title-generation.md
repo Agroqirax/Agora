@@ -1,34 +1,12 @@
 # Title Generation
 
-Automatically generate conversation titles based on the first exchange.
+Open **Settings → Title Generation** to control automatic conversation titles.
 
-## What It Does
+- Enable or disable automatic title generation. It is enabled by default.
+- Select the model used for titles, or use the current/dedicated configured model according to the selector.
+- Edit the prompt used to request a concise title.
+- Enable or disable the completion notification.
 
-When you start a new conversation, Agora can automatically generate a short, meaningful title based on your first message and the model's response. This replaces the generic "New Chat" title.
+Title requests are sent to the selected model provider and can include conversation content needed for the title. A manually renamed title is controlled through the conversation UI.
 
-## Setup
-
-1. Go to **Settings → Title Generation**
-2. Toggle **Auto-generate titles**
-3. Optionally choose a **Model** for title generation (uses the current conversation model by default)
-
-!!! tip "Model Choice"
-    Title generation uses very few tokens. You can use a cheap, fast model (like GPT-4o Mini or a local model) without affecting your conversation's quality.
-
-## How It Works
-
-1. You send your first message in a new conversation
-2. The model responds (as usual)
-3. After the response completes, Agora sends a separate, small request to generate a title
-4. The generated title is saved and displayed in the conversation list
-
-Title generation only runs once per conversation, on the first exchange.
-
-## Title Generation Model
-
-You can use a different model specifically for title generation:
-
-- **Default** (no selection) — Uses the same model as the conversation
-- **Specific model** — Always uses that model for all title generation, regardless of which model is used for the conversation
-
-Using a dedicated fast model for titles can reduce latency and cost.
+See [Conversations](conversations.md) and [Privacy & Security](privacy.md).

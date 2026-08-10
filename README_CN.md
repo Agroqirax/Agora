@@ -3,9 +3,9 @@
 
   # Agora
 
-  **BYOK LLM 客户端 — 多提供商接入、智能代理工作流、远程设备控制**
+  **BYOK LLM 客户端：多提供商接入、智能代理工作流与远程设备控制**
 
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
   [![Platform: Android](https://img.shields.io/badge/Platform-Android-green.svg)](https://developer.android.com)
   [![Kotlin](https://img.shields.io/badge/Kotlin-Native-blue.svg)](https://kotlinlang.org/)
   <br/>[English](README.md) | **中文**
@@ -21,14 +21,7 @@
 &nbsp;&nbsp;
 [![GitHub Releases](https://img.shields.io/badge/GitHub-Releases-blue?logo=github)](https://github.com/newo-ether/Agora/releases)
 
-- **F-Droid（推荐）** — 通过 [F-Droid](https://f-droid.org/) 安装，搜索 **Agora**。
-- **Google Play** — 从 [Google Play 商店](https://play.google.com/store/apps/details?id=com.newoether.agora) 安装。
-- **GitHub Releases** — 从 [Releases 页面](https://github.com/newo-ether/Agora/releases) 下载最新 `.apk`。
-- **从源码构建** — 用 Android Studio 克隆并构建（详见[快速开始](#快速开始)）。
-
----
-
-**Agora** — 为 AI 重度用户打造的 BYOK Android 客户端。接入 8+ 内置提供商（外加无限自定义端点），使用自己的 API 密钥，支持对话分支树、llama.cpp 本地推理、加密远程 Shell 控制。所有数据存储在本地，无日志泄露。开源，MIT 协议。
+Agora 是开源 Android 客户端，用于接入你自己的模型账号与端点。它把对话保存在本地，模型请求由设备直接发送到所选提供商，并支持非线性消息分支、上下文 Compact、MCP、自动化、搜索、记忆、本地模型和远程 Shell 工具。
 
 ## 截图
 
@@ -40,149 +33,49 @@
 </tr>
 </table>
 
-## 为什么选择 Agora？
+## 功能
 
-- **无中间层：** 直连 API。无遥测、无追踪、无企业服务器记录你的对话。一切存储在本地 Room 数据库中。
-- **非线性思维：** 树形消息数据库让你可以编辑任意历史消息、重新生成回复、探索备选分支，不会丢失上下文。
-- **原生智能代理：** 多轮工具调用，支持联网搜索、代码执行、远程文件操作、记忆管理、语义对话搜索。
-- **远程控制：** 通过 [Conch](https://github.com/newo-ether/conch) 协议管理服务器、编辑文件、搜索远程代码 — ECDH + AES-256-GCM 端到端加密。
+- **九类内置提供商：** OpenAI、Anthropic、Google Gemini、DeepSeek、通义千问/DashScope、OpenRouter、Groq、Ollama 和本地 llama.cpp；自定义端点支持 OpenAI 兼容、Google 或 Anthropic 协议。
+- **树形对话：** 编辑或重新生成历史消息时保留其他备选分支。
+- **Token 预算上下文：** 4K–1M 估算预算；非破坏式 Compact 胶囊保留最近消息原文。
+- **代理工具：** 网络搜索、记忆、历史对话 RAG、图片生成、MCP、任务/循环、远程 Shell 与文件、持久 Conch 任务，以及 F-Droid Alpine 沙盒。
+- **本地智能：** 通过 llama.cpp 运行 GGUF 聊天模型和本地嵌入。
+- **数据迁移：** 带版本的 `.agora` ZIP、ChatGPT/Claude 导入与定时备份。
+- **个性化界面：** Material 3 主题、字体、触觉、思考/工具展示，以及系统默认加 12 种明确界面语言。
 
-## 功能特性
-
-### 多提供商接入
-- **8 个内置提供商：** OpenAI、Anthropic、Google Gemini、DeepSeek、通义千问（DashScope）、OpenRouter、Ollama、本地（GGUF via llama.cpp）
-- **无限自定义提供商**，支持任意 Base URL 和 API 密钥
-- **BYOK：** 使用自己的 API 密钥 — 无需订阅，无中间层
-- **每个提供商支持多个 API 密钥**，可命名别名，方便轮换
-- 每个提供商可独立覆盖 Base URL，适配代理和自托管端点
-
-### 智能代理工具
-模型可在多轮循环中自主调用以下工具：
-- **联网搜索** — DuckDuckGo Lite（匿名免密钥）、Brave、Kagi、Serper、Tavily、SearXNG
-- **代码执行** — Gemini 代码执行、PRoot Alpine Linux 沙盒 + SAF 文件访问
-- **图片生成** — BYOK 文生图，OpenAI 兼容 `/v1/images/generations`，聊天内直接渲染
-- **远程 Shell 与文件 I/O** — 通过 [Conch](https://github.com/newo-ether/conch) 协议执行命令、读写/编辑/搜索远程文件
-- **记忆** — 跨对话的持久活跃记忆和记忆文件存储
-- **对话搜索** — 基于 RAG 的对话历史语义搜索
-
-### 深度推理
-- 支持深度推理：OpenAI o1/o3、Anthropic extended thinking、Gemini thinking、DeepSeek-R1、通义千问 QwQ
-- 可配置推理等级（低/中/高）
-- 流式思考标签渲染，可折叠 UI + 耗时追踪
-
-### 本地智能
-- **本地 LLM 推理** via llama.cpp — 完全离线运行 GGUF 模型
-- **本地 embedding** — 设备端语义搜索（RAG）对话历史
-- **Ollama** 提供商 — 接入局域网自托管模型
-
-### 远程设备控制（Conch 协议）
-- ECDH 密钥交换 + AES-256-GCM 加密 + HMAC-SHA256 签名
-- 令牌桶速率限制 + 基于 nonce 的防重放保护
-- **多设备支持** — 配置多台远程服务器并切换
-- **MCP 集成** — Conch 可作为 Claude Desktop MCP 服务器
-
-### 知识管理
-- **RAG 语义搜索** 基于余弦相似度搜索所有历史对话
-- 可配置相似度阈值和关键词/模型搜索方式
-- 可独立选择 embedding 模型（远程或本地），不依赖聊天模型
-- **上下文窗口管理** — 实时 token 计数和滑动窗口
-- 可视化上下文范围指示器，淡化窗口外的消息
-
-### 数据可移植
-- **.agora 导出/导入：** 对话、记忆、提示词、设置、API 密钥打包为单一可移植文件
-- **合并、替换、跳过** 三种导入策略
-- **自动备份** — 基于 WorkManager 的周期性备份，可配置周期、分类和保留策略
-- **第三方导入：** Claude 和 ChatGPT 导出格式（.zip / .json）
-- 导出和导入流程均有 API 密钥安全提醒
-
-### 个性化定制
-- **系统提示词模板**，三段式编辑器（系统提示词 + 用户前置 + 用户后置）
-- 变量替换：`{sent_time}`、`{sent_date}` 及可扩展变量系统
-- 每个对话独立切换模型和系统提示词
-- 聊天底栏可按消息切换模型
-- 每对话生成参数覆盖（温度、maxTokens、惩罚项等）
-- **自动标题生成**，可配置生成模型
-
-### UI & 交互
-- 现代 Material 3 设计，Jetpack Compose + 动态取色（Material You）
-- 亮色 / 暗色 / 跟随系统主题模式，可配置配色方案
-- **非线性分支：** 编辑任意历史消息，分支进入备选对话路径
-- 实时流式响应，消息锚定 + 动画自动滚动
-- 全局触觉反馈（长按、选择、成功/错误）
-- 沉浸式手势图片与媒体查看器
-- Markdown 渲染，支持语法高亮、LaTeX 数学公式、代码块
-- 图片、视频、PDF、文件附件支持及缩略图预览
-- iOS 风格折叠大标题设置页，共享页面过渡动画
-- 模糊效果支持性能可配置开关
-- 支持英文、简体中文和繁体中文
+Conch 只有在配置 API Key 时启用应用层加密；空 Key 端点发送明文 JSON，应使用 HTTPS。外部提供商和工具只在你使用相应功能时接收所需数据，完整边界见隐私文档。
 
 ## 文档
 
-📖 **[浏览用户手册](https://newo-ether.github.io/Agora/)** — 24 个页面，涵盖安装、提供商、工具、搜索、记忆、Shell 等。
+- 📖 **[用户手册](https://newo-ether.github.io/Agora/zh/)** — 28 个维护页面，涵盖安装、提供商、上下文 Compact、MCP、自动化、工具、隐私与数据管理。
+- 🏗️ **[架构指南](ARCHITECTURE.md)** — 当前运行时、持久化、提供商、工具与数据流。
+- 🧰 **[开发文档](development-docs/documentation-maintenance.md)** — 内部需求、架构基线和文档维护规范。
 
-🏗️ **[架构指南](ARCHITECTURE.md)** — 完整的代码库导览：数据层、API 提供商、JNI、UI 及数据流。
+公开手册位于 `docs/<locale>/`；内部工程文档单独位于 `development-docs/`。
 
 ## 快速开始
 
-### 环境要求
-- [Android Studio](https://developer.android.com/studio)（推荐 Ladybug 及以上）
-- Android SDK 34+
-- 任一支持提供商的 API 密钥
+1. 安装 Agora，从对话抽屉进入**设置**。
+2. 在**提供商**中添加凭据。
+3. 在**模型**中同步并启用模型。
+4. 从聊天底栏选择模型并发送消息。
 
-### 快速配置
+详见[快速开始手册](https://newo-ether.github.io/Agora/zh/getting-started/)。
 
-<table>
-<tr>
-<td width="20%"><b>① 启动</b><br/>在设备上打开 Agora。</td>
-<td width="20%"><b>② 设置</b><br/>从导航栏打开<b>设置</b>。</td>
-<td width="20%"><b>③ API 密钥</b><br/>选择<b>提供商</b>，添加你的 <b>API 密钥</b>。</td>
-<td width="20%"><b>④ 模型</b><br/><b>模型</b> →「从所有提供商同步」。</td>
-<td width="20%"><b>⑤ 定制</b><br/>系统提示词、上下文、搜索、记忆。</td>
-</tr>
-</table>
+### 从源码构建
 
-### 运行本地模型
-
-<table>
-<tr>
-<td width="25%"><b>① 放置</b><br/>将 GGUF 模型文件放到设备上。</td>
-<td width="25%"><b>② 导入</b><br/>设置 → 提供商 → 本地 →「导入 GGUF 模型」。</td>
-<td width="25%"><b>③ 配置</b><br/>设置上下文大小、温度等参数。</td>
-<td width="25%"><b>④ 选择</b><br/>从聊天模型选择器中选择你的本地模型。</td>
-</tr>
-</table>
-
-### 设置远程 Shell（Conch）
-
-<table>
-<tr>
-<td width="33%"><b>① 部署</b><br/>在目标机器上部署 <a href="https://github.com/newo-ether/conch">Conch 服务器</a>。</td>
-<td width="33%"><b>② 添加设备</b><br/>设置 → Shell 设备 → 添加 URL 和 API 密钥。</td>
-<td width="33%"><b>③ 使用</b><br/>模型会自动发现 Shell 设备，用于执行命令、文件操作和搜索。</td>
-</tr>
-</table>
+当前项目目标为 Android SDK 36，仓库工作流使用 JDK 21。请安装 Android Studio 及所需 SDK/NDK 组件，并遵循根目录项目脚本和说明。
 
 ## 技术栈
 
-- **语言：** [Kotlin](https://kotlinlang.org/)
-- **UI 框架：** [Jetpack Compose](https://developer.android.com/jetpack/compose)（Material 3，动态取色）
-- **架构：** MVVM + Kotlin Coroutines & Flow
-- **本地存储：** [Room Database](https://developer.android.com/training/data-storage/room) 树形消息结构 + DataStore Preferences
-- **网络：** OkHttp + SSE 流式传输
-- **序列化：** `kotlinx.serialization`
-- **原生：** llama.cpp via Android NDK（CMake）用于本地 LLM 推理和 embedding
-- **图片加载：** Coil
-- **Markdown：** Multiplatform Markdown Renderer M3
-- **数学公式：** JLaTeXMath-Android
-
-## 参与贡献
-
-欢迎贡献！可以 Fork 仓库、提交 Pull Request 或创建 Issue。
+Kotlin、Jetpack Compose Material 3、Coroutines/Flow、Room、DataStore、OkHttp/SSE、`kotlinx.serialization`、Android NDK/CMake、llama.cpp、Coil，以及 Markdown/LaTeX 渲染。
 
 ## 隐私
 
-Agora 不会收集、存储或传输任何个人数据。所有对话、API 密钥和设置均存储在本地设备上。消息直接从你的设备发送到你配置的 AI 提供商 — 无中间服务器、无遥测、无追踪。详见[隐私政策](PRIVACY.md)。
+Agora 不转发聊天补全，也没有通用分析。对话保存在应用管理的本地存储中；使用功能时，设备会直接访问已配置的提供商和工具。可选更新检查与主动提交评分有明确记录的网络目的地。崩溃后只在本地保留一份报告，并仅在用户下次启动明确确认后发送；报告包含诊断信息，不含对话文本或凭据。机密设置通常使用 Android Keystore AES-GCM 封装，但旧值以及加密失败时的保数据回退可能仍以明文存在 DataStore；若导出时选择机密，它们在 `.agora` 归档内部也不加密。
 
-## 许可证
+请阅读[隐私与安全](https://newo-ether.github.io/Agora/zh/privacy/)与仓库[隐私政策](PRIVACY.md)。
 
-本项目基于 [MIT License](LICENSE) 开源。
+## 参与贡献与许可
+
+欢迎通过 Issue 和 Pull Request 参与贡献。Agora 基于 [MIT License](LICENSE) 发布。

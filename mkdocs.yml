@@ -25,7 +25,6 @@ theme:
     text: Inter
     code: JetBrains Mono
   features:
-    - navigation.instant
     - navigation.tracking
     - navigation.top
     - search.highlight
@@ -64,6 +63,9 @@ plugins:
             Models: 模型
             Manage Models: 管理模型
             Generation: 生成参数
+            Context: 上下文
+            MCP: MCP
+            Automation: 自动化
             Parameters: 生成设置
             Title Generation: 标题生成
             Image Transcription: 图像转录
@@ -73,6 +75,7 @@ plugins:
             Language: 语言
             Shell Setup: Shell 设置
             Sandbox: 沙盒
+            Privacy & Security: 隐私与安全
             About: 关于
         - locale: zh-Hant
           name: 繁體中文
@@ -98,6 +101,9 @@ plugins:
             Models: 模型
             Manage Models: 管理模型
             Generation: 生成參數
+            Context: 上下文
+            MCP: MCP
+            Automation: 自動化
             Parameters: 生成設定
             Title Generation: 標題生成
             Image Transcription: 圖像轉錄
@@ -107,6 +113,7 @@ plugins:
             Language: 語言
             Shell Setup: Shell 設定
             Sandbox: 沙盒
+            Privacy & Security: 隱私與安全
             About: 關於
         - locale: es
           name: Español
@@ -132,6 +139,9 @@ plugins:
             Models: Modelos
             Manage Models: Gestionar Modelos
             Generation: Generación
+            Context: Contexto
+            MCP: MCP
+            Automation: Automatización
             Parameters: Parámetros
             Title Generation: Generación de Títulos
             Image Transcription: Transcripción de Imágenes
@@ -166,6 +176,9 @@ plugins:
             Models: Modèles
             Manage Models: Gérer les Modèles
             Generation: Génération
+            Context: Contexte
+            MCP: MCP
+            Automation: Automatisation
             Parameters: Paramètres
             Title Generation: Génération de Titres
             Image Transcription: Transcription d'Images
@@ -200,6 +213,9 @@ plugins:
             Models: Modelle
             Manage Models: Modelle Verwalten
             Generation: Generierung
+            Context: Kontext
+            MCP: MCP
+            Automation: Automatisierung
             Parameters: Parameter
             Title Generation: Titelgenerierung
             Image Transcription: Bildtranskription
@@ -234,6 +250,9 @@ plugins:
             Models: Модели
             Manage Models: Управление Моделями
             Generation: Генерация
+            Context: Контекст
+            MCP: MCP
+            Automation: Автоматизация
             Parameters: Параметры
             Title Generation: Генерация Заголовков
             Image Transcription: Транскрипция Изображений
@@ -268,6 +287,9 @@ plugins:
             Models: Modelos
             Manage Models: Gerenciar Modelos
             Generation: Geração
+            Context: Contexto
+            MCP: MCP
+            Automation: Automação
             Parameters: Parâmetros
             Title Generation: Geração de Títulos
             Image Transcription: Transcrição de Imagens
@@ -302,6 +324,9 @@ plugins:
             Models: モデル
             Manage Models: モデル管理
             Generation: 生成
+            Context: コンテキスト
+            MCP: MCP
+            Automation: オートメーション
             Parameters: パラメータ
             Title Generation: タイトル生成
             Image Transcription: 画像文字起こし
@@ -336,6 +361,9 @@ plugins:
             Models: 모델
             Manage Models: 모델 관리
             Generation: 생성
+            Context: 컨텍스트
+            MCP: MCP
+            Automation: 자동화
             Parameters: 매개변수
             Title Generation: 제목 생성
             Image Transcription: 이미지 트랜스크립션
@@ -346,6 +374,9 @@ plugins:
             Shell Setup: 셸 설정
             Sandbox: 샌드박스
             About: 정보
+        - locale: vi
+          name: Tiếng Việt
+          build: true
         - locale: ar
           name: العربية
           build: true
@@ -370,6 +401,9 @@ plugins:
             Models: النماذج
             Manage Models: إدارة النماذج
             Generation: التوليد
+            Context: السياق
+            MCP: MCP
+            Automation: الأتمتة
             Parameters: المعاملات
             Title Generation: توليد العناوين
             Image Transcription: نسخ الصور
@@ -401,6 +435,7 @@ nav:
   - Models:
       - Manage Models: models.md
   - Generation:
+      - Context: context.md
       - Parameters: generation.md
       - Title Generation: title-generation.md
   - Image Transcription: transcription.md
@@ -408,6 +443,8 @@ nav:
   - System Prompts: system-prompts.md
   - Agentic Tools:
       - Overview: tools.md
+      - MCP: mcp.md
+      - Automation: automation.md
       - Web Search: web-search.md
       - Remote Shell (Conch):
           - Shell Setup: shell.md
@@ -423,5 +460,6 @@ nav:
   - Appearance & Language:
       - Appearance: appearance.md
       - Language: language.md
+  - Privacy & Security: privacy.md
   - FAQ: faq.md
   - About: about.md

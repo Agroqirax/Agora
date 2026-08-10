@@ -38,12 +38,14 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
     val aliases by viewModel.settings.modelAliases.collectAsState()
     val customProviders by viewModel.settings.customProviders.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     var modelDialog by remember { mutableStateOf(false) }
     var promptDialog by remember { mutableStateOf(false) }
 
     CollapsingSettingsScaffold(
         title = stringResource(R.string.context_title),
         onBack = onBack,
+        floatingActionButton = { if (showDocFab) DocumentationFab("context.md") }
     ) {
         SettingsGroupColumn {
             SettingsGroup(
@@ -195,6 +197,7 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 },
             )
         }
+        if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
     }
 
     if (modelDialog) {

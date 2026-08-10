@@ -1,65 +1,13 @@
 # PDF Import
 
-Agora can extract and send selected pages from PDF files as images to vision-capable models.
+Attach a PDF from the chat composer to render selected pages as images for a model that supports image input.
 
-## How It Works
+## Page selection
 
-1. Attach a PDF file in chat
-2. A dialog opens showing all pages as thumbnails
-3. Select which pages to send
-4. Confirm — Agora extracts the pages as images and sends them to the model
+Agora initially selects the first five pages. It renders the document asynchronously and lets you select any pages in the file; there is no fixed 50-page application limit. Large documents or many selected pages can require substantial memory and time.
 
-The model receives the pages as vision input, letting it read and analyze PDF content.
+## Sending
 
----
+Selected page images become attachments in the conversation and are sent according to the selected model provider's image-input protocol. Use only documents you are willing to send to that provider.
 
-## Page Selection
-
-### Choosing Pages
-
-- Each page thumbnail has a **checkbox** in the top-left corner
-- Tap the checkbox to toggle a page on/off
-- **Select All** / **Deselect All** buttons for bulk operations
-- The top bar shows the selected count (e.g., "3 selected")
-- Maximum **50 pages** per PDF (larger files are clipped)
-
-### Fullscreen Preview
-
-Tap any thumbnail to open the fullscreen viewer:
-
-| Gesture | Action |
-|---------|--------|
-| Swipe left/right | Navigate between pages |
-| Tap | Show/hide the overlay controls |
-| Pinch | Zoom in/out |
-| Bottom-left capsule | Toggle page selection |
-
-The preview lets you inspect pages before deciding which to send.
-
----
-
-## Sending Pages
-
-After selecting pages, tap the confirm button. Agora:
-
-1. Renders each selected PDF page as a high-resolution image
-2. Attaches the images to your message
-3. Sends them to the model (requires a vision-capable model)
-
----
-
-## Limitations
-
-- **Max 50 pages** per PDF — larger files are truncated
-- **Image-only**: Text is not extracted; the model reads pages visually
-- **Vision model required**: The active chat model must support image inputs
-- **File size**: While there's no hard PDF size limit, very large files may be slow to render
-
----
-
-## Use Cases
-
-- **Document analysis** — upload a contract, report, or paper for the model to review
-- **Research** — share specific pages from academic papers
-- **Translation** — send foreign-language documents for translation
-- **Summarization** — get summaries of long documents, page by page
+If a model cannot accept image input, choose a compatible model or transcribe the content by another method. See [Image Transcription](transcription.md) and [Privacy & Security](privacy.md).

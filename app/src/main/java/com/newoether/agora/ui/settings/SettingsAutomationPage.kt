@@ -7,7 +7,9 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.net.toUri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Schedule
@@ -26,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -38,6 +41,7 @@ fun SettingsAutomationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val toolsEnabled by viewModel.settings.automationToolsEnabled.collectAsState()
     val exactEnabled by viewModel.settings.exactExecutionEnabled.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     val alarmManager = remember {
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     }
@@ -94,6 +98,7 @@ fun SettingsAutomationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     CollapsingSettingsScaffold(
         title = stringResource(R.string.settings_automation),
         onBack = onBack,
+        floatingActionButton = { if (showDocFab) DocumentationFab("automation.md") }
     ) {
         SettingsGroupColumn(modifier = Modifier.fillMaxWidth()) {
             SettingsGroup(
@@ -151,6 +156,7 @@ fun SettingsAutomationPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 }),
             )
         }
+        if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
     }
 }
 

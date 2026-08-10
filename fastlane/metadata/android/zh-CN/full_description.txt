@@ -1,13 +1,13 @@
-Agora 是一款完全开源、BYOK（自带密钥）的 Android LLM 客户端，面向高级用户。它直接连接 8+ AI 供应商，无中间服务器或跟踪，所有对话均存储在本地。
+Agora 是开源 BYOK Android LLM 客户端。对话保存在设备上，模型请求由设备直接发送到你配置的提供商或端点。
 
-功能特性：
-* 多轮智能体工具调用：网页搜索（Brave、Serper、Tavily、SearXNG）、代码执行、远程 Shell、文件操作（读写/编辑/文件搜索）、记忆管理、语义对话搜索
-* 远程设备控制（Conch 协议）：端到端加密（ECDH + AES-256-GCM + HMAC-SHA256），支持多设备配置和 Claude Desktop MCP 集成
-* 非线性分支对话：可编辑任意历史消息并探索替代对话路径，基于树形 Room 数据库
-* 本地 LLM 推理（llama.cpp / GGUF）及本地嵌入的 RAG 语义搜索
-* 深度推理模型支持：主流推理模型（OpenAI、Anthropic、Google、DeepSeek、Qwen），支持实时思考过程流式渲染
-* 活跃记忆和保存的记忆文件，实现跨对话持久化上下文
-* 上下文窗口管理，实时 token 计数和滑动窗口
-* .agora 导出/导入（对话、记忆、提示词、设置、密钥），支持 Claude 和 ChatGPT 的导入
-* Markdown 渲染，支持语法高亮、LaTeX 数学公式、图片和文件附件
-* 中英文双语支持
+功能：
+* 九类提供商：OpenAI、Anthropic、Google Gemini、DeepSeek、通义千问/DashScope、OpenRouter、Groq、Ollama 和本地 GGUF；自定义端点支持 OpenAI 兼容、Google 与 Anthropic 协议
+* 树形对话：编辑、重新生成和切换备选分支
+* Token 预算上下文与非破坏式 Compact 胶囊
+* 代理工具：网络搜索、记忆、历史对话 RAG、图片生成、MCP、任务/循环与远程 Shell/文件
+* 持久 Conch 任务与 SSH；配置 API Key 时 Conch 使用应用层加密
+* llama.cpp 设备端推理与本地嵌入
+* 带版本的 .agora ZIP 导入/导出、ChatGPT/Claude 导入和自动备份
+* Material 3 界面，可配置思考/工具展示、字体、触觉，支持 12 种界面语言
+
+只有使用对应功能时，数据才会发送给外部提供商或工具。崩溃后匿名诊断报告只保存在本地，并仅在用户下次启动明确确认时发送；准确网络目的地与备份安全边界请查看应用/用户手册的隐私文档。

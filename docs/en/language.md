@@ -1,21 +1,24 @@
 # Language
 
-Choose the display language for Agora's interface.
+Open **Settings → Language** to choose the app interface language.
 
-## Available Languages
+Agora supports the system default plus:
 
-| Language | Code | Description |
-|----------|------|-------------|
-| **System Default** | `system` | Follow your device's system language setting |
-| **English** | `en` | All UI text in English |
-| **简体中文** | `zh` | All UI text in Simplified Chinese |
-| **繁體中文** | `zh-Hant` | All UI text in Traditional Chinese |
+- English
+- Arabic
+- German
+- Spanish
+- French
+- Japanese
+- Korean
+- Brazilian Portuguese
+- Russian
+- Vietnamese
+- Simplified Chinese
+- Traditional Chinese
 
-## How to Change
+Changing the language updates Android-localized app resources. Some provider/model names and model-generated text remain in their original language.
 
-1. Go to **Settings → Language**
-2. Select your preferred language
-3. A snackbar appears: tap **Restart** to apply the change immediately
+## Manual translations
 
-!!! note "Restart Required"
-    Language changes require a full app restart. Agora prompts you to restart after selecting a new language — tap the restart action in the snackbar to reload the app with the new language.
+The documentation site builds the same language set. English and Simplified Chinese are maintained as complete baselines; other locale routes may display the current English page when a maintained translation is unavailable. This fallback prevents old translations from presenting obsolete product behavior.

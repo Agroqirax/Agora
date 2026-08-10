@@ -1,58 +1,15 @@
 # About
 
-App version, updates, documentation settings, and links.
-
-## App Info
-
-| Field | Description |
-|-------|-------------|
-| **Developer** | Newo Ether |
-| **Version** | Shows the current version name and build code |
-
----
+Open **Settings → About** to see the installed version, build information, project links, licenses, update status, and the optional feedback form.
 
 ## Updates
 
-### Check for Updates
+When automatic update checks are enabled, Agora checks for a newer release when the app starts, no more than once per day. The check only retrieves release metadata; installation remains an explicit user action and availability can differ between F-Droid, Google Play, and GitHub builds.
 
-Tap **Check for Updates** to query GitHub for the latest release. Agora compares your installed version against the latest release and shows the result:
+## Feedback
 
-- **Update available** — a newer version is published on GitHub
-- **Up to date** — you're running the latest release
+The rating form sends only the fields you deliberately submit—rating, name, email, and comment—to `https://newoether.space/api/rating`.
 
-### Auto Update Check
+After an unexpected crash, Agora stores one pending report locally and, on the next launch, asks whether you want to send it. Nothing is uploaded without that explicit action. The report contains the stack trace, app/Android version, device manufacturer/model, timestamp, and bounded diagnostic event tags; it does not include conversation text, credentials, or device identifiers.
 
-When enabled, Agora periodically checks for new releases in the background. Toggle this off to disable automatic checks.
-
----
-
-## Documentation
-
-### Show Documentation Links
-
-Controls the **floating help button** (FAB) that appears on settings sub-pages. When enabled, a :material-help-circle: button links to the relevant user manual page.
-
-Toggle this off if you prefer a cleaner interface without the documentation FAB.
-
----
-
-## Links
-
-| Link | Destination |
-|------|-------------|
-| **GitHub** | Agora source code repository |
-| **Issue Tracker** | Report bugs or request features |
-| **Contribute** | Open a pull request |
-| **Privacy Policy** | Agora privacy policy |
-
----
-
-## Rating
-
-A built-in feedback form lets you rate the app and submit comments. Your feedback helps improve Agora.
-
----
-
-## Crash Log
-
-If Agora encounters an error, you can view the crash log from **Settings → About → Crash Log**. The log is displayed in a monospace dialog with a **Copy** button to share diagnostic details when reporting bugs.
+For data handling and network destinations, see [Privacy & Security](privacy.md).

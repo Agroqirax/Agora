@@ -100,6 +100,7 @@ fun SettingsMcpPage(
 ) {
     val servers by viewModel.settings.mcpServers.collectAsState()
     val snapshots by viewModel.mcpServerSnapshots.collectAsState()
+    val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
     var editorRoute by remember { mutableStateOf<McpEditorRoute?>(null) }
     var deleteId by remember { mutableStateOf<String?>(null) }
 
@@ -127,6 +128,7 @@ fun SettingsMcpPage(
                     editorRoute = null
                 },
                 onRefresh = { viewModel.refreshMcpServer(target.id) },
+                showDocFab = showDocFab,
             )
         } else {
             val scrollState = rememberScrollState()
@@ -349,6 +351,7 @@ private fun McpServerEditor(
     onBack: () -> Unit,
     onSave: (McpServerConfig) -> Unit,
     onRefresh: () -> Unit,
+    showDocFab: Boolean,
 ) {
     var draft by remember(initial.id) { mutableStateOf(initial) }
     var headerRows by remember(initial.id) {
@@ -382,6 +385,7 @@ private fun McpServerEditor(
         title = stringResource(if (isNew) R.string.mcp_add_server else R.string.mcp_edit_server),
         onBack = onBack,
         scrollState = scrollState,
+        floatingActionButton = { if (showDocFab) DocumentationFab("mcp.md") },
         actions = {
             IconButton(
                 onClick = ::save,
@@ -561,6 +565,7 @@ private fun McpServerEditor(
                 )
             }
         }
+        if (showDocFab) { Spacer(modifier = Modifier.height(80.dp)) }
     }
 }
 
