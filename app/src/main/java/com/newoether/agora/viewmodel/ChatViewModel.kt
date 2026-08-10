@@ -242,7 +242,6 @@ class ChatViewModel(
             app = application,
             conversations = convRepo,
             memoryManager = memoryManager,
-            providers = providerRegistry.all,
             context = appContext,
             sandboxFactory = sandboxFactory,
             additionalToolProviders = listOf(automationToolProvider, mcpToolProvider),
@@ -637,6 +636,25 @@ class ChatViewModel(
         pendingConversationSettings = _pendingConversationSettings,
         onSnackbar = { msg -> emitSnackbar(msg) },
     )
+    private val contextProjector by lazy {
+        ConversationContextProjector(
+            conversations = convRepo,
+            requestBuilder = requestBuilder,
+            generationManager = { generationManager },
+            toBranchMessage = { it.toUiChatMessage(appContext) },
+            newChatSystemPromptId = { _pendingSystemPromptId.value },
+        )
+    }
+
+    internal suspend fun projectConversationContext(
+        conversationId: String?,
+        selectedModelId: String,
+        tokenBudget: Int,
+    ): ConversationContextProjection = contextProjector.project(
+        conversationId,
+        selectedModelId,
+        tokenBudget,
+    )
 
     private val generationController by lazy {
         MessageGenerationController(
@@ -686,8 +704,8 @@ class ChatViewModel(
             },
             onConversationAcceptedBySend = selectionController::publishAcceptedConversation,
             onUserMessagePersisted = ragManager::indexMessageForRag,
-            onTreeMutationStart = {
-                selectionController.beginTreeMutation()
+            onTreeMutationStart = { scrollToTarget ->
+                selectionController.beginTreeMutation(scrollToTarget)
             },
             onTreeMutationSettling = selectionController::markTreeMutationReady,
             onTreeMutationFailed = selectionController::failTreeMutation,
@@ -843,6 +861,47 @@ class ChatViewModel(
     ): CompactResult = generationController.compactManual(
         CompactRequest(model, prompt, retainLogicalMessages),
     )
+
+    /** Owns manual Compact beyond the lifetime of the dialog/composition that initiated it. */
+    fun startContextCompactManual(
+        model: String,
+        prompt: String,
+        retainMessages: Int,
+    ) {
+        viewModelScope.launch {
+            val result = try {
+                compactContextManual(model, prompt, retainMessages)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                CompactResult.Failed("Context compact failed")
+            }
+            if (result is CompactResult.Failed) emitSnackbar(result.message)
+        }
+    }
+
+    /** Re-runs Compact for one terminal Compact pill while preserving its graph position. */
+    fun startContextRecompact(messageId: String) {
+        val model = settings.contextCompactModel.value
+            ?.takeIf(String::isNotBlank)
+            ?: currentActiveModel.value
+        val request = CompactRequest(
+            model = model,
+            prompt = settings.contextCompactPrompt.value,
+            retainLogicalMessages = settings.contextCompactRetainCount.value,
+            replaceMessageId = messageId,
+        )
+        viewModelScope.launch {
+            val result = try {
+                generationController.compactManual(request)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                CompactResult.Failed("Context compact failed")
+            }
+            if (result is CompactResult.Failed) emitSnackbar(result.message)
+        }
+    }
 
     fun deleteMessage(messageId: String): Int {
         if (isSwitching.value) return 0

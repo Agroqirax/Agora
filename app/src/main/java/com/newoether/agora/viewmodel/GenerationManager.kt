@@ -18,8 +18,7 @@ import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.R
 import com.newoether.agora.service.AgoraForegroundService
 import com.newoether.agora.service.AppForegroundTracker
-import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
-import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
+import com.newoether.agora.api.util.ContextTokenEstimator
 import com.newoether.agora.tool.ToolProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +36,6 @@ class GenerationManager(
     private val app: Application,
     private val conversations: com.newoether.agora.data.repository.ConversationRepository,
     private val memoryManager: MemoryManager,
-    private val providers: Map<String, LlmProvider>,
     private val context: android.content.Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
     additionalToolProviders: List<ToolProvider> = emptyList(),
@@ -71,10 +69,6 @@ class GenerationManager(
         },
     )
 
-    private val transcriptionStage = GenerationTranscriptionStage(
-        TranscriptionManager(providers, conversations, context),
-    )
-
     // Image/video frame extraction lives in ImageProcessor (single source of truth).
     private val imageProcessor = ImageProcessor(app)
 
@@ -89,18 +83,25 @@ class GenerationManager(
     suspend fun semanticSearch(query: String, limit: Int, ctx: GenerationContext): List<Pair<MessageEntity, Float>> =
         toolExecutor.semanticSearch(query, limit, ctx)
 
+    internal fun fixedContextTokenCost(
+        config: GenerationConfig,
+        context: GenerationContext,
+    ): Int = ContextTokenEstimator.estimateFixed(
+        systemPrompt = config.effectiveSystemPrompt,
+        tools = toolExecutor.definitions(context),
+    )
+
     suspend fun generate(
         conversationId: String,
         modelMessageId: String,
         startTime: Long,
-        isRegenerate: Boolean,
-        replaceMessageId: String?,
         modelName: String,
         runId: String,
         pass: Int,
         ownerToken: Long,
         config: GenerationConfig,
         ctx: GenerationContext,
+        providerInstances: Map<String, LlmProvider>,
         generationJob: kotlinx.coroutines.Job?,
         callbacks: GenerationCallbacks,
         streamScope: StreamScope? = null,
@@ -113,8 +114,8 @@ class GenerationManager(
         val (onStreamUpdate, onLoadingChange, onStreamClear, isLatestPersist) = callbacks
 
         var foregroundLeaseAcquired = false
-        // Set when the tool loop ends early because a send was queued behind this generation.
-        var interruptedForQueuedSend = false
+        // Set when this Run reaches a tool-round boundary with guidance waiting for a fresh Run.
+        var endedAtGuidanceBoundary = false
         var totalText = ""
         var totalThoughts = ""
         var thinkingPlaceholder = ""
@@ -124,6 +125,7 @@ class GenerationManager(
         val tokenUsageAccumulator = RequestTokenUsageAccumulator()
         val thoughtTiming = GenerationThoughtTiming()
         var currentStatus = MessageStatus.SENDING
+        var generationErrorMessage: String? = null
         var retryText: String? = null
         val toolOverlay = GenerationToolOverlay(toolExecutor, config.providerName)
         val generatedImages = mutableListOf<String>()
@@ -134,7 +136,9 @@ class GenerationManager(
         var parentId: String? = null
         var modelRunSequence = -1L
         var toolPath = emptyList<ChatMessage>()
-        val transcriptionExecution = transcriptionStage.newExecution()
+        val transcriptionExecution = GenerationTranscriptionStage(
+            TranscriptionManager(providerInstances, conversations, context),
+        ).newExecution()
         val checkpoints = GenerationStreamingCheckpoints(
             scope = CoroutineScope(currentCoroutineContext()),
             isLatestPersist = isLatestPersist,
@@ -162,11 +166,11 @@ class GenerationManager(
         }
 
         try {
-            val provider = requireRegisteredProvider(providers, config.providerName)
+            val provider = requireRegisteredProvider(providerInstances, config.providerName)
             onLoadingChange(true)
             // Slot ownership (generating flag / active set) is claimed synchronously by the
             // controller before this coroutine runs — GenerationManager no longer touches it.
-            com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName} regen=$isRegenerate")
+            com.newoether.agora.util.CrashReporter.note("generate provider=${config.providerName}")
             thinkingPlaceholder = context.getString(R.string.thinking_ellipsis)
             val loadedMessages = conversations.getMessagesForConversationSnapshot(conversationId)
             val placeholder = checkNotNull(
@@ -206,7 +210,7 @@ class GenerationManager(
                 toolOverlay.prependAll(transcription.segments)
             }
             if (transcription.error != null) {
-                totalText = transcription.error
+                generationErrorMessage = transcription.error
                 currentStatus = MessageStatus.ERROR
             }
 
@@ -215,8 +219,6 @@ class GenerationManager(
                 GenerationApiPathRequest(
                     parentId = parentId,
                     conversationId = conversationId,
-                    isRegenerate = isRegenerate,
-                    replaceMessageId = replaceMessageId,
                     config = config,
                     context = ctx,
                     loadedMessages = loadedMessages,
@@ -258,7 +260,8 @@ class GenerationManager(
                     currentThoughtBuf,
                     currentThoughtSignature,
                     currentThoughtSignatureProvider,
-                    thoughtTiming.liveDurationMs()
+                    thoughtTiming.liveDurationMs(),
+                    generationErrorMessage,
                 ),
                 retryText = retryText,
                 runId = runId,
@@ -393,12 +396,11 @@ class GenerationManager(
                     }
                     is StreamEvent.Error -> {
                         flushThoughtSegment()
+                        flushAnswerSegment()
                         retryText = null
                         toolOverlay.failIncompleteStreams(completedToolCalls.keys)
                         currentStatus = MessageStatus.ERROR
-                        if (totalText.isBlank()) {
-                            totalText = event.message
-                        }
+                        generationErrorMessage = event.message
                     }
                     is StreamEvent.ToolCallUpdate -> {
                         val created = upsertStreamingToolSegment(
@@ -517,14 +519,11 @@ class GenerationManager(
                 }
             }
 
-            val projectedPath = projectToolResultImagesToUserMessage(
-                projectAssistantImagesToLatestUserMessage(currentPath, providerConfig.includeImages),
-                providerConfig.includeImages,
-            )
-            val apiPath = applyUserTemplateToMessages(
-                projectedPath,
-                config.userPrepend,
-                config.userPostpend,
+            val apiPath = projectGenerationInputMessages(
+                messages = currentPath,
+                includeImages = providerConfig.includeImages,
+                userPrepend = config.userPrepend,
+                userPostpend = config.userPostpend,
             )
             requestTrace?.mark("provider_dispatch")
             acceptProviderPass(collectProviderRequest(apiPath) {
@@ -571,13 +570,15 @@ class GenerationManager(
                         expectedPass = commitIdentity.pass,
                     )
                 }
-                callbacks.onToolRoundPersisted()
+                // A terminal Conch job may be deleted only after the complete tool result is
+                // durable. ACK is best-effort and cannot influence the already-authorized
+                // continuation; Conch's bounded retention remains the failure fallback.
+                toolExecutor.acknowledgeCommittedShellJobs(tcds, ctx)
+                val compactBoundaryId = callbacks.onToolRoundPersisted()
                 toolPath = apiPathBuilder.build(
                     GenerationApiPathRequest(
-                        parentId = round.lastResultId,
+                        parentId = compactBoundaryId ?: round.lastResultId,
                         conversationId = conversationId,
-                        isRegenerate = false,
-                        replaceMessageId = null,
                         config = config,
                         context = ctx,
                     ),
@@ -586,26 +587,22 @@ class GenerationManager(
                 toolCallData = null
                 toolCallDataList = emptyList()
 
-                // Steering: a send queued mid-generation is delivered at this round boundary.
+                // A send queued mid-generation starts a fresh Run at this round boundary.
                 // The round's tool/result rows are already persisted above, so ending here is
-                // clean — the slot release drains the queue (each message its own bubble) and
-                // the NEXT generation's path continues from these tool results plus the new
-                // user turns, instead of making the user wait out the whole tool loop.
+                // clean: slot release drains the complete FIFO batch into one merged USER message,
+                // and the new generation continues from those durable tool results.
                 if (callbacks.hasQueuedSends()) {
-                    interruptedForQueuedSend = true
+                    endedAtGuidanceBoundary = true
                     break
                 }
 
                 lastEmitMs = 0L
 
-                val projectedToolPath = projectToolResultImagesToUserMessage(
-                    projectAssistantImagesToLatestUserMessage(toolPath, providerConfig.includeImages),
-                    providerConfig.includeImages,
-                )
-                val apiToolPath = applyUserTemplateToMessages(
-                    projectedToolPath,
-                    config.userPrepend,
-                    config.userPostpend,
+                val apiToolPath = projectGenerationInputMessages(
+                    messages = toolPath,
+                    includeImages = providerConfig.includeImages,
+                    userPrepend = config.userPrepend,
+                    userPostpend = config.userPostpend,
                 )
                 acceptProviderPass(collectProviderRequest(apiToolPath))
                 thoughtTiming.finishCurrent()
@@ -623,7 +620,7 @@ class GenerationManager(
             if (currentStatus != MessageStatus.ERROR) {
                 // A queue-steered interruption is a SUCCESSFUL turn even with no answer text —
                 // its value is the persisted tool activity.
-                currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty() || interruptedForQueuedSend) {
+                currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty() || endedAtGuidanceBoundary) {
                     MessageStatus.SUCCESS
                 } else MessageStatus.ERROR
             }
@@ -644,7 +641,8 @@ class GenerationManager(
             val isCancelled = generationJob?.isCancelled == true
             currentStatus = if (isCancelled) MessageStatus.STOPPED else MessageStatus.ERROR
             if (!isCancelled) {
-                totalText = "Error: ${e.localizedMessage ?: "An unexpected error occurred."}"
+                generationErrorMessage =
+                    "Error: ${e.localizedMessage ?: "An unexpected error occurred."}"
             }
         } finally {
             // Fence the asynchronous checkpoint lane before any terminal transaction. Without
@@ -685,6 +683,7 @@ class GenerationManager(
                             thoughtSignature = currentThoughtSignature,
                             thoughtSignatureProvider = currentThoughtSignatureProvider,
                             thoughtDurationMs = thoughtTiming.currentDurationMs.takeIf { it > 0L },
+                            errorMessage = generationErrorMessage,
                             runId = runId,
                             runSequence = modelRunSequence,
                         ).toMessage()
@@ -735,7 +734,6 @@ class GenerationManager(
                 request = GenerationCompletionEffectsRequest(
                     terminalPersisted = terminalPersisted,
                     status = currentStatus,
-                    interruptedForQueuedSend = interruptedForQueuedSend,
                     text = totalText,
                     conversationId = conversationId,
                     modelMessageId = modelMessageId,

@@ -57,8 +57,6 @@ internal data class DirectAcceptedInputRequest(
     val userText: String,
     val payloadLease: PreparedMessagePayloadLease,
     val modelId: String,
-    val providerName: String,
-    val activeKey: String,
     val alreadyHoldsLock: Boolean,
     val requestScroll: (conversationId: String, messageId: String) -> Unit,
     val onAccepted: suspend (SendAcceptance) -> Unit,
@@ -102,7 +100,6 @@ internal class DirectAcceptedInputEffectExecutor(
     private val graphWriter: AcceptedInputGraphWriter,
     private val renderStore: ConversationRenderStore,
     private val requestBuilder: GenerationRequestBuilder,
-    private val compactController: ConversationCompactController,
     private val terminalSettlement: GenerationTerminalSettlementController,
     private val boundRunGenerationLauncher: BoundRunGenerationLauncher,
     private val acceptanceNotifier: SendAcceptanceNotifier,
@@ -174,6 +171,12 @@ internal class DirectAcceptedInputEffectExecutor(
         try {
             withOptionalLock(request.conversationId, request.alreadyHoldsLock) generationLock@ {
                 applyPendingConversationSettings(request.conversationId)
+                val generationSnapshot = requestBuilder.captureAdmissionSnapshot(
+                    conversationId = request.conversationId,
+                    runId = request.runId,
+                    modelId = request.modelId,
+                    conversationOverride = request.newConversation,
+                )
                 val graphCommit = graphWriter.commit(
                     request = AcceptedInputGraphWriter.Request(
                         inputEffect = request.inputEffect,
@@ -183,7 +186,7 @@ internal class DirectAcceptedInputEffectExecutor(
                         images = request.payloadLease.payload.allImages,
                         attachmentMeta = request.payloadLease.payload.attachmentMeta
                             ?.let(Json::encodeToString),
-                        modelId = request.modelId,
+                        modelId = generationSnapshot.selectedModelId,
                         userTimestamp = clock(),
                         newConversation = request.newConversation,
                     ),
@@ -257,26 +260,12 @@ internal class DirectAcceptedInputEffectExecutor(
                     }
                     return@generationLock
                 }
-                if (!request.wasNewChat) {
-                    compactController.automaticBeforeBoundary(
-                        conversationId = request.conversationId,
-                        fallbackModel = request.modelId,
-                        contextLimit = requestBuilder
-                            .buildEffectiveConversationSettings(request.conversationId)
-                            .contextWindow ?: settings.maxContextWindow.value,
-                        state = state,
-                    )
-                }
                 boundRunGenerationLauncher.launch(
                     BoundRunGenerationRequest(
                         conversationId = request.conversationId,
                         modelMessageId = modelMessageId,
                         startTime = modelEntity.timestamp,
-                        isRegenerate = false,
-                        replaceMessageId = null,
-                        providerName = request.providerName,
-                        modelId = request.modelId,
-                        activeKey = request.activeKey,
+                        snapshot = generationSnapshot,
                         uiToken = request.uiToken,
                         persistId = persistId,
                         runId = request.runId,
@@ -290,7 +279,7 @@ internal class DirectAcceptedInputEffectExecutor(
                     .find { it.id == modelMessageId }
                 if (
                     request.wasNewChat &&
-                    settings.titleGenerationEnabled.value &&
+                    generationSnapshot.titleGenerationEnabled &&
                     kotlinx.coroutines.currentCoroutineContext().isActive &&
                     lastMessage?.status != MessageStatus.ERROR
                 ) {

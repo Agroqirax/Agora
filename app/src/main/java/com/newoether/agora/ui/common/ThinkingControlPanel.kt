@@ -26,7 +26,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -66,8 +65,18 @@ fun ThinkingControlPanel(
     val normalizedEffort = ThinkingLevels.normalize(level)
     val providerRange = ThinkingLevels.effortRangeForProvider(providerName)
     val maxIndex = providerRange.last
-    val clampedIndex = ThinkingLevels.indexForEffort(normalizedEffort).coerceIn(providerRange)
-    var sliderPosition by remember(clampedIndex) { mutableFloatStateOf(clampedIndex.toFloat()) }
+    val effortGate = remember(providerRange.first, providerRange.last) {
+        PersistedSliderFeedbackGate(
+            initialPersisted = normalizedEffort,
+            toDisplay = { persisted ->
+                ThinkingLevels.indexForEffort(persisted).coerceIn(providerRange).toFloat()
+            },
+        )
+    }
+    LaunchedEffect(normalizedEffort, providerRange.first, providerRange.last) {
+        effortGate.reconcile(normalizedEffort)
+    }
+    val sliderPosition = effortGate.displayed
     var showAdvanced by rememberSaveable { mutableStateOf(budgetEnabled) }
     val sliderEnabled = enabled && !budgetEnabled
 
@@ -141,13 +150,18 @@ fun ThinkingControlPanel(
                 )
                 Slider(
                     value = sliderPosition,
-                    onValueChange = { if (sliderEnabled) sliderPosition = it },
+                    onValueChange = { if (sliderEnabled) effortGate.updateFromGesture(it) },
                     onValueChangeFinished = {
                         if (sliderEnabled) {
                             val idx = sliderPosition.roundToInt().coerceIn(providerRange)
-                            sliderPosition = idx.toFloat()
+                            val effort = ThinkingLevels.effortForIndex(idx)
+                            if (effort == normalizedEffort) {
+                                effortGate.settleWithoutWrite(normalizedEffort, idx.toFloat())
+                            } else {
+                                effortGate.expectPersisted(effort, idx.toFloat())
+                            }
                             onEnabledChange(true)
-                            onLevelChange(ThinkingLevels.effortForIndex(idx))
+                            onLevelChange(effort)
                         }
                     },
                     valueRange = 0f..maxIndex.toFloat(),
@@ -230,10 +244,18 @@ fun ThinkingControlPanel(
                         Spacer(modifier = Modifier.height(BudgetToggleToSliderSpacing))
                         val budgetPresets = ThinkingLevels.budgetPresets
                         val currentBudget = budgetTokens.coerceAtLeast(1)
-                        val budgetIndex = budgetPresets.indices.minByOrNull {
-                            abs(budgetPresets[it] - currentBudget)
-                        } ?: 1
-                        var budgetSliderPos by remember(currentBudget) { mutableFloatStateOf(budgetIndex.toFloat()) }
+                        val budgetGate = remember(budgetPresets) {
+                            PersistedSliderFeedbackGate(
+                                initialPersisted = currentBudget,
+                                toDisplay = { persisted ->
+                                    budgetPresets.indices.minByOrNull {
+                                        abs(budgetPresets[it] - persisted)
+                                    }?.toFloat() ?: 1f
+                                },
+                            )
+                        }
+                        LaunchedEffect(currentBudget) { budgetGate.reconcile(currentBudget) }
+                        val budgetSliderPos = budgetGate.displayed
 
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -263,13 +285,23 @@ fun ThinkingControlPanel(
                                 }
                                 Slider(
                                     value = budgetSliderPos,
-                                    onValueChange = { if (enabled) budgetSliderPos = it },
+                                    onValueChange = {
+                                        if (enabled) budgetGate.updateFromGesture(it)
+                                    },
                                     onValueChangeFinished = {
                                         if (enabled) {
                                             val idx = budgetSliderPos.roundToInt().coerceIn(0, budgetPresets.lastIndex)
-                                            budgetSliderPos = idx.toFloat()
+                                            val tokens = budgetPresets[idx]
+                                            if (tokens == currentBudget) {
+                                                budgetGate.settleWithoutWrite(
+                                                    currentBudget,
+                                                    idx.toFloat(),
+                                                )
+                                            } else {
+                                                budgetGate.expectPersisted(tokens, idx.toFloat())
+                                            }
                                             onEnabledChange(true)
-                                            onBudgetTokensChange(budgetPresets[idx])
+                                            onBudgetTokensChange(tokens)
                                         }
                                     },
                                     valueRange = 0f..(budgetPresets.size - 1).toFloat(),

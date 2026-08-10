@@ -15,6 +15,7 @@ data class SwitchingScrollRequest(
     val id: Long,
     val conversationId: String?,
     val targetMessageId: String?,
+    val scrollToTarget: Boolean,
     val kind: SwitchingRequestKind,
     val readyForUi: Boolean,
     val hapticOnCompletion: Boolean,
@@ -43,15 +44,20 @@ internal class SwitchingCoordinator {
         begin(
             conversationId = conversationId,
             targetMessageId = null,
+            scrollToTarget = true,
             kind = SwitchingRequestKind.CONVERSATION,
             readyForUi = false,
             hapticOnCompletion = hapticOnCompletion,
         )
 
-    fun beginTreeMutation(conversationId: String): SwitchingScrollRequest =
+    fun beginTreeMutation(
+        conversationId: String,
+        scrollToTarget: Boolean = true,
+    ): SwitchingScrollRequest =
         begin(
             conversationId = conversationId,
             targetMessageId = null,
+            scrollToTarget = scrollToTarget,
             kind = SwitchingRequestKind.TREE_MUTATION,
             readyForUi = false,
             hapticOnCompletion = false,
@@ -61,6 +67,7 @@ internal class SwitchingCoordinator {
         begin(
             conversationId = null,
             targetMessageId = null,
+            scrollToTarget = false,
             kind = SwitchingRequestKind.NEW_CHAT,
             readyForUi = false,
             hapticOnCompletion = false,
@@ -69,6 +76,7 @@ internal class SwitchingCoordinator {
     private fun begin(
         conversationId: String?,
         targetMessageId: String?,
+        scrollToTarget: Boolean,
         kind: SwitchingRequestKind,
         readyForUi: Boolean,
         hapticOnCompletion: Boolean,
@@ -77,6 +85,7 @@ internal class SwitchingCoordinator {
             id = ids.incrementAndGet(),
             conversationId = conversationId,
             targetMessageId = targetMessageId,
+            scrollToTarget = scrollToTarget,
             kind = kind,
             readyForUi = readyForUi,
             hapticOnCompletion = hapticOnCompletion,

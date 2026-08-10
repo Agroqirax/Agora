@@ -120,11 +120,13 @@ internal class AcceptedInputGraphWriter(
                 run = run,
                 messages = listOf(userMessage, modelMessage),
                 messageSelectionUpdates = selectionUpdates,
+                conversationModelId = request.modelId,
             )
         } ?: conversations.createRunWithMessages(
             run = run,
             messages = listOf(userMessage, modelMessage),
             messageSelectionUpdates = selectionUpdates,
+            conversationModelId = request.modelId,
         )
         check(graph.messages.size == 2) {
             "Accepted-input graph must contain exactly one USER and one MODEL row"

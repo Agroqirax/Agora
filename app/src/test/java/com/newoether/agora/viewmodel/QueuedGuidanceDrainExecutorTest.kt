@@ -1,7 +1,6 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.automation.ConversationExecutionCoordinator
-import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.local.RunGraphCommit
@@ -17,7 +16,6 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,9 +53,11 @@ class QueuedGuidanceDrainExecutorTest {
         every {
             fixture.requestBuilder.resolveProviderKey("provider:model-2")
         } returns GenerationRequestBuilder.ProviderKey("provider", "active-key")
-        every {
-            fixture.requestBuilder.buildEffectiveConversationSettings("conversation")
-        } returns ConversationSettings(contextWindow = 4096)
+        coEvery {
+            fixture.requestBuilder.captureAdmissionSnapshot(
+                any(), any(), any(), any(), any(),
+            )
+        } returns fixture.snapshot
         coEvery {
             fixture.conversations.getMessagesForConversationSnapshot("conversation")
         } returns emptyList()
@@ -71,6 +71,7 @@ class QueuedGuidanceDrainExecutorTest {
                 run = capture(createdRun),
                 messages = capture(createdMessages),
                 messageSelectionUpdates = any(),
+                conversationModelId = "provider:model-2",
                 at = any(),
             )
         } answers {
@@ -79,9 +80,6 @@ class QueuedGuidanceDrainExecutorTest {
             RunGraphCommit(messages, selections, emptyMap())
         }
         coEvery { fixture.settings.incrementMessagesSent() } just Runs
-        coEvery {
-            fixture.compactController.automaticBeforeBoundary(any(), any(), any(), state)
-        } just Runs
         coEvery { fixture.boundLauncher.launch(any(), state) } just Runs
 
         fixture.executor.launchClaim(state, claim)
@@ -89,9 +87,9 @@ class QueuedGuidanceDrainExecutorTest {
         coVerify(timeout = 5_000, exactly = 1) {
             fixture.boundLauncher.launch(
                 match {
-                    it.conversationId == "conversation" &&
+                        it.conversationId == "conversation" &&
                         it.modelMessageId == "model-message" &&
-                        it.modelId == "provider:model-2" &&
+                        it.snapshot === fixture.snapshot &&
                         it.runId == "fresh-run" &&
                         it.pass == 0 &&
                         it.callerTag == "guidanceBoundary"
@@ -107,14 +105,6 @@ class QueuedGuidanceDrainExecutorTest {
         assertEquals("model-message", createdMessages.captured[1].id)
         assertEquals(listOf("indexed:guidance-1:one\n\ntwo", "scroll:guidance-1"), fixture.events)
         assertFalse(state.settleGuidanceClaim(lease.id, durable = false))
-        coVerify(exactly = 1) {
-            fixture.compactController.automaticBeforeBoundary(
-                "conversation",
-                "provider:model-2",
-                4096,
-                state,
-            )
-        }
         state.dispose()
         Unit
     }
@@ -123,17 +113,20 @@ class QueuedGuidanceDrainExecutorTest {
         val conversations = mockk<ConversationRepository>()
         val settings = mockk<SettingsRepository>()
         val requestBuilder = mockk<GenerationRequestBuilder>()
-        val compactController = mockk<ConversationCompactController>()
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
         val boundLauncher = mockk<BoundRunGenerationLauncher>()
         val events = mutableListOf<String>()
+        val snapshot = testGenerationAdmissionSnapshot(
+            conversationId = "conversation",
+            runId = "fresh-run",
+            selectedModelId = "provider:model-2",
+        )
         private val ids = ArrayDeque(listOf("fresh-run", "model-message"))
         val executor = QueuedGuidanceDrainExecutor(
             conversations = conversations,
             settings = settings,
             requestBuilder = requestBuilder,
             executionCoordinator = ConversationExecutionCoordinator(),
-            compactController = compactController,
             terminalSettlement = terminalSettlement,
             boundRunGenerationLauncher = boundLauncher,
             toUiMessage = ::toUiMessage,
@@ -148,10 +141,6 @@ class QueuedGuidanceDrainExecutorTest {
             idFactory = ids::removeFirst,
             clock = { 100L },
         )
-
-        init {
-            every { settings.maxContextWindow } returns MutableStateFlow(8192)
-        }
     }
 
     private companion object {

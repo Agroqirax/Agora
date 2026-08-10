@@ -707,7 +707,7 @@ internal fun TimelineSegmentsContent(
 }
 
 @Composable
-private fun TimelineInfoSegmentCard(
+internal fun TimelineInfoSegmentCard(
     seg: MessageSegment,
     detailSegments: List<MessageSegment>,
     detailIndex: Int,

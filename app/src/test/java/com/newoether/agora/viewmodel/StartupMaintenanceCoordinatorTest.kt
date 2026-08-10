@@ -2,12 +2,14 @@ package com.newoether.agora.viewmodel
 
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.EmbeddingModelType
+import com.newoether.agora.data.CustomProviderIdentityMigration
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.util.SnackbarEvent
 import com.newoether.agora.util.UpdateInfo
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.mockk
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -104,6 +106,34 @@ class StartupMaintenanceCoordinatorTest {
         coVerify(exactly = 1) { fixture.conversations.deleteOrphanedEmbeddings() }
     }
 
+    @Test
+    fun legacyProviderMarkerClearsOnlyAfterRoomReferencesMigrate() = runTest {
+        val fixture = Fixture(this)
+        val migration = CustomProviderIdentityMigration(
+            legacyReference = "Relay X",
+            providerId = "custom-provider-00000000-0000-4000-8000-000000000001",
+        )
+        coEvery { fixture.settings.normalizeCustomProviderIdentities() } returns listOf(migration)
+        coEvery {
+            fixture.conversations.renameConfiguredProviderModelReferences(
+                migration.legacyReference,
+                migration.providerId,
+            )
+        } returns Unit
+
+        fixture.coordinator.start()
+        runCurrent()
+
+        coVerifyOrder {
+            fixture.settings.normalizeCustomProviderIdentities()
+            fixture.conversations.renameConfiguredProviderModelReferences(
+                migration.legacyReference,
+                migration.providerId,
+            )
+            fixture.settings.clearLegacyCustomProviderNames(listOf(migration))
+        }
+    }
+
     private class Fixture(
         testScope: kotlinx.coroutines.test.TestScope,
         now: Long = 0L,
@@ -148,7 +178,10 @@ class StartupMaintenanceCoordinatorTest {
             coEvery { settings.getAutoUpdateCheck() } returns false
             coEvery { settings.getEmbeddingModels() } returns emptyList()
             coEvery { settings.getActiveEmbeddingModelId() } returns ""
+            coEvery { settings.normalizeCustomProviderIdentities() } returns emptyList()
+            coEvery { settings.clearLegacyCustomProviderNames(any()) } returns Unit
             coEvery { conversations.deleteOrphanedEmbeddings() } returns Unit
+            coEvery { conversations.repairInvalidRunBranchSelections() } returns 0
         }
     }
 

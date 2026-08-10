@@ -1,5 +1,6 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.api.LlmProvider
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
@@ -72,6 +73,58 @@ data class GenerationContext(
     val toolTimeoutMs: Long = Constants.TOOL_EXECUTION_TIMEOUT_MS
 )
 
+/** Frozen automatic-Compact policy and provider access captured with one generation. */
+internal data class AutomaticCompactConfig(
+    val enabled: Boolean,
+    val request: CompactRequest,
+    val providerName: String,
+    val apiKey: String,
+    val baseUrl: String?,
+    val provider: LlmProvider?,
+    val configured: Boolean,
+    /** Frozen attachment/transcription policy used to project Compact input exactly once. */
+    val generationContext: GenerationContext,
+    /** Frozen API-only USER templates included in the exact Auto Compact threshold projection. */
+    val userPrepend: String? = null,
+    val userPostpend: String? = null,
+    /** Filled by the effect owner that has the exact frozen tool-definition set. */
+    val fixedTokenCost: Int = 0,
+)
+
+/** Request-shape snapshot used only for exact context accounting; no Provider access is required. */
+internal data class GenerationContextProjectionSnapshot(
+    val config: GenerationConfig,
+    val context: GenerationContext,
+)
+
+/**
+ * Complete immutable configuration accepted for one durable Run.
+ *
+ * This value is constructed before the Run/message graph commits. The same instance is then used
+ * by automatic Compact, the first Provider pass, and every tool continuation. Mutable settings
+ * must never be consulted again for generation-owned behavior after this boundary.
+ */
+internal data class GenerationAdmissionSnapshot(
+    val conversationId: String,
+    val runId: String,
+    /** Stable prefixed model identity persisted on the conversation and visible MODEL row. */
+    val selectedModelId: String,
+    val config: GenerationConfig,
+    val context: GenerationContext,
+    /** Copy of the registry keys/instances at admission; custom-provider rename cannot revoke it. */
+    val providerInstances: Map<String, LlmProvider>,
+    val automaticCompact: AutomaticCompactConfig,
+    val titleGenerationEnabled: Boolean,
+) {
+    init {
+        require(conversationId.isNotBlank())
+        require(runId.isNotBlank())
+        require(selectedModelId.isNotBlank())
+        require(context.conversationId == conversationId)
+        require(config.providerName in providerInstances)
+    }
+}
+
 /**
  * The token-gated UI callbacks a single generation drives. Built once per call by
  * [ConversationGenerationState.callbacksFor], so each generation entry point
@@ -123,5 +176,6 @@ data class GenerationCallbacks(
             if (success) RunEffect.ContinueProviderPass(identity)
             else RunEffect.ToolRoundCommitFailed(identity)
         },
-    val onToolRoundPersisted: suspend () -> Unit = {},
+    /** Returns the newly appended Compact boundary, if automatic Compact created one. */
+    val onToolRoundPersisted: suspend () -> String? = { null },
 )

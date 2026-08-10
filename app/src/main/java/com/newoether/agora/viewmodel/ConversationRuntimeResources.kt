@@ -94,6 +94,10 @@ internal class ConversationRuntimeResources {
                 check(compactState.effectIdentity == effect.identity)
                 check(compactState.compactRunId == effect.compactRunId)
                 check(compactState.mode == effect.mode)
+                if (compactState.mode == com.newoether.agora.model.CompactMode.MANUAL) {
+                    activate(compactState.generationIdentity, loading = true)
+                    activated = true
+                }
                 compactPreviewIdentity = effect.identity
                 _compactPreview.value = ""
                 _compacting.value = true

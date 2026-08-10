@@ -55,9 +55,8 @@ import com.newoether.agora.automation.CronExpression
 import com.newoether.agora.automation.ScheduleType
 import com.newoether.agora.automation.TaskSchedule
 import com.newoether.agora.data.local.TaskEntity
+import com.newoether.agora.data.modelDisplayName
 import java.util.Calendar
-import com.newoether.agora.model.ModelId
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.chat.ChatDeleteConfirmDialog
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.settings.AnimatedActionFab
@@ -145,6 +144,7 @@ internal fun TaskDetailPage(
     val running by viewModel.runningTaskIds.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
     val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
 
     var name by rememberSaveable(task.id) { mutableStateOf(task.name) }
     var prompt by rememberSaveable(task.id) { mutableStateOf(task.prompt) }
@@ -234,7 +234,7 @@ internal fun TaskDetailPage(
                             headlineContent = { Text(stringResource(R.string.task_model)) },
                             supportingContent = {
                                 Text(
-                                    modelId?.let { modelAliases[it] ?: ModelId.parse(it).apiModelName }
+                                    modelId?.let { modelDisplayName(it, modelAliases, customProviders) }
                                         ?: stringResource(R.string.task_model_default)
                                 )
                             },
@@ -322,6 +322,7 @@ internal fun TaskDetailPage(
         ModelPickerDialog(
             enabledModels = enabledModels.toList(),
             modelAliases = modelAliases,
+            customProviders = customProviders,
             selected = modelId,
             onSelect = { modelId = it; showModelPicker = false },
             onDismiss = { showModelPicker = false },

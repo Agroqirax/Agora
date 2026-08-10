@@ -224,6 +224,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">生成</string>
     <string name="context_window">上下文視窗</string>
+    <string name="context_window_desc">單次生成可使用的最大上下文</string>
     <string name="context_window_default">預設上下文視窗</string>
     <string name="context_retain">保留最近 %1$d 則訊息</string>
     <string name="context_token_budget_value">約 %1$s tokens</string>
@@ -658,7 +659,9 @@
     <string name="file_path_unknown">未知檔案</string>
     <string name="tool_exit_code">結束碼 %1$d</string>
     <string name="tool_exit">結束</string>
-    <string name="tool_shell_returned_code">傳回 %1$d</string>
+    <string name="tool_shell_returned_code">命令傳回 %1$d</string>
+    <string name="tool_shell_detail_executed">已執行</string>
+    <string name="tool_shell_detail_returned_code">傳回 %1$d</string>
     <string name="tool_shell_returned">傳回</string>
     <string name="tool_line_count">%1$d 行</string>
     <string name="tool_web_result">結果 %1$d</string>
@@ -1048,6 +1051,9 @@
     <string name="more">更多</string>
     <string name="delete_message_title">刪除訊息？</string>
     <string name="delete_message_confirm">此訊息及其後的所有回覆都將永久刪除。</string>
+    <string name="delete_compact_message_title">刪除壓縮訊息？</string>
+    <string name="delete_compact_message_confirm">只會刪除此壓縮訊息。</string>
+    <string name="recompact">重新壓縮</string>
     <string name="default_service_tier">預設服務層級</string>
     <string name="openai_service_tier_title">服務層級</string>
     <string name="openai_service_tier_desc">控制 OpenAI 協定請求的延遲與處理優先順序。</string>
@@ -1066,6 +1072,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">每次壓縮後按原文保留的訊息</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">正在壓縮上下文…</string>
     <string name="context_compact_select_available_model">請選擇可用模型</string>
@@ -1076,7 +1083,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">約 %1$s / %2$s tokens · %3$d 則邏輯訊息</string>
+    <string name="context_usage_messages">約 %1$s / %2$s tokens</string>
     <string name="context_boundary_active">壓縮邊界已啟用</string>
     <string name="context_boundary_none">無壓縮邊界</string>
 </resources>

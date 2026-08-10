@@ -1,7 +1,6 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.automation.ConversationExecutionCoordinator
-import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
@@ -19,7 +18,6 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -72,12 +70,12 @@ class DirectAcceptedInputEffectExecutorTest {
         assertEquals(
             listOf(
                 "apply-pending",
+                "capture-snapshot",
                 "room-commit",
                 "persist-user:$USER_ID",
                 "accept-callback:$USER_ID",
                 "accept-event:$USER_ID",
                 "scroll:$USER_ID",
-                "compact",
                 "bound-launch",
             ),
             fixture.events,
@@ -92,7 +90,8 @@ class DirectAcceptedInputEffectExecutorTest {
                         it.uiToken == effect.identity.ownerToken &&
                         it.persistId > 0 &&
                         it.pass == 0 &&
-                        it.callerTag == "sendMessage"
+                        it.callerTag == "sendMessage" &&
+                        it.snapshot === fixture.snapshot
                 },
                 state,
             )
@@ -192,9 +191,6 @@ class DirectAcceptedInputEffectExecutorTest {
         assertTrue(commitIndex >= 0)
         assertTrue(acceptanceIndex > commitIndex)
         assertTrue(publicationIndex > acceptanceIndex)
-        coVerify(exactly = 0) {
-            fixture.compactController.automaticBeforeBoundary(any(), any(), any(), any())
-        }
         state.dispose()
         Unit
     }
@@ -206,10 +202,13 @@ class DirectAcceptedInputEffectExecutorTest {
         val settings = mockk<SettingsRepository>()
         val graphWriter = mockk<AcceptedInputGraphWriter>()
         val requestBuilder = mockk<GenerationRequestBuilder>()
-        val compactController = mockk<ConversationCompactController>()
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
         val boundLauncher = mockk<BoundRunGenerationLauncher>()
         val events = mutableListOf<String>()
+        val snapshot = testGenerationAdmissionSnapshot(
+            conversationId = CONVERSATION_ID,
+            runId = RUN_ID,
+        ).copy(titleGenerationEnabled = false)
         val commit = AcceptedInputGraphWriter.Commit(
             userMessage = USER_ENTITY,
             modelMessage = MODEL_ENTITY,
@@ -220,20 +219,15 @@ class DirectAcceptedInputEffectExecutorTest {
         val executor: DirectAcceptedInputEffectExecutor
 
         init {
-            every { settings.maxContextWindow } returns MutableStateFlow(4096)
-            every { settings.titleGenerationEnabled } returns MutableStateFlow(false)
             coEvery { settings.incrementMessagesSent() } just Runs
-            every {
-                requestBuilder.buildEffectiveConversationSettings(CONVERSATION_ID)
-            } returns ConversationSettings(contextWindow = 4096)
             coEvery {
-                compactController.automaticBeforeBoundary(
-                    CONVERSATION_ID,
-                    "provider:model",
-                    4096,
-                    any(),
+                requestBuilder.captureAdmissionSnapshot(
+                    any(), any(), any(), any(), any(),
                 )
-            } coAnswers { events += "compact" }
+            } coAnswers {
+                events += "capture-snapshot"
+                snapshot
+            }
             coEvery {
                 conversations.getMessagesForConversationSnapshot(CONVERSATION_ID)
             } returns listOf(MODEL_ENTITY.copy(status = MessageStatus.SUCCESS))
@@ -245,7 +239,6 @@ class DirectAcceptedInputEffectExecutorTest {
                 graphWriter = graphWriter,
                 renderStore = ConversationRenderStore(),
                 requestBuilder = requestBuilder,
-                compactController = compactController,
                 terminalSettlement = terminalSettlement,
                 boundRunGenerationLauncher = boundLauncher,
                 acceptanceNotifier = SendAcceptanceNotifier { _, messageId ->
@@ -275,8 +268,6 @@ class DirectAcceptedInputEffectExecutorTest {
             userText = "hello",
             payloadLease = payloadLease,
             modelId = "provider:model",
-            providerName = "provider",
-            activeKey = "key",
             alreadyHoldsLock = false,
             requestScroll = { _, messageId -> events += "scroll:$messageId" },
             onAccepted = { events += "accept-callback:${it.messageId}" },

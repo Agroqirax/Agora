@@ -5,7 +5,6 @@ import com.newoether.agora.model.MessageStatus
 internal data class GenerationCompletionEffectsRequest(
     val terminalPersisted: Boolean,
     val status: MessageStatus,
-    val interruptedForQueuedSend: Boolean,
     val text: String,
     val conversationId: String,
     val modelMessageId: String,
@@ -53,16 +52,14 @@ internal class GenerationCompletionEffectsExecutor(
             releaseForegroundLease(request.modelMessageId)
         }
 
-        // A queued intervention ends this pass but not the generation cycle. Notify only when the
-        // successful final pass has no remaining guidance, matching the former inline ordering.
-        val generationCycleComplete =
-            request.status == MessageStatus.SUCCESS &&
-                !request.interruptedForQueuedSend &&
-                !callbacks.hasQueuedSends()
+        // A queued intervention is a separate pending generation. Avoid notifying for the Run
+        // immediately before it while the next generation is about to start.
+        val shouldNotify =
+            request.status == MessageStatus.SUCCESS && !callbacks.hasQueuedSends()
         if (
             request.terminalPersisted &&
             !isAppInForeground() &&
-            generationCycleComplete &&
+            shouldNotify &&
             request.text.isNotBlank()
         ) {
             notify(request.text, request.conversationId)

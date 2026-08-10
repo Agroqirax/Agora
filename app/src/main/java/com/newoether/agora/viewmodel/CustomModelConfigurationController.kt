@@ -29,10 +29,7 @@ internal class CustomModelConfigurationController(
     ) = providers.addCustom(name, baseUrl, protocol)
 
     fun renameProvider(oldName: String, newName: String) {
-        if (!providers.renameCustom(oldName, newName)) return
-        scope.launch(ioDispatcher) {
-            conversations.renameConfiguredProviderModelReferences(oldName, newName.trim())
-        }
+        providers.renameCustom(oldName, newName)
     }
 
     fun updateProviderProtocol(name: String, protocol: CustomEndpointProtocol) =
@@ -46,7 +43,7 @@ internal class CustomModelConfigurationController(
         modelId: String,
         alias: String,
     ) {
-        val normalizedProvider = provider.trim()
+        val normalizedProvider = settings.stableProviderReference(provider)
         val normalizedModelId = modelId.trim()
         if (normalizedProvider.isEmpty() || normalizedModelId.isEmpty()) return
         val newModelId = ModelId(normalizedProvider, normalizedModelId).prefixed

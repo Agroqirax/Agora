@@ -11,20 +11,127 @@ import org.junit.Test
 
 class ContextCompactGraphAnchorTest {
     @Test
-    fun providerSuffixStartingAtToolAnchorsBeforeVisibleAggregate() {
-        val model = entity("model", "user", Participant.MODEL, 1)
-        val tool = entity("tool_round", "model", Participant.MODEL, 2)
-        val result = entity("result_round", "tool_round", Participant.USER, 3)
-        val byId = listOf(model, tool, result).associateBy(MessageEntity::id)
+    fun appendBoundaryPlacesCompactBeforeAnEmptyProviderPlaceholder() {
+        val user = entity("user", null, Participant.USER, 0).copy(text = "request")
+        val placeholder = entity("model", user.id, Participant.MODEL, 1).copy(
+            status = MessageStatus.SENDING,
+        )
+        val selected = listOf(user, placeholder).map { it.toUiChatMessage { text -> text } }
 
         assertEquals(
-            "model",
-            resolveCompactGraphSuffixRoot("tool_round", byId)?.id,
+            CompactAppendBoundary(parentMessageId = user.id, childMessageId = placeholder.id),
+            resolveCompactAppendBoundary(
+                selectedPath = selected,
+                compactablePath = compactSplitMessages(selected),
+                entitiesById = listOf(user, placeholder).associateBy(MessageEntity::id),
+            ),
+        )
+    }
+
+    @Test
+    fun appendBoundaryKeepsFailedCompactInVisibleChronologicalOrder() {
+        val user = entity("user", null, Participant.USER, 0).copy(text = "request")
+        val failed = entity("compact_failed", user.id, Participant.MODEL, 1).copy(
+            text = "partial",
+            status = MessageStatus.ERROR,
+        )
+        val placeholder = entity("model", failed.id, Participant.MODEL, 2).copy(
+            status = MessageStatus.SENDING,
+        )
+        val selected = listOf(user, failed, placeholder).map {
+            it.toUiChatMessage { text -> text }
+        }
+
+        assertEquals(
+            CompactAppendBoundary(parentMessageId = failed.id, childMessageId = placeholder.id),
+            resolveCompactAppendBoundary(
+                selectedPath = selected,
+                compactablePath = compactSplitMessages(listOf(selected.first())),
+                entitiesById = listOf(user, failed, placeholder).associateBy(MessageEntity::id),
+            ),
+        )
+    }
+
+    @Test
+    fun appendBoundaryUsesLastToolResultWithoutReparentingItsAggregateAncestor() {
+        val aggregate = entity("model", "user", Participant.MODEL, 1)
+        val tool = entity("tool_round", aggregate.id, Participant.MODEL, 2)
+        val result = entity("result_round", tool.id, Participant.USER, 3)
+        val compactable = listOf(tool, result).map { it.toUiChatMessage { text -> text } }
+
+        assertEquals(
+            CompactAppendBoundary(parentMessageId = result.id, childMessageId = null),
+            resolveCompactAppendBoundary(
+                selectedPath = listOf(aggregate.toUiChatMessage { text -> text }),
+                compactablePath = compactable,
+                entitiesById = listOf(aggregate, tool, result).associateBy(MessageEntity::id),
+            ),
+        )
+    }
+
+    @Test
+    fun recompactScopeExcludesTheTargetAndDescendantsButKeepsThePreviousBoundary() {
+        val old = entity("old-user", null, Participant.USER, 0).copy(text = "old")
+        val previous = entity("compact_previous", old.id, Participant.MODEL, 1)
+            .copy(text = "previous summary")
+        val recent = entity("recent-user", previous.id, Participant.USER, 2)
+            .copy(text = "recent")
+        val target = entity("compact_target", recent.id, Participant.MODEL, 3)
+            .copy(text = "target summary")
+        val descendant = entity("descendant", target.id, Participant.USER, 4)
+            .copy(text = "after target")
+        val selected = listOf(old, previous, recent, target, descendant).map {
+            it.toUiChatMessage { text -> text }
+        }
+
+        val scope = selectedContextBeforeReplacement(selected, target.id)
+
+        assertEquals(
+            listOf("old-user", "compact_previous", "recent-user"),
+            scope.map { it.id },
         )
         assertEquals(
-            "model",
-            resolveCompactGraphSuffixRoot("result_round", byId)?.id,
+            listOf("previous summary", "recent"),
+            com.newoether.agora.api.util.applyNearestContextCompact(scope).map { it.text },
         )
+    }
+
+    @Test
+    fun persistedCompactTextFreezesRecentMessagesWithoutOpaqueSignatures() {
+        val tool = entity("tool_round", "user", Participant.MODEL, 2)
+            .toUiChatMessage { it }
+            .copy(
+                segments = listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = "shell",
+                        toolArgs = "{\"command\":\"echo hi\"}",
+                        signature = "must-not-leak",
+                    ),
+                ),
+            )
+        val result = entity("result_round", tool.id, Participant.USER, 3)
+            .toUiChatMessage { it }
+            .copy(
+                segments = listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = "shell",
+                        toolResult = "hi",
+                        signature = "must-not-leak",
+                    ),
+                ),
+            )
+
+        val text = buildPersistedCompactText(" summary ", listOf(tool, result))
+
+        assertEquals(
+            "summary\n\n--- Recent messages (verbatim) ---\n\n" +
+                "[Assistant tool request: shell]\n{\"command\":\"echo hi\"}\n\n" +
+                "[Tool result: shell]\nhi",
+            text,
+        )
+        assertFalse(text.contains("must-not-leak"))
     }
 
     @Test
@@ -36,17 +143,17 @@ class ContextCompactGraphAnchorTest {
             status = MessageStatus.SENDING,
         )
 
-        val split = com.newoether.agora.api.util.splitLogicalContext(
+        val split = com.newoether.agora.api.util.splitContextForCompactRetention(
             compactSplitMessages(
                 listOf(oldUser, oldModel, currentUser, placeholder).map {
                     it.toUiChatMessage { text -> text }
                 }
             ),
-            retainLogicalMessages = 1,
+            retainMessages = 1,
         )
 
         assertEquals(listOf("old-user", "old-model"), split.prefix.map { it.id })
-        assertEquals(listOf("current-user"), split.suffix.map { it.id })
+        assertEquals(listOf("current-user"), split.retained.map { it.id })
     }
 
     @Test
@@ -94,6 +201,36 @@ class ContextCompactGraphAnchorTest {
                 path = path,
                 contextLimit = 1,
                 retainLogicalMessages = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun automaticEligibilityCountsFrozenUserTemplatesUsedByDispatch() {
+        val path = listOf(
+            entity("old-user", null, Participant.USER, 1).copy(text = "old"),
+            entity("old-model", "old-user", Participant.MODEL, 2).copy(text = "answer"),
+            entity("current-user", "old-model", Participant.USER, 3).copy(text = "new"),
+        ).map { it.toUiChatMessage { text -> text } }
+        val rawUsage = com.newoether.agora.api.util.contextWindowUsage(
+            path,
+            tokenBudget = Int.MAX_VALUE,
+        ).estimatedTokenCount
+        val threshold = rawUsage + 1
+
+        assertFalse(
+            automaticCompactNeeded(
+                path = path,
+                contextLimit = threshold,
+                retainLogicalMessages = 1,
+            ),
+        )
+        assertTrue(
+            automaticCompactNeeded(
+                path = path,
+                contextLimit = threshold,
+                retainLogicalMessages = 1,
+                userPrepend = "large provider-visible prefix ".repeat(20),
             ),
         )
     }
@@ -151,15 +288,15 @@ class ContextCompactGraphAnchorTest {
             .toUiChatMessage { text -> text }
 
         val compactable = compactSplitMessages(listOf(oldUser, tool, result, continuation))
-        val split = com.newoether.agora.api.util.splitLogicalContext(
+        val split = com.newoether.agora.api.util.splitContextForCompactRetention(
             compactable,
-            retainLogicalMessages = 1,
+            retainMessages = 2,
         )
 
         assertEquals(listOf("old-user"), split.prefix.map { it.id })
         assertEquals(
             listOf("tool_round", "result_round", "continuation"),
-            split.suffix.map { it.id },
+            split.retained.map { it.id },
         )
         assertTrue(
             automaticCompactNeeded(

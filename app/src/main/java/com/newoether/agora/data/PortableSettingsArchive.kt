@@ -173,21 +173,39 @@ internal object PortableSettingsArchive {
         val previousEmbeddingModels = sm.embeddingModels.first()
         val previousFontPath = sm.customFontPath.first()
         val previousFontName = sm.customFontName.first()
+        val previousCustomProviders = sm.customProviders.first()
+        val importedProviderIdentities = prepareImportedCustomProviders(
+            raw = obj.decode<List<CustomProviderConfig>>("customProviders").orEmpty(),
+            existing = previousCustomProviders,
+            replace = replace,
+        )
+        if (importedProviderIdentities.rejected.isNotEmpty()) {
+            warnings += "skipped invalid custom provider name(s): " +
+                importedProviderIdentities.rejected.joinToString { it.name }
+        }
+        fun remapModel(modelId: String): String = modelId.remapProviderReference(
+            importedProviderIdentities.modelReferenceRemap,
+        )
 
         if (replace) sm.resetPortableSettingsForImport()
 
-        obj.string("selectedModel")?.let { sm.saveSelectedModel(it) }
+        obj.string("selectedModel")?.let { sm.saveSelectedModel(remapModel(it)) }
 
         obj.decode<Set<String>>("customModels")?.let { imported ->
-            val value = if (replace) imported else sm.customModels.first() + imported
+            val remapped = imported.mapTo(linkedSetOf(), ::remapModel)
+            val value = if (replace) remapped else sm.customModels.first() + remapped
             sm.saveCustomModels(value)
         }
         obj.decode<Set<String>>("enabledModels")?.let { imported ->
-            val value = if (replace) imported else sm.enabledModels.first() + imported
+            val remapped = imported.mapTo(linkedSetOf(), ::remapModel)
+            val value = if (replace) remapped else sm.enabledModels.first() + remapped
             sm.saveEnabledModels(value)
         }
         obj.decode<Map<String, String>>("modelAliases")?.let { imported ->
-            val value = if (replace) imported else sm.modelAliases.first() + imported
+            val remapped = imported.entries.associateTo(linkedMapOf()) { (modelId, alias) ->
+                remapModel(modelId) to alias
+            }
+            val value = if (replace) remapped else sm.modelAliases.first() + remapped
             sm.saveModelAliases(value)
         }
 
@@ -195,7 +213,9 @@ internal object PortableSettingsArchive {
             ?.let { sm.saveMaxContextWindow(it) }
         obj.boolean("visualizeContextRollout")?.let { sm.saveVisualizeContextRollout(it) }
         obj.boolean("contextCompactEnabled")?.let { sm.saveContextCompactEnabled(it) }
-        if (obj.containsKey("contextCompactModel")) sm.saveContextCompactModel(obj.nullableString("contextCompactModel"))
+        if (obj.containsKey("contextCompactModel")) {
+            sm.saveContextCompactModel(obj.nullableString("contextCompactModel")?.let(::remapModel))
+        }
         obj.string("contextCompactPrompt")?.let { sm.saveContextCompactPrompt(it) }
         obj.int("contextCompactRetainCount")?.takeIf { it >= 0 }?.let { sm.saveContextCompactRetainCount(it) }
         obj.boolean("codeExecutionEnabled")?.let { sm.saveCodeExecutionEnabled(it) }
@@ -219,12 +239,15 @@ internal object PortableSettingsArchive {
         }
 
         obj.decode<Map<String, String>>("providerBaseUrls")?.let { imported ->
-            val value = if (replace) imported else sm.providerBaseUrls.first() + imported
+            val remapped = imported.entries.associateTo(linkedMapOf()) { (name, url) ->
+                (importedProviderIdentities.providerNameRemap[name] ?: name) to url
+            }
+            val value = if (replace) remapped else sm.providerBaseUrls.first() + remapped
             sm.saveProviderBaseUrls(value)
         }
         obj.boolean("titleGenerationEnabled")?.let { sm.saveTitleGenerationEnabled(it) }
         if (obj.containsKey("titleGenerationModel")) {
-            sm.saveTitleGenerationModel(obj.nullableString("titleGenerationModel"))
+            sm.saveTitleGenerationModel(obj.nullableString("titleGenerationModel")?.let(::remapModel))
         }
         obj.string("titleGenerationPrompt")?.let { sm.saveTitleGenerationPrompt(it) }
         obj.boolean("titleGenerationNotificationsEnabled")?.let {
@@ -297,7 +320,7 @@ internal object PortableSettingsArchive {
         obj.string("webSearchBaseUrl")?.let { sm.saveWebSearchBaseUrl(it) }
         obj.boolean("imageGenEnabled")?.let { sm.saveImageGenEnabled(it) }
         if (obj.containsKey("imageGenModel")) {
-            sm.saveImageGenModel(obj.nullableString("imageGenModel"))
+            sm.saveImageGenModel(obj.nullableString("imageGenModel")?.let(::remapModel))
         }
         obj.string("imageGenSize")?.let { sm.saveImageGenSize(it) }
         obj.int("searchContextWindow")?.let { sm.saveSearchContextWindow(it) }
@@ -308,13 +331,16 @@ internal object PortableSettingsArchive {
 
         obj.boolean("imageTranscriptionEnabled")?.let { sm.saveImageTranscriptionEnabled(it) }
         obj.decode<Set<String>>("imageTranscriptionEnabledModels")?.let { imported ->
-            val value = if (replace) imported else {
-                sm.imageTranscriptionEnabledModels.first() + imported
+            val remapped = imported.mapTo(linkedSetOf(), ::remapModel)
+            val value = if (replace) remapped else {
+                sm.imageTranscriptionEnabledModels.first() + remapped
             }
             sm.saveImageTranscriptionEnabledModels(value)
         }
         if (obj.containsKey("imageTranscriptionModel")) {
-            sm.saveImageTranscriptionModel(obj.nullableString("imageTranscriptionModel"))
+            sm.saveImageTranscriptionModel(
+                obj.nullableString("imageTranscriptionModel")?.let(::remapModel),
+            )
         }
         obj.int("imageTranscriptionBatchSize")?.let { sm.saveImageTranscriptionBatchSize(it) }
         obj.string("imageTranscriptionPrompt")?.let { sm.saveImageTranscriptionPrompt(it) }
@@ -345,16 +371,14 @@ internal object PortableSettingsArchive {
         obj.boolean("automationToolsEnabled")?.let { sm.saveAutomationToolsEnabled(it) }
         obj.boolean("exactExecutionEnabled")?.let { sm.saveExactExecutionEnabled(it) }
 
-        obj.decode<List<CustomProviderConfig>>("customProviders")?.let { importedRaw ->
-            val sanitization = CustomProviderNamePolicy.sanitize(importedRaw)
-            if (sanitization.rejected.isNotEmpty()) {
-                warnings += "skipped invalid custom provider name(s): " +
-                    sanitization.rejected.joinToString { it.name }
-            }
+        if (obj.containsKey("customProviders")) {
             val value = if (replace) {
-                sanitization.accepted
+                importedProviderIdentities.providers
             } else {
-                mergeById(sm.customProviders.first(), sanitization.accepted) { it.name }
+                mergeById(
+                    previousCustomProviders,
+                    importedProviderIdentities.providers,
+                ) { it.providerId }
             }
             sm.saveCustomProviders(value)
         }
@@ -501,5 +525,62 @@ internal object PortableSettingsArchive {
         existing.forEach { merged[key(it)] = it }
         imported.forEach { merged[key(it)] = it }
         return merged.values.toList()
+    }
+
+    internal data class ImportedCustomProviderIdentities(
+        val providers: List<CustomProviderConfig>,
+        val rejected: List<CustomProviderConfig>,
+        val modelReferenceRemap: Map<String, String>,
+        val providerNameRemap: Map<String, String>,
+    )
+
+    internal fun prepareImportedCustomProviders(
+        raw: List<CustomProviderConfig>,
+        existing: List<CustomProviderConfig>,
+        replace: Boolean,
+    ): ImportedCustomProviderIdentities {
+        val sanitization = CustomProviderNamePolicy.sanitize(raw)
+        val occupied = if (replace) linkedSetOf() else existing
+            .mapTo(linkedSetOf(), CustomProviderConfig::providerId)
+        val normalized = mutableListOf<CustomProviderConfig>()
+        val modelRemap = linkedMapOf<String, String>()
+        val nameRemap = linkedMapOf<String, String>()
+
+        sanitization.accepted.forEach { imported ->
+            val importedReference = imported.id
+                .takeIf(CustomProviderIdentityPolicy::isStableId)
+                ?: imported.name
+            val matching = if (replace) null else existing.firstOrNull { current ->
+                (CustomProviderIdentityPolicy.isStableId(imported.id) && current.id == imported.id) ||
+                    current.name.equals(imported.name, ignoreCase = true)
+            }
+            val target = if (matching != null) {
+                imported.copy(
+                    name = matching.name,
+                    id = matching.providerId,
+                    legacyNames = buildSet {
+                        addAll(matching.legacyNames)
+                        addAll(imported.legacyNames)
+                        if (importedReference != matching.providerId) add(importedReference)
+                    },
+                )
+            } else {
+                CustomProviderIdentityPolicy.normalize(
+                    rawProviders = listOf(imported),
+                    occupiedIds = occupied,
+                ).providers.single()
+            }
+            occupied += target.providerId
+            normalized += target
+            modelRemap[importedReference] = target.providerId
+            imported.legacyNames.forEach { legacy -> modelRemap[legacy] = target.providerId }
+            nameRemap[imported.name] = target.name
+        }
+        return ImportedCustomProviderIdentities(
+            providers = normalized,
+            rejected = sanitization.rejected,
+            modelReferenceRemap = modelRemap,
+            providerNameRemap = nameRemap,
+        )
     }
 }

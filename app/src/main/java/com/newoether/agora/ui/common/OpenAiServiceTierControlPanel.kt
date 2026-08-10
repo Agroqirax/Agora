@@ -15,10 +15,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,10 +37,16 @@ fun OpenAiServiceTierControlPanel(
     showHeader: Boolean = true,
 ) {
     val normalizedTier = OpenAiServiceTiers.normalize(tier)
-    val selectedIndex = OpenAiServiceTiers.indexForTier(normalizedTier)
-    var sliderPosition by remember(selectedIndex) {
-        mutableFloatStateOf(selectedIndex.toFloat())
+    val tierGate = remember {
+        PersistedSliderFeedbackGate(
+            initialPersisted = normalizedTier,
+            toDisplay = { persisted ->
+                OpenAiServiceTiers.indexForTier(persisted).toFloat()
+            },
+        )
     }
+    LaunchedEffect(normalizedTier) { tierGate.reconcile(normalizedTier) }
+    val sliderPosition = tierGate.displayed
 
     Column(modifier = modifier.fillMaxWidth()) {
         if (showHeader) {
@@ -121,15 +125,20 @@ fun OpenAiServiceTierControlPanel(
                 )
                 Slider(
                     value = sliderPosition,
-                    onValueChange = { if (enabled) sliderPosition = it },
+                    onValueChange = { if (enabled) tierGate.updateFromGesture(it) },
                     onValueChangeFinished = {
                         if (enabled) {
                             val index = sliderPosition
                                 .roundToInt()
                                 .coerceIn(OpenAiServiceTiers.values.indices)
-                            sliderPosition = index.toFloat()
+                            val selectedTier = OpenAiServiceTiers.tierForIndex(index)
+                            if (selectedTier == normalizedTier) {
+                                tierGate.settleWithoutWrite(normalizedTier, index.toFloat())
+                            } else {
+                                tierGate.expectPersisted(selectedTier, index.toFloat())
+                            }
                             onEnabledChange(true)
-                            onTierChange(OpenAiServiceTiers.tierForIndex(index))
+                            onTierChange(selectedTier)
                         }
                     },
                     valueRange = 0f..OpenAiServiceTiers.values.lastIndex.toFloat(),

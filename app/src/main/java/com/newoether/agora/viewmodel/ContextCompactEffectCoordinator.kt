@@ -47,6 +47,14 @@ internal class ContextCompactEffectCoordinator(
             CompactMode.AUTOMATIC -> state.commands.requestAutomaticCompact(compactRunId, effectId)
         } ?: return Execution.Busy
 
+        if (mode == CompactMode.MANUAL) {
+            val ownerJob = requireNotNull(currentCoroutineContext()[kotlinx.coroutines.Job])
+            if (!state.attachGenerationJob(effect.identity.ownerToken, ownerJob)) {
+                settleFailure(state, effect)
+                return Execution.Superseded
+            }
+        }
+
         val result = try {
             block(effect)
         } catch (cancelled: CancellationException) {
@@ -59,7 +67,7 @@ internal class ContextCompactEffectCoordinator(
 
         val outcome = result.toRuntimeOutcome()
         val transition = withContext(NonCancellable) {
-            state.commands.finishCompact(effect.identity, outcome)
+            state.finishCompact(effect.identity, outcome)
         }
         if (!transition.accepted) {
             // Stop cancels an automatic Compact's installed generation Job. If cancellation has
@@ -68,17 +76,18 @@ internal class ContextCompactEffectCoordinator(
             currentCoroutineContext().ensureActive()
             return Execution.Superseded
         }
-        when {
-            outcome == CompactOutcome.FAILED -> check(
-                transition.effects.singleOrNull() ==
-                    RunEffect.CompactFailed(effect.identity, mode),
-            )
-            mode == CompactMode.AUTOMATIC -> check(
-                transition.effects.singleOrNull() ==
-                    RunEffect.ResumeAfterCompact(effect.identity, outcome),
-            )
-            else -> check(transition.effects.isEmpty())
-        }
+        check(
+            transition.effects.any { it is RunEffect.CompactFailed } ==
+                (outcome == CompactOutcome.FAILED),
+        )
+        check(
+            transition.effects.any { it is RunEffect.ResumeAfterCompact } ==
+                (mode == CompactMode.AUTOMATIC && outcome != CompactOutcome.FAILED),
+        )
+        check(
+            transition.effects.any { it is RunEffect.ReleaseSlot } ==
+                (mode == CompactMode.MANUAL),
+        )
         return Execution.Settled(result)
     }
 
@@ -88,7 +97,7 @@ internal class ContextCompactEffectCoordinator(
     ) {
         withContext(NonCancellable) {
             try {
-                state.commands.finishCompact(effect.identity, CompactOutcome.FAILED)
+                state.finishCompact(effect.identity, CompactOutcome.FAILED)
             } catch (_: Exception) {
                 // Preserve the originating cancellation/effect failure when runtime disposal has
                 // already closed the mailbox. No later continuation can be authorized there.

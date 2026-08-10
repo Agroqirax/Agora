@@ -1,6 +1,7 @@
 package com.newoether.agora.tool
 
 import com.newoether.agora.viewmodel.GenerationContext
+import com.newoether.agora.model.ToolCallData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
@@ -8,6 +9,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
@@ -339,3 +341,57 @@ internal class ShellDurableJobExecutor {
         )
     }
 }
+
+internal data class TerminalShellJobAcknowledgement(
+    val serverName: String,
+    val jobId: String,
+)
+
+/**
+ * Extracts only terminal Conch jobs whose full result is about to cross a durable Room boundary.
+ * Running/stopping jobs, malformed payloads, errors without a terminal state, and unrelated tools
+ * are ignored. The server may live only in the original tool arguments because `/jobs/get` returns
+ * a server-local job document.
+ */
+internal fun terminalShellJobAcknowledgements(
+    calls: List<ToolCallData>,
+): List<TerminalShellJobAcknowledgement> = calls.mapNotNull { call ->
+    if (call.toolName !in ACKNOWLEDGEABLE_SHELL_TOOLS) return@mapNotNull null
+    val envelope = runCatching {
+        Json.parseToJsonElement(call.result).jsonObject
+    }.getOrNull() ?: return@mapNotNull null
+    val nested = envelope["result"] as? JsonObject
+    val state = nested.stringValue("state") ?: envelope.stringValue("state")
+    if (state?.lowercase() !in TERMINAL_ACK_STATES) return@mapNotNull null
+    val jobId = envelope.stringValue("job_id")
+        ?: nested.stringValue("job_id")
+        ?: return@mapNotNull null
+    val arguments = runCatching {
+        Json.parseToJsonElement(call.arguments).jsonObject
+    }.getOrNull()
+    TerminalShellJobAcknowledgement(
+        serverName = envelope.stringValue("server")
+            ?: nested.stringValue("server")
+            ?: arguments.stringValue("server")
+            ?: "",
+        jobId = jobId,
+    )
+}.distinctBy { acknowledgement ->
+    acknowledgement.serverName.lowercase() to acknowledgement.jobId
+}
+
+private fun JsonObject?.stringValue(key: String): String? =
+    (this?.get(key) as? JsonPrimitive)?.content?.takeIf(String::isNotBlank)
+
+private val ACKNOWLEDGEABLE_SHELL_TOOLS = setOf(
+    "execute_shell_command",
+    "get_shell_job",
+    "wait_for_job",
+)
+
+private val TERMINAL_ACK_STATES = setOf(
+    "succeeded",
+    "failed",
+    "stopped",
+    "interrupted",
+)

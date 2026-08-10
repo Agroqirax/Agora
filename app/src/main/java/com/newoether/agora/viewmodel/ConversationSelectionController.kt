@@ -230,8 +230,10 @@ internal class ConversationSelectionController(
     }
 
     /** Begins the same UI transition for edit/delete services without exposing the coordinator. */
-    suspend fun beginTreeMutation(): Long? {
-        val request = _currentConversationId.value?.let(switching::beginTreeMutation)
+    suspend fun beginTreeMutation(scrollToTarget: Boolean = true): Long? {
+        val request = _currentConversationId.value?.let { conversationId ->
+            switching.beginTreeMutation(conversationId, scrollToTarget)
+        }
         fadeDelay()
         return request?.id
     }

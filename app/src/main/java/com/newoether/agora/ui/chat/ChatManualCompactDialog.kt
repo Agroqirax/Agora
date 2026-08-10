@@ -27,6 +27,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelDisplayName
 import com.newoether.agora.ui.components.clearFocusOnTap
 
 /** Manual Compact uses the same Material alert-dialog treatment as the other chat editors. */
@@ -38,6 +40,7 @@ internal fun ChatManualCompactDialog(
     initialRetainCount: Int,
     enabledModels: Set<String>,
     modelAliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig>,
     isCompacting: Boolean,
     onCompact: (model: String, prompt: String, retainCount: Int) -> Unit,
     onDismiss: () -> Unit,
@@ -77,7 +80,7 @@ internal fun ChatManualCompactDialog(
                     onExpandedChange = { if (!busy) modelMenu = it },
                 ) {
                     OutlinedTextField(
-                        value = modelAliases[model] ?: model,
+                        value = modelDisplayName(model, modelAliases, customProviders),
                         onValueChange = {},
                         readOnly = true,
                         enabled = !busy,
@@ -100,7 +103,9 @@ internal fun ChatManualCompactDialog(
                     ) {
                         enabledModels.sorted().forEach { candidate ->
                             DropdownMenuItem(
-                                text = { Text(modelAliases[candidate] ?: candidate) },
+                                text = {
+                                    Text(modelDisplayName(candidate, modelAliases, customProviders))
+                                },
                                 onClick = {
                                     model = candidate
                                     modelMenu = false

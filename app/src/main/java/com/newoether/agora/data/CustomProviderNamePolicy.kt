@@ -10,9 +10,9 @@ internal data class CustomProviderSanitizationResult(
 /**
  * Owns the namespace invariant for custom providers.
  *
- * Provider names are persisted as identifiers throughout settings and model IDs, so a custom
- * provider must never share a name with a built-in provider. Comparisons are case-insensitive
- * because several provider-facing screens already classify names that way.
+ * Provider names are mutable display labels, while [CustomProviderConfig.id] owns model identity.
+ * A custom display name still must not shadow a built-in provider because connection settings and
+ * user-facing routes are name-keyed for backward compatibility. Comparisons are case-insensitive.
  */
 internal object CustomProviderNamePolicy {
     private val reservedNames = listOf(

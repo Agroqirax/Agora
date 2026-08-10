@@ -1,9 +1,7 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
-import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -20,7 +18,6 @@ import io.mockk.unmockkObject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
@@ -30,7 +27,7 @@ import org.junit.Test
 class BoundRunGenerationLauncherTest {
     @Test
     fun launchesOnePassWithLoadedKeyAndIdentifiedRuntimeCallbacks() = runBlocking {
-        val fixture = Fixture(activeKey = "loaded-key")
+        val fixture = Fixture()
         var generationJob: Job? = null
         val callbacks = slot<GenerationCallbacks>()
         coEvery {
@@ -38,21 +35,20 @@ class BoundRunGenerationLauncherTest {
                 conversationId = "conversation",
                 modelMessageId = "model-message",
                 startTime = 100L,
-                isRegenerate = false,
-                replaceMessageId = null,
                 modelName = "provider:model",
                 runId = "run",
                 pass = 3,
                 ownerToken = fixture.uiToken,
                 config = fixture.config,
                 ctx = fixture.generationContext,
+                providerInstances = fixture.snapshot.providerInstances,
                 generationJob = any(),
                 callbacks = capture(callbacks),
                 streamScope = fixture.state.streamScope,
                 requestTrace = any(),
             )
         } coAnswers {
-            generationJob = arg(11)
+            generationJob = arg(10)
             Unit
         }
         mockDebugLog()
@@ -64,13 +60,12 @@ class BoundRunGenerationLauncherTest {
         }
 
         assertSame(currentCoroutineContext()[Job], generationJob)
-        coVerify(exactly = 0) { fixture.settings.awaitActiveKey(any()) }
         coVerify(exactly = 1) {
             fixture.compactController.automaticBeforeBoundary(
-                "conversation",
-                "provider:model",
-                4096,
-                fixture.state,
+                conversationId = "conversation",
+                contextLimit = 4096,
+                config = fixture.snapshot.automaticCompact,
+                state = fixture.state,
             )
         }
         fixture.state.dispose()
@@ -78,51 +73,26 @@ class BoundRunGenerationLauncherTest {
     }
 
     @Test
-    fun blankLoadedKeyAwaitsFreshDataStoreValueBeforeBuildingConfig() = runBlocking {
-        val fixture = Fixture(activeKey = "")
-        coEvery { fixture.settings.awaitActiveKey("provider") } returns "fresh-key"
+    fun generationStartFailureTerminalizesOnlyTheBoundSendingPlaceholder() = runBlocking {
+        val fixture = Fixture()
         coEvery {
-            fixture.builder.buildGenerationPair(
-                "provider",
-                "provider:model",
-                "fresh-key",
-                "system",
-                "prepend",
-                "postpend",
-                fixture.effectiveSettings,
-                "conversation",
+            fixture.manager.generate(
+                conversationId = any(),
+                modelMessageId = any(),
+                startTime = any(),
+                modelName = any(),
+                runId = any(),
+                pass = any(),
+                ownerToken = any(),
+                config = any(),
+                ctx = any(),
+                providerInstances = any(),
+                generationJob = any(),
+                callbacks = any(),
+                streamScope = any(),
+                requestTrace = any(),
             )
-        } returns (fixture.config to fixture.generationContext)
-        coEvery { fixture.manager.generate(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } just Runs
-        mockDebugLog()
-        try {
-            fixture.launcher.launch(fixture.request, fixture.state)
-        } finally {
-            unmockkObject(DebugLog)
-        }
-
-        coVerify(exactly = 1) { fixture.settings.awaitActiveKey("provider") }
-        coVerify(exactly = 1) {
-            fixture.builder.buildGenerationPair(
-                "provider",
-                "provider:model",
-                "fresh-key",
-                "system",
-                "prepend",
-                "postpend",
-                fixture.effectiveSettings,
-                "conversation",
-            )
-        }
-        fixture.state.dispose()
-        Unit
-    }
-
-    @Test
-    fun requestBuildFailureTerminalizesOnlyTheBoundSendingPlaceholder() = runBlocking {
-        val fixture = Fixture(activeKey = "loaded-key", stubGenerationPair = false)
-        coEvery { fixture.builder.buildGenerationPair(any(), any(), any(), any(), any(), any(), any(), any()) } throws
-            IllegalStateException("configuration failed")
+        } throws IllegalStateException("configuration failed")
         coEvery {
             fixture.conversations.getMessagesForConversationSnapshot("conversation")
         } returns listOf(MESSAGE_ENTITY)
@@ -147,15 +117,37 @@ class BoundRunGenerationLauncherTest {
 
         assertEquals(MessageStatus.ERROR, failedMessage.captured.status)
         assertEquals("Error: configuration failed", failedMessage.captured.text)
-        coVerify(exactly = 0) { fixture.manager.generate(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) {
+            fixture.manager.generate(
+                conversationId = any(),
+                modelMessageId = any(),
+                startTime = any(),
+                modelName = any(),
+                runId = any(),
+                pass = any(),
+                ownerToken = any(),
+                config = any(),
+                ctx = any(),
+                providerInstances = any(),
+                generationJob = any(),
+                callbacks = any(),
+                streamScope = any(),
+                requestTrace = any(),
+            )
+        }
         fixture.state.dispose()
         Unit
     }
 
     @Test
     fun cancellationFromGenerationIsPropagatedWithoutFailureFinalization() = runBlocking {
-        val fixture = Fixture(activeKey = "loaded-key")
-        coEvery { fixture.manager.generate(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) } throws
+        val fixture = Fixture()
+        coEvery {
+            fixture.manager.generate(
+                any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(),
+            )
+        } throws
             CancellationException("stop")
         mockDebugLog()
         try {
@@ -178,39 +170,24 @@ class BoundRunGenerationLauncherTest {
         Unit
     }
 
-    private class Fixture(
-        activeKey: String,
-        stubGenerationPair: Boolean = true,
-    ) {
-        val builder = mockk<GenerationRequestBuilder>()
-        val settings = mockk<SettingsRepository>()
+    private class Fixture {
         val conversations = mockk<ConversationRepository>()
         val manager = mockk<GenerationManager>()
         val compactController = mockk<ConversationCompactController>()
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
         val state = ConversationGenerationState("conversation")
         val uiToken = requireNotNull(state.acquireForSend())
-        val effectiveSettings = ConversationSettings(contextWindow = 4096)
-        val config = GenerationConfig(
-            providerName = "provider",
-            modelId = "model",
-            apiKey = "loaded-key",
-            effectiveSystemPrompt = "system",
-            codeExecutionEnabled = false,
-            googleSearchEnabled = false,
-            thinkingEnabled = false,
-            baseUrl = null,
+        val snapshot = testGenerationAdmissionSnapshot(
+            conversationId = "conversation",
+            runId = "run",
         )
-        val generationContext = GenerationContext(conversationId = "conversation")
+        val config = snapshot.config
+        val generationContext = snapshot.context
         val request = BoundRunGenerationRequest(
             conversationId = "conversation",
             modelMessageId = "model-message",
             startTime = 100L,
-            isRegenerate = false,
-            replaceMessageId = null,
-            providerName = "provider",
-            modelId = "provider:model",
-            activeKey = activeKey,
+            snapshot = snapshot,
             uiToken = uiToken,
             persistId = 7L,
             runId = "run",
@@ -221,36 +198,11 @@ class BoundRunGenerationLauncherTest {
 
         init {
             state.bindRun(uiToken, "run", pass = 3)
-            coEvery {
-                builder.buildEffectiveSystemPrompt("conversation", "provider:model")
-            } returns GenerationRequestBuilder.ResolvedPrompt("system", "prepend", "postpend")
-            every {
-                builder.buildEffectiveConversationSettings("conversation")
-            } returns effectiveSettings
-            every { settings.maxContextWindow } returns MutableStateFlow(8192)
-            if (activeKey.isNotBlank()) {
-                coEvery { settings.awaitActiveKey(any()) } returns null
-            }
-            if (stubGenerationPair) {
-                coEvery {
-                    builder.buildGenerationPair(
-                        "provider",
-                        "provider:model",
-                        activeKey,
-                        "system",
-                        "prepend",
-                        "postpend",
-                        effectiveSettings,
-                        "conversation",
-                    )
-                } returns (config to generationContext)
-            }
+            every { manager.fixedContextTokenCost(any(), any()) } returns 0
             coEvery {
                 compactController.automaticBeforeBoundary(any(), any(), any(), any())
-            } just Runs
+            } returns null
             launcher = BoundRunGenerationLauncher(
-                requestBuilder = builder,
-                settings = settings,
                 conversations = conversations,
                 generationManagerProvider = { manager },
                 compactController = compactController,

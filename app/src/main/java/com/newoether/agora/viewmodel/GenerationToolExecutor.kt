@@ -6,6 +6,7 @@ import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.RunEffectIdentity
+import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.model.ToolExecutionStates
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.tool.ImageGenToolProvider
@@ -144,6 +145,16 @@ internal class GenerationToolExecutor private constructor(
 
     fun drainGeneratedImages(conversationId: String): List<String> =
         imageGenProvider?.drainImages(conversationId).orEmpty()
+
+    /** Cleanup side effect only; it cannot authorize continuation or change runtime state. */
+    suspend fun acknowledgeCommittedShellJobs(
+        calls: List<ToolCallData>,
+        context: GenerationContext,
+    ) {
+        providers.filterIsInstance<ShellToolProvider>()
+            .firstOrNull()
+            ?.acknowledgeCommittedJobs(calls, context)
+    }
 
     suspend fun execute(
         call: AuthorizedToolCall,

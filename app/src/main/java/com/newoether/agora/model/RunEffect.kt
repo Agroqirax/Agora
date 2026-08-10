@@ -22,7 +22,6 @@ sealed interface RunEffect {
     data class AcceptGuidance(val identity: RunEffectIdentity) : RunEffect
     data class DrainGuidanceFirst(val identity: RunEffectIdentity) : RunEffect
     data class AwaitRunRelease(val identity: RunEffectIdentity) : RunEffect
-    data class AwaitCompactSettlement(val identity: RunEffectIdentity) : RunEffect
     data class RejectSendBusy(val identity: RunEffectIdentity) : RunEffect
     data class StartProviderPass(val identity: RunEffectIdentity) : RunEffect
     data class ProviderPassAccepted(

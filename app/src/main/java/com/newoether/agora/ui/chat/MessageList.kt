@@ -41,9 +41,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.ContextBudget
-import com.newoether.agora.api.util.contextWindowRetainedMessageIds
-import com.newoether.agora.api.util.expandSelectedToolProtocolRows
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunMessagePresentation
@@ -52,9 +50,9 @@ import com.newoether.agora.model.StableMessageList
 import com.newoether.agora.model.StableModelAliases
 import com.newoether.agora.model.ToolCallDisplayModes
 import com.newoether.agora.model.ThinkingSegmentDisplayModes
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.ui.chat.message.GroupedSegmentAutoExpansionController
 import com.newoether.agora.ui.chat.message.MessageItem
-import com.newoether.agora.ui.chat.message.ContextCompactProgressPill
 import com.newoether.agora.ui.chat.message.REGENERATION_ABORT_RESTORE_DURATION_MS
 import com.newoether.agora.ui.chat.message.REGENERATION_EXIT_DURATION_MS
 import com.newoether.agora.ui.chat.message.SegmentAppearanceRegistry
@@ -88,6 +86,25 @@ private fun ChatMessage.toRunProjectionKey(): RunProjectionMessageKey =
         runSequence = runSequence,
     )
 
+internal fun compactMessageActionsEnabled(
+    isLoading: Boolean,
+    isStopping: Boolean,
+    isCompacting: Boolean,
+): Boolean = !isLoading && !isStopping && !isCompacting
+
+internal fun shouldShowStreamingTailIndicator(
+    isLoading: Boolean,
+    isStopping: Boolean,
+    message: ChatMessage?,
+): Boolean =
+    isLoading &&
+        !isStopping &&
+        message?.let {
+            MessageGenerationBoundaryResolver.isOrdinaryAssistant(it) &&
+                it.status == MessageStatus.SENDING &&
+                it.hasActiveAnswerSegment()
+        } == true
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageList(
@@ -115,8 +132,9 @@ internal fun MessageList(
     thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
     detailedTokenUsage: Boolean = false,
-    maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
+    contextRetainedMessageIds: Set<String> = emptySet(),
     modelAliases: StableModelAliases = StableModelAliases(),
+    customProviders: List<com.newoether.agora.data.CustomProviderConfig> = emptyList(),
     bottomBarHeight: androidx.compose.ui.unit.Dp = 0.dp,
     viewportHeight: Int = 0,
     messageHeights: SnapshotStateMap<String, Int> = remember { mutableStateMapOf() },
@@ -125,6 +143,7 @@ internal fun MessageList(
     onRegenerate: (String) -> Boolean = { false },
     onFork: (String) -> Unit = {},
     onShare: (String) -> Unit = {},
+    onRecompact: (String) -> Unit = {},
     onDelete: (String) -> Unit = {},
     searchQuery: String = "",
     activeSearchMatch: ConversationSearchMatch? = null,
@@ -243,12 +262,7 @@ internal fun MessageList(
     val allProjectionKey = remember(allMessages) {
         allMessages.list.map(ChatMessage::toRunProjectionKey)
     }
-    val inContextIds = remember(messages, allMessages, maxContextWindow) {
-        contextWindowRetainedMessageIds(
-            expandSelectedToolProtocolRows(messages.list, allMessages.list),
-            maxContextWindow,
-        )
-    }
+    val inContextIds = contextRetainedMessageIds
 
     val activeMessageIds = remember(messages) {
         messages.list.mapTo(hashSetOf()) { message -> message.id }
@@ -261,7 +275,8 @@ internal fun MessageList(
     }
     val turnCache = remember { MessageListTurnCache() }
     val turns = remember(presentationMessages) { turnCache.update(presentationMessages) }
-    val lastUserMessage = messages.list.lastOrNull { it.participant == Participant.USER }
+    val lastUserMessage =
+        messages.list.lastOrNull(MessageGenerationBoundaryResolver::isRealUser)
     val resolvedEditReplacement = remember(messages, pendingEditVisualReplacement) {
         resolvePendingEditReplacement(
             messages = messages.list,
@@ -289,12 +304,11 @@ internal fun MessageList(
             pendingEditVisualReplacement = null
         }
     }
-    val answeringTailVisible =
-        isLoading &&
-            !isStopping &&
-            messages.list.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
-                message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
-            } == true
+    val answeringTailVisible = shouldShowStreamingTailIndicator(
+        isLoading = isLoading,
+        isStopping = isStopping,
+        message = messages.list.lastOrNull { it.participant == Participant.MODEL },
+    )
 
     LaunchedEffect(regenerationTransition?.id) {
         val transition = regenerationTransition
@@ -704,7 +718,17 @@ internal fun MessageList(
             // Every active MODEL owns its streaming renderer until its own terminal status.
             // Appending a queued USER must not dispose the previous turn's incremental renderer.
             isStreaming = messageIsStreaming,
+            liveCompactPreview = compactPreview.takeIf {
+                isCompacting &&
+                    message.isContextCompact() &&
+                    message.status in setOf(MessageStatus.SENDING, MessageStatus.THINKING)
+            },
             isLoading = isLoading || pendingEditMessageId == message.id,
+            compactActionsEnabled = compactMessageActionsEnabled(
+                isLoading = isLoading,
+                isStopping = isStopping,
+                isCompacting = isCompacting,
+            ),
             isRegenerationExiting = message.id in regenerationExitIds,
             isEditingAllowed = !isRetainedRegenerationExit &&
                 !selectionMode &&
@@ -714,6 +738,7 @@ internal fun MessageList(
             isSwitching = isSwitching,
             isInContext = isInContext,
             modelAliases = modelAliases,
+            customProviders = customProviders,
             visualizeContextRollout = visualizeContextRollout,
             toolCallDisplayMode = toolCallDisplayMode,
             thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
@@ -745,6 +770,7 @@ internal fun MessageList(
             onRegenerate = onRegenerate,
             onFork = onFork,
             onShare = onShare,
+            onRecompact = onRecompact,
             deleteTargetMessageId = presentation?.deleteTargetMessageId ?: message.id,
             onDelete = onDelete,
             onMediaClick = onMediaClick,
@@ -891,18 +917,6 @@ internal fun MessageList(
                                 }
                             }
                         }
-                    }
-                }
-            }
-            if (isCompacting) {
-                item(key = "agora:context-compact-progress:$conversationId") {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ContextCompactProgressPill(conversationId, compactPreview)
                     }
                 }
             }

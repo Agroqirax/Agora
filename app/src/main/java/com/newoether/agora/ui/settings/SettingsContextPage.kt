@@ -11,14 +11,19 @@ import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.modelDisplayName
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.model.apiModelName
+import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.viewmodel.ChatViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,6 +37,7 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val retainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
     val aliases by viewModel.settings.modelAliases.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
     var modelDialog by remember { mutableStateOf(false) }
     var promptDialog by remember { mutableStateOf(false) }
 
@@ -48,35 +54,47 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         fun nearestIndex(value: Int): Int = presets.indices.minByOrNull {
                             kotlin.math.abs(presets[it] - value)
                         } ?: 3
-                        var draftIndex by remember(window) {
-                            mutableFloatStateOf(nearestIndex(window).toFloat())
-                        }
-                        val draft = presets[draftIndex.toInt().coerceIn(0, presets.lastIndex)]
-                        SettingsIconContent(Icons.Default.Memory) {
-                            Text(stringResource(R.string.context_window), fontWeight = FontWeight.Medium)
-                            Text(
-                                stringResource(
-                                    R.string.context_token_budget_value,
-                                    ContextBudget.compactLabel(draft),
-                                ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Slider(
-                                value = draftIndex,
-                                onValueChange = { draftIndex = it },
-                                valueRange = 0f..presets.lastIndex.toFloat(),
-                                steps = presets.size - 2,
-                                onValueChangeFinished = {
-                                    viewModel.settings.setMaxContextWindow(draft)
+                        val sliderGate = remember {
+                            PersistedSliderFeedbackGate(
+                                initialPersisted = window,
+                                toDisplay = { value ->
+                                nearestIndex(value).toFloat()
                                 },
                             )
                         }
+                        LaunchedEffect(window) { sliderGate.reconcile(window) }
+                        val draftIndex = sliderGate.displayed
+                        val draft = presets[draftIndex.toInt().coerceIn(0, presets.lastIndex)]
+                        ContextSliderItem(
+                            icon = Icons.Default.Memory,
+                            label = stringResource(R.string.context_window),
+                            description = stringResource(R.string.context_window_desc),
+                            displayValue = ContextBudget.compactLabel(draft),
+                            sliderValue = draftIndex,
+                            valueRange = 0f..presets.lastIndex.toFloat(),
+                            steps = presets.size - 2,
+                            onValueChange = sliderGate::updateFromGesture,
+                            onValueChangeFinished = {
+                                if (draft != window) {
+                                    sliderGate.expectPersisted(draft, draftIndex)
+                                    viewModel.settings.setMaxContextWindow(draft)
+                                } else {
+                                    sliderGate.settleWithoutWrite(window, draftIndex)
+                                }
+                            },
+                        )
                     },
                     {
                         SettingsItem(
                             headlineContent = { Text(stringResource(R.string.context_visualize)) },
                             supportingContent = { Text(stringResource(R.string.context_visualize_desc)) },
-                            leadingContent = { Icon(Icons.Default.Visibility, null) },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.Visibility,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
                             trailingContent = {
                                 Switch(
                                     checked = visualize,
@@ -97,7 +115,13 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         SettingsItem(
                             headlineContent = { Text(stringResource(R.string.context_compact_auto)) },
                             supportingContent = { Text(stringResource(R.string.context_compact_auto_desc)) },
-                            leadingContent = { Icon(Icons.Default.Compress, null) },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.Compress,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
                             trailingContent = {
                                 Switch(
                                     checked = compact,
@@ -116,30 +140,49 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 supportingContent = {
                                     Text(
                                         compactModel?.let {
-                                            aliases[it] ?: ModelId.parse(it).apiModelName
+                                            modelDisplayName(it, aliases, customProviders)
                                         } ?: stringResource(R.string.title_gen_current_model)
                                     )
                                 },
-                                leadingContent = { Icon(Icons.Default.Chat, null) },
+                                leadingContent = {
+                                    Icon(
+                                        Icons.Default.Chat,
+                                        null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                    )
+                                },
                                 modifier = Modifier.clickable { modelDialog = true },
                             )
                         }
                     }
                     add {
-                        var draft by remember(retainCount) { mutableFloatStateOf(retainCount.toFloat()) }
-                        SettingsIconContent(Icons.Default.Memory) {
-                            Text(stringResource(R.string.context_compact_retain), fontWeight = FontWeight.Medium)
-                            Text(draft.toInt().toString(), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Slider(
-                                value = draft,
-                                onValueChange = { draft = it },
-                                valueRange = 0f..20f,
-                                steps = 19,
-                                onValueChangeFinished = {
-                                    viewModel.settings.setContextCompactRetainCount(draft.toInt())
-                                },
+                        val sliderGate = remember {
+                            PersistedSliderFeedbackGate(
+                                initialPersisted = retainCount,
+                                toDisplay = { it.toFloat() },
                             )
                         }
+                        LaunchedEffect(retainCount) { sliderGate.reconcile(retainCount) }
+                        val draft = sliderGate.displayed
+                        ContextSliderItem(
+                            icon = Icons.Default.Memory,
+                            label = stringResource(R.string.context_compact_retain),
+                            description = stringResource(R.string.context_compact_retain_desc),
+                            displayValue = draft.toInt().toString(),
+                            sliderValue = draft,
+                            valueRange = 0f..20f,
+                            steps = 19,
+                            onValueChange = sliderGate::updateFromGesture,
+                            onValueChangeFinished = {
+                                val committed = draft.toInt()
+                                if (committed != retainCount) {
+                                    sliderGate.expectPersisted(committed, committed.toFloat())
+                                    viewModel.settings.setContextCompactRetainCount(committed)
+                                } else {
+                                    sliderGate.settleWithoutWrite(retainCount, committed.toFloat())
+                                }
+                            },
+                        )
                     }
                     add {
                         PromptSettingItem(
@@ -156,13 +199,20 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     if (modelDialog) {
         AlertDialog(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { modelDialog = false },
-            title = { Text(stringResource(R.string.context_compact_select_model)) },
+            title = {
+                Text(
+                    stringResource(R.string.context_compact_select_model),
+                    fontWeight = FontWeight.Bold,
+                )
+            },
             text = {
-                LazyColumn {
+                LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     item {
                         CompactModelItem(
                             label = stringResource(R.string.title_gen_current_model),
+                            provider = null,
                             selected = compactModel == null,
                             onClick = {
                                 viewModel.settings.setContextCompactModel(null)
@@ -171,8 +221,10 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         )
                     }
                     items(enabledModels.toList(), key = { it }) { model ->
+                        val parsed = ModelId.parse(model)
                         CompactModelItem(
-                            label = aliases[model] ?: ModelId.parse(model).apiModelName,
+                            label = aliases[model] ?: parsed.apiModelName,
+                            provider = providerDisplayName(parsed.providerName, customProviders),
                             selected = compactModel == model,
                             onClick = {
                                 viewModel.settings.setContextCompactModel(model)
@@ -200,10 +252,91 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 }
 
 @Composable
-private fun CompactModelItem(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun CompactModelItem(
+    label: String,
+    provider: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
     SettingsItem(
         headlineContent = { Text(label, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal) },
+        supportingContent = provider?.let {
+            {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                )
+            }
+        },
         leadingContent = { RadioButton(selected = selected, onClick = onClick) },
         modifier = Modifier.clickable(onClick = onClick),
     )
+}
+
+@Composable
+private fun ContextSliderItem(
+    icon: ImageVector,
+    label: String,
+    description: String,
+    displayValue: String,
+    sliderValue: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    steps: Int,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        text = displayValue,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+                Slider(
+                    value = sliderValue,
+                    onValueChange = onValueChange,
+                    valueRange = valueRange,
+                    steps = steps,
+                    onValueChangeFinished = onValueChangeFinished,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                )
+            }
+        }
+    }
 }

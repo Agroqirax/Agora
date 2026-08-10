@@ -239,6 +239,7 @@ internal fun AssistantMessageContent(
                 val hasActiveAnswer = message.hasActiveAnswerSegment()
                 val toolCallingStatus = stringResource(R.string.tool_calling_ellipsis)
                 val transcribingStatus = stringResource(R.string.transcription_ellipsis)
+                val failedStatus = stringResource(R.string.failed_to_generate)
                 val detailedUsage = if (detailedTokenUsage) {
                     tokenUsagePresentation(message.tokenUsage)
                         .takeIf { it.input != null || it.output != null }
@@ -272,6 +273,7 @@ internal fun AssistantMessageContent(
                     // line upward on the exact frame generation completes.
                     message.status == MessageStatus.SUCCESS -> completedUsageText
                     message.status == MessageStatus.STOPPED -> stringResource(R.string.generation_stopped)
+                    message.status == MessageStatus.ERROR -> failedStatus
                     isStreaming && isTranscribing -> transcribingStatus
                     isStreaming && isToolCalling -> toolCallingStatus
                     isStreaming && thinkingNow -> thinkingStatus
@@ -323,6 +325,16 @@ internal fun AssistantMessageContent(
                 val mergedSegments = remember(segmentsOrNull) {
                     mergeAdjacentSegments(segmentsOrNull.orEmpty())
                 }
+                val failedToGenerateText = stringResource(R.string.failed_to_generate)
+                val errorContent = remember(
+                    message.text,
+                    message.status,
+                    message.participant,
+                    mergedSegments,
+                    failedToGenerateText,
+                ) {
+                    assistantErrorContent(message, mergedSegments, failedToGenerateText)
+                }
                 val normalizedToolCallDisplayMode = ToolCallDisplayModes.normalize(toolCallDisplayMode)
                 val useThinkingSheet =
                     ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
@@ -339,7 +351,7 @@ internal fun AssistantMessageContent(
                                 )
                         )
                 val detailSegments = remember(mergedSegments) {
-                    mergedSegments.filter { it.type != "answer" }
+                    mergedSegments.filter { it.type != "answer" && it.type != "error" }
                 }
                 val compactVisible = !useTimelineSegments && detailSegments.isNotEmpty()
                 val sheetCollapsedStates = remember(message.id) {
@@ -415,26 +427,13 @@ internal fun AssistantMessageContent(
                     }
                 }
 
+                val answerBodyText = errorContent?.answerText ?: renderedText.takeIf { !isError }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .noOpBringIntoView()
                 ) {
-                    if (isError) {
-                        Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                            Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                                Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                NoAutoScrollSelectionContainer {
-                                    Text(
-                                        renderedText.ifEmpty { stringResource(R.string.failed_to_generate) },
-                                        style = ChatType.errorBody,
-                                        color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                    )
-                                }
-                            }
-                        }
-                    } else if (renderedText.isNotEmpty() && !useTimelineSegments) {
+                    if (!answerBodyText.isNullOrEmpty() && !useTimelineSegments) {
                         if (compactAnswerAppearanceKey != null) {
                             AnimatedTimelineBlockAppearance(
                                 animationKey = compactAnswerAppearanceKey,
@@ -442,7 +441,7 @@ internal fun AssistantMessageContent(
                                 isStreaming = isStreaming,
                             ) {
                                 StreamingMarkdownDocument(
-                                    content = renderedText,
+                                    content = answerBodyText,
                                     isStreaming = isStreaming,
                                     renderContext = renderContext,
                                     modifier = Modifier.fillMaxWidth(),
@@ -451,12 +450,27 @@ internal fun AssistantMessageContent(
                             }
                         } else {
                             StreamingMarkdownDocument(
-                                content = renderedText,
+                                content = answerBodyText,
                                 isStreaming = isStreaming,
                                 renderContext = renderContext,
                                 modifier = Modifier.fillMaxWidth(),
                                 selectionEnabled = !isStreaming,
                             )
+                        }
+                    }
+                }
+                if (errorContent != null) {
+                    Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
+                            Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
+                            Spacer(modifier = Modifier.width(12.dp))
+                            NoAutoScrollSelectionContainer {
+                                Text(
+                                    errorContent.errorText,
+                                    style = ChatType.errorBody,
+                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                )
+                            }
                         }
                     }
                 }

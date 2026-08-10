@@ -201,6 +201,8 @@ internal class ConchBackend(override val device: ShellDeviceConfig) : Backend {
 
     suspend fun stopJob(jobId: String): String = client.stopJob(jobId)
 
+    suspend fun acknowledgeJob(jobId: String): String = client.acknowledgeJob(jobId)
+
     suspend fun viewImage(path: String): ShellClient.FileImageResult =
         client.fileImage(path)
 }

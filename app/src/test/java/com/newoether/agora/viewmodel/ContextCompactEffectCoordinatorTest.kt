@@ -1,6 +1,9 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.CompactMode
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunEndReason
@@ -26,7 +29,8 @@ class ContextCompactEffectCoordinatorTest {
         val execution = coordinator.executeManual(state) { effect ->
             received = effect
             assertTrue(state.compacting.value)
-            assertFalse(state.generating.value)
+            assertTrue(state.generating.value)
+            assertTrue(state.isLoading.value)
             assertEquals("", state.compactPreview.value)
             assertTrue(state.appendCompactPreview(effect.identity, "first"))
             assertTrue(state.appendCompactPreview(effect.identity, " second"))
@@ -65,6 +69,13 @@ class ContextCompactEffectCoordinatorTest {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 3)
+        val ordinaryAssistant = ChatMessage(
+            id = "assistant-placeholder",
+            text = "ordinary partial answer",
+            participant = Participant.MODEL,
+            status = MessageStatus.SENDING,
+        )
+        state.streamUpdate(token, ordinaryAssistant)
         val coordinator = ContextCompactEffectCoordinator { "automatic" }
 
         val execution = coordinator.executeAutomatic(state) { effect ->
@@ -72,6 +83,9 @@ class ContextCompactEffectCoordinatorTest {
             assertEquals(3, effect.identity.pass)
             assertEquals("compact_run_automatic", effect.compactRunId)
             assertTrue(state.compacting.value)
+            assertTrue(state.appendCompactPreview(effect.identity, "compact-only text"))
+            assertEquals("compact-only text", state.compactPreview.value)
+            assertEquals(ordinaryAssistant, state.streamingMessage.value)
             CompactResult.NotNeeded
         }
 
@@ -123,7 +137,7 @@ class ContextCompactEffectCoordinatorTest {
             state.runtimeTraceSnapshot().map { it.commandType },
         )
         assertEquals(
-            listOf("CompactFailed"),
+            listOf("CompactFailed", "ReleaseSlot"),
             state.runtimeTraceSnapshot().last().effectTypes,
         )
     }

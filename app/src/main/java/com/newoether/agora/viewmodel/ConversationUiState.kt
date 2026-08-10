@@ -1,6 +1,7 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
@@ -14,23 +15,7 @@ import com.newoether.agora.util.Constants
 internal fun nearestUserAncestorId(
     messages: List<ChatMessage>,
     messageId: String,
-): String? {
-    val byId = messages.associateBy(ChatMessage::id)
-    var parentId = byId[messageId]?.parentId
-    val visited = hashSetOf<String>()
-    while (parentId != null && visited.add(parentId)) {
-        val parent = byId[parentId] ?: return null
-        if (
-            parent.participant == Participant.USER &&
-            !parent.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-            !parent.id.startsWith(Constants.RESULT_MSG_PREFIX)
-        ) {
-            return parent.id
-        }
-        parentId = parent.parentId
-    }
-    return null
-}
+): String? = MessageGenerationBoundaryResolver.nearestInputAncestorId(messages, messageId)
 
 /**
  * Chooses the covered jump-cut destination after deleting a structural message subtree.
@@ -59,9 +44,7 @@ internal fun deleteSettlementTargetMessageId(
 }
 
 private fun ChatMessage.isRealUserMessage(): Boolean =
-    participant == Participant.USER &&
-        !id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-        !id.startsWith(Constants.RESULT_MSG_PREFIX)
+    MessageGenerationBoundaryResolver.isRealUser(this)
 
 data class ConversationUiState(
     val path: List<ChatMessage> = emptyList(),

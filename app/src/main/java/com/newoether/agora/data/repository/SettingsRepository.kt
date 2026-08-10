@@ -5,10 +5,12 @@ import com.newoether.agora.model.ContextBudget
 
 import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
+import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_ENABLED
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.CustomProviderIdentityMigration
 import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.data.EmbeddingModelConfig
 import com.newoether.agora.data.LocalChatModelConfig
@@ -94,7 +96,10 @@ class SettingsRepository(
     val maxContextWindow: StateFlow<Int> =
         hot(settingsManager.maxContextWindow, ContextBudget.DEFAULT_TOKENS)
     val visualizeContextRollout: StateFlow<Boolean> = hot(settingsManager.visualizeContextRollout, false)
-    val contextCompactEnabled: StateFlow<Boolean> = hot(settingsManager.contextCompactEnabled, false)
+    val contextCompactEnabled: StateFlow<Boolean> = hot(
+        settingsManager.contextCompactEnabled,
+        DEFAULT_CONTEXT_COMPACT_ENABLED,
+    )
     val contextCompactModel: StateFlow<String?> = hot(settingsManager.contextCompactModel, null)
     val contextCompactPrompt: StateFlow<String> = hot(settingsManager.contextCompactPrompt, BuiltInPrompts.CONTEXT_COMPACT_SYSTEM)
     val contextCompactRetainCount: StateFlow<Int> = hot(settingsManager.contextCompactRetainCount, 6)
@@ -221,14 +226,12 @@ class SettingsRepository(
 
     fun updateModelAlias(model: String, alias: String) {
         scope.launch {
-            val updated = modelAliases.value.toMutableMap()
-            if (alias.isBlank()) updated.remove(model) else updated[model] = alias
-            settingsManager.saveModelAliases(updated)
+            settingsManager.updateModelAlias(model, alias)
         }
     }
 
     fun addCustomModel(provider: String, modelName: String, alias: String = "") {
-        val normalizedProvider = provider.trim()
+        val normalizedProvider = stableProviderReference(provider)
         val normalizedName = modelName.trim()
         if (normalizedProvider.isEmpty() || normalizedName.isEmpty()) return
         val modelId = ModelId(normalizedProvider, normalizedName).prefixed
@@ -371,7 +374,6 @@ class SettingsRepository(
                 models[newName] = models.remove(oldName) ?: emptyList()
                 settingsManager.saveAvailableModels(newName, models[newName] ?: emptyList())
                 settingsManager.saveAvailableModels(oldName, emptyList())
-                settingsManager.renameProviderModelReferences(oldName, newName)
                 settingsManager.renameApiKeyProvider(oldName, newName)
             }
         }
@@ -390,17 +392,22 @@ class SettingsRepository(
 
     fun deleteCustomProvider(name: String) {
         if (!CustomProviderNamePolicy.isAllowed(name)) return
+        val providerId = customProviders.value.firstOrNull { it.name == name }
+            ?.providerId
+            ?: return
         scope.launch {
             settingsManager.saveCustomProviders(customProviders.value.filter { it.name != name })
             settingsManager.saveCustomEndpointResolution(name, null)
             settingsManager.saveAvailableModels(name, emptyList())
             settingsManager.saveCustomModels(
                 customModels.value.filterTo(linkedSetOf()) {
-                    ModelId.parse(it).providerName != name
+                    ModelId.parse(it).providerName != providerId
                 }
             )
-            settingsManager.saveEnabledModels(enabledModels.value.filter { !it.startsWith("$name:") }.toSet())
-            settingsManager.saveModelAliases(modelAliases.value.filterKeys { !it.startsWith("$name:") })
+            settingsManager.saveEnabledModels(
+                enabledModels.value.filter { !it.startsWith("$providerId:") }.toSet(),
+            )
+            settingsManager.removeModelAliasesForProvider(providerId)
             settingsManager.saveProviderBaseUrl(name, "")
             settingsManager.saveApiKeys(apiKeys.value.filter { it.provider != name })
             settingsManager.setActiveApiKeyId(name, null)
@@ -561,9 +568,20 @@ class SettingsRepository(
     suspend fun getAvailableModels(): Map<String, List<String>> = settingsManager.availableModels.first()
     suspend fun getSystemPrompts(): List<SystemPromptEntry> = settingsManager.systemPrompts.first()
 
+    internal suspend fun normalizeCustomProviderIdentities(): List<CustomProviderIdentityMigration> =
+        settingsManager.normalizeCustomProviderIdentities()
+
+    internal suspend fun clearLegacyCustomProviderNames(
+        completed: List<CustomProviderIdentityMigration>,
+    ) = settingsManager.clearLegacyCustomProviderNames(completed)
+
     suspend fun saveAvailableModels(provider: String, models: List<String>) = settingsManager.saveAvailableModels(provider, models)
     suspend fun saveCustomModels(models: Set<String>) = settingsManager.saveCustomModels(models)
     suspend fun saveModelAliases(aliases: Map<String, String>) = settingsManager.saveModelAliases(aliases)
+    suspend fun updateStoredModelAlias(modelId: String, alias: String) =
+        settingsManager.updateModelAlias(modelId, alias)
+    suspend fun synchronizeLocalModelAliases(aliases: Map<String, String>) =
+        settingsManager.synchronizeLocalModelAliases(aliases)
     suspend fun saveLastUpdateCheckTime(time: Long) = settingsManager.saveLastUpdateCheckTime(time)
     suspend fun saveLastModelsFetchFingerprint(fingerprint: String) = settingsManager.saveLastModelsFetchFingerprint(fingerprint)
     suspend fun incrementMessagesSent() = settingsManager.incrementMessagesSent()
@@ -576,4 +594,11 @@ class SettingsRepository(
     suspend fun saveAutoBackupDirectory(path: String) = settingsManager.saveAutoBackupDirectory(path)
     suspend fun saveAutoDeleteEnabled(enabled: Boolean) = settingsManager.saveAutoDeleteEnabled(enabled)
     suspend fun saveAutoDeletePeriodHours(hours: Int) = settingsManager.saveAutoDeletePeriodHours(hours)
+
+    fun stableProviderReference(reference: String): String {
+        val normalized = reference.trim()
+        return customProviders.value.firstOrNull { provider ->
+            provider.name == normalized || provider.ownsIdentity(normalized)
+        }?.providerId ?: normalized
+    }
 }

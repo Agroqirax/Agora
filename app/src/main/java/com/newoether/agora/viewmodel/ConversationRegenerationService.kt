@@ -5,10 +5,10 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunStatus
-import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -19,8 +19,6 @@ internal data class ConversationRegenerationRequest(
     val conversationId: String,
     val messageId: String,
     val modelId: String,
-    val providerName: String,
-    val activeKey: String,
     val visiblePath: List<ChatMessage>,
 )
 
@@ -32,6 +30,7 @@ internal data class ConversationRegenerationRequest(
  */
 internal class ConversationRegenerationService(
     private val conversations: ConversationRepository,
+    private val requestBuilder: GenerationRequestBuilder,
     private val executionCoordinator: ConversationExecutionCoordinator,
     private val transitions: RegenerationTransitionCoordinator,
     private val terminalSettlement: GenerationTerminalSettlementController,
@@ -52,24 +51,12 @@ internal class ConversationRegenerationService(
         request: ConversationRegenerationRequest,
         state: ConversationGenerationState,
     ): Boolean {
-        val messageToRegenerate = request.visiblePath
-            .find { it.id == request.messageId } ?: return false
-        if (messageToRegenerate.participant != Participant.MODEL) return false
-        val sourceRunId = messageToRegenerate.runId ?: return false
-        val targetUserMessageId = messageToRegenerate.parentId ?: return false
-        val outputBoundary = request.visiblePath
-            .filter {
-                it.runId == sourceRunId &&
-                    it.participant == Participant.MODEL &&
-                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            }
-            .maxWithOrNull(
-                compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-                    .thenBy { it.timestamp }
-                    .thenBy { it.id },
-            )
-        if (outputBoundary?.id != request.messageId) return false
+        val boundary = MessageGenerationBoundaryResolver.containing(
+            request.visiblePath,
+            request.messageId,
+        ) ?: return false
+        if (boundary.lastAssistant?.id != request.messageId) return false
+        val targetUserMessageId = boundary.input?.id ?: return false
 
         val uiToken = state.tryAcquireForReplacement() ?: return false
         val transition = transitions.begin(
@@ -110,12 +97,29 @@ internal class ConversationRegenerationService(
                         .getMessagesForConversationSnapshot(request.conversationId)
                     val persistedTarget = persistedMessages
                         .find { it.id == request.messageId } ?: return@lock
-                    if (persistedTarget.runId != sourceRunId) return@lock
-                    conversations.getRun(sourceRunId) ?: return@lock
-                    val sourceInput = RunRegenerationPolicy.selectBoundaryInput(
-                        persistedMessages,
-                        sourceRunId,
-                    ) ?: return@lock
+                    val persistedUiMessages = persistedMessages.map(toUiMessage)
+                    if (!MessageGenerationBoundaryResolver.isOrdinaryAssistant(toUiMessage(persistedTarget))) {
+                        return@lock
+                    }
+                    val sourceInput = persistedMessages
+                        .find { it.id == targetUserMessageId }
+                        ?: return@lock
+                    if (!MessageGenerationBoundaryResolver.isRealUser(toUiMessage(sourceInput))) {
+                        return@lock
+                    }
+                    if (
+                        MessageGenerationBoundaryResolver.nearestInputAncestorId(
+                            persistedUiMessages,
+                            persistedTarget.id,
+                        ) != sourceInput.id
+                    ) {
+                        return@lock
+                    }
+                    val generationSnapshot = requestBuilder.captureAdmissionSnapshot(
+                        conversationId = request.conversationId,
+                        runId = runId,
+                        modelId = request.modelId,
+                    )
                     val modelMessageId = idFactory()
                     setupModelMessageId = modelMessageId
                     val startTime = maxOf(clock(), persistedTarget.timestamp + 1)
@@ -129,7 +133,7 @@ internal class ConversationRegenerationService(
                         status = MessageStatus.SENDING,
                         participant = Participant.MODEL,
                         timestamp = startTime,
-                        modelName = request.modelId,
+                        modelName = generationSnapshot.selectedModelId,
                         runId = runId,
                         runSequence = 0,
                     )
@@ -145,6 +149,7 @@ internal class ConversationRegenerationService(
                         ),
                         listOf(modelEntity),
                         messageSelectionUpdates = mapOf(sourceInput.id to modelEntity.id),
+                        conversationModelId = generationSnapshot.selectedModelId,
                     )
                     graphCommitted = true
                     transitions.markCommitted(transition.id)
@@ -176,11 +181,7 @@ internal class ConversationRegenerationService(
                             conversationId = request.conversationId,
                             modelMessageId = modelMessageId,
                             startTime = startTime,
-                            isRegenerate = false,
-                            replaceMessageId = null,
-                            providerName = request.providerName,
-                            modelId = request.modelId,
-                            activeKey = request.activeKey,
+                            snapshot = generationSnapshot,
                             uiToken = uiToken,
                             persistId = persistId,
                             runId = runId,

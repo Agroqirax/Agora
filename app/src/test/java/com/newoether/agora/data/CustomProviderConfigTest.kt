@@ -15,6 +15,8 @@ class CustomProviderConfigTest {
 
         assertEquals("Legacy", config.name)
         assertEquals(CustomEndpointProtocol.OPENAI, config.protocol)
+        assertEquals("", config.id)
+        assertEquals(emptySet<String>(), config.legacyNames)
     }
 
     @Test
@@ -27,6 +29,21 @@ class CustomProviderConfigTest {
 
             assertEquals(protocol, decoded.protocol)
         }
+    }
+
+    @Test
+    fun stableIdentityAndMigrationMarkersRoundTrip() {
+        val original = CustomProviderConfig(
+            name = "Relay X",
+            protocol = CustomEndpointProtocol.ANTHROPIC,
+            id = "custom-provider-00000000-0000-4000-8000-000000000001",
+            legacyNames = setOf("Old Relay"),
+        )
+
+        assertEquals(
+            original,
+            json.decodeFromString<CustomProviderConfig>(json.encodeToString(original)),
+        )
     }
 
     @Test

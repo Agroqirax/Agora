@@ -37,6 +37,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.clearFocusOnTap
@@ -152,8 +154,11 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val providerChoices = remember(customProviders) {
         (RemoteModelProviders + customProviders.map { it.name }).distinct()
     }
-    val manualModelGroups = remember(customModels, providerChoices) {
-        customModelGroups(customModels, providerChoices)
+    val manualProviderOrder = remember(customProviders) {
+        RemoteModelProviders + customProviders.map(CustomProviderConfig::providerId)
+    }
+    val manualModelGroups = remember(customModels, manualProviderOrder) {
+        customModelGroups(customModels, manualProviderOrder)
     }
     val autoFetchedModelGroups = remember(
         availableModels,
@@ -230,7 +235,10 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             item(key = "default_model") {
                 val activeAlias = modelAliases[selectedModel]
                 val activeParsed = com.newoether.agora.model.ModelId.parse(selectedModel)
-                val providerName = activeParsed.providerName
+                val providerName = providerDisplayName(
+                    activeParsed.providerName,
+                    customProviders,
+                )
                 val activeDisplayName = activeAlias ?: activeParsed.apiModelName
                 val activeIconRes = providerIcon(providerName)
                 val isActiveLocal = providerName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
@@ -300,13 +308,17 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     searchActive = false,
                     enabledModels = enabledModels,
                     modelAliases = modelAliases,
+                    customProviders = customProviders,
                     expandedProviders = expandedProviders,
                     modelBlockHeights = modelBlockHeights,
                     onAliasClick = null,
                     onDetailsClick = { model ->
                         val parsed = ModelId.parse(model)
                         editingCustomModel = model
-                        customModelProvider = parsed.providerName
+                        customModelProvider = providerDisplayName(
+                            parsed.providerName,
+                            customProviders,
+                        )
                         customModelId = parsed.modelName
                         customModelAlias = modelAliases[model].orEmpty()
                         showCustomModelDialog = true
@@ -428,6 +440,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     searchActive = searchActive,
                     enabledModels = enabledModels,
                     modelAliases = modelAliases,
+                    customProviders = customProviders,
                     expandedProviders = expandedProviders,
                     modelBlockHeights = modelBlockHeights,
                     onAliasClick = { showModelAliasDialog = it },
@@ -457,7 +470,10 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val alias = modelAliases[model]
                         val parsed = com.newoether.agora.model.ModelId.parse(model)
                         val displayName = alias ?: parsed.apiModelName
-                        val providerName = parsed.providerName
+                        val providerName = providerDisplayName(
+                            parsed.providerName,
+                            customProviders,
+                        )
 
                         SettingsItem(
                             headlineContent = {
@@ -782,6 +798,7 @@ private fun LazyListScope.modelProviderGroups(
     searchActive: Boolean,
     enabledModels: Set<String>,
     modelAliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig>,
     expandedProviders: MutableMap<String, MutableTransitionState<Boolean>>,
     modelBlockHeights: MutableMap<String, Float>,
     onAliasClick: ((String) -> Unit)?,
@@ -790,6 +807,7 @@ private fun LazyListScope.modelProviderGroups(
 ) {
     groups.forEachIndexed { providerIndex, group ->
         val providerName = group.providerName
+        val displayProviderName = providerDisplayName(providerName, customProviders)
         val models = group.models
         val providerStateKey = "$keyPrefix:$providerName"
         val transitionState = expandedProviders.getOrPut(providerStateKey) {
@@ -818,11 +836,11 @@ private fun LazyListScope.modelProviderGroups(
                 shape = headerShape,
                 addTopGap = !(isFirstProvider && firstHeaderStartsSection),
             ) {
-                val headerIconRes = providerIcon(providerName)
+                val headerIconRes = providerIcon(displayProviderName)
                 val isLocalHeader =
-                    providerName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
+                    displayProviderName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
                 SettingsItem(
-                    headlineContent = { Text(providerName) },
+                    headlineContent = { Text(displayProviderName) },
                     supportingContent = {
                         val enabledCount = models.count { it in enabledModels }
                         Text(

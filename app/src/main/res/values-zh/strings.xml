@@ -322,6 +322,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">生成</string>
     <string name="context_window">上下文窗口</string>
+    <string name="context_window_desc">单次生成可使用的最大上下文</string>
     <string name="context_window_default">默认上下文窗口</string>
     <string name="context_retain">保留最近 %1$d 条消息</string>
     <string name="context_token_budget_value">约 %1$s tokens</string>
@@ -756,7 +757,9 @@
     <string name="file_path_unknown">未知文件</string>
     <string name="tool_exit_code">退出码 %1$d</string>
     <string name="tool_exit">退出</string>
-    <string name="tool_shell_returned_code">返回 %1$d</string>
+    <string name="tool_shell_returned_code">命令返回 %1$d</string>
+    <string name="tool_shell_detail_executed">已执行</string>
+    <string name="tool_shell_detail_returned_code">返回 %1$d</string>
     <string name="tool_shell_returned">返回</string>
     <string name="tool_line_count">%1$d 行</string>
     <string name="tool_web_result">结果 %1$d</string>
@@ -840,6 +843,9 @@
     <string name="delete_chat_confirm">确定要删除此对话吗？此操作无法撤销。</string>
     <string name="delete_message_title">删除消息？</string>
     <string name="delete_message_confirm">此消息及其后的所有回复都将被永久删除。</string>
+    <string name="delete_compact_message_title">删除压缩消息？</string>
+    <string name="delete_compact_message_confirm">只会删除此压缩消息。</string>
+    <string name="recompact">重新压缩</string>
     <string name="clear_database">清除数据库</string>
     <string name="conversation_prompt">对话指令</string>
     <string name="global_default_format">全局默认（%1$s）</string>
@@ -1158,6 +1164,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">每次压缩后按原文保留的消息</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">正在压缩上下文…</string>
     <string name="context_compact_select_available_model">请选择可用模型</string>
@@ -1168,7 +1175,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">约 %1$s / %2$s tokens · %3$d 条逻辑消息</string>
+    <string name="context_usage_messages">约 %1$s / %2$s tokens</string>
     <string name="context_boundary_active">压缩边界已启用</string>
     <string name="context_boundary_none">无压缩边界</string>
 </resources>

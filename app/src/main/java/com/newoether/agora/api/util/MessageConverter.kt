@@ -169,25 +169,7 @@ fun limitContext(messages: List<ChatMessage>, contextTokenBudget: Int): List<Cha
 
     // A tool call and all of its results are one protocol unit. Truncating the flat list can leave
     // either an orphan result or an unanswered assistant tool call, so window complete units only.
-    val units = mutableListOf<List<ChatMessage>>()
-    var index = 0
-    while (index < messages.size) {
-        val message = messages[index]
-        if (message.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
-            val round = mutableListOf(message)
-            index++
-            while (
-                index < messages.size &&
-                messages[index].id.startsWith(Constants.RESULT_MSG_PREFIX)
-            ) {
-                round += messages[index++]
-            }
-            units += round
-        } else {
-            units += listOf(message)
-            index++
-        }
-    }
+    val units = protocolAtomicUnits(messages)
 
     val selected = ArrayDeque<List<ChatMessage>>()
     var estimatedTokens = 0L

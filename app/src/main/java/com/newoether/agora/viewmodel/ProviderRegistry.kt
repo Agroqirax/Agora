@@ -16,7 +16,10 @@ import com.newoether.agora.api.openai.QwenProvider
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.CustomProviderIdentityPolicy
 import com.newoether.agora.data.CustomProviderNamePolicy
+import com.newoether.agora.data.canonicalCustomModelId
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.util.Constants
@@ -25,6 +28,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
@@ -40,6 +44,15 @@ internal fun createCustomProvider(
         CustomEndpointProtocol.ANTHROPIC -> AnthropicProvider(config.name, baseUrl)
         CustomEndpointProtocol.UNKNOWN -> null
     }
+}
+
+internal fun prefixFetchedModels(
+    providerName: String,
+    customConfig: CustomProviderConfig?,
+    modelNames: List<String>,
+): List<String> {
+    val providerReference = customConfig?.providerId ?: providerName
+    return modelNames.map { "$providerReference:${it.removePrefix("models/")}" }
 }
 
 internal fun customEndpointBaseUrlCandidates(
@@ -166,8 +179,12 @@ class ProviderRegistry(
         )
 
     fun providerForModel(modelId: String): String {
-        // Prefixed IDs (e.g. "OpenAI:gpt-4"): extract provider directly
-        if (modelId.contains(":")) return ModelId.parse(modelId).providerName
+        // Custom model IDs carry the provider's immutable ID. Resolve it to the mutable display
+        // name only at the live connection boundary; renaming can no longer reclassify the model.
+        if (modelId.contains(":")) {
+            val reference = ModelId.parse(canonicalModelId(modelId)).providerName
+            return providerDisplayName(reference, settings.customProviders.value)
+        }
         // Unprefixed IDs: user-registered providers take priority over heuristics
         settings.availableModels.value.forEach { (providerName, models) ->
             if (models.contains(modelId)) return providerName
@@ -175,6 +192,10 @@ class ProviderRegistry(
         // Heuristic fallback for legacy unprefixed IDs
         return ModelId.parse(modelId).providerName
     }
+
+    /** Canonicalizes legacy name-prefixed IDs, including historical names containing `:`. */
+    fun canonicalModelId(modelId: String): String =
+        canonicalCustomModelId(modelId, settings.customProviders.value)
 
     // ── Custom provider CRUD ──────────────────────────────────
     // Settings persists the config; the callbacks keep the live `providers` map in sync.
@@ -191,7 +212,11 @@ class ProviderRegistry(
                 existingNames = settings.customProviders.value.map { it.name },
             )
         ) return
-        val config = CustomProviderConfig(name = normalizedName, protocol = protocol)
+        val config = CustomProviderConfig(
+            name = normalizedName,
+            protocol = protocol,
+            id = CustomProviderIdentityPolicy.newId(),
+        )
         val provider = createCustomProvider(config, baseUrl) ?: return
         runtimeEndpointResolutions.remove(normalizedName)
         providers[normalizedName] = provider
@@ -213,7 +238,9 @@ class ProviderRegistry(
             ?: return false
         val newConfig = oldConfig.copy(name = normalizedNewName)
         val provider = createCustomProvider(newConfig, url)
-        providers.remove(oldName)
+        // Keep the old connection key until the DataStore-backed collector observes the rename.
+        // During that short handoff model IDs still resolve through the old config snapshot; eager
+        // removal would create a transient "provider not registered" failure for an accepted Send.
         if (provider != null) providers[normalizedNewName] = provider
         runtimeEndpointResolutions.remove(oldName)?.let {
             runtimeEndpointResolutions[normalizedNewName] = it
@@ -300,7 +327,7 @@ class ProviderRegistry(
                     runtimeEndpointResolutions[name] = resolution
                     settings.saveCustomEndpointResolution(name, resolution)
                 }
-                val prefixed = raw.map { "$name:${it.removePrefix("models/")}" }
+                val prefixed = prefixFetchedModels(name, customConfig, raw)
                 settings.saveAvailableModels(name, prefixed)
                 return prefixed
             } catch (error: TimeoutCancellationException) {
@@ -331,9 +358,15 @@ class ProviderRegistry(
         // Sync custom providers into the live map whenever the persisted set changes.
         scope.launch {
             try {
+                // This DataStore transaction completes before the live registry admits custom
+                // providers, so all newly emitted model IDs use immutable provider identities.
+                settings.normalizeCustomProviderIdentities()
                 // Avoid treating the eager empty default as an authoritative provider set during
                 // a Worker cold start. The first collected value is now the on-disk snapshot.
                 settings.awaitInitialLoad()
+                settings.customProviders.first { providers ->
+                    providers.all { CustomProviderIdentityPolicy.isStableId(it.id) }
+                }
                 settings.customProviders.collect { custom ->
                     providers.keys.filter { !isBuiltIn(it) }.forEach { providers.remove(it) }
                     val baseUrls = settings.getProviderBaseUrls()

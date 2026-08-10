@@ -7,6 +7,11 @@ import org.junit.Test
 
 class SettingsContractsTest {
     @Test
+    fun automaticContextCompactIsEnabledByDefault() {
+        assertTrue(DEFAULT_CONTEXT_COMPACT_ENABLED)
+    }
+
+    @Test
     fun legacyPromptContentResolvesToOneCustomSystemItem() {
         val prompt = SystemPromptEntry(
             title = "Legacy",

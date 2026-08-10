@@ -302,7 +302,7 @@ class ToolPresentationResolverTest {
     }
 
     @Test
-    fun shellPresentationHasOnlyExecutingOrExitStates() {
+    fun shellPresentationDistinguishesForegroundBackgroundAndExitStates() {
         val running = ToolPresentationResolver.resolve(
             MessageSegment(
                 type = "tool",
@@ -318,8 +318,19 @@ class ToolPresentationResolverTest {
                 toolResult = """{"type":"execute_shell_command","output":"done"}""",
             ),
         )
+        val background = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "execute_shell_command",
+                toolResult = """{"background":true,"job_id":"job-1","state":"running"}""",
+            ),
+        )
 
         assertEquals(ShellPresentationStatus.Executing, shellPresentationStatus(running))
+        assertEquals(
+            ShellPresentationStatus.Background("job-1"),
+            shellPresentationStatus(background),
+        )
         assertEquals(
             ShellPresentationStatus.Exit(code = null),
             shellPresentationStatus(terminalWithoutCode),

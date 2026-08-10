@@ -84,6 +84,7 @@ class ConversationRegenerationServiceTest {
                 run = capture(createdRun),
                 messages = capture(createdMessages),
                 messageSelectionUpdates = mapOf("source-input" to "new-model"),
+                conversationModelId = "provider:model",
                 at = any(),
             )
         } answers {
@@ -102,9 +103,9 @@ class ConversationRegenerationServiceTest {
         coVerify(timeout = 5_000, exactly = 1) {
             fixture.boundLauncher.launch(
                 match {
-                    it.conversationId == "conversation" &&
+                        it.conversationId == "conversation" &&
                         it.modelMessageId == "new-model" &&
-                        it.modelId == "provider:model" &&
+                        it.snapshot === fixture.snapshot &&
                         it.runId == "new-run" &&
                         it.pass == 0 &&
                         it.callerTag == "regenerate"
@@ -126,14 +127,20 @@ class ConversationRegenerationServiceTest {
 
     private class Fixture {
         val conversations = mockk<ConversationRepository>()
+        val requestBuilder = mockk<GenerationRequestBuilder>()
         val transitions = RegenerationTransitionCoordinator(fadeTimeoutMs = 5_000L)
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
         val boundLauncher = mockk<BoundRunGenerationLauncher>()
         val guidanceDrain = mockk<QueuedGuidanceDrainExecutor>()
         val events = mutableListOf<String>()
+        val snapshot = testGenerationAdmissionSnapshot(
+            conversationId = "conversation",
+            runId = "new-run",
+        )
         private val ids = ArrayDeque(listOf("new-run", "new-model"))
         val service = ConversationRegenerationService(
             conversations = conversations,
+            requestBuilder = requestBuilder,
             executionCoordinator = ConversationExecutionCoordinator(),
             transitions = transitions,
             terminalSettlement = terminalSettlement,
@@ -147,12 +154,18 @@ class ConversationRegenerationServiceTest {
             idFactory = ids::removeFirst,
             clock = { 50L },
         )
+
+        init {
+            coEvery {
+                requestBuilder.captureAdmissionSnapshot(
+                    any(), any(), any(), any(), any(),
+                )
+            } returns snapshot
+        }
         val request = ConversationRegenerationRequest(
             conversationId = "conversation",
             messageId = "target-model",
             modelId = "provider:model",
-            providerName = "provider",
-            activeKey = "key",
             visiblePath = listOf(SOURCE_USER, TARGET_MODEL),
         )
     }

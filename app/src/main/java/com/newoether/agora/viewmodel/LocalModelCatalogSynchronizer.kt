@@ -13,19 +13,17 @@ internal class LocalModelCatalogSynchronizer(
     fun start() {
         scope.launch {
             var lastLocalIds: List<String>? = null
-            var lastAliases: Map<String, String>? = null
+            var lastLocalAliases: Map<String, String>? = null
             settings.localChatModels.collect { models ->
                 val localIds = models.map { "Local:${it.modelId}" }
-                val aliases = settings.getModelAliases().toMutableMap().apply {
-                    models.forEach { put("Local:${it.modelId}", it.alias) }
-                }
+                val localAliases = models.associate { "Local:${it.modelId}" to it.alias }
                 if (localIds != lastLocalIds) {
                     settings.saveAvailableModels(Constants.PROVIDER_LOCAL, localIds)
                     lastLocalIds = localIds
                 }
-                if (aliases != lastAliases) {
-                    settings.saveModelAliases(aliases)
-                    lastAliases = aliases
+                if (localAliases != lastLocalAliases) {
+                    settings.synchronizeLocalModelAliases(localAliases)
+                    lastLocalAliases = localAliases
                 }
             }
         }

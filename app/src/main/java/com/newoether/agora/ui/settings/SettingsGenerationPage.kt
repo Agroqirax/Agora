@@ -27,6 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.ui.common.OpenAiServiceTierControlPanel
+import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.ui.common.ThinkingControlPanel
 import com.newoether.agora.ui.common.openAiServiceTierShortLabel
 import com.newoether.agora.ui.common.thinkingControlShortLabel
@@ -235,16 +236,20 @@ private fun GenParamSlider(
     onReset: () -> Unit
 ) {
     val defaultSliderPos = (valueRange.start + valueRange.endInclusive) / 2f
-    val persistedSliderPos = value ?: defaultSliderPos
-    var sliderPos by remember { mutableFloatStateOf(persistedSliderPos) }
-    LaunchedEffect(persistedSliderPos) {
-        sliderPos = persistedSliderPos
+    val sliderGate = remember(valueRange.start, valueRange.endInclusive) {
+        PersistedSliderFeedbackGate(
+            initialPersisted = value,
+            toDisplay = { persisted -> persisted ?: defaultSliderPos },
+        )
     }
     // Reset is reflected synchronously; only the DataStore write is async. justReset
     // flips the label to "not specified" immediately and is cleared once the async
     // [value] catches up (becomes null on reset, or a new value if the user re-sets).
     var justReset by remember { mutableStateOf(false) }
-    LaunchedEffect(value) { justReset = false }
+    LaunchedEffect(value) {
+        if (sliderGate.reconcile(value)) justReset = false
+    }
+    val sliderPos = sliderGate.displayed
     val draftChangedFromDefault = kotlin.math.abs(sliderPos - defaultSliderPos) > 0.0001f
     val hasExplicitOrDraftValue = (value != null && !justReset) || draftChangedFromDefault
     Column(
@@ -291,7 +296,11 @@ private fun GenParamSlider(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             modifier = Modifier.clickable {
-                                sliderPos = defaultSliderPos
+                                if (value == null) {
+                                    sliderGate.settleWithoutWrite(null, defaultSliderPos)
+                                } else {
+                                    sliderGate.expectPersisted(null, defaultSliderPos)
+                                }
                                 justReset = true
                                 onReset()
                             }
@@ -306,15 +315,19 @@ private fun GenParamSlider(
                 )
                 Slider(
                     value = sliderPos,
-                    onValueChange = { sliderPos = it },
+                    onValueChange = sliderGate::updateFromGesture,
                     onValueChangeFinished = {
                         val committed = sliderPos.coerceIn(valueRange.start, valueRange.endInclusive)
                         val shouldCommit = value != null || kotlin.math.abs(committed - defaultSliderPos) > 0.0001f
-                        sliderPos = committed
                         if (shouldCommit) {
                             if (value == null || kotlin.math.abs(value - committed) > 0.0001f) {
+                                sliderGate.expectPersisted(committed, committed)
                                 onValueChange(committed)
+                            } else {
+                                sliderGate.settleWithoutWrite(value, committed)
                             }
+                        } else {
+                            sliderGate.settleWithoutWrite(value, committed)
                         }
                     },
                     valueRange = valueRange,
@@ -339,14 +352,20 @@ private fun GenParamSlider(
 ) {
     fun toIndex(v: Int) = presets.indices.minByOrNull { kotlin.math.abs(presets[it] - v) } ?: 3
     val defaultIndex = 3.coerceIn(0, presets.lastIndex)
-    val persistedIndex = if (value != null) toIndex(value) else defaultIndex
-    var sliderPos by remember { mutableFloatStateOf(persistedIndex.toFloat()) }
-    LaunchedEffect(persistedIndex) {
-        sliderPos = persistedIndex.toFloat()
+    val sliderGate = remember(presets) {
+        PersistedSliderFeedbackGate(
+            initialPersisted = value,
+            toDisplay = { persisted ->
+                (persisted?.let(::toIndex) ?: defaultIndex).toFloat()
+            },
+        )
     }
     // Reset is reflected synchronously; only the DataStore write is async (see float variant).
     var justReset by remember { mutableStateOf(false) }
-    LaunchedEffect(value) { justReset = false }
+    LaunchedEffect(value) {
+        if (sliderGate.reconcile(value)) justReset = false
+    }
+    val sliderPos = sliderGate.displayed
     val draftIndex = sliderPos.roundToInt().coerceIn(0, presets.lastIndex)
     val hasExplicitOrDraftValue = (value != null && !justReset) || draftIndex != defaultIndex
     Column(
@@ -393,7 +412,11 @@ private fun GenParamSlider(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             modifier = Modifier.clickable {
-                                sliderPos = defaultIndex.toFloat()
+                                if (value == null) {
+                                    sliderGate.settleWithoutWrite(null, defaultIndex.toFloat())
+                                } else {
+                                    sliderGate.expectPersisted(null, defaultIndex.toFloat())
+                                }
                                 justReset = true
                                 onReset()
                             }
@@ -408,16 +431,23 @@ private fun GenParamSlider(
                 )
                 Slider(
                     value = sliderPos,
-                    onValueChange = { sliderPos = it },
+                    onValueChange = sliderGate::updateFromGesture,
                     onValueChangeFinished = {
                         val committedIndex = sliderPos.roundToInt().coerceIn(0, presets.lastIndex)
                         val committedValue = presets[committedIndex]
                         val shouldCommit = value != null || committedIndex != defaultIndex
-                        sliderPos = committedIndex.toFloat()
                         if (shouldCommit) {
                             if (value != committedValue) {
+                                sliderGate.expectPersisted(
+                                    committedValue,
+                                    committedIndex.toFloat(),
+                                )
                                 onValueChange(committedValue)
+                            } else {
+                                sliderGate.settleWithoutWrite(value, committedIndex.toFloat())
                             }
+                        } else {
+                            sliderGate.settleWithoutWrite(value, committedIndex.toFloat())
                         }
                     },
                     valueRange = 0f..(presets.size - 1).toFloat(),

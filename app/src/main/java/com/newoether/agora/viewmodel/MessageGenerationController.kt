@@ -39,7 +39,6 @@ private sealed interface SendPlacement {
         val claim: QueuedDrainClaim,
     ) : SendPlacement
     data object RetryAfterRelease : SendPlacement
-    data object RetryAfterCompact : SendPlacement
 
     /**
      * The slot was busy and the caller asked for a direct-only send, so NOTHING was persisted.
@@ -133,7 +132,7 @@ internal class MessageGenerationController(
     // ever entered the cache through a manual full re-cache. Enqueues background work only.
     private val onUserMessagePersisted: (messageId: String, text: String) -> Unit = { _, _ -> },
     /** Covers destructive tree mutation until ChatApp has settled the resulting path. */
-    private val onTreeMutationStart: suspend () -> Long? = { null },
+    private val onTreeMutationStart: suspend (scrollToTarget: Boolean) -> Long? = { null },
     private val onTreeMutationSettling: (requestId: Long?, targetMessageId: String?) -> Unit =
         { _, _ -> },
     private val onTreeMutationFailed: (requestId: Long?) -> Unit = {},
@@ -143,7 +142,6 @@ internal class MessageGenerationController(
     private val titleGenerator = ConversationTitleGenerator(convRepo, settings, providerRegistry)
     private val compactController = ConversationCompactController(
         conversations = convRepo,
-        executionCoordinator = executionCoordinator,
         operation = ContextCompactor(
             conversations = convRepo,
             settings = settings,
@@ -158,6 +156,7 @@ internal class MessageGenerationController(
                 )
             }
         },
+        onCompactStarted = onScrollToAttachedBottomAfter,
     )
     private val acceptanceNotifier = SendAcceptanceNotifier(onSendAcceptedEvent)
     private val terminalSettlement = GenerationTerminalSettlementController(
@@ -169,8 +168,6 @@ internal class MessageGenerationController(
         onSnackbar = onSnackbar,
     )
     private val boundRunGenerationLauncher = BoundRunGenerationLauncher(
-        requestBuilder = requestBuilder,
-        settings = settings,
         conversations = convRepo,
         generationManagerProvider = generationManagerProvider,
         compactController = compactController,
@@ -184,7 +181,6 @@ internal class MessageGenerationController(
         graphWriter = AcceptedInputGraphWriter(convRepo),
         renderStore = renderStore,
         requestBuilder = requestBuilder,
-        compactController = compactController,
         terminalSettlement = terminalSettlement,
         boundRunGenerationLauncher = boundRunGenerationLauncher,
         acceptanceNotifier = acceptanceNotifier,
@@ -200,6 +196,7 @@ internal class MessageGenerationController(
     )
     private val editService = ConversationEditService(
         conversations = convRepo,
+        requestBuilder = requestBuilder,
         executionCoordinator = executionCoordinator,
         inputCloner = EditedRunInputCloner(
             java.io.File(application.filesDir, "run-inputs"),
@@ -228,7 +225,6 @@ internal class MessageGenerationController(
         settings = settings,
         requestBuilder = requestBuilder,
         executionCoordinator = executionCoordinator,
-        compactController = compactController,
         terminalSettlement = terminalSettlement,
         boundRunGenerationLauncher = boundRunGenerationLauncher,
         toUiMessage = { it.toUiChatMessage(appContext) },
@@ -245,6 +241,7 @@ internal class MessageGenerationController(
     )
     private val regenerationService = ConversationRegenerationService(
         conversations = convRepo,
+        requestBuilder = requestBuilder,
         executionCoordinator = executionCoordinator,
         transitions = regenerationTransitions,
         terminalSettlement = terminalSettlement,
@@ -327,15 +324,12 @@ internal class MessageGenerationController(
         val genId = currentConversationId.value ?: return false
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
-        val (providerName, activeKey) =
-            requestBuilder.resolveProviderKey(modelId) ?: return false
+        requestBuilder.resolveProviderKey(modelId) ?: return false
         return regenerationService.regenerate(
             ConversationRegenerationRequest(
                 conversationId = genId,
                 messageId = messageId,
                 modelId = modelId,
-                providerName = providerName,
-                activeKey = activeKey,
                 visiblePath = messages.value.toList(),
             ),
             state,
@@ -356,15 +350,13 @@ internal class MessageGenerationController(
         val genId = currentConversationId.value ?: return false
         val state = registry.getOrCreate(genId)
         val modelId = currentActiveModel.value
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return false
+        requestBuilder.resolveProviderKey(modelId) ?: return false
         return editService.edit(
             ConversationEditRequest(
                 conversationId = genId,
                 messageId = messageId,
                 newText = newText,
                 modelId = modelId,
-                providerName = providerName,
-                activeKey = activeKey,
                 visiblePath = messages.value.toList(),
             ),
             state,
@@ -397,6 +389,15 @@ internal class MessageGenerationController(
             onSnackbar(application.getString(R.string.no_model_selected))
             return null
         }
+        val selectedProvider = requestBuilder.resolveProviderKey(selectedModelId) ?: return null
+        if (selectedProvider.providerName == Constants.PROVIDER_LOCAL) {
+            val localModelId = selectedModelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
+            val localConfig = settings.localChatModels.value.find { it.modelId == localModelId }
+            if (localConfig == null || !java.io.File(localConfig.localFilePath).exists()) {
+                onSnackbar(application.getString(R.string.local_model_not_found))
+                return null
+            }
+        }
         // Resolve a stable id before claiming the generation slot, but do not publish a new-chat
         // transition yet. Its conversation + Run + message graph commit atomically below; only
         // after the composer acknowledges that durable success may the screen switch and render.
@@ -405,6 +406,31 @@ internal class MessageGenerationController(
             UUID.randomUUID().toString()
         } else {
             currentConversationId.value ?: return null
+        }
+        if (!wasNewChat) {
+            val state = registry.getOrCreate(genId)
+            if (!state.generating.value) {
+                settings.awaitInitialLoad()
+                val preflightRunId = "compact_preflight_${UUID.randomUUID()}"
+                val snapshot = requestBuilder.captureAdmissionSnapshot(
+                    conversationId = genId,
+                    runId = preflightRunId,
+                    modelId = selectedModelId,
+                )
+                val fixedTokenCost = generationManagerProvider().fixedContextTokenCost(
+                    snapshot.config,
+                    snapshot.context,
+                )
+                // The Compact row is durable and visible before this returns. sendInto then sees
+                // the same occupied generation slot and accepts this input through the ordinary
+                // FIFO guidance queue instead of waiting in a Compact-specific preflight state.
+                compactController.startAutomaticBeforeSend(
+                    conversationId = genId,
+                    contextLimit = snapshot.config.maxContextWindow,
+                    config = snapshot.automaticCompact.copy(fixedTokenCost = fixedTokenCost),
+                    state = state,
+                )
+            }
         }
         val newConversation = if (wasNewChat) {
             ChatEntity(
@@ -438,8 +464,8 @@ internal class MessageGenerationController(
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
      * background send lands in its own conversation). Placement enters the conversation command
-     * mailbox: a bound or preparing Run accepts memory-only guidance, Compact waits only for its
-     * exact settlement, STOPPING waits for release, and IDLE emits one identified persistence
+     * mailbox: a bound, preparing, or Compact Run accepts memory-only guidance through the same
+     * FIFO queue, STOPPING waits for release, and IDLE emits one identified persistence
      * effect before generation launches. The installed Job's completion hook releases the slot and
      * requests queue drain; pre-launch failures release via
      * [QueuedGuidanceDrainExecutor.releaseUnlaunchedSlotAndDrain].
@@ -462,7 +488,7 @@ internal class MessageGenerationController(
         onGenerationJob: ((kotlinx.coroutines.Job?) -> Unit)? = null,
     ): SendAcceptance? {
         val state = registry.getOrCreate(genId)
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: return null
+        val providerName = requestBuilder.resolveProviderKey(modelId)?.providerName ?: return null
         if (providerName == Constants.PROVIDER_LOCAL) {
             val localModelId = modelId.substringAfter("${Constants.PROVIDER_LOCAL}:")
             val config = settings.localChatModels.value.find { it.modelId == localModelId }
@@ -562,7 +588,6 @@ internal class MessageGenerationController(
                             }
                         }
                         is RunEffect.AwaitRunRelease -> SendPlacement.RetryAfterRelease
-                        is RunEffect.AwaitCompactSettlement -> SendPlacement.RetryAfterCompact
                         is RunEffect.RejectSendBusy -> SendPlacement.Rejected
                         else -> error(
                             "SendRequested emitted unexpected effect ${effect.javaClass.simpleName}",
@@ -571,8 +596,6 @@ internal class MessageGenerationController(
                 }
                 if (decision == SendPlacement.RetryAfterRelease) {
                     state.awaitSendAvailable()
-                } else if (decision == SendPlacement.RetryAfterCompact) {
-                    state.awaitCompactSettled()
                 } else {
                     placement = decision
                 }
@@ -602,8 +625,6 @@ internal class MessageGenerationController(
                 userText = text,
                 payloadLease = payloadLease,
                 modelId = modelId,
-                providerName = providerName,
-                activeKey = activeKey,
                 alreadyHoldsLock = alreadyHoldsLock,
                 requestScroll = resolveScrollCallback(scrollPolicy),
                 onAccepted = onAccepted,

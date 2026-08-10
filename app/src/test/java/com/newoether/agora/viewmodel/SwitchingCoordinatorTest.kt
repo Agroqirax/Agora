@@ -62,12 +62,30 @@ class SwitchingCoordinatorTest {
         val request = coordinator.beginTreeMutation("conversation")
 
         assertFalse(request.readyForUi)
+        assertTrue(request.scrollToTarget)
         assertNull(request.targetMessageId)
 
         val ready = coordinator.markTreeMutationReady(request.id, "message")
 
         assertTrue(ready?.readyForUi == true)
+        assertTrue(ready?.scrollToTarget == true)
         assertTrue(ready?.targetMessageId == "message")
+        assertTrue(coordinator.complete(request.id))
+    }
+
+    @Test
+    fun treeMutationCanSettleInPlaceWithoutAScrollTarget() {
+        val coordinator = SwitchingCoordinator()
+        val request = coordinator.beginTreeMutation(
+            conversationId = "conversation",
+            scrollToTarget = false,
+        )
+
+        val ready = coordinator.markTreeMutationReady(request.id, null)
+
+        assertTrue(ready?.readyForUi == true)
+        assertFalse(ready?.scrollToTarget ?: true)
+        assertNull(ready?.targetMessageId)
         assertTrue(coordinator.complete(request.id))
     }
 

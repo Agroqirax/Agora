@@ -18,7 +18,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
@@ -161,21 +160,32 @@ class ConversationGenerationState(
         RunFinalizationOutcome.SETTLED
     }
 
-    /** Wait until neither a generation nor an idle manual Compact owns this conversation. */
+    /** Wait until the conversation's one ordinary generation slot is available. */
     suspend fun awaitSendAvailable() {
-        combine(generating, compacting) { isGenerating, isCompacting ->
-            !isGenerating && !isCompacting
-        }.first { available -> available }
-    }
-
-    /** Wait only for Compact settlement, then let the mailbox re-evaluate Idle versus Active. */
-    suspend fun awaitCompactSettled() {
-        compacting.first { isCompacting -> !isCompacting }
+        generating.first { isGenerating -> !isGenerating }
     }
 
     /** Identified UI-only Compact output; stale effects cannot alter the active preview. */
     fun appendCompactPreview(identity: RunEffectIdentity, delta: String): Boolean =
         synchronized(genLock) { resources.appendCompactPreview(identity, delta) }
+
+    /**
+     * Echoes the exact Compact result and requests the same FIFO queue drain used by an ordinary
+     * generation whenever a manual/pre-send Compact releases the generation slot.
+     */
+    suspend fun finishCompact(
+        identity: RunEffectIdentity,
+        outcome: com.newoether.agora.model.CompactOutcome,
+    ): Transition = withContext(NonCancellable) {
+        val transition = commands.finishCompact(identity, outcome)
+        if (
+            transition.accepted &&
+            transition.effects.any { effect -> effect is RunEffect.ReleaseSlot }
+        ) {
+            onQueueDrainRequested?.invoke(this@ConversationGenerationState)
+        }
+        transition
+    }
 
     // ── Generation slot (single source of truth: [runState] under [genLock]) ─────────────
     // The reducer-backed slot is the atomic decision point for "launch now vs enqueue": exactly
@@ -582,7 +592,7 @@ class ConversationGenerationState(
         is RunState.Recovering -> null
         is RunState.Preparing -> ownerIdentity
         is RunState.Active -> identity
-        is RunState.Compacting -> resumeIdentity
+        is RunState.Compacting -> generationIdentity
         is RunState.Finalizing -> identity
         is RunState.Stopping -> identity
     }
@@ -590,9 +600,9 @@ class ConversationGenerationState(
     private fun RunState.isLaunchableOwner(ownerToken: Long): Boolean = when (this) {
         is RunState.Preparing -> ownerIdentity.ownerToken == ownerToken
         is RunState.Active -> !coroutineSettled && identity.ownerToken == ownerToken
+        is RunState.Compacting -> generationIdentity.ownerToken == ownerToken
         is RunState.Idle,
         is RunState.Recovering,
-        is RunState.Compacting,
         is RunState.Finalizing,
         is RunState.Stopping,
         -> false

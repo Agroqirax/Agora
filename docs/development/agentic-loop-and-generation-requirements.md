@@ -36,7 +36,7 @@ Guidance entered while generation/tool execution is active is not yet a message:
 1. The click accepts text and attachments into ordered in-memory pending guidance.
 2. Before the next boundary, it is absent from Room, the message graph, selected path, render store, and `LazyColumn`.
 3. The drain boundary is after the next tool call and all results are durably committed. If no next tool call occurs, generation finalization is the boundary. Stop finalization is also a generation-final boundary.
-4. At the boundary, all pending guidance is sent in click order through the normal real-send pipeline. Each item remains a distinct user bubble. Publication, entrance animation, and absolute-bottom scroll happen once, not once early and once later.
+4. At the boundary, all pending guidance is sent in click order through the normal real-send pipeline as one USER message. Text items are joined with exactly `\n\n`; attachments retain FIFO ownership/order. Publication, entrance animation, and absolute-bottom scroll happen once, not once early and once later.
 5. Delayed drain is silent for haptics.
 
 The boundary drain must serialize with the conversation lock, generation slot, provider stream, tool-round commit, and Compact. Stop must settle its coroutine and durable Run state before migration/drain. A drained batch must never be appended to an already stopped Run. Pending attachment ownership must be explicit; cancellation, ViewModel destruction, and process death must not leave orphan files or partially durable messages.
@@ -87,9 +87,9 @@ If damaged history must be represented as text, it uses clearly non-executable p
 
 ## 7. Completion notification
 
-A completion notification means the entire current generation Run has ended. A provider pass returning, a guidance click being accepted, a tool boundary, or queue drain beginning is not completion.
+A completion notification means one complete generation Run has ended. A provider pass returning, a guidance click being accepted, a tool boundary, or queue drain beginning is not completion.
 
-Notify at most once, only after all tool continuations and pending queued/guidance sends for the Run have been consumed and no subsequent pass remains. Stop/cancellation/error follow the existing product notification policy but cannot produce duplicate “completed” events.
+Notify at most once per Run and only when no subsequent pass remains. Pending guidance belongs to a new Run, never the origin Run; while that fresh Run is pending, suppress the origin Run's notification so the immediate handoff does not notify twice. Stop/cancellation/error follow the existing product notification policy but cannot produce duplicate “completed” events.
 
 ## 8. Shell job tools
 

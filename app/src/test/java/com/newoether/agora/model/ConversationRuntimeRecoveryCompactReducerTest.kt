@@ -92,7 +92,7 @@ class ConversationRuntimeRecoveryCompactReducerTest {
     }
 
     @Test
-    fun `manual Compact owns Idle without becoming a generation and serializes Send`() {
+    fun `manual Compact owns the generation slot queues Send and accepts Stop`() {
         val identity = RunEffectIdentity(
             conversationId = CONVERSATION_ID,
             ownerToken = 4,
@@ -116,13 +116,21 @@ class ConversationRuntimeRecoveryCompactReducerTest {
             listOf(RunEffect.RunCompact(identity, "compact-run", CompactMode.MANUAL)),
             started.effects,
         )
-        val waitingSend = ConversationRuntimeReducer.reduce(
+        val queuedSend = ConversationRuntimeReducer.reduce(
             started.newState,
             sendCommand(ownerToken = 5, runId = "send-run", effectId = "send"),
         )
         assertEquals(
-            RunEffect.AwaitCompactSettlement(sendCommand(5, "send-run", "send").identity),
-            waitingSend.effects.single(),
+            RunEffect.AcceptGuidance(
+                RunEffectIdentity(
+                    conversationId = CONVERSATION_ID,
+                    ownerToken = 4,
+                    runId = "compact-run",
+                    pass = 0,
+                    effectId = "send",
+                ),
+            ),
+            queuedSend.effects.single(),
         )
         val directSend = ConversationRuntimeReducer.reduce(
             started.newState,
@@ -135,24 +143,38 @@ class ConversationRuntimeRecoveryCompactReducerTest {
         )
         assertTrue(directSend.effects.single() is RunEffect.RejectSendBusy)
 
-        val stopped = ConversationRuntimeReducer.reduce(
+        val stopping = ConversationRuntimeReducer.reduce(
             started.newState,
             ConversationCommand.StopRequested(
-                identity = RuntimeRunIdentity(CONVERSATION_ID, ownerToken = 4),
-                coroutineAlreadySettled = true,
-                requiresPersistence = false,
-                effectId = null,
+                identity = identity.runIdentity(),
+                coroutineAlreadySettled = false,
+                requiresPersistence = true,
+                effectId = "stop",
             ),
         )
-        assertEquals(CommandRejection.ILLEGAL_STATE, stopped.rejection)
-        assertSame(started.newState, stopped.newState)
+        assertTrue(stopping.newState is RunState.Stopping)
+        assertEquals(
+            listOf(
+                RunEffect.CancelProviderPass(identity.runIdentity()),
+                RunEffect.FinalizeStop(identity.copy(effectId = "stop")),
+            ),
+            stopping.effects,
+        )
 
         val completed = ConversationRuntimeReducer.reduce(
             started.newState,
             ConversationCommand.CompactCompleted(identity, CompactOutcome.CREATED),
         )
         assertEquals(RunState.Idle(CONVERSATION_ID), completed.newState)
-        assertTrue(completed.effects.isEmpty())
+        assertEquals(
+            listOf(
+                RunEffect.ReleaseSlot(
+                    identity.runIdentity(),
+                    SlotReleaseReason.NORMAL_COMPLETION,
+                ),
+            ),
+            completed.effects,
+        )
     }
 
     @Test

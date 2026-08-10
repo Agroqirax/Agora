@@ -389,4 +389,7 @@ class ShellClient(
     suspend fun stopJob(jobId: String): String =
         encryptedPost("/jobs/stop", buildJsonObject { put("job_id", jobId) }.toString())
 
+    suspend fun acknowledgeJob(jobId: String): String =
+        encryptedPost("/jobs/ack", buildJsonObject { put("job_id", jobId) }.toString())
+
 }

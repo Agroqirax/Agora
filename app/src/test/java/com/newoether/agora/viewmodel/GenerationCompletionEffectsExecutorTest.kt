@@ -68,7 +68,6 @@ class GenerationCompletionEffectsExecutorTest {
     ) = GenerationCompletionEffectsRequest(
         terminalPersisted = terminalPersisted,
         status = MessageStatus.SUCCESS,
-        interruptedForQueuedSend = false,
         text = "answer",
         conversationId = "conversation",
         modelMessageId = "model",

@@ -7,6 +7,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkOut
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.filled.Compress
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
@@ -44,6 +47,9 @@ internal fun usesExplicitDetailBackHandler(thinkingSegmentDisplayMode: String): 
     ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
         ThinkingSegmentDisplayModes.BOTTOM_SHEET
 
+internal fun messageEntranceInitialScale(message: ChatMessage): Float =
+    if (message.isContextCompact()) 0.9f else 1f
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageItem(
@@ -53,13 +59,16 @@ internal fun MessageItem(
     modifier: Modifier = Modifier,
     animateEntrance: Boolean = false,
     isStreaming: Boolean = false,
+    liveCompactPreview: String? = null,
     isLoading: Boolean = false,
+    compactActionsEnabled: Boolean = true,
     isRegenerationExiting: Boolean = false,
     isEditingAllowed: Boolean = true,
     isEditing: Boolean = false,
     isSwitching: Boolean = false,
     isInContext: Boolean = false,
     modelAliases: StableModelAliases = StableModelAliases(),
+    customProviders: List<com.newoether.agora.data.CustomProviderConfig> = emptyList(),
     visualizeContextRollout: Boolean = false,
     toolCallDisplayMode: String = ToolCallDisplayModes.DEFAULT,
     thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
@@ -79,6 +88,7 @@ internal fun MessageItem(
     onFork: (String) -> Unit = {},
     onShare: (String) -> Unit = {},
     deleteTargetMessageId: String = message.id,
+    onRecompact: (String) -> Unit = {},
     onDelete: (String) -> Unit = {},
     onMediaClick: (List<String>, Int) -> Unit = { _, _ -> },
     onFileContentClick: ((fileName: String, content: String) -> Unit)? = null,
@@ -108,19 +118,28 @@ internal fun MessageItem(
         MessageInfoDialog(
             message = message,
             modelAliases = modelAliases.map,
+            customProviders = customProviders,
             onDismiss = { showInfoDialog = false }
         )
     }
 
     if (showDeleteConfirm) {
-        MessageDeleteDialog(
-            onConfirm = {
-                showDeleteConfirm = false
-                haptics.destructiveConfirmed()
-                onDelete(deleteTargetMessageId)
-            },
-            onDismiss = { showDeleteConfirm = false }
-        )
+        val onConfirmDelete = {
+            showDeleteConfirm = false
+            haptics.destructiveConfirmed()
+            onDelete(deleteTargetMessageId)
+        }
+        if (message.isContextCompact()) {
+            ContextCompactDeleteDialog(
+                onConfirm = onConfirmDelete,
+                onDismiss = { showDeleteConfirm = false },
+            )
+        } else {
+            MessageDeleteDialog(
+                onConfirm = onConfirmDelete,
+                onDismiss = { showDeleteConfirm = false },
+            )
+        }
     }
 
     val alignment = when (message.participant) {
@@ -172,6 +191,7 @@ internal fun MessageItem(
         animationKey = "message:${message.id}",
         animate = animateEntrance && !isSwitching,
         durationMillis = MESSAGE_ENTER_DURATION_MS,
+        initialScale = messageEntranceInitialScale(message),
     )
 
     Row(
@@ -214,6 +234,10 @@ internal fun MessageItem(
                     Modifier
                 }
                 if (message.isContextCompact()) {
+                    val compactInProgress = message.status in setOf(
+                        MessageStatus.SENDING,
+                        MessageStatus.THINKING,
+                    )
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -221,7 +245,11 @@ internal fun MessageItem(
                         contentAlignment = Alignment.Center,
                     ) {
                         ContextCompactPill(
+                            inProgress = compactInProgress,
+                            actionsEnabled = compactActionsEnabled && !compactInProgress,
                             onClick = { showCompactDetail = true },
+                            onRecompact = { onRecompact(message.id) },
+                            onDelete = { showDeleteConfirm = true },
                         )
                     }
                 } else if (message.participant == Participant.USER) {
@@ -306,28 +334,28 @@ internal fun MessageItem(
     }
 
     if (showCompactDetail) {
-        val compactDetailMessage = remember(message.id, message.text) {
+        val compactInProgress = message.status in setOf(
+            MessageStatus.SENDING,
+            MessageStatus.THINKING,
+        )
+        val compactDetailText = liveCompactPreview
+            ?.takeIf { compactInProgress }
+            ?: message.text
+        val compactDetailMessage = remember(message.id, message.status, compactDetailText) {
+            val renderableText = compactDetailText.ifBlank { "\u200B" }
             message.copy(
-                segments = listOf(MessageSegment(type = "thought", content = message.text)),
+                text = renderableText,
+                segments = listOf(MessageSegment(type = "thought", content = renderableText)),
             )
         }
         SegmentDetailSheet(
             message = compactDetailMessage,
             selectedSegmentIndex = 0,
             selectedSegmentIndices = listOf(0),
-            isStreaming = false,
+            isStreaming = compactInProgress,
             markdownRenderContext = thoughtMarkdownRenderContext,
             onMediaClick = onMediaClick,
             titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
-            detailFooter = {
-                TextButton(
-                    onClick = { showCompactDetail = false; showDeleteConfirm = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    modifier = Modifier.padding(top = 18.dp),
-                ) {
-                    Text(stringResource(com.newoether.agora.R.string.delete))
-                }
-            },
             handleBackInternally = true,
             onDismiss = { showCompactDetail = false },
         )
@@ -343,21 +371,34 @@ internal fun MessageItem(
             markdownRenderContext = thoughtMarkdownRenderContext,
             onMediaClick = onMediaClick,
             handleBackInternally = detailUsesExplicitBackHandler,
+            showSegmentListFirst = detailUsesExplicitBackHandler,
             onDismiss = { showSegmentDetail = false }
         )
     }
 }
 
-
-
 @Composable
 internal fun ContextCompactPill(
     inProgress: Boolean = false,
+    actionsEnabled: Boolean = true,
     onClick: (() -> Unit)? = null,
+    onRecompact: () -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
+    var actionsExpanded by remember { mutableStateOf(false) }
+    val pillShape = RoundedCornerShape(100.dp)
+    val destructiveActionTint = MaterialTheme.colorScheme.error.copy(
+        alpha = if (actionsEnabled) 1f else 0.38f,
+    )
     Surface(
-        modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
-        shape = RoundedCornerShape(100.dp),
+        modifier = if (onClick != null) {
+            Modifier
+                .clip(pillShape)
+                .clickable(onClick = onClick)
+        } else {
+            Modifier
+        },
+        shape = pillShape,
         color = MaterialTheme.colorScheme.secondaryContainer,
         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
     ) {
@@ -385,45 +426,69 @@ internal fun ContextCompactPill(
                 ),
                 style = MaterialTheme.typography.labelLarge,
             )
+            Box {
+                IconButton(
+                    onClick = { actionsExpanded = true },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
+                        contentDescription = stringResource(com.newoether.agora.R.string.more),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(
+                    expanded = actionsExpanded,
+                    onDismissRequest = { actionsExpanded = false },
+                    shape = RoundedCornerShape(16.dp),
+                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ) {
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = stringResource(com.newoether.agora.R.string.recompact),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        },
+                        enabled = actionsEnabled,
+                        onClick = {
+                            actionsExpanded = false
+                            onRecompact()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Default.Delete,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp),
+                                    tint = destructiveActionTint,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Text(
+                                    text = stringResource(com.newoether.agora.R.string.delete),
+                                    color = destructiveActionTint,
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                            }
+                        },
+                        enabled = actionsEnabled,
+                        onClick = {
+                            actionsExpanded = false
+                            onDelete()
+                        },
+                    )
+                }
+            }
         }
-    }
-}
-
-@Composable
-internal fun ContextCompactProgressPill(
-    conversationId: String?,
-    preview: String,
-) {
-    // This belongs to one live Compact effect. Do not restore an open preview into a later
-    // Compact operation for the same conversation after the progress item leaves composition.
-    var showDetail by remember(conversationId) { mutableStateOf(false) }
-    val textColor = MaterialTheme.colorScheme.onSurface
-    val markdownAssets = rememberChatMarkdownAssets(textColor, searchHighlight = null)
-    val previewMessage = remember(conversationId, preview) {
-        ChatMessage(
-            id = "compact_progress_${conversationId.orEmpty()}",
-            text = preview,
-            participant = Participant.MODEL,
-            status = MessageStatus.SENDING,
-            segments = listOf(MessageSegment(type = "thought", content = preview)),
-        )
-    }
-
-    ContextCompactPill(
-        inProgress = true,
-        onClick = { showDetail = true },
-    )
-    if (showDetail) {
-        SegmentDetailSheet(
-            message = previewMessage,
-            selectedSegmentIndex = 0,
-            selectedSegmentIndices = listOf(0),
-            isStreaming = true,
-            markdownRenderContext = markdownAssets.thoughtRenderContext,
-            onMediaClick = { _, _ -> },
-            titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
-            handleBackInternally = true,
-            onDismiss = { showDetail = false },
-        )
     }
 }

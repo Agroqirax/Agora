@@ -18,8 +18,8 @@ import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.Participant
-import com.newoether.agora.model.apiModelName
-import com.newoether.agora.util.Constants
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelDisplayName
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -29,15 +29,13 @@ import java.util.Locale
 internal fun MessageInfoDialog(
     message: ChatMessage,
     modelAliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig> = emptyList(),
     onDismiss: () -> Unit
 ) {
     val sdf = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
     val dateString = sdf.format(Date(message.timestamp))
     val modelDisplay = if (message.modelName != null) {
-        val parsed = message.modelName?.let { com.newoether.agora.model.ModelId.parse(it) }
-        val modelId = parsed?.apiModelName ?: message.modelName
-        val provider = parsed?.providerName ?: Constants.PROVIDER_UNKNOWN
-        modelAliases[message.modelName] ?: ("$modelId ($provider)")
+        modelDisplayName(message.modelName, modelAliases, customProviders)
     } else stringResource(R.string.unknown)
     val tokenUsage = tokenUsagePresentation(message.tokenUsage)
     val inputTokens = when {
@@ -91,6 +89,36 @@ internal fun MessageInfoDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.provider_close)) }
         }
+    )
+}
+
+/** Specialized confirmation: Compact deletion reparents descendants and removes only the pill. */
+@Composable
+internal fun ContextCompactDeleteDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(R.string.delete_compact_message_title),
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = { Text(stringResource(R.string.delete_compact_message_confirm)) },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error,
+                ),
+            ) { Text(stringResource(R.string.delete)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
+        },
     )
 }
 

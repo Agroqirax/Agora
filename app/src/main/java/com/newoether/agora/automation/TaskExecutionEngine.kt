@@ -188,7 +188,6 @@ class TaskExecutionEngine(
         app = application,
         conversations = convRepo,
         memoryManager = memoryManager,
-        providers = providerRegistry.all,
         context = appContext,
         sandboxFactory = sandboxFactory,
         additionalToolProviders = listOf(mcpToolProvider),
@@ -317,18 +316,6 @@ class TaskExecutionEngine(
                 pendingConversationSettings = MutableStateFlow(null),
                 onSnackbar = {},
             )
-            val resolved = if (systemPromptOverride != null) {
-                GenerationRequestBuilder.ResolvedPrompt(
-                    systemPromptOverride.ifBlank { null },
-                    null,
-                    null,
-                )
-            } else {
-                builder.buildEffectiveSystemPrompt(conversationId, effectiveModelId)
-            }
-            val effectiveSettings = builder.buildEffectiveConversationSettings(conversationId)
-            val contextLimit = effectiveSettings.contextWindow ?: settings.maxContextWindow.value
-
             // Headless Task/Loop uses the same direct-only Send command as the foreground bridge.
             // The queue mutex keeps pending guidance from being overtaken between inspection and
             // the mailbox decision. Busy is typed and persists no message/Run side effect.
@@ -353,6 +340,35 @@ class TaskExecutionEngine(
                 return Result.Failure("Conversation generation slot was revoked")
             }
             val persistToken = generationState.nextPersistId()
+            val captured = builder.captureAdmissionSnapshot(
+                conversationId = conversationId,
+                runId = runId,
+                modelId = effectiveModelId,
+                resolvedPromptOverride = systemPromptOverride?.let {
+                    GenerationRequestBuilder.ResolvedPrompt(
+                        it.ifBlank { null },
+                        null,
+                        null,
+                    )
+                },
+            )
+            val taskContext = captured.context.copy(
+                    // Automation tools are intentionally foreground-only: a scheduled run must
+                    // not recursively create more tasks/loops without a user in the loop.
+                    automationToolsEnabled = false,
+                    foregroundServiceManagedExternally = foregroundServiceManagedExternally,
+                )
+            val generationSnapshot = captured.copy(
+                context = taskContext,
+                automaticCompact = captured.automaticCompact.copy(
+                    generationContext = taskContext,
+                ),
+            )
+
+            val fixedTokenCost = generationManager.fixedContextTokenCost(
+                generationSnapshot.config,
+                generationSnapshot.context,
+            )
 
             suspend fun compactAtBoundary(): CompactResult {
                 return when (
@@ -361,8 +377,11 @@ class TaskExecutionEngine(
                     ) { effect ->
                         contextCompactor.compactAutomatic(
                             conversationId = conversationId,
-                            fallbackModel = effectiveModelId,
-                            contextLimit = contextLimit,
+                            contextLimit = generationSnapshot.config.maxContextWindow,
+                            config = generationSnapshot.automaticCompact.copy(
+                                fixedTokenCost = fixedTokenCost,
+                            ),
+                            identity = effect.identity,
                             compactRunId = effect.compactRunId,
                             onSummaryChunk = { chunk ->
                                 generationState.appendCompactPreview(effect.identity, chunk)
@@ -393,7 +412,7 @@ class TaskExecutionEngine(
                     userMessageId = userMessageId,
                     modelMessageId = modelMessageId,
                     userText = userText,
-                    modelId = effectiveModelId,
+                    modelId = generationSnapshot.selectedModelId,
                     userTimestamp = now,
                 ),
             )
@@ -439,31 +458,18 @@ class TaskExecutionEngine(
                 CompactResult.NotNeeded -> Unit
             }
 
-            val (config, baseGenCtx) = builder.buildGenerationPair(
-                providerName, effectiveModelId, activeKey,
-                resolved.systemPrompt, resolved.userPrepend, resolved.userPostpend,
-                effectiveSettings, conversationId,
-            )
-            val genCtx = baseGenCtx.copy(
-                // Automation tools are intentionally foreground-only: a scheduled run must
-                // not recursively create more tasks/loops without a user in the loop.
-                automationToolsEnabled = false,
-                foregroundServiceManagedExternally = foregroundServiceManagedExternally,
-            )
-
             val baseCallbacks = generationState.callbacksFor(uiToken, persistToken)
             generationManager.generate(
                 conversationId = conversationId,
                 modelMessageId = modelMessageId,
                 startTime = startTime,
-                isRegenerate = false,
-                replaceMessageId = null,
-                modelName = effectiveModelId,
+                modelName = generationSnapshot.selectedModelId,
                 runId = runId,
                 pass = 0,
                 ownerToken = uiToken,
-                config = config,
-                ctx = genCtx,
+                config = generationSnapshot.config,
+                ctx = generationSnapshot.context,
+                providerInstances = generationSnapshot.providerInstances,
                 generationJob = currentJob,
                 callbacks = baseCallbacks.copy(
                     onStreamUpdate = { message ->
@@ -477,8 +483,8 @@ class TaskExecutionEngine(
                             is CompactResult.Failed -> error(
                                 "Automatic context compact failed: ${compactResult.message}"
                             )
-                            is CompactResult.Created,
-                            CompactResult.NotNeeded -> Unit
+                            is CompactResult.Created -> compactResult.messageId
+                            CompactResult.NotNeeded -> null
                         }
                     },
                 ),

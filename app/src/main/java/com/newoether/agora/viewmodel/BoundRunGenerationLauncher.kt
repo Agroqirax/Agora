@@ -3,7 +3,6 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.api.HttpClient
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
-import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.util.DebugLog
@@ -16,17 +15,18 @@ internal data class BoundRunGenerationRequest(
     val conversationId: String,
     val modelMessageId: String,
     val startTime: Long,
-    val isRegenerate: Boolean,
-    val replaceMessageId: String?,
-    val providerName: String,
-    val modelId: String,
-    val activeKey: String,
+    val snapshot: GenerationAdmissionSnapshot,
     val uiToken: Long,
     val persistId: Long,
     val runId: String,
     val pass: Int,
     val callerTag: String,
-)
+) {
+    init {
+        require(snapshot.conversationId == conversationId)
+        require(snapshot.runId == runId)
+    }
+}
 
 /**
  * Executes the shared generation tail after the caller has durably created and bound the Run.
@@ -35,8 +35,6 @@ internal data class BoundRunGenerationRequest(
  * still return through the identified callbacks supplied by the conversation runtime host.
  */
 internal class BoundRunGenerationLauncher(
-    private val requestBuilder: GenerationRequestBuilder,
-    private val settings: SettingsRepository,
     private val conversations: ConversationRepository,
     private val generationManagerProvider: () -> GenerationManager,
     private val compactController: ConversationCompactController,
@@ -56,51 +54,34 @@ internal class BoundRunGenerationLauncher(
             "prepare_start",
             "acceptedDelayMs=${(clock() - request.startTime).coerceAtLeast(0L)}",
         )
-        val resolved = requestBuilder.buildEffectiveSystemPrompt(
-            request.conversationId,
-            request.modelId,
-        )
-        val effectiveSettings = requestBuilder.buildEffectiveConversationSettings(
-            request.conversationId,
-        )
-        // The already-loaded key is authoritative on the normal path. Only await DataStore during
-        // the startup race where the eager StateFlow still exposes its empty default.
-        val freshKey = request.activeKey.takeIf { it.isNotBlank() }
-            ?: settings.awaitActiveKey(request.providerName)?.takeIf { it.isNotBlank() }
-            .orEmpty()
         try {
-            val (config, generationContext) = requestBuilder.buildGenerationPair(
-                request.providerName,
-                request.modelId,
-                freshKey,
-                resolved.systemPrompt,
-                resolved.userPrepend,
-                resolved.userPostpend,
-                effectiveSettings,
-                request.conversationId,
-            )
             requestTrace.mark("request_config_ready")
-            generationManagerProvider().generate(
+            val generationManager = generationManagerProvider()
+            val fixedTokenCost = generationManager.fixedContextTokenCost(
+                request.snapshot.config,
+                request.snapshot.context,
+            )
+            generationManager.generate(
                 conversationId = request.conversationId,
                 modelMessageId = request.modelMessageId,
                 startTime = request.startTime,
-                isRegenerate = request.isRegenerate,
-                replaceMessageId = request.replaceMessageId,
-                modelName = request.modelId,
+                modelName = request.snapshot.selectedModelId,
                 runId = request.runId,
                 pass = request.pass,
                 ownerToken = request.uiToken,
-                config = config,
-                ctx = generationContext,
+                config = request.snapshot.config,
+                ctx = request.snapshot.context,
+                providerInstances = request.snapshot.providerInstances,
                 generationJob = currentCoroutineContext()[Job],
                 callbacks = state.callbacksFor(request.uiToken, request.persistId).copy(
                     onToolRoundPersisted = {
                         compactController.automaticBeforeBoundary(
-                            request.conversationId,
-                            request.modelId,
-                            effectiveSettings.contextWindow
-                                ?: settings.maxContextWindow.value,
-                            state,
+                            conversationId = request.conversationId,
+                            contextLimit = request.snapshot.config.maxContextWindow,
+                            config = request.snapshot.automaticCompact.copy(
+                                fixedTokenCost = fixedTokenCost,
+                            ),
+                            state = state,
                         )
                     },
                 ),

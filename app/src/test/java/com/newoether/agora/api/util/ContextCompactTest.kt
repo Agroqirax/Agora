@@ -6,6 +6,8 @@ import com.newoether.agora.model.Participant
 import com.newoether.agora.api.OpenAiChatRequest
 import com.newoether.agora.api.openai.requireValidWireFormat
 import com.newoether.agora.viewmodel.buildCompactSummaryInput
+import com.newoether.agora.viewmodel.buildRolledCompactInput
+import com.newoether.agora.viewmodel.compactProviderMessageBudget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -72,6 +74,104 @@ class ContextCompactTest {
         val split = splitLogicalContext(history, 2)
         assertTrue(split.prefix.isEmpty())
         assertEquals(history, split.suffix)
+    }
+
+    @Test
+    fun failedCompactNeverBecomesProviderContextOrABoundary() {
+        val failed = message("compact_failed", "failed summary", Participant.MODEL).copy(
+            status = MessageStatus.ERROR,
+        )
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            failed,
+            message("u1", "new", Participant.USER),
+        )
+
+        assertEquals(listOf("u0", "u1"), applyNearestContextCompact(history).map { it.id })
+        assertTrue(!contextWindowUsage(history, 4_096).hasCompactBoundary)
+    }
+
+    @Test
+    fun failedCompactTextNeverLeaksIntoAnOrdinaryUserTurn() {
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            message("compact_failed", "private partial summary", Participant.MODEL).copy(
+                status = MessageStatus.ERROR,
+            ),
+            message("u1", "ordinary follow-up", Participant.USER),
+        )
+
+        val canonical = canonicalContextMessages(history)
+
+        assertEquals(listOf("old\nordinary follow-up"), canonical.map { it.text })
+        assertTrue(canonical.none { it.text.contains("private partial summary") })
+    }
+
+    @Test
+    fun stoppedCompactNeverBecomesProviderContextOrABoundary() {
+        val stopped = message("compact_stopped", "partial summary", Participant.MODEL).copy(
+            status = MessageStatus.STOPPED,
+        )
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            stopped,
+            message("u1", "new", Participant.USER),
+        )
+
+        assertEquals(listOf("u0", "u1"), applyNearestContextCompact(history).map { it.id })
+        assertTrue(!contextWindowUsage(history, 4_096).hasCompactBoundary)
+    }
+
+    @Test
+    fun failedCompactIsNotMarkedAsRetainedProviderContext() {
+        val failed = message("compact_failed", "partial", Participant.MODEL).copy(
+            status = MessageStatus.ERROR,
+        )
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            failed,
+            message("u1", "new", Participant.USER),
+        )
+
+        assertEquals(
+            linkedSetOf("u0", "u1"),
+            contextWindowRetainedMessageIds(history, tokenBudget = 4_096),
+        )
+    }
+
+    @Test
+    fun physicalRetentionCountsEveryOrdinaryMessage() {
+        val history = listOf(
+            message("u0", "one", Participant.USER),
+            message("u1", "two", Participant.USER),
+            message("a0", "answer", Participant.MODEL),
+        )
+
+        val split = splitContextForCompactRetention(history, retainMessages = 2)
+
+        assertEquals(listOf("u0"), split.prefix.map { it.id })
+        assertEquals(listOf("u1", "a0"), split.retained.map { it.id })
+        assertEquals(2, split.retainedMessageCount)
+    }
+
+    @Test
+    fun physicalRetentionNeverSplitsToolRound() {
+        val history = listOf(
+            message("u0", "old", Participant.USER),
+            message("tool_call", "", Participant.MODEL),
+            message("result_one", "one", Participant.USER),
+            message("result_two", "two", Participant.USER),
+            message("a0", "answer", Participant.MODEL),
+        )
+
+        val split = splitContextForCompactRetention(history, retainMessages = 2)
+
+        assertEquals(listOf("u0"), split.prefix.map { it.id })
+        assertEquals(
+            listOf("tool_call", "result_one", "result_two", "a0"),
+            split.retained.map { it.id },
+        )
+        assertEquals(4, split.retainedMessageCount)
     }
 
     @Test
@@ -183,8 +283,65 @@ class ContextCompactTest {
 
         request.requireValidWireFormat("DeepSeek")
         assertEquals(Participant.USER, compactInput.last().participant)
-        assertTrue(compactInput.last().id.startsWith("compact_summary_request_"))
+        assertTrue(compactInput.last().id.startsWith("ephemeral_summary_request_"))
         assertEquals(prefixEndingInAssistant, compactInput.dropLast(1))
+    }
+
+    @Test
+    fun rolledCompactInputIncludesTheCompleteContextRegardlessOfRetention() {
+        val context = listOf(
+            message("compact_boundary", "prior summary", Participant.MODEL),
+            message("u1", "first question", Participant.USER),
+            message("a1", "first answer", Participant.MODEL),
+            message("u2", "recent question", Participant.USER),
+        )
+
+        val input = buildRolledCompactInput(context, "compact prompt", contextWindow = 8_192)
+
+        assertEquals(
+            listOf("prior summary\nfirst question", "first answer", "recent question"),
+            input.dropLast(1).map { it.text },
+        )
+        assertTrue(input.last().id.startsWith("ephemeral_summary_request_"))
+    }
+
+    @Test
+    fun rolledCompactInputUsesTheStandardUserLedSuffixWindow() {
+        val context = listOf(
+            message("u0", "old question ".repeat(80), Participant.USER),
+            message("a0", "old answer ".repeat(80), Participant.MODEL),
+            message("u1", "new question", Participant.USER),
+            message("a1", "new answer", Participant.MODEL),
+        )
+
+        val input = buildRolledCompactInput(context, "compact prompt", contextWindow = 64)
+
+        assertEquals(Participant.USER, input.first().participant)
+        assertTrue(input.none { it.id == "u0" || it.id == "a0" })
+        assertEquals(listOf("u1", "a1"), input.dropLast(1).map { it.id })
+        assertTrue(input.last().id.startsWith("ephemeral_summary_request_"))
+    }
+
+    @Test
+    fun providerCanonicalizationCannotDropAnOversizedRolledSourceForTheInstruction() {
+        val oversized = "latest source ".repeat(200)
+        val input = buildRolledCompactInput(
+            context = listOf(message("u0", oversized, Participant.USER)),
+            systemPrompt = "compact prompt",
+            contextWindow = 32,
+        )
+        val providerPrepared = prepareMessages(
+            messages = input,
+            contextTokenBudget = compactProviderMessageBudget(
+                input = input,
+                systemPrompt = "compact prompt",
+                contextWindow = 32,
+            ),
+        )
+
+        assertEquals("u0", providerPrepared.first().id)
+        assertTrue(providerPrepared.first().text.startsWith("latest source"))
+        assertTrue(providerPrepared.last().text.contains("Return only the summary"))
     }
 
     @Test

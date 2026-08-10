@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlinx.coroutines.delay
@@ -38,6 +39,13 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showProviderDialog by remember { mutableStateOf(false) }
     var apiKeyText by remember(webSearchProvider) { mutableStateOf(webSearchApiKeys[webSearchProvider] ?: "") }
     LaunchedEffect(webSearchProvider) { apiKeyText = webSearchApiKeys[webSearchProvider] ?: "" }
+    val resultCountGate = remember {
+        PersistedSliderFeedbackGate(
+            initialPersisted = webSearchNumResults,
+            toDisplay = Int::toFloat,
+        )
+    }
+    LaunchedEffect(webSearchNumResults) { resultCountGate.reconcile(webSearchNumResults) }
 
     // No-op bring-into-view to prevent auto-scrolling on text field focus
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
@@ -203,14 +211,33 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            stringResource(R.string.web_search_num_results_desc, webSearchNumResults),
+                                            stringResource(
+                                                R.string.web_search_num_results_desc,
+                                                resultCountGate.displayed.toInt(),
+                                            ),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(top = 4.dp)
                                         )
                                         Slider(
-                                            value = webSearchNumResults.toFloat(),
-                                            onValueChange = { viewModel.settings.setWebSearchNumResults(it.toInt()) },
+                                            value = resultCountGate.displayed,
+                                            onValueChange = resultCountGate::updateFromGesture,
+                                            onValueChangeFinished = {
+                                                val committed = resultCountGate.displayed.toInt()
+                                                if (committed == webSearchNumResults) {
+                                                    resultCountGate.settleWithoutWrite(
+                                                        webSearchNumResults,
+                                                        committed.toFloat(),
+                                                    )
+                                                } else {
+                                                    resultCountGate.expectPersisted(
+                                                        committed,
+                                                        committed.toFloat(),
+                                                    )
+                                                    viewModel.settings
+                                                        .setWebSearchNumResults(committed)
+                                                }
+                                            },
                                             valueRange = 1f..10f,
                                             steps = 8,
                                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)

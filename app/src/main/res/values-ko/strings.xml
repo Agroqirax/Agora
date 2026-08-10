@@ -306,6 +306,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">생성</string>
     <string name="context_window">컨텍스트 창</string>
+    <string name="context_window_desc">한 번의 생성에 사용할 수 있는 최대 컨텍스트</string>
     <string name="context_window_default">기본 컨텍스트 창</string>
     <string name="context_token_budget_value">예상 토큰 %1$s개</string>
     <string name="context_retain">최근 메시지 %1$d개 유지</string>
@@ -702,6 +703,9 @@
     <string name="delete_chat">채팅을 삭제하시겠습니까?</string>
     <string name="delete_chat_confirm">이 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</string>
     <string name="delete_message_title">메시지를 삭제하시겠습니까?</string>
+    <string name="delete_compact_message_title">압축 메시지를 삭제하시겠습니까?</string>
+    <string name="delete_compact_message_confirm">이 압축 메시지만 삭제됩니다.</string>
+    <string name="recompact">다시 압축</string>
     <string name="delete_message_confirm">이 메시지와 이후의 모든 답글이 영구적으로 제거됩니다.</string>
     <string name="conversation_prompt">대화 프롬프트</string>
     <string name="global_default_format">전역 기본값(%1$s)</string>
@@ -1009,7 +1013,9 @@
     <string name="tool_execution_stopped">도구 실행 중지됨</string>
     <string name="tool_exit_code">종료 %1$d</string>
     <string name="tool_exit">종료</string>
-    <string name="tool_shell_returned_code">반환 %1$d</string>
+    <string name="tool_shell_returned_code">명령이 %1$d을(를) 반환했습니다</string>
+    <string name="tool_shell_detail_executed">실행됨</string>
+    <string name="tool_shell_detail_returned_code">반환값 %1$d</string>
     <string name="tool_shell_returned">반환</string>
     <string name="tool_found_no_matches">일치하는 항목이 없습니다</string>
     <string name="tool_line_count">%1$d줄</string>
@@ -1058,6 +1064,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">각 압축 후 원문 그대로 보존할 메시지</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>
@@ -1068,7 +1075,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">약 %1$s / %2$s tokens · 논리 메시지 %3$d개</string>
+    <string name="context_usage_messages">약 %1$s / %2$s tokens</string>
     <string name="context_boundary_active">컴팩트 경계 활성화됨</string>
     <string name="context_boundary_none">컴팩트 경계 없음</string>
 </resources>

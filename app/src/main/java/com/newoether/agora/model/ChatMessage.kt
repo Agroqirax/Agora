@@ -32,7 +32,7 @@ data class ToolImageAttachment(
 
 @Serializable
 data class MessageSegment(
-    val type: String, // "answer", "thought", "tool", or "transcription"
+    val type: String, // "answer", "thought", "tool", "transcription", or terminal "error"
     val content: String = "",
     val toolName: String? = null,
     val toolArgs: String? = null,
@@ -146,6 +146,9 @@ data class ChatConversation(
 
 fun ChatMessage.isContextCompact(): Boolean =
     id.startsWith(com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX)
+
+fun ChatMessage.isSuccessfulContextCompact(): Boolean =
+    isContextCompact() && status == MessageStatus.SUCCESS
 
 @Immutable
 data class StableMessageList(val list: List<ChatMessage> = emptyList())

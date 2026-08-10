@@ -24,18 +24,19 @@ import org.junit.Test
 
 class ConversationEditServiceTest {
     @Test
-    fun rejectsNonBoundaryInputBeforeClaimingRuntimeOrReadingRoom() = runBlocking {
+    fun rejectsAssistantBeforeClaimingRuntimeOrReadingRoom() = runBlocking {
         val fixture = Fixture()
         val state = ConversationGenerationState("conversation")
         val result = fixture.service.edit(
             fixture.request.copy(
-                messageId = "later-input",
+                messageId = "assistant",
                 visiblePath = listOf(
                     SOURCE_MESSAGE,
                     SOURCE_MESSAGE.copy(
-                        id = "later-input",
-                        parentId = "model",
-                        runSequence = 2,
+                        id = "assistant",
+                        parentId = SOURCE_MESSAGE.id,
+                        participant = Participant.MODEL,
+                        runSequence = 1,
                     ),
                 ),
             ),
@@ -76,6 +77,7 @@ class ConversationEditServiceTest {
                 run = capture(createdRun),
                 messages = capture(createdMessages),
                 messageSelectionUpdates = EXPECTED_SELECTIONS,
+                conversationModelId = "provider:model",
                 at = any(),
             )
         } returns RunGraphCommit(
@@ -93,6 +95,7 @@ class ConversationEditServiceTest {
                 match {
                     it.conversationId == "conversation" &&
                         it.modelMessageId == "new-model" &&
+                        it.snapshot === fixture.snapshot &&
                         it.runId == "new-run" &&
                         it.pass == 0 &&
                         it.callerTag == "editMessage"
@@ -119,13 +122,19 @@ class ConversationEditServiceTest {
 
     private class Fixture {
         val conversations = mockk<ConversationRepository>()
+        val requestBuilder = mockk<GenerationRequestBuilder>()
         val inputCloner = mockk<EditedRunInputCloner>()
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
         val boundLauncher = mockk<BoundRunGenerationLauncher>()
         val events = mutableListOf<String>()
+        val snapshot = testGenerationAdmissionSnapshot(
+            conversationId = "conversation",
+            runId = "new-run",
+        )
         private val ids = ArrayDeque(listOf("new-run", "new-model"))
         val service = ConversationEditService(
             conversations = conversations,
+            requestBuilder = requestBuilder,
             executionCoordinator = ConversationExecutionCoordinator(),
             inputCloner = inputCloner,
             terminalSettlement = terminalSettlement,
@@ -142,13 +151,19 @@ class ConversationEditServiceTest {
             onScrollToMessage = { events += "scroll:$it" },
             idFactory = ids::removeFirst,
         )
+
+        init {
+            coEvery {
+                requestBuilder.captureAdmissionSnapshot(
+                    any(), any(), any(), any(), any(),
+                )
+            } returns snapshot
+        }
         val request = ConversationEditRequest(
             conversationId = "conversation",
             messageId = "source-input",
             newText = "edited text",
             modelId = "provider:model",
-            providerName = "provider",
-            activeKey = "key",
             visiblePath = listOf(SOURCE_MESSAGE),
         )
     }

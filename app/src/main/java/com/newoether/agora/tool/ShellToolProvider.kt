@@ -2,14 +2,20 @@ package com.newoether.agora.tool
 
 import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.data.ShellDeviceConfig
+import com.newoether.agora.model.ToolCallData
 import com.newoether.agora.sandbox.SandboxManagerFactory
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.GenerationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -31,6 +37,34 @@ class ShellToolProvider(
      * too because they can mutate files outside the app sandbox.
      */
     var confirm: (suspend (server: String, summary: String) -> Boolean)? = null
+
+    /** Best-effort cleanup after the caller has committed these exact results to Room. */
+    internal suspend fun acknowledgeCommittedJobs(
+        calls: List<ToolCallData>,
+        context: GenerationContext,
+    ) {
+        val acknowledgements = terminalShellJobAcknowledgements(calls)
+        if (acknowledgements.isEmpty()) return
+        supervisorScope {
+            acknowledgements.map { acknowledgement ->
+                async {
+                    withTimeoutOrNull(JOB_ACK_TIMEOUT_MS) {
+                        val backend = getConchBackend(acknowledgement.serverName, context)
+                            ?: return@withTimeoutOrNull
+                        try {
+                            backend.acknowledgeJob(acknowledgement.jobId)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            // Retention TTL/count remains the safe fallback when cleanup is offline.
+                        } finally {
+                            backend.close()
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
 
     private suspend fun confirmTarget(
         device: ShellDeviceConfig?,
@@ -642,6 +676,8 @@ class ShellToolProvider(
     }
 
     companion object {
+        private const val JOB_ACK_TIMEOUT_MS = 3_000L
+
         internal fun maxWaitMs(ctx: GenerationContext): Int =
             ShellDurableJobExecutor.maxWaitMs(ctx)
     }

@@ -46,8 +46,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.isOpenAiProtocolProvider
-import com.newoether.agora.api.util.contextWindowUsage
-import com.newoether.agora.api.util.expandSelectedToolProtocolRows
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
@@ -149,8 +147,7 @@ fun ChatApp(
     val globalThinkingLevel by viewModel.settings.thinkingLevel.collectAsState()
     val globalThinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
     val globalThinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
-    val globalOpenAiServiceTierEnabled by
-        viewModel.settings.openAiServiceTierEnabled.collectAsState()
+    val globalOpenAiServiceTierEnabled by viewModel.settings.openAiServiceTierEnabled.collectAsState()
     val globalOpenAiServiceTier by viewModel.settings.openAiServiceTier.collectAsState()
     val customProviders by viewModel.settings.customProviders.collectAsState()
     val globalWebSearch by viewModel.settings.webSearchEnabled.collectAsState()
@@ -178,18 +175,18 @@ fun ChatApp(
         convOverride?.openAiServiceTier ?: globalOpenAiServiceTier,
     )
     val selectedProviderName = viewModel.getProviderForModel(selectedModel)
-    val openAiServiceTierAvailable =
-        isOpenAiProtocolProvider(selectedProviderName, customProviders)
+    val openAiServiceTierAvailable = isOpenAiProtocolProvider(selectedProviderName, customProviders)
     // Web Search and Shell: global switch OFF → always false, regardless of override
     val webSearchEnabled = globalWebSearch && (convOverride?.webSearchEnabled ?: true)
     val shellEnabled = globalShell && (convOverride?.shellEnabled ?: true)
     val contextWindow = ContextBudget.normalize(convOverride?.contextWindow ?: maxContextWindow)
-    val contextUsage = remember(messagesState.value, allMessagesState.value, contextWindow) {
-        contextWindowUsage(
-            expandSelectedToolProtocolRows(messagesState.value, allMessagesState.value),
-            contextWindow,
-        )
-    }
+    val contextProjectionKey = rememberContextProjectionInvalidationKey(viewModel, listOf(codeExecutionEnabled, googleSearchEnabled, webSearchEnabled, shellEnabled, shellDevices, currentConversation?.systemPromptId))
+    val contextProjection = rememberConversationContextProjection(
+        viewModel, currentConversationId, selectedModel, contextWindow,
+        allMessagesState.value,
+        contextProjectionKey,
+    )
+    val contextUsage = contextProjection.usage
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val reduceMotion = motionPolicy.reduceMotion
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
@@ -570,8 +567,9 @@ fun ChatApp(
                                 thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
                                 autoExpandActiveGroup = autoExpandActiveGroup,
                                 detailedTokenUsage = detailedTokenUsage,
-                                maxContextWindow = contextWindow,
+                                contextRetainedMessageIds = contextProjection.retainedMessageIds,
                                 modelAliases = StableModelAliases(modelAliases),
+                                customProviders = customProviders,
                                 bottomBarHeight = bottomBarHeight + shareSelectionBarSpace,
                                 viewportHeight = viewportHeightPx,
                                 messageHeights = messageHeights,
@@ -598,6 +596,9 @@ fun ChatApp(
                                 },
                                 onShare = { id ->
                                     viewModel.shareGeneration(id)
+                                },
+                                onRecompact = { id ->
+                                    viewModel.startContextRecompact(id)
                                 },
                                 onDelete = { id -> viewModel.deleteMessage(id) },
                                 searchQuery = if (conversationSearchActive) {
@@ -902,6 +903,7 @@ fun ChatApp(
                         enabledModels = enabledModels,
                         selectedModel = selectedModel,
                         modelAliases = modelAliases,
+                        customProviders = customProviders,
                         codeExecutionEnabled = codeExecutionEnabled,
                         googleSearchEnabled = googleSearchEnabled,
                         thinkingEnabled = thinkingEnabled,
@@ -962,9 +964,7 @@ fun ChatApp(
                         compactDefaultPrompt = compactPrompt,
                         compactDefaultRetainCount = compactRetainCount,
                         contextEstimatedTokens = contextUsage.estimatedTokenCount,
-                        contextLogicalMessageCount = contextUsage.logicalMessageCount,
                         contextTokenBudget = contextUsage.tokenBudget,
-                        hasCompactBoundary = contextUsage.hasCompactBoundary,
                         canCompact = currentConversationId != null && !isLoading && !isSwitching && !isStopping,
                         onCompactClick = {
                             dialogState.showManualCompact()
@@ -987,13 +987,12 @@ fun ChatApp(
         state = dialogState,
         viewModel = viewModel,
         haptics = haptics,
-        scope = scope,
         compactModel = compactModel,
         selectedModel = selectedModel,
         compactPrompt = compactPrompt,
         compactRetainCount = compactRetainCount,
         enabledModels = enabledModels,
-        modelAliases = modelAliases,
+        modelAliases = modelAliases, customProviders = customProviders,
         isCompacting = isCompacting,
     )
 }

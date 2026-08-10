@@ -306,6 +306,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">Geração</string>
     <string name="context_window">Janela de contexto</string>
+    <string name="context_window_desc">Contexto máximo disponível para uma geração</string>
     <string name="context_window_default">Janela de contexto padrão</string>
     <string name="context_token_budget_value">Cerca de %1$s tokens</string>
     <string name="context_retain">Reter %1$d mensagens recentes</string>
@@ -702,6 +703,9 @@
     <string name="delete_chat">Excluir conversa?</string>
     <string name="delete_chat_confirm">Tem certeza de que deseja excluir esta conversa? Esta ação não pode ser desfeita.</string>
     <string name="delete_message_title">Excluir mensagem?</string>
+    <string name="delete_compact_message_title">Excluir mensagem de compactação?</string>
+    <string name="delete_compact_message_confirm">Somente esta mensagem de compactação será excluída.</string>
+    <string name="recompact">Compactar novamente</string>
     <string name="delete_message_confirm">Esta mensagem e todas as respostas seguintes serão removidas permanentemente.</string>
     <string name="conversation_prompt">Prompt da conversa</string>
     <string name="global_default_format">Padrão global (%1$s)</string>
@@ -1009,7 +1013,9 @@
     <string name="tool_execution_stopped">Execução da ferramenta interrompida</string>
     <string name="tool_exit_code">Saída %1$d</string>
     <string name="tool_exit">Saída</string>
-    <string name="tool_shell_returned_code">Retornou %1$d</string>
+    <string name="tool_shell_returned_code">O comando retornou %1$d</string>
+    <string name="tool_shell_detail_executed">Executado</string>
+    <string name="tool_shell_detail_returned_code">Retornou %1$d</string>
     <string name="tool_shell_returned">Retornou</string>
     <string name="tool_found_no_matches">Nenhuma correspondência encontrada</string>
     <string name="tool_line_count">%1$d linhas</string>
@@ -1058,6 +1064,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">Mensagens preservadas literalmente após cada compactação</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>
@@ -1068,7 +1075,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s tokens · %3$d mensagens lógicas</string>
+    <string name="context_usage_messages">~%1$s / %2$s tokens</string>
     <string name="context_boundary_active">Limite de compactação ativo</string>
     <string name="context_boundary_none">Sem limite de compactação</string>
 </resources>

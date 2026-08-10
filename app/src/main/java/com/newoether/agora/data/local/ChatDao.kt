@@ -28,16 +28,13 @@ private fun encodeSelectionMap(selections: Map<String?, String>): String =
     Json.encodeToString(selections.mapKeys { it.key ?: "null" })
 
 @Dao
-interface ChatDao : ChatAutomationDao {
+interface ChatDao : ChatAutomationDao, ChatContextCompactDao {
     // Task executions always remain in their owning Task's History.
     @Query("SELECT * FROM conversations WHERE taskId IS NULL ORDER BY lastUpdated DESC")
     fun getAllConversations(): Flow<List<ChatEntity>>
 
     @Query("SELECT * FROM conversations WHERE taskId = :taskId ORDER BY lastUpdated DESC")
     fun getExecutionsForTask(taskId: String): Flow<List<ChatEntity>>
-
-    @Query("SELECT * FROM conversations WHERE id = :conversationId")
-    suspend fun getConversation(conversationId: String): ChatEntity?
 
     @Query("SELECT * FROM conversations WHERE id = :conversationId")
     fun observeConversation(conversationId: String): Flow<ChatEntity?>
@@ -204,21 +201,9 @@ interface ChatDao : ChatAutomationDao {
     @Upsert
     suspend fun upsertMessage(message: MessageEntity)
 
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insertMessage(message: MessageEntity)
-
-    @Query("SELECT * FROM messages WHERE id = :messageId")
-    suspend fun getMessage(messageId: String): MessageEntity?
-
     // Runs
-    @Insert(onConflict = OnConflictStrategy.ABORT)
-    suspend fun insertRun(run: RunEntity)
-
     @Upsert
     suspend fun upsertRun(run: RunEntity)
-
-    @Query("SELECT * FROM runs WHERE id = :runId")
-    suspend fun getRun(runId: String): RunEntity?
 
     @Query("SELECT * FROM runs WHERE conversationId = :conversationId ORDER BY startedAt, id")
     fun getRunsForConversation(conversationId: String): Flow<List<RunEntity>>
@@ -226,28 +211,21 @@ interface ChatDao : ChatAutomationDao {
     @Query("SELECT * FROM runs WHERE conversationId = :conversationId ORDER BY startedAt, id")
     suspend fun getRunsForConversationSnapshot(conversationId: String): List<RunEntity>
 
-    @Query("SELECT * FROM messages WHERE runId IN (:runIds) ORDER BY runSequence, timestamp, id")
-    suspend fun getMessagesForRuns(runIds: List<String>): List<MessageEntity>
-
-    @Query("DELETE FROM runs WHERE id = :runId")
-    suspend fun deleteRun(runId: String): Int
-
-    @Query("DELETE FROM embeddings WHERE messageId IN (:messageIds)")
-    suspend fun deleteEmbeddingsByMessageIds(messageIds: List<String>)
-
     @Query(
         """
         UPDATE conversations
         SET selectedBranchesJson = :selectedBranchesJson,
             selectedRunBranchesJson = :selectedRunBranchesJson,
+            modelId = :modelId,
             lastUpdated = :at
         WHERE id = :conversationId
         """
     )
-    suspend fun updateSelectionsForRunDeletion(
+    suspend fun updateConversationForRunAdmission(
         conversationId: String,
         selectedBranchesJson: String,
         selectedRunBranchesJson: String,
+        modelId: String,
         at: Long,
     ): Int
 
@@ -294,27 +272,18 @@ interface ChatDao : ChatAutomationDao {
         return true
     }
 
-    @Query(
-        "SELECT * FROM runs WHERE conversationId = :conversationId AND activeSlot = 1 LIMIT 1"
-    )
-    suspend fun getLiveRun(conversationId: String): RunEntity?
-
-    @Query("SELECT COALESCE(MAX(runSequence), -1) + 1 FROM messages WHERE runId = :runId")
-    suspend fun nextRunSequence(runId: String): Long
-
-    @Query("UPDATE runs SET lastCheckpointAt = :at WHERE id = :runId")
-    suspend fun touchRun(runId: String, at: Long): Int
-
     @Transaction
     suspend fun createRunWithMessages(
         run: RunEntity,
         messages: List<MessageEntity>,
         messageSelectionUpdates: Map<String?, String>,
+        conversationModelId: String,
         at: Long,
     ): RunGraphCommit {
         require(run.status == RunStatus.ACTIVE)
         require(run.activeSlot == 1)
         require(messages.isNotEmpty())
+        require(conversationModelId.isNotBlank())
         require(messages.all { it.runId == run.id })
         require(messages.map { it.runSequence } == messages.indices.map { it.toLong() })
         val conversation = checkNotNull(getConversation(run.conversationId)) {
@@ -337,10 +306,11 @@ interface ChatDao : ChatAutomationDao {
             put(run.parentRunId, run.id)
         }
         check(
-            updateSelectionsForRunDeletion(
+            updateConversationForRunAdmission(
                 conversationId = run.conversationId,
                 selectedBranchesJson = encodeSelectionMap(messageSelections),
                 selectedRunBranchesJson = encodeSelectionMap(runSelections),
+                modelId = conversationModelId,
                 at = at,
             ) == 1
         ) { "Conversation ${run.conversationId} disappeared during Run creation" }
@@ -357,14 +327,22 @@ interface ChatDao : ChatAutomationDao {
         run: RunEntity,
         messages: List<MessageEntity>,
         messageSelectionUpdates: Map<String?, String>,
+        conversationModelId: String,
         at: Long,
     ): RunGraphCommit {
         require(conversation.id == run.conversationId)
         check(getConversation(conversation.id) == null) {
             "Conversation ${conversation.id} already exists"
         }
-        upsertConversation(conversation)
-        return createRunWithMessages(run, messages, messageSelectionUpdates, at)
+        require(conversationModelId.isNotBlank())
+        upsertConversation(conversation.copy(modelId = conversationModelId))
+        return createRunWithMessages(
+            run,
+            messages,
+            messageSelectionUpdates,
+            conversationModelId,
+            at,
+        )
     }
 
     @Transaction
@@ -633,96 +611,8 @@ interface ChatDao : ChatAutomationDao {
     @Query("DELETE FROM messages WHERE conversationId = :conversationId")
     suspend fun deleteMessagesByConversation(conversationId: String)
 
-    @Query("DELETE FROM messages WHERE id IN (:ids)")
-    suspend fun deleteMessagesByIds(ids: List<String>)
-    @Query("UPDATE messages SET parentId = :replacementParentId WHERE parentId = :removedMessageId")
-    suspend fun reparentMessageChildren(removedMessageId: String, replacementParentId: String?): Int
-
-    @Query("UPDATE runs SET parentRunId = :replacementParentRunId WHERE parentRunId = :removedRunId")
-    suspend fun reparentRunChildren(removedRunId: String, replacementParentRunId: String?): Int
-
     @Query("UPDATE runs SET parentRunId = :newParentRunId WHERE id = :runId")
     suspend fun updateRunParent(runId: String, newParentRunId: String?): Int
-
-    @Query("UPDATE messages SET parentId = :newParentId WHERE id = :messageId")
-    suspend fun updateMessageParent(messageId: String, newParentId: String?): Int
-
-    @Transaction
-    suspend fun insertContextCompactBeforeSuffix(
-        run: RunEntity,
-        message: MessageEntity,
-        suffixRootId: String?,
-        selectedBranchesJson: String,
-        at: Long,
-    ) {
-        val conversation = checkNotNull(getConversation(message.conversationId)) {
-            "Conversation ${message.conversationId} disappeared during Compact insertion"
-        }
-        val suffixRun = suffixRootId?.let { getMessage(it) }?.let { getRun(it.runId) }
-        insertRun(run)
-        insertMessage(message)
-        if (suffixRootId != null) check(updateMessageParent(suffixRootId, message.id) == 1)
-        val runSelections = decodeSelectionMap(conversation.selectedRunBranchesJson).apply {
-            put(run.parentRunId, run.id)
-            if (suffixRun != null && suffixRun.id != run.parentRunId) {
-                check(suffixRun.parentRunId == run.parentRunId) {
-                    "Compact suffix Run ${suffixRun.id} is not a child of ${run.parentRunId}"
-                }
-                check(updateRunParent(suffixRun.id, run.id) == 1)
-                put(run.id, suffixRun.id)
-            }
-        }
-        check(
-            updateSelectionsForRunDeletion(
-                conversationId = message.conversationId,
-                selectedBranchesJson = selectedBranchesJson,
-                selectedRunBranchesJson = encodeSelectionMap(runSelections),
-                at = at,
-            ) == 1
-        )
-    }
-
-    @Transaction
-    suspend fun removeContextCompact(messageId: String): Boolean {
-        val message = getMessage(messageId) ?: return false
-        require(message.id.startsWith(com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX))
-        val conversation = getConversation(message.conversationId) ?: return false
-        val compactRun = getRun(message.runId) ?: return false
-        reparentMessageChildren(message.id, message.parentId)
-        deleteMessagesByIds(listOf(message.id))
-        val selections = decodeSelectionMap(conversation.selectedBranchesJson)
-        val selectedCompact = selections[message.parentId] == message.id
-        // The selected suffix child is already encoded in the normal branch-selection map. Capture
-        // it before removing the compact key; choosing the newest reparented sibling would silently
-        // switch branches when another child of the prefix has a later timestamp.
-        val selectedSuffixChildId = selections[message.id]
-        selections.remove(message.id)
-        if (selectedCompact) {
-            if (selectedSuffixChildId == null) selections.remove(message.parentId)
-            else selections[message.parentId] = selectedSuffixChildId
-        }
-        val runSelections = decodeSelectionMap(conversation.selectedRunBranchesJson)
-        val selectedCompactRun = runSelections[compactRun.parentRunId] == compactRun.id
-        val selectedCompactRunChild = runSelections.remove(compactRun.id)
-        if (selectedCompactRun) {
-            if (selectedCompactRunChild == null) runSelections.remove(compactRun.parentRunId)
-            else runSelections[compactRun.parentRunId] = selectedCompactRunChild
-        }
-        check(
-            updateSelectionsForRunDeletion(
-                conversationId = message.conversationId,
-                selectedBranchesJson = encodeSelectionMap(selections),
-                selectedRunBranchesJson = encodeSelectionMap(runSelections),
-                at = System.currentTimeMillis(),
-            ) == 1
-        )
-        // A zero-retention Compact can be the last visible node. Subsequent Runs then reference
-        // its synthetic Run as their parent; deleting it directly would cascade-delete the entire
-        // future conversation. Splice those Run children back to the Compact Run's parent first.
-        reparentRunChildren(compactRun.id, compactRun.parentRunId)
-        check(deleteRun(compactRun.id) == 1)
-        return true
-    }
 
     @Query("DELETE FROM embeddings WHERE messageId IN (SELECT id FROM messages WHERE conversationId = :conversationId)")
     suspend fun deleteEmbeddingsByConversation(conversationId: String)
@@ -831,6 +721,20 @@ interface ChatDao : ChatAutomationDao {
     @Query("SELECT * FROM conversations")
     suspend fun getAllConversationsList(): List<ChatEntity>
 
+    /** Repairs derived Run-selection metadata without making the conversation look newly edited. */
+    @Query(
+        """
+        UPDATE conversations
+        SET selectedRunBranchesJson = :replacement
+        WHERE id = :conversationId AND selectedRunBranchesJson = :expected
+        """
+    )
+    suspend fun compareAndSetRunBranchSelections(
+        conversationId: String,
+        expected: String,
+        replacement: String,
+    ): Int
+
     @Query("SELECT id FROM conversations")
     suspend fun getAllConversationIds(): List<String>
 
@@ -918,10 +822,22 @@ interface ChatDao : ChatAutomationDao {
         """
         UPDATE conversations
         SET modelId = :newProvider || substr(modelId, length(:oldProvider) + 1)
-        WHERE modelId LIKE :oldProvider || ':%'
+        WHERE substr(modelId, 1, length(:oldProvider) + 1) = :oldProvider || ':'
         """
     )
     suspend fun renameConversationProviderModelReferences(
+        oldProvider: String,
+        newProvider: String,
+    ): Int
+
+    @Query(
+        """
+        UPDATE messages
+        SET modelName = :newProvider || substr(modelName, length(:oldProvider) + 1)
+        WHERE substr(modelName, 1, length(:oldProvider) + 1) = :oldProvider || ':'
+        """
+    )
+    suspend fun renameMessageProviderModelReferences(
         oldProvider: String,
         newProvider: String,
     ): Int
@@ -930,5 +846,6 @@ interface ChatDao : ChatAutomationDao {
     suspend fun renameConfiguredProviderModelReferences(oldProvider: String, newProvider: String) {
         renameConversationProviderModelReferences(oldProvider, newProvider)
         renameTaskProviderModelReferences(oldProvider, newProvider)
+        renameMessageProviderModelReferences(oldProvider, newProvider)
     }
 }

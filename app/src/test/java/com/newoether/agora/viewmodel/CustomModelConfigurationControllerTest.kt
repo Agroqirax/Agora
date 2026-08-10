@@ -72,12 +72,33 @@ class CustomModelConfigurationControllerTest {
         }
 
     @Test
-    fun `provider rename and model delete preserve registry and durable ordering`() = runTest {
+    fun `custom model replacement uses provider stable identity`() = runTest {
+        val oldModel = "custom-provider-00000000-0000-4000-8000-000000000001:old"
+        val providerId = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val settings = settings(setOf(oldModel))
+        every { settings.stableProviderReference("Relay X") } returns providerId
+        val conversations = mockk<ConversationRepository>()
+        coEvery { conversations.replaceConfiguredModelReferences(any(), any()) } returns Unit
+        val controller = controller(
+            conversations = conversations,
+            settings = settings,
+            onReplaced = { _, _ -> },
+        )
+
+        controller.updateModel(oldModel, "Relay X", "new", "")
+        runCurrent()
+
+        coVerify {
+            settings.replaceCustomModel(oldModel, "$providerId:new", "")
+        }
+    }
+
+    @Test
+    fun `provider rename keeps stable model identity and model delete preserves durable ordering`() = runTest {
         val providers = mockk<ProviderRegistry>()
         val settings = settings(setOf("Custom:model"))
         val conversations = mockk<ConversationRepository>()
         every { providers.renameCustom("Old", " New ") } returns true
-        coEvery { conversations.renameConfiguredProviderModelReferences(any(), any()) } returns Unit
         coEvery { conversations.replaceConfiguredModelReferences(any(), any()) } returns Unit
         val callbacks = mutableListOf<Pair<String, String?>>()
         val controller = controller(
@@ -91,8 +112,8 @@ class CustomModelConfigurationControllerTest {
         controller.deleteModel("Custom:model")
         runCurrent()
 
-        coVerify(exactly = 1) {
-            conversations.renameConfiguredProviderModelReferences("Old", "New")
+        coVerify(exactly = 0) {
+            conversations.renameConfiguredProviderModelReferences(any(), any())
         }
         coVerifyOrder {
             settings.replaceCustomModel("Custom:model", null, "")
@@ -118,6 +139,9 @@ class CustomModelConfigurationControllerTest {
     private fun settings(models: Set<String>): SettingsRepository =
         mockk<SettingsRepository>().also { settings ->
             every { settings.customModels } returns MutableStateFlow(models)
+            every { settings.stableProviderReference(any()) } answers {
+                firstArg<String>().trim()
+            }
             coEvery { settings.replaceCustomModel(any(), any(), any()) } just Runs
         }
 }

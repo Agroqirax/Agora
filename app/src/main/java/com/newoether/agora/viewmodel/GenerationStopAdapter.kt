@@ -3,6 +3,7 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.flow.StateFlow
 
@@ -61,7 +62,7 @@ internal class GenerationStopAdapter(
     private fun snapshotVisibleStoppedRows(): List<ChatMessage> = runCatching {
         renderStore.allMessages.mapNotNull { message ->
             if (
-                message.participant == Participant.MODEL &&
+                (message.participant == Participant.MODEL || message.isContextCompact()) &&
                 message.status.isInFlight()
             ) {
                 message.copy(status = MessageStatus.STOPPED).also { stopped ->

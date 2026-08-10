@@ -74,6 +74,7 @@ class GenerationStreamingSegmentsTest {
             thoughtSignature = null,
             thoughtSignatureProvider = null,
             thoughtDurationMs = null,
+            errorMessage = null,
             runId = "run",
             runSequence = 3L,
         )
@@ -84,5 +85,43 @@ class GenerationStreamingSegmentsTest {
         assertEquals("firstsecond", message.segments?.single()?.content)
         assertEquals("run", message.runId)
         assertEquals(3L, message.runSequence)
+    }
+
+    @Test
+    fun `failed snapshot keeps generated answer separate from terminal error`() {
+        val snapshot = GenerationFinalSnapshot(
+            messageId = "model",
+            parentId = "user",
+            text = "Useful partial answer",
+            images = emptyList(),
+            thoughts = "",
+            thoughtTitle = null,
+            tokenCount = 0,
+            tokenUsage = null,
+            status = MessageStatus.ERROR,
+            timestamp = 10L,
+            thoughtTimeMs = null,
+            modelName = "model-name",
+            flushedSegments = listOf(
+                MessageSegment(type = "answer", content = "Useful partial answer"),
+            ),
+            answerBuffer = "",
+            thoughtBuffer = "",
+            thoughtSignature = null,
+            thoughtSignatureProvider = null,
+            thoughtDurationMs = null,
+            errorMessage = "Connection closed before a valid terminator",
+            runId = "run",
+            runSequence = 1L,
+        )
+
+        val message = snapshot.toMessage()
+
+        assertEquals("Useful partial answer", message.text)
+        assertEquals(listOf("answer", "error"), message.segments?.map { it.type })
+        assertEquals(
+            "Connection closed before a valid terminator",
+            message.segments?.last()?.content,
+        )
     }
 }

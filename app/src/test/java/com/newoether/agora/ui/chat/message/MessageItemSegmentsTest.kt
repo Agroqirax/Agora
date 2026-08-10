@@ -1,6 +1,9 @@
 package com.newoether.agora.ui.chat.message
 
 import com.newoether.agora.model.MessageSegment
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.Participant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -189,6 +192,46 @@ class MessageItemSegmentsTest {
         assertEquals(
             GroupedSegmentAutoExpansionAction.EXPAND,
             controller.update(key, isActive = true, enabled = true),
+        )
+    }
+
+    @Test
+    fun legacyFailedRowWithAnswerSegmentsDoesNotRenderItsAnswerAsTheErrorDetail() {
+        val message = ChatMessage(
+            text = "Generated answer",
+            status = MessageStatus.ERROR,
+            participant = Participant.MODEL,
+            segments = listOf(MessageSegment(type = "answer", content = "Generated answer")),
+        )
+
+        assertEquals(
+            AssistantErrorContent(
+                answerText = "Generated answer",
+                errorText = "Failed to generate",
+            ),
+            assistantErrorContent(message, message.segments.orEmpty(), "Failed to generate"),
+        )
+    }
+
+    @Test
+    fun explicitTerminalErrorIsIndependentFromGeneratedAnswer() {
+        val segments = listOf(
+            MessageSegment(type = "answer", content = "Generated answer"),
+            MessageSegment(type = "error", content = "Stream ended unexpectedly"),
+        )
+        val message = ChatMessage(
+            text = "Generated answer",
+            status = MessageStatus.ERROR,
+            participant = Participant.MODEL,
+            segments = segments,
+        )
+
+        assertEquals(
+            AssistantErrorContent(
+                answerText = "Generated answer",
+                errorText = "Stream ended unexpectedly",
+            ),
+            assistantErrorContent(message, segments, "Failed to generate"),
         )
     }
 }

@@ -111,6 +111,27 @@ class RegenerationTreeRepairPlannerTest {
         assertEquals("selected-answer", plan.messageSelections["user"])
     }
 
+    @Test
+    fun originalOutputSelection_doesNotCreateRunSelfEdge() {
+        val plan = RegenerationTreeRepairPlanner.plan(
+            runs = listOf(
+                run("source", parentRunId = null, startedAt = 1),
+                run("regeneration", parentRunId = null, startedAt = 3),
+            ),
+            messages = listOf(
+                message("user", null, Participant.USER, "source", 0, 1, "same"),
+                message("answer", "user", Participant.MODEL, "source", 1, 2),
+                message("clone", null, Participant.USER, "regeneration", 0, 3, "same"),
+                message("new-answer", "clone", Participant.MODEL, "regeneration", 1, 4),
+            ),
+            messageSelections = mapOf(null to "user", "user" to "answer"),
+            runSelections = mapOf(null to "source"),
+        )
+
+        assertFalse("source" in plan.runSelections)
+        assertEquals("source", plan.runSelections[null])
+    }
+
     private fun run(id: String, parentRunId: String?, startedAt: Long) =
         V17RunRecord(id, parentRunId, startedAt)
 

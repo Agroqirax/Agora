@@ -38,7 +38,6 @@ internal class QueuedGuidanceDrainExecutor(
     private val settings: SettingsRepository,
     private val requestBuilder: GenerationRequestBuilder,
     private val executionCoordinator: ConversationExecutionCoordinator,
-    private val compactController: ConversationCompactController,
     private val terminalSettlement: GenerationTerminalSettlementController,
     private val boundRunGenerationLauncher: BoundRunGenerationLauncher,
     private val toUiMessage: (MessageEntity) -> ChatMessage,
@@ -119,7 +118,7 @@ internal class QueuedGuidanceDrainExecutor(
         val uiToken = claim.uiToken
         val runId = claim.inputEffect.identity.runId
         val modelId = batch.last().modelId
-        val (providerName, activeKey) = requestBuilder.resolveProviderKey(modelId) ?: run {
+        requestBuilder.resolveProviderKey(modelId) ?: run {
             state.settleGuidanceClaim(claim.lease.id, durable = false)
             state.deferNextQueueDrain()
             state.scope.launch {
@@ -147,6 +146,11 @@ internal class QueuedGuidanceDrainExecutor(
                 val queued = mergeQueuedGuidance(batch)
                 val persistId = state.nextPersistId()
                 executionCoordinator.withConversationLock(conversationId) {
+                    val generationSnapshot = requestBuilder.captureAdmissionSnapshot(
+                        conversationId = conversationId,
+                        runId = runId,
+                        modelId = modelId,
+                    )
                     val snapshot = conversations.getMessagesForConversationSnapshot(conversationId)
                     val selections = conversations.restoreBranchSelections(conversationId)
                     val path = ConversationUiState.resolvePath(
@@ -184,7 +188,7 @@ internal class QueuedGuidanceDrainExecutor(
                         status = MessageStatus.SENDING,
                         participant = Participant.MODEL,
                         timestamp = start + users.size,
-                        modelName = modelId,
+                        modelName = generationSnapshot.selectedModelId,
                         runId = runId,
                         runSequence = users.size.toLong(),
                     )
@@ -204,6 +208,7 @@ internal class QueuedGuidanceDrainExecutor(
                         ),
                         messages = users + placeholderEntity,
                         messageSelectionUpdates = selectionUpdates,
+                        conversationModelId = generationSnapshot.selectedModelId,
                     )
                     val committedUsers = graphCommit.messages.dropLast(1)
                     val committedPlaceholder = graphCommit.messages.last()
@@ -256,24 +261,12 @@ internal class QueuedGuidanceDrainExecutor(
                             placeholder,
                         )
                     }
-                    compactController.automaticBeforeBoundary(
-                        conversationId = conversationId,
-                        fallbackModel = modelId,
-                        contextLimit = requestBuilder
-                            .buildEffectiveConversationSettings(conversationId)
-                            .contextWindow ?: settings.maxContextWindow.value,
-                        state = state,
-                    )
                     boundRunGenerationLauncher.launch(
                         BoundRunGenerationRequest(
                             conversationId = conversationId,
                             modelMessageId = modelMessageId,
                             startTime = committedPlaceholder.timestamp,
-                            isRegenerate = false,
-                            replaceMessageId = null,
-                            providerName = providerName,
-                            modelId = modelId,
-                            activeKey = activeKey,
+                            snapshot = generationSnapshot,
                             uiToken = uiToken,
                             persistId = persistId,
                             runId = runId,

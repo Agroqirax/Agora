@@ -86,6 +86,7 @@ internal fun buildLiveSegments(
     signature: String? = null,
     signatureProvider: String? = null,
     thoughtDurationMs: Long? = null,
+    errorMessage: String? = null,
 ): List<MessageSegment>? {
     val result = flushed.toMutableList()
     if (answer.isNotEmpty()) {
@@ -102,6 +103,9 @@ internal fun buildLiveSegments(
                 durationMs = thoughtDurationMs,
             ),
         )
+    }
+    errorMessage?.takeIf { it.isNotBlank() }?.let { error ->
+        result.add(MessageSegment(type = "error", content = error))
     }
     return result.ifEmpty { null }
 }
@@ -125,6 +129,7 @@ internal data class GenerationFinalSnapshot(
     val thoughtSignature: String?,
     val thoughtSignatureProvider: String?,
     val thoughtDurationMs: Long?,
+    val errorMessage: String?,
     val runId: String,
     val runSequence: Long,
 )
@@ -150,6 +155,7 @@ internal fun GenerationFinalSnapshot.toMessage(): ChatMessage = ChatMessage(
         thoughtSignature,
         thoughtSignatureProvider,
         thoughtDurationMs,
+        errorMessage,
     ) ?: flushedSegments.ifEmpty { null },
     runId = runId,
     runSequence = runSequence,

@@ -158,7 +158,6 @@ class ConversationRuntimeTrace(
         is RunEffect.AcceptGuidance -> "AcceptGuidance"
         is RunEffect.DrainGuidanceFirst -> "DrainGuidanceFirst"
         is RunEffect.AwaitRunRelease -> "AwaitRunRelease"
-        is RunEffect.AwaitCompactSettlement -> "AwaitCompactSettlement"
         is RunEffect.RejectSendBusy -> "RejectSendBusy"
         is RunEffect.StartProviderPass -> "StartProviderPass"
         is RunEffect.ProviderPassAccepted -> "ProviderPassAccepted"

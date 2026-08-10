@@ -309,6 +309,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">Tạo nội dung</string>
     <string name="context_window">Cửa sổ ngữ cảnh</string>
+    <string name="context_window_desc">Ngữ cảnh tối đa khả dụng cho một lần tạo</string>
     <string name="context_window_default">Cửa sổ ngữ cảnh mặc định</string>
     <string name="context_token_budget_value">Ước tính %1$s token</string>
     <string name="context_retain">Giữ lại %1$d tin nhắn gần đây</string>
@@ -705,6 +706,9 @@
     <string name="delete_chat">Xóa cuộc trò chuyện?</string>
     <string name="delete_chat_confirm">Bạn có chắc chắn muốn xóa cuộc trò chuyện này? Hành động này không thể hoàn tác.</string>
     <string name="delete_message_title">Xóa tin nhắn?</string>
+    <string name="delete_compact_message_title">Xóa tin nhắn thu gọn?</string>
+    <string name="delete_compact_message_confirm">Chỉ tin nhắn thu gọn này sẽ bị xóa.</string>
+    <string name="recompact">Thu gọn lại</string>
     <string name="delete_message_confirm">Tin nhắn này và tất cả các phản hồi tiếp theo sẽ bị xóa vĩnh viễn.</string>
     <string name="conversation_prompt">Gợi ý cuộc trò chuyện</string>
     <string name="global_default_format">Mặc định toàn cục (%1$s)</string>
@@ -1015,7 +1019,9 @@
     <string name="tool_execution_stopped">Đã dừng thực thi công cụ</string>
     <string name="tool_exit_code">Thoát %1$d</string>
     <string name="tool_exit">Thoát</string>
-    <string name="tool_shell_returned_code">Trả về %1$d</string>
+    <string name="tool_shell_returned_code">Lệnh trả về %1$d</string>
+    <string name="tool_shell_detail_executed">Đã thực thi</string>
+    <string name="tool_shell_detail_returned_code">Trả về %1$d</string>
     <string name="tool_shell_returned">Trả về</string>
     <string name="tool_found_no_matches">Không tìm thấy kết quả phù hợp</string>
     <string name="tool_line_count">%1$d dòng</string>
@@ -1064,6 +1070,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">Tin nhắn được giữ nguyên văn sau mỗi lần thu gọn</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>
@@ -1074,7 +1081,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s token · %3$d tin nhắn logic</string>
+    <string name="context_usage_messages">~%1$s / %2$s token</string>
     <string name="context_boundary_active">Ranh giới thu gọn đang hoạt động</string>
     <string name="context_boundary_none">Không có ranh giới thu gọn</string>
 </resources>

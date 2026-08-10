@@ -1,20 +1,24 @@
 package com.newoether.agora.ui.chat.message
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -39,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -65,9 +70,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.newoether.agora.ui.components.DialogWindowEdgeToEdge
+import com.newoether.agora.ui.components.CircularBackButton
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.R
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.ui.theme.ChatType
 import com.newoether.agora.util.noOpBringIntoView
 import kotlin.math.abs
@@ -77,6 +84,33 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+
+internal enum class SegmentSheetBackAction { DISMISS, SHOW_LIST }
+
+internal fun usesVirtualizedSegmentDetail(
+    selectedSegmentCount: Int,
+    segmentType: String,
+    segmentContentIsBlank: Boolean,
+    isStreaming: Boolean,
+    hasFooter: Boolean,
+): Boolean =
+    selectedSegmentCount == 1 &&
+        segmentType != "tool" &&
+        !(segmentType == "transcription" && segmentContentIsBlank) &&
+        !isStreaming &&
+        !hasFooter
+
+internal fun segmentSheetBackAction(
+    handleBackInternally: Boolean,
+    showSegmentListFirst: Boolean,
+    detailPageIndex: Int,
+): SegmentSheetBackAction = if (
+    handleBackInternally && showSegmentListFirst && detailPageIndex >= 0
+) {
+    SegmentSheetBackAction.SHOW_LIST
+} else {
+    SegmentSheetBackAction.DISMISS
+}
 
 // Segment detail bottom sheet (custom implementation).
 //
@@ -95,32 +129,57 @@ internal fun SegmentDetailSheet(
     titleOverride: String? = null,
     detailFooter: (@Composable () -> Unit)? = null,
     handleBackInternally: Boolean = false,
+    showSegmentListFirst: Boolean = false,
     onDismiss: () -> Unit
 ) {
     val liveSegs = remember(message.segments) {
         mergeAdjacentSegments(message.segments.orEmpty()).filter { it.type != "answer" }
     }
-    val selectedSegs = remember(liveSegs, selectedSegmentIndices, selectedSegmentIndex) {
-        selectedSegmentIndices.mapNotNull { liveSegs.getOrNull(it) }
-            .ifEmpty { liveSegs.getOrNull(selectedSegmentIndex)?.let { listOf(it) }.orEmpty() }
+    val selectedEntries = remember(liveSegs, selectedSegmentIndices, selectedSegmentIndex) {
+        selectedSegmentIndices.mapNotNull { index ->
+            liveSegs.getOrNull(index)?.let { index to it }
+        }.ifEmpty {
+            liveSegs.getOrNull(selectedSegmentIndex)
+                ?.let { listOf(selectedSegmentIndex to it) }
+                .orEmpty()
+        }
     }
-    val seg = selectedSegs.firstOrNull()
-    if (seg == null) {
-        onDismiss()
+    val firstSelectedSegment = selectedEntries.firstOrNull()?.second
+    if (firstSelectedSegment == null) {
+        LaunchedEffect(message.id, selectedSegmentIndices, selectedSegmentIndex) {
+            onDismiss()
+        }
     } else {
+        var detailPageIndex by remember(message.id, selectedSegmentIndices, showSegmentListFirst) {
+            mutableIntStateOf(if (showSegmentListFirst) -1 else 0)
+        }
+        var lastDetailPageIndex by remember(message.id, selectedSegmentIndices) {
+            mutableIntStateOf(0)
+        }
+        val showSegmentListPage = showSegmentListFirst && detailPageIndex < 0
+        val renderedEntries = if (showSegmentListFirst) {
+            listOfNotNull(selectedEntries.getOrNull(lastDetailPageIndex))
+        } else {
+            selectedEntries
+        }
+        val selectedSegs = renderedEntries.map { it.second }
+        val seg = selectedSegs.first()
+        val selectedLiveIndex = renderedEntries.first().first
         val motionPolicy = LocalAgoraMotionPolicy.current
         val density = LocalDensity.current
         val screenHeightPx =
             LocalWindowInfo.current.containerSize.height.toFloat().coerceAtLeast(1f)
         val coroutineScope = rememberCoroutineScope()
         val scrollState = rememberScrollState()
+        val segmentListScrollState = rememberScrollState()
         val lazyDetailListState = rememberLazyListState()
-        val usesVirtualizedSingleMarkdown =
-            selectedSegs.size == 1 &&
-                seg.type != "tool" &&
-                !(seg.type == "transcription" && seg.content.isBlank()) &&
-                !isStreaming &&
-                detailFooter == null
+        val usesVirtualizedSingleMarkdown = usesVirtualizedSegmentDetail(
+            selectedSegmentCount = selectedSegs.size,
+            segmentType = seg.type,
+            segmentContentIsBlank = seg.content.isBlank(),
+            isStreaming = isStreaming,
+            hasFooter = detailFooter != null,
+        )
 
         val PARTIAL = 0.45f
         val FULL = 0.94f
@@ -171,7 +230,12 @@ internal fun SegmentDetailSheet(
 
         fun dismiss() { dismissing = true; animateTo(0f) }
 
-        BackHandler(enabled = handleBackInternally && !dismissing) { dismiss() }
+        LaunchedEffect(detailPageIndex) {
+            if (detailPageIndex >= 0) {
+                scrollState.scrollTo(0)
+                lazyDetailListState.scrollToItem(0)
+            }
+        }
 
         // ── Grab: interrupt animation, sync raw to current visual position ──
         fun grabSheet() {
@@ -224,7 +288,10 @@ internal fun SegmentDetailSheet(
         // Half: content does NOT scroll — all delta goes to sheet expansion.
         // Full: content scrolls normally. Exit Full ONLY when content at top
         //       and finger still dragging down (source == Drag).
-        val sheetScrollConnection = remember(usesVirtualizedSingleMarkdown) {
+        val sheetScrollConnection = remember(
+            usesVirtualizedSingleMarkdown,
+            showSegmentListPage,
+        ) {
             object : NestedScrollConnection {
                 override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                     if (!dismissing && phase != PHASE_FULL) {
@@ -245,7 +312,9 @@ internal fun SegmentDetailSheet(
                     // Exit Full → Half: content at top + finger dragging down
                     if (phase == PHASE_FULL
                         && available.y > 0f
-                        && if (usesVirtualizedSingleMarkdown) {
+                        && if (showSegmentListPage) {
+                            segmentListScrollState.value == 0
+                        } else if (usesVirtualizedSingleMarkdown) {
                             lazyDetailListState.firstVisibleItemIndex == 0 &&
                                 lazyDetailListState.firstVisibleItemScrollOffset == 0
                         } else {
@@ -274,10 +343,23 @@ internal fun SegmentDetailSheet(
         }
 
         Dialog(
-            onDismissRequest = { dismiss() },
+            onDismissRequest = {
+                if (!dismissing) {
+                    when (
+                        segmentSheetBackAction(
+                            handleBackInternally = handleBackInternally,
+                            showSegmentListFirst = showSegmentListFirst,
+                            detailPageIndex = detailPageIndex,
+                        )
+                    ) {
+                        SegmentSheetBackAction.SHOW_LIST -> detailPageIndex = -1
+                        SegmentSheetBackAction.DISMISS -> dismiss()
+                    }
+                }
+            },
             properties = DialogProperties(
                 usePlatformDefaultWidth = false,
-                dismissOnBackPress = !handleBackInternally,
+                dismissOnBackPress = true,
                 dismissOnClickOutside = false,
                 decorFitsSystemWindows = false
             )
@@ -365,24 +447,55 @@ internal fun SegmentDetailSheet(
                                 )
                             }
 
-                            // Fixed title
-                            Text(
-                                text = titleOverride ?: if (selectedSegs.size > 1) compactSegmentTitle(selectedSegs, message, useLiveStatus = false)
-                                    else if (seg.type == "tool") toolDisplayName(seg)
-                                    else if (seg.type == "transcription") transcriptionLabel(liveSegs, selectedSegmentIndex)
-                                    else stringResource(R.string.tool_thinking),
-                                style = ChatType.detailTitle,
-                                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-                            )
+                            val sheetTitle = when {
+                                titleOverride != null -> titleOverride
+                                showSegmentListPage ->
+                                    stringResource(R.string.thinking_segments_title)
+                                selectedSegs.size > 1 ->
+                                    compactSegmentTitle(
+                                        selectedSegs,
+                                        message,
+                                        useLiveStatus = false,
+                                    )
+                                seg.type == "tool" -> toolDisplayName(seg)
+                                seg.type == "transcription" ->
+                                    transcriptionLabel(liveSegs, selectedLiveIndex)
+                                else -> stringResource(R.string.tool_thinking)
+                            }
+                            if (showSegmentListFirst && !showSegmentListPage) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 24.dp, top = 4.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    CircularBackButton(
+                                        onClick = { detailPageIndex = -1 },
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = sheetTitle,
+                                        style = ChatType.detailTitle,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = sheetTitle,
+                                    style = ChatType.detailTitle,
+                                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                                )
+                            }
                             HorizontalDivider(
                                 modifier = Modifier.padding(horizontal = 24.dp),
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                             )
                         }
 
+                        val detailPageContent: @Composable () -> Unit = {
                         if (usesVirtualizedSingleMarkdown) {
                             DetailContentReveal(
-                                revealKey = "${message.id}:$selectedSegmentIndex",
+                                revealKey = "${message.id}:$selectedLiveIndex",
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .nestedScroll(sheetScrollConnection)
@@ -420,7 +533,7 @@ internal fun SegmentDetailSheet(
                             ) {
                                 if (selectedSegs.size > 1) {
                                     selectedSegs.forEachIndexed { index, detailSeg ->
-                                        val detailIndex = selectedSegmentIndices.getOrNull(index)
+                                        val detailIndex = renderedEntries.getOrNull(index)?.first
                                             ?: liveSegs.indexOf(detailSeg).coerceAtLeast(0)
                                         Text(
                                             segmentDetailTitle(detailSeg, liveSegs, detailIndex),
@@ -481,7 +594,7 @@ internal fun SegmentDetailSheet(
                                     )
                                 } else {
                                     StreamingDetailMarkdownReveal(
-                                        revealKey = "${message.id}:$selectedSegmentIndex",
+                                        revealKey = "${message.id}:$selectedLiveIndex",
                                         content = seg.content,
                                         isStreaming = isStreaming,
                                         renderContext = markdownRenderContext,
@@ -490,11 +603,96 @@ internal fun SegmentDetailSheet(
                                 detailFooter?.invoke()
                             }
                         }
+                        }
+                        if (showSegmentListFirst) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                SegmentSheetAnimatedPage(
+                                    visible = showSegmentListPage,
+                                    leadingPage = true,
+                                ) {
+                                    ThinkingSegmentListContent(
+                                        message = message,
+                                        segments = selectedEntries.map { it.second },
+                                        segmentIndices = selectedEntries.map { it.first },
+                                        isStreaming = isStreaming,
+                                        scrollState = segmentListScrollState,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .nestedScroll(sheetScrollConnection)
+                                            .navigationBarsPadding(),
+                                        onSegmentSelected = { liveIndex ->
+                                            val targetIndex = selectedEntries.indexOfFirst {
+                                                it.first == liveIndex
+                                            }
+                                            if (targetIndex >= 0) {
+                                                lastDetailPageIndex = targetIndex
+                                                detailPageIndex = targetIndex
+                                            }
+                                        },
+                                    )
+                                }
+                                SegmentSheetAnimatedPage(
+                                    visible = !showSegmentListPage,
+                                    leadingPage = false,
+                                ) {
+                                    detailPageContent()
+                                }
+                            }
+                        } else {
+                            detailPageContent()
+                        }
                     }
                 }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SegmentSheetAnimatedPage(
+    visible: Boolean,
+    leadingPage: Boolean,
+    content: @Composable () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally { width -> if (leadingPage) -width else width } + fadeIn(),
+        exit = slideOutHorizontally { width -> if (leadingPage) -width / 3 else width } + fadeOut(),
+        content = { content() },
+    )
+}
+
+@Composable
+private fun ThinkingSegmentListContent(
+    message: ChatMessage,
+    segments: List<MessageSegment>,
+    segmentIndices: List<Int>,
+    isStreaming: Boolean,
+    scrollState: ScrollState,
+    modifier: Modifier = Modifier,
+    onSegmentSelected: (Int) -> Unit,
+) {
+    val appearanceRegistry = remember(message.id) { SegmentAppearanceRegistry() }
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    ) {
+        segments.forEachIndexed { index, segment ->
+            val liveIndex = segmentIndices.getOrElse(index) { index }
+            TimelineInfoSegmentCard(
+                seg = segment,
+                detailSegments = segments,
+                detailIndex = index,
+                isStreamingContent = isStreaming && index == segments.lastIndex,
+                animateAppearance = false,
+                cardAnimationKey = "${message.id}:sheet-list:$liveIndex",
+                segmentAppearanceRegistry = appearanceRegistry,
+                onClick = { onSegmentSelected(liveIndex) },
+            )
+        }
+        Spacer(modifier = Modifier.navigationBarsPadding().height(24.dp))
     }
 }
 

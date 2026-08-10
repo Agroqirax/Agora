@@ -4,6 +4,8 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.Participant
+import com.newoether.agora.model.isSuccessfulContextCompact
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.util.Constants
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -25,12 +27,23 @@ import java.security.MessageDigest
  * Its position is the only boundary metadata: deleting it naturally reveals the previous compact.
  */
 fun applyNearestContextCompact(messages: List<ChatMessage>): List<ChatMessage> {
-    val index = messages.indexOfLast { it.id.startsWith(Constants.COMPACT_MSG_PREFIX) }
-    if (index < 0) return messages
-    val compact = messages[index]
-    return buildList(messages.size - index) {
+    // A failed, stopped, or in-flight Compact is durable UI history, but it never summarizes
+    // anything and therefore has no Provider-context meaning. Keeping it in the wire history can
+    // also leave a generation request ending in an assistant row after automatic fallback.
+    val hasNonSuccessfulCompact = messages.any {
+        it.isContextCompact() && !it.isSuccessfulContextCompact()
+    }
+    val providerVisible = if (hasNonSuccessfulCompact) {
+        messages.filterNot { it.isContextCompact() && !it.isSuccessfulContextCompact() }
+    } else {
+        messages
+    }
+    val index = providerVisible.indexOfLast(ChatMessage::isSuccessfulContextCompact)
+    if (index < 0) return providerVisible
+    val compact = providerVisible[index]
+    return buildList(providerVisible.size - index) {
         add(compact.copy(id = "context_summary_${compact.id}", participant = Participant.USER))
-        addAll(messages.drop(index + 1))
+        addAll(providerVisible.drop(index + 1))
     }
 }
 
@@ -86,6 +99,46 @@ data class LogicalContextSplit(
     val logicalMessageCount: Int,
 )
 
+data class ContextRetentionSplit(
+    val prefix: List<ChatMessage>,
+    val retained: List<ChatMessage>,
+    val retainedMessageCount: Int,
+)
+
+/**
+ * Splits provider-visible context by physical message count for Compact retention.
+ *
+ * A tool request followed by its result rows is one indivisible protocol unit. When the requested
+ * cut lands inside that unit, the complete round is retained. Callers must pass the fail-closed
+ * output of [validateToolMessages], so malformed tool rows have already become ordinary text and
+ * cannot be mistaken for an executable protocol round.
+ */
+fun splitContextForCompactRetention(
+    messages: List<ChatMessage>,
+    retainMessages: Int,
+): ContextRetentionSplit {
+    require(retainMessages >= 0)
+    if (messages.isEmpty()) return ContextRetentionSplit(emptyList(), emptyList(), 0)
+    if (retainMessages == 0) {
+        return ContextRetentionSplit(messages, emptyList(), 0)
+    }
+
+    val units = protocolAtomicUnits(messages)
+    val retainedUnits = ArrayDeque<List<ChatMessage>>()
+    var retainedCount = 0
+    for (unit in units.asReversed()) {
+        if (retainedCount >= retainMessages) break
+        retainedUnits.addFirst(unit)
+        retainedCount += unit.size
+    }
+    val retained = retainedUnits.flatten()
+    return ContextRetentionSplit(
+        prefix = messages.dropLast(retained.size),
+        retained = retained,
+        retainedMessageCount = retained.size,
+    )
+}
+
 /** Splits context using provider role semantics. Tool rows have zero weight and remain atomic. */
 fun splitLogicalContext(messages: List<ChatMessage>, retainLogicalMessages: Int): LogicalContextSplit {
     require(retainLogicalMessages >= 0)
@@ -138,23 +191,35 @@ data class ContextWindowUsage(
             (estimatedTokenCount.toFloat() / tokenBudget).coerceIn(0f, 1f)
 }
 
-fun contextWindowUsage(messages: List<ChatMessage>, tokenBudget: Int): ContextWindowUsage {
+fun contextWindowUsage(
+    messages: List<ChatMessage>,
+    tokenBudget: Int,
+    fixedTokenCost: Int = 0,
+): ContextWindowUsage {
     val safeBudget = tokenBudget.coerceAtLeast(1)
     val canonical = canonicalContextMessages(messages)
     return ContextWindowUsage(
-        estimatedTokenCount = ContextTokenEstimator.estimate(canonical),
+        estimatedTokenCount = (
+            ContextTokenEstimator.estimate(canonical).toLong() +
+                fixedTokenCost.coerceAtLeast(0).toLong()
+            ).coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
         tokenBudget = safeBudget,
         logicalMessageCount = splitLogicalContext(canonical, retainLogicalMessages = 0)
             .logicalMessageCount,
-        hasCompactBoundary = messages.any { it.id.startsWith(Constants.COMPACT_MSG_PREFIX) },
+        hasCompactBoundary = messages.any(ChatMessage::isSuccessfulContextCompact),
     )
 }
 
 /** Original message ids retained by the provider's canonical context window. */
-fun contextWindowRetainedMessageIds(messages: List<ChatMessage>, tokenBudget: Int): Set<String> {
+fun contextWindowRetainedMessageIds(
+    messages: List<ChatMessage>,
+    tokenBudget: Int,
+    fixedTokenCost: Int = 0,
+): Set<String> {
     if (messages.isEmpty()) return emptySet()
     val compacted = applyNearestContextCompact(messages)
-    val retained = limitContext(canonicalContextMessages(messages), tokenBudget.coerceAtLeast(1))
+    val messageBudget = (tokenBudget - fixedTokenCost.coerceAtLeast(0)).coerceAtLeast(1)
+    val retained = limitContext(canonicalContextMessages(messages), messageBudget)
     val firstRetainedId = retained.firstOrNull()?.id ?: return emptySet()
     val sourceAnchorId = firstRetainedId.removePrefix("context_summary_")
     val originalSourceIndex = messages.indexOfFirst { it.id == sourceAnchorId }
@@ -162,7 +227,10 @@ fun contextWindowRetainedMessageIds(messages: List<ChatMessage>, tokenBudget: In
         // A Compact is projected with a synthetic context_summary_ id and may then absorb the first
         // same-role suffix row during canonicalization. Recover the durable boundary in the original
         // graph so rollout visualization retains the Compact and every verbatim suffix message.
-        return messages.drop(originalSourceIndex).mapTo(linkedSetOf(), ChatMessage::id)
+        return messages
+            .drop(originalSourceIndex)
+            .filterNot { it.isContextCompact() && !it.isSuccessfulContextCompact() }
+            .mapTo(linkedSetOf(), ChatMessage::id)
     }
     val sourceIndex = compacted.indexOfFirst { it.id == sourceAnchorId }
     if (sourceIndex < 0) return retained.mapTo(linkedSetOf()) {
@@ -178,6 +246,29 @@ fun prepareMessages(messages: List<ChatMessage>, contextTokenBudget: Int): List<
     return stripEmptyTurns(
         mergeConsecutiveSameRole(limitContext(canonical, contextTokenBudget))
     )
+}
+
+internal fun protocolAtomicUnits(messages: List<ChatMessage>): List<List<ChatMessage>> {
+    val units = mutableListOf<List<ChatMessage>>()
+    var index = 0
+    while (index < messages.size) {
+        val message = messages[index]
+        if (message.id.startsWith(Constants.TOOL_MSG_PREFIX)) {
+            val round = mutableListOf(message)
+            index++
+            while (
+                index < messages.size &&
+                messages[index].id.startsWith(Constants.RESULT_MSG_PREFIX)
+            ) {
+                round += messages[index++]
+            }
+            units += round
+        } else {
+            units += listOf(message)
+            index++
+        }
+    }
+    return units
 }
 
 /**
@@ -227,7 +318,7 @@ fun projectGenerationStatusesForApi(messages: List<ChatMessage>): List<ChatMessa
 }
 
 private fun ChatMessage.isGenerationStatusMessage(): Boolean =
-    !isToolProtocolMessage() &&
+    !isToolProtocolMessage() && !isContextCompact() &&
         (participant == Participant.ERROR ||
             status == MessageStatus.ERROR ||
             status == MessageStatus.STOPPED)

@@ -169,7 +169,11 @@ internal object RegenerationTreeRepairPlanner {
             } else if (repairedMessageSelections[anchorInput.parentId] == anchorInput.id) {
                 rootOutputByRun[anchorRunId]?.let { originalOutput ->
                     repairedMessageSelections[anchorInput.id] = originalOutput.id
-                    repairedRunSelections[anchorRunId] = anchorRunId
+                    // The original output remains selected inside anchorRunId itself. There is no
+                    // child Run to select here. Persisting anchorRunId -> anchorRunId creates a
+                    // self-edge that cannot exist in the Run tree and later destabilizes branch
+                    // restore/delete/fork operations.
+                    repairedRunSelections.remove(anchorRunId)
                 }
             }
         }

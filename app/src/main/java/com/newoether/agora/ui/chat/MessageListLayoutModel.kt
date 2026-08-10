@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.chat
 
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
 
@@ -91,7 +92,7 @@ internal fun resolvePendingEditReplacement(
     pending ?: return null
     if (messages.any { message -> message.id == pending.sourceMessageId }) return null
     return messages.lastOrNull { message ->
-        message.participant == Participant.USER &&
+        MessageGenerationBoundaryResolver.isRealUser(message) &&
             message.id != pending.sourceMessageId &&
             message.parentId == pending.sourceParentId &&
             message.text == pending.submittedText
@@ -175,10 +176,12 @@ internal fun buildMessageListTurns(messages: List<ChatMessage>): List<MessageLis
     }
 
     messages.forEach { message ->
-        if (message.participant == Participant.USER) {
+        if (MessageGenerationBoundaryResolver.isRealUser(message)) {
             flushActiveTurn()
             activeTurn += message
-        } else if (activeTurn.firstOrNull()?.participant == Participant.USER) {
+        } else if (
+            activeTurn.firstOrNull()?.let(MessageGenerationBoundaryResolver::isRealUser) == true
+        ) {
             activeTurn += message
         } else {
             // Preserve leading/error-only paths as their own stable items until a USER begins a

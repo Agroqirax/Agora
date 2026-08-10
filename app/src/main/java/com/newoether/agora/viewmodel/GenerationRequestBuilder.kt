@@ -5,7 +5,9 @@ import com.newoether.agora.R
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
+import com.newoether.agora.data.SystemPromptEntry
 import com.newoether.agora.data.isOpenAiProtocolProvider
+import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ModelId
@@ -49,37 +51,41 @@ class GenerationRequestBuilder(
         return ProviderKey(providerName, activeKey)
     }
 
-    private fun resolveTranscriptionProviderName(): String =
-        settings.imageTranscriptionModel.value?.let { providerRegistry.providerForModel(it) } ?: ""
+    private fun resolveTranscriptionProviderName(model: String?): String =
+        model?.let { providerRegistry.providerForModel(it) } ?: ""
 
-    private fun resolveTranscriptionModelId(): String =
-        settings.imageTranscriptionModel.value?.let { ModelId.parse(it).modelName } ?: ""
+    private fun resolveTranscriptionModelId(model: String?): String =
+        model?.let {
+            ModelId.parse(providerRegistry.canonicalModelId(it)).modelName
+        } ?: ""
 
-    private fun resolveTranscriptionApiKey(): String {
-        val model = settings.imageTranscriptionModel.value ?: return ""
+    private fun resolveTranscriptionApiKey(model: String?): String {
+        model ?: return ""
         val providerName = providerRegistry.providerForModel(model)
         if (providerName == Constants.PROVIDER_LOCAL) return ""
         return settings.resolveActiveKey(providerName) ?: ""
     }
 
-    private fun resolveTranscriptionBaseUrl(): String? {
-        val model = settings.imageTranscriptionModel.value ?: return null
+    private fun resolveTranscriptionBaseUrl(model: String?): String? {
+        model ?: return null
         return providerRegistry.getEffectiveBaseUrl(providerRegistry.providerForModel(model))
     }
 
     // Image generation reuses the selected model's provider credentials (mirrors transcription).
-    private fun resolveImageGenModelId(): String =
-        settings.imageGenModel.value?.let { ModelId.parse(it).apiModelName } ?: ""
+    private fun resolveImageGenModelId(model: String?): String =
+        model?.let {
+            ModelId.parse(providerRegistry.canonicalModelId(it)).apiModelName
+        } ?: ""
 
-    private fun resolveImageGenApiKey(): String {
-        val model = settings.imageGenModel.value ?: return ""
+    private fun resolveImageGenApiKey(model: String?): String {
+        model ?: return ""
         val providerName = providerRegistry.providerForModel(model)
         if (providerName == Constants.PROVIDER_LOCAL) return ""
         return settings.resolveActiveKey(providerName) ?: ""
     }
 
-    private fun resolveImageGenBaseUrl(): String {
-        val model = settings.imageGenModel.value ?: return ""
+    private fun resolveImageGenBaseUrl(model: String?): String {
+        model ?: return ""
         return providerRegistry.getEffectiveBaseUrl(providerRegistry.providerForModel(model)) ?: ""
     }
 
@@ -112,7 +118,137 @@ class GenerationRequestBuilder(
         )
     }
 
-    internal suspend fun buildGenerationPair(
+    /**
+     * Captures every setting owned by one generation before its Room graph is admitted.
+     *
+     * The returned value contains only immutable/copy-on-capture data. Later settings edits can
+     * affect the next Run, but not Compact preflight, Provider passes, or tool continuation for
+     * this Run.
+     */
+    internal suspend fun captureAdmissionSnapshot(
+        conversationId: String,
+        runId: String,
+        modelId: String,
+        conversationOverride: ChatEntity? = null,
+        resolvedPromptOverride: ResolvedPrompt? = null,
+    ): GenerationAdmissionSnapshot {
+        val selectedModelId = providerRegistry.canonicalModelId(modelId)
+        val providerName = providerRegistry.providerForModel(selectedModelId)
+        val effectiveSettings = buildEffectiveConversationSettings(conversationId)
+        val frozenKey = settings.awaitActiveKey(providerName).orEmpty()
+        check(providerRegistry.isConfigured(providerName, frozenKey)) {
+            "Provider is no longer configured: $providerName"
+        }
+        val (baseConfig, context) = buildGenerationPair(
+            providerName = providerName,
+            modelId = selectedModelId,
+            activeKey = frozenKey,
+            resolvedSystemPrompt = null,
+            resolvedUserPrepend = null,
+            resolvedUserPostpend = null,
+            effectiveSettings = effectiveSettings,
+            currentId = conversationId,
+        )
+        val compactModel = settings.contextCompactModel.value
+            ?.takeIf(String::isNotBlank)
+            ?.let(providerRegistry::canonicalModelId)
+            ?: selectedModelId
+        val compactProviderName = providerRegistry.providerForModel(compactModel)
+        val providerInstances = providerRegistry.all.toMap()
+        val compactKey = if (compactProviderName == providerName) {
+            frozenKey
+        } else {
+            settings.resolveActiveKey(compactProviderName).orEmpty()
+        }
+        val automaticCompact = AutomaticCompactConfig(
+            enabled = settings.contextCompactEnabled.value,
+            request = CompactRequest(
+                model = compactModel,
+                prompt = settings.contextCompactPrompt.value,
+                retainLogicalMessages = settings.contextCompactRetainCount.value,
+            ),
+            providerName = compactProviderName,
+            apiKey = compactKey,
+            baseUrl = providerRegistry.getEffectiveBaseUrl(compactProviderName),
+            provider = providerInstances[compactProviderName],
+            configured = providerRegistry.isConfigured(compactProviderName, compactKey),
+            generationContext = context.copy(
+                webSearchApiKeys = context.webSearchApiKeys.toMap(),
+                shellDevices = context.shellDevices.toList(),
+            ),
+        )
+        val titleGenerationEnabled = settings.titleGenerationEnabled.value
+        val promptSettings = capturePromptSettings()
+        val resolved = resolvedPromptOverride ?: buildEffectiveSystemPrompt(
+            currentId = conversationId,
+            activeModel = selectedModelId,
+            conversationOverride = conversationOverride,
+            promptSettings = promptSettings,
+        )
+        return GenerationAdmissionSnapshot(
+            conversationId = conversationId,
+            runId = runId,
+            selectedModelId = selectedModelId,
+            config = baseConfig.copy(
+                effectiveSystemPrompt = resolved.systemPrompt,
+                userPrepend = resolved.userPrepend,
+                userPostpend = resolved.userPostpend,
+            ),
+            context = context.copy(
+                webSearchApiKeys = context.webSearchApiKeys.toMap(),
+                shellDevices = context.shellDevices.toList(),
+            ),
+            providerInstances = providerInstances,
+            automaticCompact = automaticCompact.copy(
+                userPrepend = resolved.userPrepend,
+                userPostpend = resolved.userPostpend,
+            ),
+            titleGenerationEnabled = titleGenerationEnabled,
+        )
+    }
+
+    /**
+     * Captures only the system-prompt and tool-definition inputs needed by the context indicator.
+     * Unlike Run admission this must work before a Provider has a usable key or endpoint.
+     */
+    internal suspend fun captureContextProjectionSnapshot(
+        conversationId: String,
+        modelId: String,
+        systemPromptIdOverride: String? = null,
+    ): GenerationContextProjectionSnapshot {
+        val selectedModelId = providerRegistry.canonicalModelId(modelId)
+        val providerName = providerRegistry.providerForModel(selectedModelId)
+        val (baseConfig, context) = buildGenerationPair(
+            providerName = providerName,
+            modelId = selectedModelId,
+            activeKey = "",
+            resolvedSystemPrompt = null,
+            resolvedUserPrepend = null,
+            resolvedUserPostpend = null,
+            effectiveSettings = buildEffectiveConversationSettings(conversationId),
+            currentId = conversationId,
+        )
+        val resolved = buildEffectiveSystemPrompt(
+            currentId = conversationId,
+            activeModel = selectedModelId,
+            conversationOverride = null,
+            promptSettings = capturePromptSettings(),
+            systemPromptIdOverride = systemPromptIdOverride,
+        )
+        return GenerationContextProjectionSnapshot(
+            config = baseConfig.copy(
+                effectiveSystemPrompt = resolved.systemPrompt,
+                userPrepend = resolved.userPrepend,
+                userPostpend = resolved.userPostpend,
+            ),
+            context = context.copy(
+                webSearchApiKeys = context.webSearchApiKeys.toMap(),
+                shellDevices = context.shellDevices.toList(),
+            ),
+        )
+    }
+
+    private fun buildGenerationPair(
         providerName: String,
         modelId: String,
         activeKey: String,
@@ -121,10 +257,12 @@ class GenerationRequestBuilder(
         resolvedUserPostpend: String?,
         effectiveSettings: ConversationSettings,
         currentId: String
-    ): Pair<GenerationConfig, GenerationContext> = withContext(Dispatchers.Default) {
+    ): Pair<GenerationConfig, GenerationContext> {
+        val imageGenModel = settings.imageGenModel.value
+        val transcriptionModel = settings.imageTranscriptionModel.value
         val config = GenerationConfig(
             providerName = providerName,
-            modelId = ModelId.parse(modelId).modelName,
+            modelId = ModelId.parse(providerRegistry.canonicalModelId(modelId)).modelName,
             apiKey = activeKey,
             effectiveSystemPrompt = resolvedSystemPrompt,
             maxContextWindow = ContextBudget.normalize(
@@ -166,10 +304,10 @@ class GenerationRequestBuilder(
             webSearchProvider = settings.webSearchProvider.value,
             webSearchNumResults = settings.webSearchNumResults.value,
             webSearchBaseUrl = settings.webSearchBaseUrl.value,
-            imageGenEnabled = settings.imageGenEnabled.value && settings.imageGenModel.value?.contains(":") == true,
-            imageGenApiKey = resolveImageGenApiKey(),
-            imageGenBaseUrl = resolveImageGenBaseUrl(),
-            imageGenModel = resolveImageGenModelId(),
+            imageGenEnabled = settings.imageGenEnabled.value && imageGenModel?.contains(":") == true,
+            imageGenApiKey = resolveImageGenApiKey(imageGenModel),
+            imageGenBaseUrl = resolveImageGenBaseUrl(imageGenModel),
+            imageGenModel = resolveImageGenModelId(imageGenModel),
             imageGenSize = settings.imageGenSize.value,
             automationToolsEnabled = settings.automationToolsEnabled.value,
             shellEnabled = effectiveSettings.shellEnabled ?: settings.shellEnabled.value,
@@ -181,16 +319,28 @@ class GenerationRequestBuilder(
             imageTranscriptionEnabled =
                 settings.imageTranscriptionEnabled.value &&
                     settings.imageTranscriptionEnabledModels.value.contains(modelId),
-            imageTranscriptionModel = settings.imageTranscriptionModel.value,
+            imageTranscriptionModel = transcriptionModel,
             imageTranscriptionBatchSize = settings.imageTranscriptionBatchSize.value,
             imageTranscriptionPrompt = settings.imageTranscriptionPrompt.value,
-            transcriptionProviderName = resolveTranscriptionProviderName(),
-            transcriptionModelId = resolveTranscriptionModelId(),
-            transcriptionApiKey = resolveTranscriptionApiKey(),
-            transcriptionBaseUrl = resolveTranscriptionBaseUrl()
+            transcriptionProviderName = resolveTranscriptionProviderName(transcriptionModel),
+            transcriptionModelId = resolveTranscriptionModelId(transcriptionModel),
+            transcriptionApiKey = resolveTranscriptionApiKey(transcriptionModel),
+            transcriptionBaseUrl = resolveTranscriptionBaseUrl(transcriptionModel)
         )
-        Pair(config, genCtx)
+        return Pair(config, genCtx)
     }
+
+    private data class PromptSettingsSnapshot(
+        val includeActiveMemory: Boolean,
+        val activeSystemPromptId: String?,
+        val systemPrompts: List<SystemPromptEntry>,
+    )
+
+    private fun capturePromptSettings() = PromptSettingsSnapshot(
+        includeActiveMemory = settings.accessActiveMemory.value,
+        activeSystemPromptId = settings.activeSystemPromptId.value,
+        systemPrompts = settings.systemPrompts.value.toList(),
+    )
 
     data class ResolvedPrompt(
         val systemPrompt: String?,
@@ -198,26 +348,30 @@ class GenerationRequestBuilder(
         val userPostpend: String?
     )
 
-    /** [activeModel] is the full "provider:model" string of the generation being built. */
-    internal suspend fun buildEffectiveSystemPrompt(
+    private suspend fun buildEffectiveSystemPrompt(
         currentId: String,
         activeModel: String,
+        conversationOverride: ChatEntity?,
+        promptSettings: PromptSettingsSnapshot,
+        systemPromptIdOverride: String? = null,
     ): ResolvedPrompt = withContext(Dispatchers.Default) {
         coroutineScope {
-            val includeActiveMemory = settings.accessActiveMemory.value
+            val includeActiveMemory = promptSettings.includeActiveMemory
             // Room and the optional memory-file read are independent. Running both immediately avoids
             // adding their latencies serially to the visible Sending phase.
             val conversationDeferred = async {
-                convRepo.getConversation(currentId)
+                conversationOverride ?: convRepo.getConversation(currentId)
             }
             val activeMemoryDeferred = async(Dispatchers.IO) {
                 if (includeActiveMemory) memoryManager.getActiveMemory() else ""
             }
             val conversation = conversationDeferred.await()
-            val targetPromptId = conversation?.systemPromptId ?: settings.activeSystemPromptId.value
-            val entry = settings.systemPrompts.value.find { it.id == targetPromptId }
+            val targetPromptId = systemPromptIdOverride
+                ?: conversation?.systemPromptId
+                ?: promptSettings.activeSystemPromptId
+            val entry = promptSettings.systemPrompts.find { it.id == targetPromptId }
             val activeMemory = activeMemoryDeferred.await()
-            val modelId = ModelId.parse(activeModel).modelName
+            val modelId = ModelId.parse(providerRegistry.canonicalModelId(activeModel)).modelName
 
             val sdf = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.US)
             val dateSdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)

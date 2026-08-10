@@ -10,6 +10,7 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.MessageStreamCheckpoint
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.local.RunGraphCommit
+import com.newoether.agora.data.local.RunBranchSelectionIntegrity
 import com.newoether.agora.data.local.ToolRoundCommit
 import com.newoether.agora.model.AttachmentMeta
 import com.newoether.agora.model.ChatMessage
@@ -156,10 +157,17 @@ class ConversationRepository(
         run: RunEntity,
         messages: List<MessageEntity>,
         messageSelectionUpdates: Map<String?, String>,
+        conversationModelId: String,
         at: Long = System.currentTimeMillis(),
     ): RunGraphCommit {
         ensureRunRecovery()
-        return chatDao.createRunWithMessages(run, messages, messageSelectionUpdates, at)
+        return chatDao.createRunWithMessages(
+            run,
+            messages,
+            messageSelectionUpdates,
+            conversationModelId,
+            at,
+        )
     }
 
     suspend fun createConversationRunWithMessages(
@@ -167,6 +175,7 @@ class ConversationRepository(
         run: RunEntity,
         messages: List<MessageEntity>,
         messageSelectionUpdates: Map<String?, String>,
+        conversationModelId: String,
         at: Long = System.currentTimeMillis(),
     ): RunGraphCommit {
         ensureRunRecovery()
@@ -175,6 +184,7 @@ class ConversationRepository(
             run,
             messages,
             messageSelectionUpdates,
+            conversationModelId,
             at,
         )
     }
@@ -334,18 +344,114 @@ class ConversationRepository(
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 
-    suspend fun insertContextCompactBeforeSuffix(
-        run: RunEntity,
+    suspend fun beginAutomaticContextCompact(
         message: MessageEntity,
-        suffixRootId: String?,
+        childMessageId: String?,
+        expectedPass: Int,
+        expectedSelections: Map<String?, String>,
         selections: Map<String?, String>,
         at: Long = System.currentTimeMillis(),
-    ) = chatDao.insertContextCompactBeforeSuffix(
-        run,
-        message,
-        suffixRootId,
-        Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
-        at,
+    ): MessageEntity = chatDao.beginAutomaticContextCompact(
+        message = message,
+        childMessageId = childMessageId,
+        expectedPass = expectedPass,
+        expectedSelectedBranchesJson = Json.encodeToString(
+            expectedSelections.mapKeys { it.key ?: "null" },
+        ),
+        selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
+        at = at,
+    )
+
+    suspend fun beginRecompactContextCompact(
+        messageId: String,
+        modelName: String,
+        expectedSelections: Map<String?, String>,
+    ): MessageEntity = chatDao.beginRecompactContextCompact(
+        messageId = messageId,
+        modelName = modelName,
+        expectedSelectedBranchesJson = Json.encodeToString(
+            expectedSelections.mapKeys { it.key ?: "null" },
+        ),
+    )
+
+    suspend fun beginManualContextCompact(
+        run: RunEntity,
+        message: MessageEntity,
+        expectedSelections: Map<String?, String>,
+        selections: Map<String?, String>,
+        at: Long = System.currentTimeMillis(),
+    ): MessageEntity = chatDao.beginManualContextCompact(
+        run = run,
+        message = message,
+        expectedSelectedBranchesJson = Json.encodeToString(
+            expectedSelections.mapKeys { it.key ?: "null" },
+        ),
+        selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
+        at = at,
+    )
+
+    suspend fun settleAutomaticContextCompact(
+        messageId: String,
+        runId: String,
+        expectedPass: Int,
+        text: String,
+        status: MessageStatus,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.settleAutomaticContextCompact(
+        messageId = messageId,
+        runId = runId,
+        expectedPass = expectedPass,
+        text = text,
+        status = status,
+        at = at,
+    )
+
+    suspend fun updateContextCompactCheckpoint(
+        messageId: String,
+        runId: String,
+        expectedPass: Int?,
+        text: String,
+    ): Boolean = chatDao.updateContextCompactCheckpoint(
+        messageId = messageId,
+        runId = runId,
+        expectedPass = expectedPass,
+        text = MessagePersistenceGuard.clipText(text),
+    ) == 1
+
+    suspend fun updateRecompactCheckpoint(
+        messageId: String,
+        text: String,
+    ): Boolean = chatDao.updateRecompactCheckpoint(
+        messageId = messageId,
+        text = MessagePersistenceGuard.clipText(text),
+    ) == 1
+
+    suspend fun settleRecompactMessage(
+        messageId: String,
+        text: String,
+        status: MessageStatus,
+    ): Boolean = chatDao.settleRecompactMessage(
+        messageId = messageId,
+        text = MessagePersistenceGuard.clipText(text),
+        status = status,
+    ) == 1
+
+    suspend fun settleManualContextCompact(
+        messageId: String,
+        runId: String,
+        text: String,
+        messageStatus: MessageStatus,
+        runStatus: RunStatus,
+        reason: RunEndReason,
+        at: Long = System.currentTimeMillis(),
+    ): Boolean = chatDao.settleManualContextCompact(
+        messageId = messageId,
+        runId = runId,
+        text = text,
+        messageStatus = messageStatus,
+        runStatus = runStatus,
+        reason = reason,
+        at = at,
     )
 
     suspend fun removeContextCompact(messageId: String): Boolean = chatDao.removeContextCompact(messageId)
@@ -412,6 +518,34 @@ class ConversationRepository(
             Json.decodeFromString<Map<String, String>>(raw)
                 .mapKeys { if (it.key == "null") null else it.key }
         }.getOrDefault(emptyMap())
+    }
+
+    /**
+     * Removes impossible parent->child Run-selection edges left by the historical v17->v18 data
+     * repair. The compare-and-set protects a concurrent user branch selection, and the update does
+     * not touch conversation recency because selection metadata is derived from the Run tree.
+     */
+    suspend fun repairInvalidRunBranchSelections(): Int {
+        var repairedConversations = 0
+        chatDao.getAllConversationsList().forEach { conversation ->
+            val raw = conversation.selectedRunBranchesJson ?: return@forEach
+            val decoded = runCatching {
+                Json.decodeFromString<Map<String, String>>(raw)
+                    .mapKeys { if (it.key == "null") null else it.key }
+            }.getOrNull() ?: return@forEach
+            val repaired = RunBranchSelectionIntegrity.retainValidEdges(
+                selections = decoded,
+                runs = chatDao.getRunsForConversationSnapshot(conversation.id),
+            )
+            if (repaired == decoded) return@forEach
+            val replacement = Json.encodeToString(repaired.mapKeys { it.key ?: "null" })
+            repairedConversations += chatDao.compareAndSetRunBranchSelections(
+                conversationId = conversation.id,
+                expected = raw,
+                replacement = replacement,
+            )
+        }
+        return repairedConversations
     }
 
     suspend fun selectRunBranch(

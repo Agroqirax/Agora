@@ -11,10 +11,12 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.Locale
+import kotlinx.coroutines.flow.map
+
+internal const val DEFAULT_CONTEXT_COMPACT_ENABLED = true
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -54,7 +56,9 @@ class SettingsManager(private val context: Context) {
         )
     }
     val visualizeContextRollout: Flow<Boolean> = context.dataStore.data.map { it[VISUALIZE_CONTEXT_ROLLOUT] ?: false }
-    val contextCompactEnabled: Flow<Boolean> = context.dataStore.data.map { it[CONTEXT_COMPACT_ENABLED] ?: false }
+    val contextCompactEnabled: Flow<Boolean> = context.dataStore.data.map {
+        it[CONTEXT_COMPACT_ENABLED] ?: DEFAULT_CONTEXT_COMPACT_ENABLED
+    }
     val contextCompactModel: Flow<String?> = context.dataStore.data.map { it[CONTEXT_COMPACT_MODEL] }
     val contextCompactPrompt: Flow<String> = context.dataStore.data.map { pref ->
         pref[CONTEXT_COMPACT_PROMPT]?.takeIf { it.isNotBlank() } ?: BuiltInPrompts.CONTEXT_COMPACT_SYSTEM
@@ -245,6 +249,15 @@ class SettingsManager(private val context: Context) {
     suspend fun saveModelAliases(aliases: Map<String, String>) =
         modelPreferenceStore.saveModelAliases(aliases)
 
+    suspend fun updateModelAlias(modelId: String, alias: String) =
+        modelPreferenceStore.updateModelAlias(modelId, alias)
+
+    suspend fun synchronizeLocalModelAliases(aliases: Map<String, String>) =
+        modelPreferenceStore.synchronizeLocalModelAliases(aliases)
+
+    suspend fun removeModelAliasesForProvider(providerId: String) =
+        modelPreferenceStore.removeModelAliasesForProvider(providerId)
+
     suspend fun saveApiKeys(keys: List<ApiKeyEntry>) =
         modelPreferenceStore.saveApiKeys(keys)
 
@@ -354,10 +367,6 @@ class SettingsManager(private val context: Context) {
             it[CONTEXT_TOKEN_BUDGET] = ContextBudget.normalize(window).toString()
         }
     }
-
-    /** Remaps every configured model reference whose provider component was renamed. */
-    suspend fun renameProviderModelReferences(oldProvider: String, newProvider: String) =
-        modelPreferenceStore.renameProviderModelReferences(oldProvider, newProvider)
 
     suspend fun saveVisualizeContextRollout(enabled: Boolean) {
         context.dataStore.edit { it[VISUALIZE_CONTEXT_ROLLOUT] = enabled }
@@ -550,6 +559,13 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveCustomProviders(providers: List<CustomProviderConfig>) =
         modelPreferenceStore.saveCustomProviders(providers)
+
+    internal suspend fun normalizeCustomProviderIdentities(): List<CustomProviderIdentityMigration> =
+        modelPreferenceStore.normalizeCustomProviderIdentities()
+
+    internal suspend fun clearLegacyCustomProviderNames(
+        completed: List<CustomProviderIdentityMigration>,
+    ) = modelPreferenceStore.clearLegacyCustomProviderNames(completed)
 
     suspend fun saveContextCompactEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CONTEXT_COMPACT_ENABLED] = enabled }

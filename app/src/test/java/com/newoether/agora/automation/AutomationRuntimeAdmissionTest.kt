@@ -88,8 +88,10 @@ class AutomationRuntimeAdmissionTest {
 
         assertSame(AutomationRuntimeAdmission.Decision.Busy, decision)
         assertTrue(state.compacting.value)
-        assertFalse(state.generating.value)
+        assertTrue(state.generating.value)
+        assertTrue(state.isLoading.value)
         assertTrue(state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED).accepted)
+        assertFalse(state.generating.value)
     }
 
     private suspend fun finalizeBoundRun(

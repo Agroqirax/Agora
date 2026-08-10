@@ -64,6 +64,40 @@ internal fun ChatMessage.hasActiveAnswerSegment(): Boolean {
     }
 }
 
+internal data class AssistantErrorContent(
+    val answerText: String?,
+    val errorText: String,
+)
+
+/**
+ * Keeps already-generated assistant content separate from the terminal failure detail. Rows
+ * written before explicit error segments are recoverable when their persisted answer segments
+ * reproduce [ChatMessage.text]; legacy error-only rows continue to treat text as the error.
+ */
+internal fun assistantErrorContent(
+    message: ChatMessage,
+    mergedSegments: List<MessageSegment>,
+    fallbackErrorText: String,
+): AssistantErrorContent? {
+    if (message.status != com.newoether.agora.model.MessageStatus.ERROR &&
+        message.participant != com.newoether.agora.model.Participant.ERROR
+    ) {
+        return null
+    }
+    val persistedError = mergedSegments
+        .lastOrNull { it.type == "error" && it.content.isNotBlank() }
+        ?.content
+    val hasPersistedAnswer = mergedSegments.any { it.isVisibleAnswerSegment() }
+    return AssistantErrorContent(
+        answerText = message.text.takeIf {
+            it.isNotBlank() && (persistedError != null || hasPersistedAnswer)
+        },
+        errorText = persistedError
+            ?: message.text.takeIf { it.isNotBlank() && !hasPersistedAnswer }
+            ?: fallbackErrorText,
+    )
+}
+
 /**
  * Stable render identity for one merged message segment.
  *

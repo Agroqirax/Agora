@@ -30,12 +30,14 @@ class AcceptedInputGraphWriterTest {
         lateinit var insertedRun: RunEntity
         lateinit var insertedMessages: List<MessageEntity>
         lateinit var insertedSelections: Map<String?, String>
+        lateinit var insertedConversationModelId: String
         coEvery {
-            repository.createRunWithMessages(any(), any(), any(), any())
+            repository.createRunWithMessages(any(), any(), any(), any(), any())
         } coAnswers {
             insertedRun = firstArg()
             insertedMessages = secondArg()
             insertedSelections = thirdArg()
+            insertedConversationModelId = arg(3)
             RunGraphCommit(insertedMessages, insertedSelections, emptyMap())
         }
 
@@ -58,6 +60,7 @@ class AcceptedInputGraphWriterTest {
         assertEquals(listOf("new-user", "new-model"), insertedMessages.map { it.id })
         assertEquals("new-user", insertedSelections["selected"])
         assertEquals("new-model", insertedSelections["new-user"])
+        assertEquals("OpenAI:model", insertedConversationModelId)
         assertEquals(insertedSelections, result.messageSelections)
         assertEquals(true, beforeCommitCalled)
     }
@@ -66,7 +69,9 @@ class AcceptedInputGraphWriterTest {
     fun newConversation_startsAtTheRootWithoutReadingAStaleGraph() = runTest {
         val repository = mockk<ConversationRepository>()
         coEvery {
-            repository.createConversationRunWithMessages(any(), any(), any(), any(), any())
+            repository.createConversationRunWithMessages(
+                any(), any(), any(), any(), any(), any(),
+            )
         } coAnswers {
             val messages = thirdArg<List<MessageEntity>>()
             val selections = arg<Map<String?, String>>(3)

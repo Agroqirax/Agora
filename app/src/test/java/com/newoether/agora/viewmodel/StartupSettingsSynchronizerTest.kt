@@ -74,9 +74,8 @@ class StartupSettingsSynchronizerTest {
         val settings = mockk<SettingsRepository>()
         val models = MutableStateFlow(listOf(localModel("one", "First")))
         every { settings.localChatModels } returns models
-        coEvery { settings.getModelAliases() } returns mapOf("Remote:model" to "Remote")
         coEvery { settings.saveAvailableModels(any(), any()) } returns Unit
-        coEvery { settings.saveModelAliases(any()) } returns Unit
+        coEvery { settings.synchronizeLocalModelAliases(any()) } returns Unit
         LocalModelCatalogSynchronizer(settings, backgroundScope).start()
         runCurrent()
 
@@ -84,9 +83,7 @@ class StartupSettingsSynchronizerTest {
             settings.saveAvailableModels(Constants.PROVIDER_LOCAL, listOf("Local:one"))
         }
         coVerify(exactly = 1) {
-            settings.saveModelAliases(
-                mapOf("Remote:model" to "Remote", "Local:one" to "First"),
-            )
+            settings.synchronizeLocalModelAliases(mapOf("Local:one" to "First"))
         }
     }
 
@@ -95,9 +92,8 @@ class StartupSettingsSynchronizerTest {
         val settings = mockk<SettingsRepository>()
         val models = MutableStateFlow(listOf(localModel("one", "First")))
         every { settings.localChatModels } returns models
-        coEvery { settings.getModelAliases() } returns emptyMap()
         coEvery { settings.saveAvailableModels(any(), any()) } returns Unit
-        coEvery { settings.saveModelAliases(any()) } returns Unit
+        coEvery { settings.synchronizeLocalModelAliases(any()) } returns Unit
         LocalModelCatalogSynchronizer(settings, backgroundScope).start()
         runCurrent()
 
@@ -108,10 +104,10 @@ class StartupSettingsSynchronizerTest {
             settings.saveAvailableModels(Constants.PROVIDER_LOCAL, listOf("Local:one"))
         }
         coVerify(exactly = 1) {
-            settings.saveModelAliases(mapOf("Local:one" to "First"))
+            settings.synchronizeLocalModelAliases(mapOf("Local:one" to "First"))
         }
         coVerify(exactly = 1) {
-            settings.saveModelAliases(mapOf("Local:one" to "Renamed"))
+            settings.synchronizeLocalModelAliases(mapOf("Local:one" to "Renamed"))
         }
     }
 

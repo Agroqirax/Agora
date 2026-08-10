@@ -1,6 +1,8 @@
 package com.newoether.agora.data
 
 import android.content.Context
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -16,6 +18,8 @@ class MemoryManager(context: Context) {
         File(memoryDir, "memory_meta.json")
 
     private val json = Json { ignoreUnknownKeys = true; prettyPrint = true }
+    private val _activeMemoryRevision = MutableStateFlow(0L)
+    val activeMemoryRevision = _activeMemoryRevision.asStateFlow()
 
     data class MemoryFileInfo(
         val name: String,
@@ -32,8 +36,8 @@ class MemoryManager(context: Context) {
         mode: String = "replace",
         oldString: String? = null,
         newString: String? = null
-    ): String =
-        when (mode) {
+    ): String {
+        val result = when (mode) {
             "append" -> {
                 activeMemoryFile.appendText("\n$content")
                 "Appended to active memory."
@@ -59,6 +63,9 @@ class MemoryManager(context: Context) {
                 "Active memory updated."
             }
         }
+        _activeMemoryRevision.value += 1
+        return result
+    }
 
     @Synchronized
     private fun loadMeta(): MutableMap<String, String> =

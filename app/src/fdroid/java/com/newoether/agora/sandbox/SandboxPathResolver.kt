@@ -37,7 +37,7 @@ internal class SandboxPathResolver(
             normalized == sharedStorageMountPath ||
             normalized.startsWith("$sharedStorageMountPath/")
         ) {
-            val root = sharedStorageHostDir()
+            val root = sharedStorageHostDir()?.canonicalFile
                 ?: throw SecurityException(
                     "Shared storage is not mounted. Enable it and grant all-files access first.",
                 )

@@ -634,14 +634,16 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun manualCompactIsMailboxOwnedWithoutActivatingGeneration() = runBlocking {
+    fun manualCompactUsesOrdinaryGenerationProjectionAndDrain() = runBlocking {
         var registryActiveCount = 0
         var registryIdleCount = 0
+        var queueDrainCount = 0
         val state = ConversationGenerationState(
             conversationId = "conversation",
             onRegistryActive = { registryActiveCount += 1 },
             onRegistryIdle = { registryIdleCount += 1 },
         )
+        state.onQueueDrainRequested = { queueDrainCount += 1 }
 
         val effect = state.commands.requestManualCompact(
             compactRunId = "compact-run",
@@ -649,32 +651,38 @@ class ConversationGenerationStateTest {
         )!!
 
         assertTrue(state.compacting.value)
-        assertFalse(state.generating.value)
-        assertNull(state.currentRunId())
+        assertTrue(state.generating.value)
+        assertTrue(state.isLoading.value)
+        assertEquals("compact-run", state.currentRunId())
         assertNull(state.commands.requestManualCompact("other-compact", "other-effect"))
-        val waiting = state.commands.requestSend(
+        val queued = state.commands.requestSend(
             proposedRunId = "send-run",
             effectId = "send-effect",
             directOnly = false,
             hasPendingGuidance = false,
         )
-        assertTrue(waiting.effects.single() is RunEffect.AwaitCompactSettlement)
-        val available = CompletableDeferred<Unit>()
-        val waiter = launch {
-            state.awaitCompactSettled()
-            available.complete(Unit)
-        }
-        assertFalse(available.isCompleted)
+        assertEquals(
+            RunEffect.AcceptGuidance(
+                RunEffectIdentity(
+                    conversationId = "conversation",
+                    ownerToken = effect.identity.ownerToken,
+                    runId = "compact-run",
+                    pass = 0,
+                    effectId = "send-effect",
+                ),
+            ),
+            queued.effects.single(),
+        )
 
-        val settled = state.commands.finishCompact(effect.identity, CompactOutcome.CREATED)
+        val settled = state.finishCompact(effect.identity, CompactOutcome.CREATED)
 
         assertTrue(settled.accepted)
-        available.await()
-        waiter.join()
         assertFalse(state.compacting.value)
         assertFalse(state.generating.value)
-        assertEquals(0, registryActiveCount)
-        assertEquals(0, registryIdleCount)
+        assertFalse(state.isLoading.value)
+        assertEquals(1, registryActiveCount)
+        assertEquals(1, registryIdleCount)
+        assertEquals(1, queueDrainCount)
         val retried = state.commands.requestSend(
             proposedRunId = "send-run",
             effectId = "send-effect",
@@ -723,7 +731,7 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun SendDuringAutomaticCompactReentersAsGuidanceAfterCompactNotRunRelease() = runBlocking {
+    fun SendDuringAutomaticCompactIsAcceptedAsOrdinaryGuidanceImmediately() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
         state.bindRun(token, "run", pass = 2)
@@ -732,17 +740,6 @@ class ConversationGenerationStateTest {
             effectId = "compact-effect",
         )!!
         val requested = state.commands.requestSend(
-            proposedRunId = "unused-send-run",
-            effectId = "guidance-effect",
-            directOnly = false,
-            hasPendingGuidance = false,
-        )
-        assertTrue(requested.effects.single() is RunEffect.AwaitCompactSettlement)
-
-        state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
-        state.awaitCompactSettled()
-        assertTrue(state.generating.value)
-        val retried = state.commands.requestSend(
             proposedRunId = "unused-send-run",
             effectId = "guidance-effect",
             directOnly = false,
@@ -759,8 +756,10 @@ class ConversationGenerationStateTest {
                     effectId = "guidance-effect",
                 ),
             ),
-            retried.effects.single(),
+            requested.effects.single(),
         )
+        state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
+        assertTrue(state.generating.value)
         assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
     }
 

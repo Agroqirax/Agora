@@ -19,7 +19,7 @@
     <string name="tool_generating_image_subject">Generating image: %1$s…</string>
     <string name="tool_creating_task_subject">Creating task: %1$s…</string>
     <string name="tool_deleting_task_subject">Deleting task: %1$s…</string>
-    <string name="tool_background_job_running_default">Background job is running</string>
+    <string name="tool_background_job_running_default">Running in background</string>
     <string name="tool_web_fetch_done_default">Fetched web page</string>
     <string name="tool_read_conversation_done_default">Read conversation</string>
     <string name="tool_shell_job_read_default">Read shell job</string>

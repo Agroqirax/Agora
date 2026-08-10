@@ -138,4 +138,19 @@ class CustomProviderFactoryTest {
         assertTrue(!resolution.matches(CustomEndpointProtocol.GOOGLE, "https://example.test"))
         assertTrue(!resolution.matches(CustomEndpointProtocol.OPENAI, "https://other.test"))
     }
+
+    @Test
+    fun fetchedCustomModelsUseStableProviderIdentityNotDisplayName() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val config = CustomProviderConfig(name = "Relay X", id = id)
+
+        assertEquals(
+            listOf("$id:gemini-3.1-pro"),
+            prefixFetchedModels("Relay X", config, listOf("models/gemini-3.1-pro")),
+        )
+        assertEquals(
+            listOf("OpenAI:gpt-5"),
+            prefixFetchedModels("OpenAI", null, listOf("gpt-5")),
+        )
+    }
 }

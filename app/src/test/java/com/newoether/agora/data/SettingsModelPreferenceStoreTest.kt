@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -94,6 +95,195 @@ class SettingsModelPreferenceStoreTest {
         assertTrue(store.customEndpointResolutions.first().isEmpty())
         assertEquals("", store.lastModelsFetchFingerprint.first())
     }
+
+    @Test
+    fun legacyProviderIdentityAndEveryDataStoreModelReferenceMigrateAtomically() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        dataStore.edit { preferences ->
+            preferences[CUSTOM_PROVIDERS_JSON] = testJson.encodeToString(
+                listOf(CustomProviderConfig("Relay X")),
+            )
+            preferences[CUSTOM_MODELS] = setOf("Relay X:custom")
+            preferences[ENABLED_MODELS] = setOf("Relay X:catalog", "OpenAI:gpt-5")
+            preferences[SELECTED_MODEL] = "Relay X:catalog"
+            preferences[TITLE_GENERATION_MODEL] = "Relay X:catalog"
+            preferences[CONTEXT_COMPACT_MODEL] = "Relay X:custom"
+            preferences[IMAGE_TRANSCRIPTION_MODEL] = "Relay X:catalog"
+            preferences[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = setOf("Relay X:catalog")
+            preferences[MODEL_ALIASES_JSON] = testJson.encodeToString(
+                mapOf("Relay X:catalog" to "Alias"),
+            )
+            preferences[AVAILABLE_MODELS_JSON] = testJson.encodeToString(
+                mapOf("Relay X" to listOf("Relay X:catalog")),
+            )
+            preferences[PROVIDER_BASE_URLS] = testJson.encodeToString(
+                mapOf("Relay X" to "https://relay.invalid"),
+            )
+        }
+
+        val migrations = store.normalizeCustomProviderIdentities()
+        val provider = store.customProviders.first().single()
+        val prefix = "${provider.id}:"
+
+        assertTrue(CustomProviderIdentityPolicy.isStableId(provider.id))
+        assertEquals(setOf("Relay X"), provider.legacyNames)
+        assertEquals(
+            listOf(CustomProviderIdentityMigration("Relay X", provider.id)),
+            migrations,
+        )
+        assertEquals(setOf(prefix + "custom"), store.customModels.first())
+        assertEquals(setOf(prefix + "catalog", "OpenAI:gpt-5"), store.enabledModels.first())
+        assertEquals(prefix + "catalog", store.selectedModel.first())
+        assertEquals(mapOf(prefix + "catalog" to "Alias"), store.modelAliases.first())
+        assertEquals(
+            mapOf("Relay X" to listOf(prefix + "catalog")),
+            store.availableModels.first(),
+        )
+        assertEquals(
+            mapOf("Relay X" to "https://relay.invalid"),
+            store.providerBaseUrls.first(),
+        )
+
+        store.clearLegacyCustomProviderNames(migrations)
+        assertTrue(store.customProviders.first().single().legacyNames.isEmpty())
+    }
+
+    @Test
+    fun staleLegacyProviderWriteCannotForkModelAliasesOntoANewIdentity() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        dataStore.edit { preferences ->
+            preferences[CUSTOM_PROVIDERS_JSON] = testJson.encodeToString(
+                listOf(CustomProviderConfig("Relay X")),
+            )
+            preferences[MODEL_ALIASES_JSON] = testJson.encodeToString(
+                mapOf("Relay X:model" to "My Alias"),
+            )
+        }
+
+        store.normalizeCustomProviderIdentities()
+        val firstId = store.customProviders.first().single().id
+        store.saveCustomProviders(listOf(CustomProviderConfig("Relay X")))
+        store.normalizeCustomProviderIdentities()
+
+        assertEquals(firstId, store.customProviders.first().single().id)
+        assertEquals(mapOf("$firstId:model" to "My Alias"), store.modelAliases.first())
+    }
+
+    @Test
+    fun orphanedAliasFromIntermediateIdentityBuildMovesToItsUniqueCurrentProvider() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        val orphanId = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val currentId = "custom-provider-00000000-0000-4000-8000-000000000002"
+        dataStore.edit { preferences ->
+            preferences[CUSTOM_PROVIDERS_JSON] = testJson.encodeToString(
+                listOf(CustomProviderConfig(name = "Relay X", id = currentId)),
+            )
+            preferences[ENABLED_MODELS] = setOf("$currentId:model")
+            preferences[MODEL_ALIASES_JSON] = testJson.encodeToString(
+                mapOf("$orphanId:model" to "My Alias"),
+            )
+        }
+
+        store.normalizeCustomProviderIdentities()
+
+        assertEquals(mapOf("$currentId:model" to "My Alias"), store.modelAliases.first())
+    }
+
+    @Test
+    fun stableProviderRecoversNameQualifiedAliasesAfterLegacyMarkerWasCleared() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        val providerId = "custom-provider-00000000-0000-4000-8000-000000000002"
+        dataStore.edit { preferences ->
+            preferences[CUSTOM_PROVIDERS_JSON] = testJson.encodeToString(
+                listOf(CustomProviderConfig(name = "Relay X", id = providerId)),
+            )
+            preferences[ENABLED_MODELS] = setOf("$providerId:model")
+            preferences[MODEL_ALIASES_JSON] = testJson.encodeToString(
+                mapOf("Relay X:model" to "My Alias"),
+            )
+        }
+
+        val migrations = store.normalizeCustomProviderIdentities()
+
+        assertEquals(mapOf("$providerId:model" to "My Alias"), store.modelAliases.first())
+        assertEquals(
+            listOf(CustomProviderIdentityMigration("Relay X", providerId)),
+            migrations,
+        )
+    }
+
+    @Test
+    fun localCatalogSynchronizationCannotOverwriteOrDeleteUnrelatedAliases() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        val providerId = "custom-provider-00000000-0000-4000-8000-000000000002"
+        store.saveModelAliases(
+            mapOf(
+                "$providerId:model" to "Custom alias",
+                "Local:old" to "Old local alias",
+            ),
+        )
+
+        store.synchronizeLocalModelAliases(mapOf("Local:new" to "New local alias"))
+
+        assertEquals(
+            mapOf(
+                "$providerId:model" to "Custom alias",
+                "Local:old" to "Old local alias",
+                "Local:new" to "New local alias",
+            ),
+            store.modelAliases.first(),
+        )
+    }
+
+    @Test
+    fun aliasMutationReadsLatestDurableMapInsteadOfReplacingItWithAStaleSnapshot() = runTest {
+        val dataStore = InMemoryPreferencesDataStore()
+        val store = SettingsModelPreferenceStore(dataStore, testJson)
+        val providerId = "custom-provider-00000000-0000-4000-8000-000000000002"
+        store.saveModelAliases(mapOf("$providerId:model" to "Preserved"))
+
+        store.updateModelAlias("OpenAI:gpt-5", "Work")
+
+        assertEquals(
+            mapOf(
+                "$providerId:model" to "Preserved",
+                "OpenAI:gpt-5" to "Work",
+            ),
+            store.modelAliases.first(),
+        )
+    }
+
+    @Test
+    fun freshInstallCustomAliasSurvivesStartupSynchronizationRenameAndRestartNormalization() =
+        runTest {
+            val dataStore = InMemoryPreferencesDataStore()
+            val store = SettingsModelPreferenceStore(dataStore, testJson)
+            val providerId = "custom-provider-00000000-0000-4000-8000-000000000002"
+            store.saveCustomProviders(
+                listOf(CustomProviderConfig(name = "Relay X", id = providerId)),
+            )
+            store.addCustomModel("$providerId:model", "My alias")
+
+            store.synchronizeLocalModelAliases(mapOf("Local:device" to "On device"))
+            store.normalizeCustomProviderIdentities()
+            store.saveCustomProviders(
+                listOf(CustomProviderConfig(name = "Renamed relay", id = providerId)),
+            )
+            store.normalizeCustomProviderIdentities()
+
+            assertEquals(
+                mapOf(
+                    "$providerId:model" to "My alias",
+                    "Local:device" to "On device",
+                ),
+                store.modelAliases.first(),
+            )
+        }
 
     private class InMemoryPreferencesDataStore(
         initial: Preferences = emptyPreferences(),

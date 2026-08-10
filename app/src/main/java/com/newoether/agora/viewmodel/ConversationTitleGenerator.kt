@@ -98,7 +98,7 @@ class ConversationTitleGenerator(
                 status = MessageStatus.SUCCESS,
             )
         )
-        val modelId = ModelId.parse(prefixedModelId).modelName
+        val modelId = ModelId.parse(providers.canonicalModelId(prefixedModelId)).modelName
         val provider = providers.getInstanceOrNull(providerName)
             ?: return Result.Failure("Provider not registered: $providerName")
         val config = ProviderConfig(

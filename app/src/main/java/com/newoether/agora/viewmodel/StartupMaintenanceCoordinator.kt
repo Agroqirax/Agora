@@ -28,9 +28,11 @@ internal class StartupMaintenanceCoordinator(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     fun start() {
+        scope.launch(ioDispatcher) { migrateLegacyCustomProviderReferences() }
         scope.launch(ioDispatcher) { checkForUpdateIfDue() }
         scope.launch(ioDispatcher) { remindAboutUncachedMessages() }
         scope.launch(ioDispatcher) { conversations.deleteOrphanedEmbeddings() }
+        scope.launch(ioDispatcher) { conversations.repairInvalidRunBranchSelections() }
         scope.launch(ioDispatcher) {
             try {
                 sweepAttachments()
@@ -39,6 +41,19 @@ internal class StartupMaintenanceCoordinator(
             }
         }
         startAutoBackup()
+    }
+
+    private suspend fun migrateLegacyCustomProviderReferences() {
+        val pending = settings.normalizeCustomProviderIdentities()
+        val completed = pending.filter { migration ->
+            runCatching {
+                conversations.renameConfiguredProviderModelReferences(
+                    migration.legacyReference,
+                    migration.providerId,
+                )
+            }.isSuccess
+        }
+        settings.clearLegacyCustomProviderNames(completed)
     }
 
     private suspend fun checkForUpdateIfDue() {

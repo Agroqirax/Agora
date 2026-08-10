@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.Participant
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.ui.common.AgoraHaptics
 import com.newoether.agora.ui.motion.AgoraMotionPolicy
 import com.newoether.agora.util.DebugLog
@@ -280,7 +280,13 @@ internal class ChatScrollCoordinator internal constructor(
                     return@LaunchedEffect
                 }
 
-                if (settleCoveredTransition(messages, request.targetMessageId)) {
+                if (
+                    settleCoveredTransition(
+                        messages = messages,
+                        targetMessageId = request.targetMessageId,
+                        scrollToTarget = request.scrollToTarget,
+                    )
+                ) {
                     val completed = viewModel.completeSwitchingScroll(request.id)
                     if (
                         completed &&
@@ -581,7 +587,7 @@ internal class ChatScrollCoordinator internal constructor(
             ?.toFloat()
             ?: with(density) { 72.dp.toPx() }
         val lastUserMessageId = messages
-            .lastOrNull { message -> message.participant == Participant.USER }
+            .lastOrNull(MessageGenerationBoundaryResolver::isRealUser)
             ?.id
         val tailMinimumHeightPx = if (lastUserMessageId == null || viewportHeightPx == 0) {
             0f
@@ -650,6 +656,7 @@ internal class ChatScrollCoordinator internal constructor(
     private suspend fun settleCoveredTransition(
         messages: State<List<ChatMessage>>,
         targetMessageId: String?,
+        scrollToTarget: Boolean,
     ): Boolean = withTimeoutOrNull(SCROLL_SETTLE_TIMEOUT_MS) {
         var stableSamples = 0
         var previousSignature: List<Any>? = null
@@ -658,6 +665,32 @@ internal class ChatScrollCoordinator internal constructor(
             val currentMessages = messages.value
             if (currentMessages.isEmpty()) {
                 val signature = listOf(0, viewportHeightPx)
+                if (signature == previousSignature) stableSamples += 1
+                else {
+                    previousSignature = signature
+                    stableSamples = 1
+                }
+                continue
+            }
+            if (!scrollToTarget) {
+                if (viewportHeightPx <= 0) {
+                    stableSamples = 0
+                    previousSignature = null
+                    continue
+                }
+                val layout = listState.layoutInfo
+                val signature = listOf(
+                    currentMessages.map(ChatMessage::id),
+                    listState.firstVisibleItemIndex,
+                    listState.firstVisibleItemScrollOffset,
+                    layout.totalItemsCount,
+                    layout.viewportStartOffset,
+                    layout.viewportEndOffset,
+                    layout.visibleItemsInfo.map { item ->
+                        listOf(item.index, item.key, item.offset, item.size)
+                    },
+                    viewportHeightPx,
+                )
                 if (signature == previousSignature) stableSamples += 1
                 else {
                     previousSignature = signature

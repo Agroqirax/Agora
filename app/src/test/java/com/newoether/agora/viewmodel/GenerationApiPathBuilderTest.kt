@@ -5,6 +5,7 @@ import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.util.Constants
+import com.newoether.agora.api.util.ContextTokenEstimator
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
@@ -25,8 +26,6 @@ class GenerationApiPathBuilderTest {
             GenerationApiPathRequest(
                 parentId = model.id,
                 conversationId = "conversation",
-                isRegenerate = false,
-                replaceMessageId = null,
                 config = generationConfig(),
                 context = GenerationContext(),
                 loadedMessages = listOf(message("old", null, 0), compact, user, model),
@@ -37,29 +36,40 @@ class GenerationApiPathBuilderTest {
         assertEquals("model-id", path.providerConfig.modelId)
         assertEquals("system", path.providerConfig.systemPrompt)
         assertTrue(path.providerConfig.tools.orEmpty().isEmpty())
+        assertEquals(
+            generationConfig().maxContextWindow -
+                ContextTokenEstimator.estimateFixed("system", emptyList()),
+            path.providerConfig.maxContextWindow,
+        )
         coVerify(exactly = 0) { repository.getMessagesForConversationSnapshot(any()) }
     }
 
     @Test
-    fun `regeneration excludes the replaced message and its suffix`() = runTest {
+    fun `failed compact is not a request boundary`() = runTest {
         val repository = mockk<ConversationRepository>(relaxed = true)
         val builder = GenerationApiPathBuilder(repository) { emptyList() }
-        val user = message("user", null, 0, Participant.USER)
-        val replaced = message("replaced", user.id, 1)
+        val old = message("old", null, 0, participant = Participant.USER)
+        val failed = message(
+            "${Constants.COMPACT_MSG_PREFIX}failed",
+            parentId = old.id,
+            sequence = 1,
+        ).copy(status = MessageStatus.ERROR)
+        val user = message("user", failed.id, 2, Participant.USER)
+        val model = message("model", user.id, 3)
 
         val path = builder.build(
             GenerationApiPathRequest(
-                parentId = replaced.id,
+                parentId = model.id,
                 conversationId = "conversation",
-                isRegenerate = true,
-                replaceMessageId = replaced.id,
                 config = generationConfig(),
                 context = GenerationContext(),
-                loadedMessages = listOf(user, replaced),
+                loadedMessages = listOf(old, failed, user, model),
             ),
         )
 
-        assertEquals(listOf(user.id), path.messages.map { it.id })
+        assertTrue(path.messages.any { it.id == old.id })
+        assertTrue(path.messages.any { it.id == failed.id && it.text == failed.text })
+        assertEquals("user", path.messages.single { it.id == user.id }.text)
     }
 
     private fun generationConfig() = GenerationConfig(

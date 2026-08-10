@@ -20,7 +20,7 @@ internal class ConversationBranchMutationService(
     private val toUiMessage: (MessageEntity) -> ChatMessage,
     private val isConversationOpen: (String) -> Boolean,
     private val projectGraph: (List<ChatMessage>, Map<String?, String>) -> Unit,
-    private val onMutationStart: suspend () -> Long?,
+    private val onMutationStart: suspend (scrollToTarget: Boolean) -> Long?,
     private val onMutationSettling: (Long?, String?) -> Unit,
     private val onMutationFailed: (Long?) -> Unit,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -41,7 +41,7 @@ internal class ConversationBranchMutationService(
         }
 
         scope.launch(ioDispatcher) {
-            val switchingRequestId = onMutationStart()
+            val switchingRequestId = onMutationStart(!compactOnly)
             var committed = false
             try {
                 state.queueMutationMutex.withLock {
@@ -53,12 +53,13 @@ internal class ConversationBranchMutationService(
                             check(conversations.removeContextCompact(messageId))
                             val remaining =
                                 conversations.getMessagesForConversationSnapshot(conversationId)
+                            val remainingChatMessages = remaining.map(toUiMessage)
                             val selections = conversations.restoreBranchSelections(conversationId)
                             if (isConversationOpen(conversationId)) {
-                                projectGraph(remaining.map(toUiMessage), selections)
+                                projectGraph(remainingChatMessages, selections)
                             }
                             committed = true
-                            onMutationSettling(switchingRequestId, remaining.lastOrNull()?.id)
+                            onMutationSettling(switchingRequestId, null)
                             return@lock
                         }
 

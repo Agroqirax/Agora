@@ -67,6 +67,33 @@ class ChatDaoRunRecoveryTest {
         assertTrue(failure is IllegalStateException)
     }
 
+    @Test
+    fun recoveryStopsTheDurableCompactRowInsteadOfRemovingIt() = runTest {
+        val dao = mockk<ChatDao>()
+        val compact = MessageEntity(
+            id = "compact_inflight",
+            conversationId = CONVERSATION_ID,
+            parentId = "user",
+            text = "partial summary",
+            status = MessageStatus.SENDING,
+            participant = Participant.MODEL,
+            timestamp = 2L,
+            runId = RUN_ID,
+            runSequence = 1,
+        )
+        val checkpoint = slot<MessageStreamCheckpoint>()
+        coEvery { dao.recoverOrphanedRuns(any()) } coAnswers { callOriginal() }
+        coEvery { dao.getOrphanedLiveRuns() } returns listOf(liveRun(RunStatus.ACTIVE))
+        coEvery { dao.getMessagesForRuns(listOf(RUN_ID)) } returns listOf(compact)
+        coEvery { dao.updateMessageCheckpoint(capture(checkpoint)) } returns 1
+        coEvery { dao.terminalizeLiveRun(any(), any(), any(), any()) } returns 1
+
+        assertEquals(1, dao.recoverOrphanedRuns(99L))
+        assertEquals(compact.id, checkpoint.captured.id)
+        assertEquals("partial summary", checkpoint.captured.text)
+        assertEquals(MessageStatus.STOPPED, checkpoint.captured.status)
+    }
+
     private fun liveRun(status: RunStatus) = RunEntity(
         id = RUN_ID,
         conversationId = CONVERSATION_ID,

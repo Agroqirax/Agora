@@ -34,7 +34,7 @@ interface ChatAutomationDao {
         """
         UPDATE tasks
         SET modelId = :newProvider || substr(modelId, length(:oldProvider) + 1)
-        WHERE modelId LIKE :oldProvider || ':%'
+        WHERE substr(modelId, 1, length(:oldProvider) + 1) = :oldProvider || ':'
         """
     )
     suspend fun renameTaskProviderModelReferences(

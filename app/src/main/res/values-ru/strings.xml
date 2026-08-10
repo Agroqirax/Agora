@@ -306,6 +306,7 @@
     <!-- Settings - Generation Page -->
     <string name="generation_title">Генерация</string>
     <string name="context_window">Окно контекста</string>
+    <string name="context_window_desc">Максимальный контекст, доступный для одной генерации</string>
     <string name="context_window_default">Окно контекста по умолчанию</string>
     <string name="context_token_budget_value">Примерно %1$s токенов</string>
     <string name="context_retain">Сохранять %1$d последних сообщений</string>
@@ -702,6 +703,9 @@
     <string name="delete_chat">Удалить чат?</string>
     <string name="delete_chat_confirm">Вы уверены, что хотите удалить эту беседу? Это действие нельзя отменить.</string>
     <string name="delete_message_title">Удалить сообщение?</string>
+    <string name="delete_compact_message_title">Удалить сообщение сжатия?</string>
+    <string name="delete_compact_message_confirm">Будет удалено только это сообщение сжатия.</string>
+    <string name="recompact">Сжать повторно</string>
     <string name="delete_message_confirm">Это сообщение и все последующие ответы будут безвозвратно удалены.</string>
     <string name="conversation_prompt">Промпт беседы</string>
     <string name="global_default_format">Глобальное значение по умолчанию (%1$s)</string>
@@ -1009,7 +1013,9 @@
     <string name="tool_execution_stopped">Выполнение инструмента остановлено</string>
     <string name="tool_exit_code">Код выхода %1$d</string>
     <string name="tool_exit">Выход</string>
-    <string name="tool_shell_returned_code">Возврат %1$d</string>
+    <string name="tool_shell_returned_code">Команда вернула %1$d</string>
+    <string name="tool_shell_detail_executed">Выполнено</string>
+    <string name="tool_shell_detail_returned_code">Возвращено %1$d</string>
     <string name="tool_shell_returned">Возврат</string>
     <string name="tool_found_no_matches">Совпадений не найдено</string>
     <string name="tool_line_count">%1$d строк</string>
@@ -1058,6 +1064,7 @@
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
+    <string name="context_compact_retain_desc">Сообщения, сохраняемые дословно после каждого сжатия</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
     <string name="context_compact_select_available_model">Select an available model</string>
@@ -1068,7 +1075,7 @@
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s токенов · %3$d логических сообщений</string>
+    <string name="context_usage_messages">~%1$s / %2$s токенов</string>
     <string name="context_boundary_active">Граница сжатия активна</string>
     <string name="context_boundary_none">Граница сжатия отсутствует</string>
 </resources>

@@ -1,7 +1,5 @@
 package com.newoether.agora.model
 
-import com.newoether.agora.util.Constants
-
 data class RunMessagePresentation(
     val showActions: Boolean = false,
     val copyText: String? = null,
@@ -14,16 +12,17 @@ data class RunMessagePresentation(
 )
 
 /**
- * Derives Run-boundary UI affordances from the selected message path.
+ * Derives message-generation UI affordances from the selected message path.
  *
  * Edit and Regenerate are two independent structural branch dimensions:
  *
  *  - edited USER messages are siblings under the preceding message, so their selector belongs
- *    only to the Run's boundary input;
+ *    only to the generation's input;
  *  - regenerated MODEL roots are siblings under one shared USER input, so their selector belongs
- *    only to the selected Run's terminal output.
+ *    only to the selected generation's terminal output.
  *
- * Intermediate Pass input/output and synthetic tool/result rows never expose their own bars.
+ * Each real USER starts a generation. Only that USER and the last ordinary assistant before the
+ * next USER expose actions. Compact and synthetic tool/result rows never expose their own bars.
  */
 object RunUiProjection {
     fun project(
@@ -36,17 +35,13 @@ object RunUiProjection {
         // interpreted as two real branches even if a caller accidentally supplies duplicates.
         val uniqueAllMessages = allMessages.distinctBy { it.id }
         val uniqueVisibleMessages = visibleMessages.distinctBy { it.id }
-        val boundaryInputs = uniqueAllMessages.filter(::isBoundaryUserInput)
-        val boundaryInputIds = boundaryInputs.mapTo(mutableSetOf()) { it.id }
+        val boundaryInputs = uniqueAllMessages.filter(MessageGenerationBoundaryResolver::isRealUser)
         val editSiblingsByParent = boundaryInputs
             .groupBy { it.parentId }
             .mapValues { (_, messages) -> messages.sortedWith(branchOrder) }
-        // A legacy Run can contain several regenerated assistant siblings with the same shared
-        // user parent. Structural parentage, not Run ownership, is therefore the canonical branch
-        // discriminator.
-        val rootOutputs = uniqueAllMessages.filter {
-            isVisibleModelOutput(it) &&
-                it.parentId?.let(boundaryInputIds::contains) == true
+        val rootOutputs = uniqueAllMessages.filter { message ->
+            MessageGenerationBoundaryResolver.isOrdinaryAssistant(message) &&
+                boundaryInputs.any { input -> message.parentId == input.id }
         }
         val regenerationSiblingsByParent = rootOutputs
             .groupBy { it.parentId }
@@ -56,7 +51,7 @@ object RunUiProjection {
             .associate { it.id to RunMessagePresentation() }
             .toMutableMap()
         uniqueVisibleMessages
-            .filter(::isBoundaryUserInput)
+            .filter(MessageGenerationBoundaryResolver::isRealUser)
             .forEach { userBoundary ->
                 val siblings = editSiblingsByParent[userBoundary.parentId].orEmpty()
                 result[userBoundary.id] = RunMessagePresentation(
@@ -71,54 +66,28 @@ object RunUiProjection {
                 )
             }
 
-        val visibleOutputsByRun = uniqueVisibleMessages
-            .filter(::isVisibleModelOutput)
-            .filter { !it.runId.isNullOrBlank() }
-            .groupBy { checkNotNull(it.runId) }
-
-        for ((runId, runOutputs) in visibleOutputsByRun) {
-            val outputBoundary = runOutputs.maxWithOrNull(messageOrder) ?: continue
-            val structuralRootOutput = runOutputs
-                .filter { it.parentId?.let(boundaryInputIds::contains) == true }
-                .minWithOrNull(messageOrder)
-            // Malformed legacy rows may have lost the explicit root-output -> boundary-user edge.
-            // Their safest deletion boundary is still the Run's earliest ordinary MODEL row.
-            val rootOutput = structuralRootOutput ?: runOutputs.minWithOrNull(messageOrder)
-            val siblings = structuralRootOutput
-                ?.let { regenerationSiblingsByParent[it.parentId] }
+        MessageGenerationBoundaryResolver.resolve(uniqueVisibleMessages).forEach { boundary ->
+            val outputBoundary = boundary.lastAssistant ?: return@forEach
+            val rootOutput = boundary.firstAssistant ?: outputBoundary
+            val siblings = boundary.input
+                ?.takeIf { rootOutput.parentId == it.id }
+                ?.let { regenerationSiblingsByParent[it.id] }
                 .orEmpty()
             result[outputBoundary.id] = RunMessagePresentation(
                 showActions = true,
                 copyText = outputBoundary.text.takeIf { it.isNotBlank() },
-                deleteTargetMessageId = rootOutput?.id ?: outputBoundary.id,
+                deleteTargetMessageId = rootOutput.id,
                 showBranchSelector = siblings.size > 1,
-                branchIndex = siblings.indexOfFirst { it.id == rootOutput?.id }.coerceAtLeast(0),
+                branchIndex = siblings.indexOfFirst { it.id == rootOutput.id }.coerceAtLeast(0),
                 totalBranches = siblings.size.coerceAtLeast(1),
-                branchAnchorParentId = rootOutput?.parentId,
-                branchAnchorMessageId = rootOutput?.id,
+                branchAnchorParentId = rootOutput.parentId,
+                branchAnchorMessageId = rootOutput.id,
             )
         }
         return result
     }
 
-    private val messageOrder =
-        compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-            .thenBy { it.timestamp }
-            .thenBy { it.id }
-
     private val branchOrder =
         compareBy<ChatMessage> { it.timestamp }
             .thenBy { it.id }
-
-    private fun isBoundaryUserInput(message: ChatMessage): Boolean =
-        message.participant == Participant.USER &&
-            message.runSequence == 0L &&
-            !isSynthetic(message)
-
-    private fun isVisibleModelOutput(message: ChatMessage): Boolean =
-        message.participant == Participant.MODEL && !isSynthetic(message)
-
-    private fun isSynthetic(message: ChatMessage): Boolean =
-        message.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
-            message.id.startsWith(Constants.RESULT_MSG_PREFIX)
 }

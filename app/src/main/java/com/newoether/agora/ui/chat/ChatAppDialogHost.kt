@@ -7,11 +7,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.ui.common.AgoraHaptics
 import com.newoether.agora.viewmodel.ChatViewModel
-import com.newoether.agora.viewmodel.CompactResult
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
 
 @Stable
 internal class ChatAppDialogState internal constructor(
@@ -84,13 +82,13 @@ internal fun ChatAppDialogHost(
     state: ChatAppDialogState,
     viewModel: ChatViewModel,
     haptics: AgoraHaptics,
-    scope: CoroutineScope,
     compactModel: String?,
     selectedModel: String,
     compactPrompt: String,
     compactRetainCount: Int,
     enabledModels: Set<String>,
     modelAliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig>,
     isCompacting: Boolean,
 ) {
     state.renameConversationId?.let { id ->
@@ -130,15 +128,11 @@ internal fun ChatAppDialogHost(
             initialRetainCount = compactRetainCount,
             enabledModels = enabledModels,
             modelAliases = modelAliases,
+            customProviders = customProviders,
             isCompacting = isCompacting,
             onCompact = { model, prompt, retainCount ->
                 state.dismissManualCompact()
-                scope.launch {
-                    val result = viewModel.compactContextManual(model, prompt, retainCount)
-                    if (result is CompactResult.Failed) {
-                        viewModel.emitSnackbar(result.message)
-                    }
-                }
+                viewModel.startContextCompactManual(model, prompt, retainCount)
             },
             onDismiss = state::dismissManualCompact,
         )

@@ -73,9 +73,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.providerDisplayName
+import com.newoether.agora.data.modelDisplayName
 
 internal val CHAT_BOTTOM_BAR_OUTER_RADIUS = 28.dp
 internal val CHAT_BOTTOM_BAR_OUTER_SHAPE = RoundedCornerShape(CHAT_BOTTOM_BAR_OUTER_RADIUS)
+
+internal fun contextUsageAtCapacity(estimatedTokens: Int, tokenBudget: Int): Boolean =
+    tokenBudget > 0 && estimatedTokens >= tokenBudget
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -92,6 +98,7 @@ fun ChatBottomBar(
     enabledModels: Set<String>,
     selectedModel: String,
     modelAliases: Map<String, String> = emptyMap(),
+    customProviders: List<CustomProviderConfig> = emptyList(),
     codeExecutionEnabled: Boolean = false,
     googleSearchEnabled: Boolean = false,
     thinkingEnabled: Boolean = true,
@@ -140,9 +147,7 @@ fun ChatBottomBar(
     compactDefaultPrompt: String = "",
     compactDefaultRetainCount: Int = 6,
     contextEstimatedTokens: Int = 0,
-    contextLogicalMessageCount: Int = 0,
     contextTokenBudget: Int = ContextBudget.DEFAULT_TOKENS,
-    hasCompactBoundary: Boolean = false,
     canCompact: Boolean = false,
     onCompactClick: () -> Unit = {},
     queuedSends: List<QueuedSend> = emptyList(),
@@ -441,12 +446,12 @@ fun ChatBottomBar(
                 var lastContextDismissTime by remember { mutableLongStateOf(0L) }
                 var lastToolsDismissTime by remember { mutableLongStateOf(0L) }
 
-                val parsed = com.newoether.agora.model.ModelId.parse(selectedModel)
-                val modelId = parsed.apiModelName
-                val provider = parsed.providerName
-
+                val selectedProvider = providerDisplayName(
+                    com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
+                    customProviders,
+                )
                 val displayText = when {
-                    isModelValid -> modelAliases[selectedModel] ?: ("$modelId ($provider)")
+                    isModelValid -> modelDisplayName(selectedModel, modelAliases, customProviders)
                     enabledModels.isNotEmpty() -> stringResource(R.string.select_model)
                     else -> stringResource(R.string.no_model_selected)
                 }
@@ -501,10 +506,15 @@ fun ChatBottomBar(
                             // Grouped by provider, then alphabetical. enabledModels is a Set whose
                             // iteration order is insertion order (i.e. whenever each model was
                             // enabled), which scrambles providers together in the picker.
-                            val sortedModels = remember(enabledModels) {
+                            val sortedModels = remember(enabledModels, customProviders) {
                                 enabledModels.sortedWith(
                                     compareBy(
-                                        { com.newoether.agora.model.ModelId.parse(it).providerName.lowercase() },
+                                        {
+                                            providerDisplayName(
+                                                com.newoether.agora.model.ModelId.parse(it).providerName,
+                                                customProviders,
+                                            ).lowercase()
+                                        },
                                         { com.newoether.agora.model.ModelId.parse(it).apiModelName.lowercase() },
                                     )
                                 )
@@ -512,10 +522,7 @@ fun ChatBottomBar(
                             sortedModels.forEach { model ->
                                 DropdownMenuItem(
                                     text = {
-                                        val parsed = com.newoether.agora.model.ModelId.parse(model)
-                                        val modelId = parsed.apiModelName
-                                        val provider = parsed.providerName
-                                        Text(modelAliases[model] ?: ("$modelId ($provider)"))
+                                        Text(modelDisplayName(model, modelAliases, customProviders))
                                     },
                                     onClick = {
                                         haptics.selection()
@@ -529,6 +536,13 @@ fun ChatBottomBar(
                     }
                 }
                 
+                val contextProgressColor = if (
+                    contextUsageAtCapacity(contextEstimatedTokens, contextTokenBudget)
+                ) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                }
                 ExposedDropdownMenuBox(
                     expanded = activeMenu == "context",
                     onExpandedChange = { },
@@ -557,9 +571,7 @@ fun ChatBottomBar(
                             },
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.5.dp,
-                            color = if (contextEstimatedTokens >= contextTokenBudget) {
-                                MaterialTheme.colorScheme.error
-                            } else MaterialTheme.colorScheme.primary,
+                            color = contextProgressColor,
                         )
                     }
                     ExposedDropdownMenu(
@@ -590,24 +602,15 @@ fun ChatBottomBar(
                                 },
                                 modifier = Modifier.size(36.dp).align(Alignment.CenterHorizontally),
                                 strokeWidth = 4.dp,
+                                color = contextProgressColor,
                             )
                             Text(
                                 text = stringResource(
                                     R.string.context_usage_messages,
                                     ContextBudget.compactLabel(contextEstimatedTokens),
                                     ContextBudget.compactLabel(contextTokenBudget),
-                                    contextLogicalMessageCount,
                                 ),
                                 style = MaterialTheme.typography.bodyMedium,
-                            )
-                            Text(
-                                text = if (hasCompactBoundary) {
-                                    stringResource(R.string.context_boundary_active)
-                                } else {
-                                    stringResource(R.string.context_boundary_none)
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -643,7 +646,7 @@ fun ChatBottomBar(
                         matchTextFieldWidth = false,
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        val isGemini = provider.equals("google", ignoreCase = true) && isModelValid
+                        val isGemini = selectedProvider.equals("google", ignoreCase = true) && isModelValid
                         if (isGemini) {
                             DropdownMenuItem(
                                 text = {
@@ -819,7 +822,6 @@ fun ChatBottomBar(
                 textFieldState = textFieldState,
                 composer = composer,
                 isLoading = isLoading,
-                isCompacting = isCompacting,
                 isSwitching = isSwitching,
                 isStopping = isStopping,
                 isModelValid = isModelValid,
@@ -861,7 +863,10 @@ fun ChatBottomBar(
                     onLevelChange = onThinkingLevelChange,
                     onBudgetEnabledChange = onThinkingBudgetEnabledChange,
                     onBudgetTokensChange = onThinkingBudgetTokensChange,
-                    providerName = com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
+                    providerName = providerDisplayName(
+                        com.newoether.agora.model.ModelId.parse(selectedModel).providerName,
+                        customProviders,
+                    ),
                     animateSections = true
                 )
                 Spacer(modifier = Modifier.height(24.dp))

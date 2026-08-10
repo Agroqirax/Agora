@@ -304,7 +304,8 @@ Each row is an independent semantic commit and rollback boundary:
    state-backed foreground and production Task/Loop execution; the registry-less headless sentinel
    and permissive callback mode were removed with automation admission in step 7.
 6. Queued guidance and attachment ownership move through the normal Send contract — implemented:
-   guidance stays memory-only until a legal boundary, the origin Run closes, one explicit lease
+   guidance stays memory-only until a legal boundary, the FIFO batch is merged into one USER
+   message with text separated by `\n\n`, the origin Run closes, one explicit lease
    enters a fresh `SendRequested`/accepted-input transaction, distinct USER rows remain ordered,
    and failed/disposed ownership is deterministic. Same-Run/durable pending-queue authorities were
    deleted without changing Room v22.

@@ -8,7 +8,7 @@ import org.junit.Test
 
 class RunUiProjectionTest {
     @Test
-    fun intermediatePassMessages_haveNoActions_andBoundaryCopyKeepsOriginalRowSemantics() {
+    fun eachUserStartsANewGenerationAndOnlyItsLastAssistantGetsActions() {
         val messages = listOf(
             message("u0", "start", Participant.USER, "run-a", 0),
             message("m0", "first", Participant.MODEL, "run-a", 1),
@@ -21,11 +21,11 @@ class RunUiProjectionTest {
         assertTrue(projected.getValue("u0").showActions)
         assertEquals("start", projected.getValue("u0").copyText)
         assertEquals("u0", projected.getValue("u0").deleteTargetMessageId)
-        assertFalse(projected.getValue("m0").showActions)
-        assertFalse(projected.getValue("u1").showActions)
+        assertTrue(projected.getValue("m0").showActions)
+        assertTrue(projected.getValue("u1").showActions)
         assertTrue(projected.getValue("m1").showActions)
         assertEquals("final", projected.getValue("m1").copyText)
-        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
+        assertEquals("m1", projected.getValue("m1").deleteTargetMessageId)
     }
 
     @Test
@@ -170,6 +170,51 @@ class RunUiProjectionTest {
         assertEquals("answer", projected.getValue("m0").copyText)
         assertFalse(projected.getValue("tool_x").showActions)
         assertFalse(projected.getValue("result_x").showActions)
+    }
+
+    @Test
+    fun multipleAssistantsAfterOneUser_onlyExposeActionsOnTheLastAssistant() {
+        val messages = listOf(
+            message("u0", "prompt", Participant.USER, "run-a", 0),
+            message("m0", "partial", Participant.MODEL, "run-a", 1, parentId = "u0"),
+            message("m1", "final", Participant.MODEL, "run-b", 0, parentId = "m0"),
+        )
+
+        val projected = RunUiProjection.project(messages, messages)
+
+        assertTrue(projected.getValue("u0").showActions)
+        assertFalse(projected.getValue("m0").showActions)
+        assertTrue(projected.getValue("m1").showActions)
+        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
+    }
+
+    @Test
+    fun malformedAssistantRoot_stillExposesTerminalActionsWithoutInventingAnInput() {
+        val messages = listOf(
+            message("m0", "orphan start", Participant.MODEL, "run-a", 3),
+            message("m1", "orphan end", Participant.MODEL, "run-b", 0, parentId = "m0"),
+        )
+
+        val projected = RunUiProjection.project(messages, messages)
+
+        assertFalse(projected.getValue("m0").showActions)
+        assertTrue(projected.getValue("m1").showActions)
+        assertEquals("m0", projected.getValue("m1").deleteTargetMessageId)
+        assertFalse(projected.getValue("m1").showBranchSelector)
+    }
+
+    @Test
+    fun compactMessage_isNeverAnAssistantActionBoundary() {
+        val messages = listOf(
+            message("u0", "prompt", Participant.USER, "run-a", 0),
+            message("m0", "answer", Participant.MODEL, "run-a", 1, parentId = "u0"),
+            message("${com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX}0", "summary", Participant.MODEL, "compact", 0, parentId = "m0"),
+        )
+
+        val projected = RunUiProjection.project(messages, messages)
+
+        assertTrue(projected.getValue("m0").showActions)
+        assertFalse(projected.getValue("${com.newoether.agora.util.Constants.COMPACT_MSG_PREFIX}0").showActions)
     }
 
     private fun message(

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.api.ProviderDefaults
+import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
@@ -63,8 +64,28 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var showRenameDialog by remember { mutableStateOf<String?>(null) }
     var showRecacheConfirm by remember { mutableStateOf<String?>(null) }
     var showMenuForModel by remember { mutableStateOf<String?>(null) }
-    var localThreshold by remember { mutableFloatStateOf(ragThreshold) }
-    LaunchedEffect(ragThreshold) { localThreshold = ragThreshold }
+    val searchContextGate = remember {
+        PersistedSliderFeedbackGate(
+            initialPersisted = searchContextWindow,
+            toDisplay = Int::toFloat,
+        )
+    }
+    val searchMatchGate = remember {
+        PersistedSliderFeedbackGate(
+            initialPersisted = searchMatchLimit,
+            toDisplay = Int::toFloat,
+        )
+    }
+    val ragThresholdGate = remember {
+        PersistedSliderFeedbackGate(
+            initialPersisted = ragThreshold,
+            toDisplay = { it },
+            equivalent = { left, right -> kotlin.math.abs(left - right) < 0.0001f },
+        )
+    }
+    LaunchedEffect(searchContextWindow) { searchContextGate.reconcile(searchContextWindow) }
+    LaunchedEffect(searchMatchLimit) { searchMatchGate.reconcile(searchMatchLimit) }
+    LaunchedEffect(ragThreshold) { ragThresholdGate.reconcile(ragThreshold) }
     var renameText by remember { mutableStateOf("") }
     // Embedding provider presets
     val embeddingProviders = listOf(
@@ -372,14 +393,32 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = stringResource(R.string.search_context_desc, searchContextWindow),
+                                        text = stringResource(
+                                            R.string.search_context_desc,
+                                            searchContextGate.displayed.toInt(),
+                                        ),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                     Slider(
-                                        value = searchContextWindow.toFloat(),
-                                        onValueChange = { viewModel.settings.setSearchContextWindow(it.toInt()) },
+                                        value = searchContextGate.displayed,
+                                        onValueChange = searchContextGate::updateFromGesture,
+                                        onValueChangeFinished = {
+                                            val committed = searchContextGate.displayed.toInt()
+                                            if (committed == searchContextWindow) {
+                                                searchContextGate.settleWithoutWrite(
+                                                    searchContextWindow,
+                                                    committed.toFloat(),
+                                                )
+                                            } else {
+                                                searchContextGate.expectPersisted(
+                                                    committed,
+                                                    committed.toFloat(),
+                                                )
+                                                viewModel.settings.setSearchContextWindow(committed)
+                                            }
+                                        },
                                         valueRange = 4f..32f,
                                         steps = 6,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -412,14 +451,32 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = stringResource(R.string.search_match_desc, searchMatchLimit),
+                                        text = stringResource(
+                                            R.string.search_match_desc,
+                                            searchMatchGate.displayed.toInt(),
+                                        ),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                     Slider(
-                                        value = searchMatchLimit.toFloat(),
-                                        onValueChange = { viewModel.settings.setSearchMatchLimit(it.toInt()) },
+                                        value = searchMatchGate.displayed,
+                                        onValueChange = searchMatchGate::updateFromGesture,
+                                        onValueChangeFinished = {
+                                            val committed = searchMatchGate.displayed.toInt()
+                                            if (committed == searchMatchLimit) {
+                                                searchMatchGate.settleWithoutWrite(
+                                                    searchMatchLimit,
+                                                    committed.toFloat(),
+                                                )
+                                            } else {
+                                                searchMatchGate.expectPersisted(
+                                                    committed,
+                                                    committed.toFloat(),
+                                                )
+                                                viewModel.settings.setSearchMatchLimit(committed)
+                                            }
+                                        },
                                         valueRange = 5f..30f,
                                         steps = 4,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
@@ -452,15 +509,26 @@ fun SettingsSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = "≥ ${"%.2f".format(localThreshold)}",
+                                        text = "≥ ${"%.2f".format(ragThresholdGate.displayed)}",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(top = 4.dp)
                                     )
                                     Slider(
-                                        value = localThreshold,
-                                        onValueChange = { localThreshold = it },
-                                        onValueChangeFinished = { viewModel.settings.setRagThreshold(localThreshold) },
+                                        value = ragThresholdGate.displayed,
+                                        onValueChange = ragThresholdGate::updateFromGesture,
+                                        onValueChangeFinished = {
+                                            val committed = ragThresholdGate.displayed
+                                            if (kotlin.math.abs(committed - ragThreshold) < 0.0001f) {
+                                                ragThresholdGate.settleWithoutWrite(
+                                                    ragThreshold,
+                                                    committed,
+                                                )
+                                            } else {
+                                                ragThresholdGate.expectPersisted(committed, committed)
+                                                viewModel.settings.setRagThreshold(committed)
+                                            }
+                                        },
                                         valueRange = 0f..1f,
                                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                     )

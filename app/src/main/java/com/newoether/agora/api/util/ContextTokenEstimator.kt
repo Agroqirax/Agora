@@ -1,5 +1,6 @@
 package com.newoether.agora.api.util
 
+import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.util.Constants
 import kotlin.math.ceil
@@ -27,15 +28,37 @@ object ContextTokenEstimator {
         return applySafetyMargin(raw)
     }
 
+    /** Provider-visible cost that exists even when the conversation history is empty. */
+    fun estimateFixed(systemPrompt: String?, tools: List<ToolDefinition>): Int {
+        var raw = MESSAGE_OVERHEAD.toLong() + estimateTextRaw(systemPrompt.orEmpty())
+        tools.forEach { tool ->
+            raw += TOOL_CALL_OVERHEAD
+            raw += estimateTextRaw(tool.type)
+            raw += estimateTextRaw(tool.function.name)
+            raw += estimateTextRaw(tool.function.description)
+            raw += estimateTextRaw(tool.function.parameters.type)
+            tool.function.parameters.properties.toSortedMap().forEach { (name, property) ->
+                raw += estimateTextRaw(name)
+                raw += estimateToolPropertyRaw(property)
+            }
+            tool.function.parameters.required.sorted().forEach { required ->
+                raw += estimateTextRaw(required)
+            }
+        }
+        return applySafetyMargin(raw.coerceAtMost(Int.MAX_VALUE.toLong()))
+    }
+
     internal fun estimateText(text: String): Int = applySafetyMargin(estimateTextRaw(text))
 
     private fun estimateMessageRaw(message: ChatMessage): Long {
-        var total = MESSAGE_OVERHEAD.toLong() + estimateTextRaw(message.text)
-        total += message.images.size.toLong() * IMAGE_ESTIMATE
-        if (
-            message.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
+        val isToolProtocol = message.id.startsWith(Constants.TOOL_MSG_PREFIX) ||
             message.id.startsWith(Constants.RESULT_MSG_PREFIX)
-        ) {
+        // Provider adapters serialize tool protocol payload from segments/toolCall and ignore the
+        // mirrored Room text field. Counting both made result-heavy contexts look up to 2x larger.
+        var total = MESSAGE_OVERHEAD.toLong() +
+            if (isToolProtocol) 0L else estimateTextRaw(message.text)
+        total += message.images.size.toLong() * IMAGE_ESTIMATE
+        if (isToolProtocol) {
             val segments = message.segments.orEmpty().filter { it.type == "tool" }
             if (segments.isNotEmpty()) {
                 segments.forEach { segment ->
@@ -86,6 +109,11 @@ object ContextTokenEstimator {
         flushAsciiRun()
         return tokens
     }
+
+    private fun estimateToolPropertyRaw(property: com.newoether.agora.api.ToolProperty): Long =
+        estimateTextRaw(property.type) +
+            estimateTextRaw(property.description) +
+            (property.items?.let(::estimateToolPropertyRaw) ?: 0L)
 
     private fun applySafetyMargin(raw: Long): Int =
         ((raw * SAFETY_NUMERATOR + SAFETY_DENOMINATOR - 1) / SAFETY_DENOMINATOR)

@@ -45,7 +45,17 @@ data class CustomProviderConfig(
     val name: String,
     // Configs written before protocol selection existed were OpenAI-compatible.
     val protocol: CustomEndpointProtocol = CustomEndpointProtocol.OPENAI,
-)
+    /** Immutable namespace used by persisted model IDs. The blank default decodes legacy data. */
+    val id: String = "",
+    /** Temporary crash-safe bridge until legacy name-prefixed Room references are migrated. */
+    val legacyNames: Set<String> = emptySet(),
+) {
+    val providerId: String
+        get() = id.takeIf(CustomProviderIdentityPolicy::isStableId) ?: name
+
+    fun ownsIdentity(reference: String): Boolean =
+        providerId == reference || reference in legacyNames
+}
 
 fun isOpenAiProtocolProvider(
     providerName: String,
@@ -53,7 +63,8 @@ fun isOpenAiProtocolProvider(
 ): Boolean =
     providerName == Constants.PROVIDER_OPENAI ||
         customProviders.any {
-            it.name == providerName && it.protocol == CustomEndpointProtocol.OPENAI
+            (it.name == providerName || it.ownsIdentity(providerName)) &&
+                it.protocol == CustomEndpointProtocol.OPENAI
         }
 
 /**

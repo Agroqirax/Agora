@@ -1,5 +1,7 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.api.util.projectAssistantImagesToLatestUserMessage
+import com.newoether.agora.api.util.projectToolResultImagesToUserMessage
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
@@ -145,3 +147,24 @@ internal fun applyUserTemplateToMessages(
         } else msg
     }
 }
+
+/**
+ * Exact API-only history projection shared by dispatch, Context accounting, and Auto Compact.
+ *
+ * Provider adapters still own canonical role/tool validation and hard-cap rollout. This step owns
+ * the transformations that happen immediately before that shared provider boundary, so admission
+ * policy and the bottom-bar estimate cannot omit text or images that dispatch will actually send.
+ */
+internal fun projectGenerationInputMessages(
+    messages: List<ChatMessage>,
+    includeImages: Boolean,
+    userPrepend: String?,
+    userPostpend: String?,
+): List<ChatMessage> = applyUserTemplateToMessages(
+    messages = projectToolResultImagesToUserMessage(
+        messages = projectAssistantImagesToLatestUserMessage(messages, includeImages),
+        includeImages = includeImages,
+    ),
+    prepend = userPrepend,
+    postpend = userPostpend,
+)

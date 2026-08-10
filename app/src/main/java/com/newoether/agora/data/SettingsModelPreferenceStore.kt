@@ -272,6 +272,60 @@ internal class SettingsModelPreferenceStore(
         dataStore.edit { it[MODEL_ALIASES_JSON] = json.encodeToString(aliases) }
     }
 
+    /**
+     * Changes one alias against the value currently stored on disk.  Callers must not rebuild
+     * the complete alias map from a StateFlow snapshot: that snapshot can predate startup
+     * identity migration and would restore legacy custom-provider keys after migration commits.
+     */
+    suspend fun updateModelAlias(modelId: String, alias: String) {
+        dataStore.edit { prefs ->
+            val aliases = prefs.mutableModelAliasesOrNull() ?: return@edit
+            if (alias.isBlank()) {
+                aliases.remove(modelId)
+            } else {
+                aliases[modelId] = alias.trim()
+            }
+            prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+        }
+    }
+
+    /**
+     * Merges the currently configured Local-provider aliases without touching any other alias.
+     * Deleting a local model has its own explicit key-removal path; startup synchronization must
+     * not reinterpret an absent/stale local configuration as authorization to erase durable
+     * alias data. The read and write occur in one DataStore transaction so this cannot overwrite
+     * a concurrent custom-provider identity migration with a stale whole-map snapshot.
+     */
+    suspend fun synchronizeLocalModelAliases(localAliases: Map<String, String>) {
+        val localPrefix = "${Constants.PROVIDER_LOCAL}:"
+        val normalized = localAliases
+            .filterKeys { it.startsWith(localPrefix) }
+            .mapValues { (_, alias) -> alias.trim() }
+        dataStore.edit { prefs ->
+            val aliases = prefs.mutableModelAliasesOrNull() ?: return@edit
+            aliases.putAll(normalized)
+            prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+        }
+    }
+
+    /** Removes only aliases owned by [providerId], preserving concurrent unrelated edits. */
+    suspend fun removeModelAliasesForProvider(providerId: String) {
+        val prefix = "$providerId:"
+        dataStore.edit { prefs ->
+            val aliases = prefs.mutableModelAliasesOrNull() ?: return@edit
+            if (aliases.keys.removeAll { it.startsWith(prefix) }) {
+                prefs[MODEL_ALIASES_JSON] = json.encodeToString(aliases)
+            }
+        }
+    }
+
+    private fun Preferences.mutableModelAliasesOrNull(): MutableMap<String, String>? {
+        val raw = this[MODEL_ALIASES_JSON] ?: return mutableMapOf()
+        return runCatching {
+            json.decodeFromString<MutableMap<String, String>>(raw)
+        }.getOrNull()
+    }
+
     suspend fun saveApiKeys(keys: List<ApiKeyEntry>) {
         dataStore.edit { it[API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(keys)) }
     }
@@ -330,38 +384,142 @@ internal class SettingsModelPreferenceStore(
         }
     }
 
-    /** Remaps every configured model reference whose provider component was renamed. */
-    suspend fun renameProviderModelReferences(oldProvider: String, newProvider: String) {
-        val oldPrefix = "$oldProvider:"
-        val newPrefix = "$newProvider:"
-        fun String.remapProvider(): String =
-            if (startsWith(oldPrefix)) newPrefix + removePrefix(oldPrefix) else this
-
+    /**
+     * Atomically assigns immutable IDs to legacy custom providers and rewrites every DataStore
+     * model reference that used the mutable provider name. Provider connection settings remain
+     * name-keyed for compatibility; only model ownership moves to the stable namespace.
+     *
+     * Legacy names stay on the provider config until the independent Room migration succeeds.
+     * That marker makes a crash between the two stores recoverable and lets background execution
+     * resolve old task/conversation references in the meantime.
+     */
+    suspend fun normalizeCustomProviderIdentities(): List<CustomProviderIdentityMigration> {
+        var migrations = emptyList<CustomProviderIdentityMigration>()
         dataStore.edit { prefs ->
-            prefs[CUSTOM_MODELS] = (prefs[CUSTOM_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
-                it.remapProvider()
-            }
-            prefs[ENABLED_MODELS] = (prefs[ENABLED_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
-                it.remapProvider()
-            }
-            prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] =
-                (prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] ?: emptySet()).mapTo(linkedSetOf()) {
-                    it.remapProvider()
-                }
-            val aliases = runCatching {
-                json.decodeFromString<Map<String, String>>(prefs[MODEL_ALIASES_JSON] ?: "{}")
-            }.getOrDefault(emptyMap())
-            prefs[MODEL_ALIASES_JSON] = json.encodeToString(
-                aliases.mapKeys { (modelId, _) -> modelId.remapProvider() }
+            val raw = prefs[CUSTOM_PROVIDERS_JSON] ?: "[]"
+            val decoded = runCatching {
+                json.decodeFromString<List<CustomProviderConfig>>(raw)
+            }.getOrNull() ?: return@edit
+            val normalization = CustomProviderIdentityPolicy.normalize(
+                decoded,
+                newId = { provider -> CustomProviderIdentityPolicy.legacyId(provider.name) },
             )
-            listOf(
+            // The current display name remains a safe compatibility input even when an
+            // intermediate build cleared legacyNames too early. Custom names are unique and may
+            // not shadow built-ins, so this idempotently recovers name-keyed aliases/references.
+            migrations = (
+                normalization.migrations + normalization.providers.map { provider ->
+                    CustomProviderIdentityMigration(provider.name, provider.id)
+                }
+            ).distinct()
+            val migrationMap = migrations.associate {
+                it.legacyReference to it.providerId
+            }
+            val providersChanged = normalization.providers != decoded
+            if (providersChanged) {
+                prefs[CUSTOM_PROVIDERS_JSON] = json.encodeToString(normalization.providers)
+            }
+
+            fun remap(modelId: String): String = modelId.remapProviderReference(migrationMap)
+            var modelReferencesChanged = false
+            val rawCustomModels = prefs[CUSTOM_MODELS]
+            val rawEnabledModels = prefs[ENABLED_MODELS]
+            val rawTranscriptionModels = prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS]
+            val customModels = rawCustomModels?.mapTo(linkedSetOf(), ::remap).orEmpty()
+            val enabledModels = rawEnabledModels?.mapTo(linkedSetOf(), ::remap).orEmpty()
+            val transcriptionModels = rawTranscriptionModels
+                ?.mapTo(linkedSetOf(), ::remap)
+                .orEmpty()
+            if (rawCustomModels != null) prefs[CUSTOM_MODELS] = customModels
+            if (rawEnabledModels != null) prefs[ENABLED_MODELS] = enabledModels
+            if (rawTranscriptionModels != null) {
+                prefs[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = transcriptionModels
+            }
+            modelReferencesChanged =
+                (rawCustomModels != null && rawCustomModels != customModels) ||
+                (rawEnabledModels != null && rawEnabledModels != enabledModels) ||
+                (rawTranscriptionModels != null &&
+                    rawTranscriptionModels != transcriptionModels)
+            val scalarKeys = listOf(
                 SELECTED_MODEL,
                 TITLE_GENERATION_MODEL,
                 IMAGE_TRANSCRIPTION_MODEL,
                 IMAGE_GEN_MODEL,
                 CONTEXT_COMPACT_MODEL,
-            ).forEach { key ->
-                prefs[key]?.let { modelId -> prefs[key] = modelId.remapProvider() }
+            )
+            val scalarModels = scalarKeys.mapNotNull { key ->
+                prefs[key]?.let { modelId ->
+                    val remapped = remap(modelId)
+                    if (remapped != modelId) modelReferencesChanged = true
+                    prefs[key] = remapped
+                }
+                prefs[key]
+            }
+            val catalogs = runCatching {
+                json.decodeFromString<Map<String, List<String>>>(
+                    prefs[AVAILABLE_MODELS_JSON] ?: "{}",
+                )
+            }.getOrNull()
+            val remappedCatalogs = catalogs?.mapValues { (_, models) -> models.map(::remap) }
+            if (remappedCatalogs != null) {
+                prefs[AVAILABLE_MODELS_JSON] = json.encodeToString(remappedCatalogs)
+                if (remappedCatalogs != catalogs) modelReferencesChanged = true
+            }
+            val aliases = runCatching {
+                json.decodeFromString<Map<String, String>>(prefs[MODEL_ALIASES_JSON] ?: "{}")
+            }.getOrNull()
+            val remappedAliases = aliases?.let { remapModelAliases(it, migrationMap) }
+            val repairedAliases = remappedAliases?.let {
+                repairOrphanedCustomProviderAliases(
+                    aliases = it,
+                    knownModelReferences = buildList {
+                        addAll(customModels)
+                        addAll(enabledModels)
+                        addAll(transcriptionModels)
+                        addAll(scalarModels)
+                        remappedCatalogs?.values?.forEach(::addAll)
+                    },
+                    activeProviderIds = normalization.providers.mapTo(linkedSetOf()) {
+                        it.providerId
+                    },
+                )
+            }
+            if (repairedAliases != null) {
+                prefs[MODEL_ALIASES_JSON] = json.encodeToString(repairedAliases)
+            }
+            if (
+                providersChanged || modelReferencesChanged ||
+                repairedAliases != aliases
+            ) {
+                prefs.remove(LAST_MODELS_FETCH_FINGERPRINT)
+            }
+        }
+        return migrations
+    }
+
+    /** Clears only markers whose exact Room migration was confirmed successful. */
+    suspend fun clearLegacyCustomProviderNames(
+        completed: List<CustomProviderIdentityMigration>,
+    ) {
+        if (completed.isEmpty()) return
+        val completedById = completed.groupBy(
+            keySelector = CustomProviderIdentityMigration::providerId,
+            valueTransform = CustomProviderIdentityMigration::legacyReference,
+        )
+        dataStore.edit { prefs ->
+            val decoded = runCatching {
+                json.decodeFromString<List<CustomProviderConfig>>(
+                    prefs[CUSTOM_PROVIDERS_JSON] ?: "[]",
+                )
+            }.getOrNull() ?: return@edit
+            val updated = decoded.map { provider ->
+                val names = completedById[provider.id].orEmpty().toSet()
+                if (names.isEmpty()) provider else provider.copy(
+                    legacyNames = provider.legacyNames - names,
+                )
+            }
+            if (updated != decoded) {
+                prefs[CUSTOM_PROVIDERS_JSON] = json.encodeToString(updated)
             }
         }
     }
@@ -370,9 +528,12 @@ internal class SettingsModelPreferenceStore(
         dataStore.edit { it[LOCAL_CHAT_MODELS_JSON] = json.encodeToString(models) }
     }
     suspend fun saveCustomProviders(providers: List<CustomProviderConfig>) {
-        val sanitized = CustomProviderNamePolicy.sanitize(providers)
+        val normalized = CustomProviderIdentityPolicy.normalize(
+            providers,
+            newId = { provider -> CustomProviderIdentityPolicy.legacyId(provider.name) },
+        )
         dataStore.edit {
-            it[CUSTOM_PROVIDERS_JSON] = json.encodeToString(sanitized.accepted)
+            it[CUSTOM_PROVIDERS_JSON] = json.encodeToString(normalized.providers)
         }
     }
 

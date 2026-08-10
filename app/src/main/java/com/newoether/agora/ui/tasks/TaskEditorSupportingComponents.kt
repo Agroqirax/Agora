@@ -62,6 +62,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.automation.ScheduleType
 import com.newoether.agora.automation.TaskSchedule
 import com.newoether.agora.model.MessageStatus
@@ -591,6 +593,7 @@ internal fun ExecutionRow(
 internal fun ModelPickerDialog(
     enabledModels: List<String>,
     modelAliases: Map<String, String>,
+    customProviders: List<CustomProviderConfig>,
     selected: String?,
     onSelect: (String?) -> Unit,
     onDismiss: () -> Unit,
@@ -613,7 +616,7 @@ internal fun ModelPickerDialog(
                     val parsed = ModelId.parse(model)
                     ChoiceRow(
                         label = modelAliases[model] ?: parsed.apiModelName,
-                        sub = parsed.providerName,
+                        sub = providerDisplayName(parsed.providerName, customProviders),
                         selected = selected == model,
                         onClick = { onSelect(model) },
                     )

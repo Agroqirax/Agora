@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.providerIcon
@@ -86,6 +87,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val size by viewModel.settings.imageGenSize.collectAsState()
     val availableModels by viewModel.settings.availableModels.collectAsState()
     val modelAliases by viewModel.settings.modelAliases.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState()
     var showModelDialog by remember { mutableStateOf(false) }
     var showAllModels by remember { mutableStateOf(false) }
     val showDocFab by viewModel.settings.showDocumentationFab.collectAsState()
@@ -121,7 +123,9 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                         val parsed = selectedModel?.takeIf { it.contains(":") }?.let { ModelId.parse(it) }
                         val displayName = parsed?.let { modelAliases[selectedModel] ?: it.apiModelName }
                             ?: stringResource(R.string.image_gen_no_model)
-                        val providerName = parsed?.providerName
+                        val providerName = parsed?.let {
+                            providerDisplayName(it.providerName, customProviders)
+                        }
                         val iconRes = providerName?.let { providerIcon(it) } ?: 0
                         SettingsItem(
                             headlineContent = {
@@ -216,7 +220,7 @@ fun SettingsImageGenPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             val displayName = modelAliases[model] ?: parsed.apiModelName
                             SettingsItem(
                                 headlineContent = { Text(displayName, fontWeight = if (selectedModel == model) FontWeight.Bold else FontWeight.Normal) },
-                                supportingContent = { Text(parsed.providerName, style = MaterialTheme.typography.bodySmall) },
+                                supportingContent = { Text(providerDisplayName(parsed.providerName, customProviders), style = MaterialTheme.typography.bodySmall) },
                                 leadingContent = {
                                     RadioButton(selected = selectedModel == model, onClick = {
                                         viewModel.settings.setImageGenModel(model); showModelDialog = false

@@ -22,10 +22,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class ConversationBranchMutationServiceTest {
     @Test
-    fun compactBoundaryUsesDedicatedTransactionAndProjectsRemainingGraph() = runTest {
+    fun compactBoundaryUsesDedicatedTransactionWithoutRequestingAScrollTarget() = runTest {
         val conversations = mockk<ConversationRepository>()
         val compactId = "${Constants.COMPACT_MSG_PREFIX}one"
         val remaining = entity("user", null, Participant.USER)
+        val offPathTail = entity("off-path-tail", "missing-parent", Participant.MODEL)
         val events = mutableListOf<String>()
         coEvery { conversations.getLiveRun("conversation") } coAnswers {
             events += "live-check"
@@ -37,7 +38,7 @@ class ConversationBranchMutationServiceTest {
         }
         coEvery { conversations.getMessagesForConversationSnapshot("conversation") } coAnswers {
             events += "snapshot"
-            listOf(remaining)
+            listOf(remaining, offPathTail)
         }
         coEvery { conversations.restoreBranchSelections("conversation") } coAnswers {
             events += "selections"
@@ -61,7 +62,15 @@ class ConversationBranchMutationServiceTest {
 
         assertEquals(1, previewCount)
         assertEquals(
-            listOf("start", "live-check", "remove", "snapshot", "selections", "project:user", "settle:user"),
+            listOf(
+                "start:false",
+                "live-check",
+                "remove",
+                "snapshot",
+                "selections",
+                "project:user, off-path-tail",
+                "settle:null",
+            ),
             events,
         )
         assertEquals(emptyList<Long?>(), failed)
@@ -113,7 +122,7 @@ class ConversationBranchMutationServiceTest {
 
         assertEquals(1, previewCount)
         assertEquals(
-            listOf("start", "room-commit", "file-delete", "project:user", "settle:user"),
+            listOf("start:true", "room-commit", "file-delete", "project:user", "settle:user"),
             events,
         )
         state.dispose()
@@ -153,8 +162,8 @@ class ConversationBranchMutationServiceTest {
         },
         isConversationOpen = { true },
         projectGraph = { messages, _ -> events += "project:${messages.joinToString { it.id }}" },
-        onMutationStart = {
-            events += "start"
+        onMutationStart = { scrollToTarget ->
+            events += "start:$scrollToTarget"
             7L
         },
         onMutationSettling = { _, target -> events += "settle:$target" },

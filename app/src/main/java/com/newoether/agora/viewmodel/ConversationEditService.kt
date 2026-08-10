@@ -7,10 +7,10 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunStatus
-import com.newoether.agora.util.Constants
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -26,8 +26,6 @@ internal data class ConversationEditRequest(
     val messageId: String,
     val newText: String,
     val modelId: String,
-    val providerName: String,
-    val activeKey: String,
     val visiblePath: List<ChatMessage>,
 )
 
@@ -109,6 +107,7 @@ internal object EditedRunInputFactory {
  */
 internal class ConversationEditService(
     private val conversations: ConversationRepository,
+    private val requestBuilder: GenerationRequestBuilder,
     private val executionCoordinator: ConversationExecutionCoordinator,
     private val inputCloner: EditedRunInputCloner,
     private val terminalSettlement: GenerationTerminalSettlementController,
@@ -131,22 +130,11 @@ internal class ConversationEditService(
         state: ConversationGenerationState,
     ): Boolean {
         if (request.newText.isBlank()) return false
-        val messageToEdit = request.visiblePath.find { it.id == request.messageId } ?: return false
-        if (messageToEdit.participant != Participant.USER) return false
-        val sourceRunId = messageToEdit.runId ?: return false
-        val inputBoundary = request.visiblePath
-            .filter {
-                it.runId == sourceRunId &&
-                    it.participant == Participant.USER &&
-                    !it.id.startsWith(Constants.TOOL_MSG_PREFIX) &&
-                    !it.id.startsWith(Constants.RESULT_MSG_PREFIX)
-            }
-            .minWithOrNull(
-                compareBy<ChatMessage> { it.runSequence ?: Long.MAX_VALUE }
-                    .thenBy { it.timestamp }
-                    .thenBy { it.id },
-            )
-        if (inputBoundary?.id != request.messageId) return false
+        val boundary = MessageGenerationBoundaryResolver.containing(
+            request.visiblePath,
+            request.messageId,
+        ) ?: return false
+        if (boundary.input?.id != request.messageId) return false
 
         val uiToken = state.tryAcquireForReplacement() ?: return false
         val runId = idFactory()
@@ -164,8 +152,21 @@ internal class ConversationEditService(
                     )
                     val persistedSource = persistedMessages
                         .find { it.id == request.messageId } ?: return@lock
-                    if (persistedSource.runId != sourceRunId) return@lock
-                    val sourceRun = conversations.getRun(sourceRunId) ?: return@lock
+                    if (!MessageGenerationBoundaryResolver.isRealUser(toUiMessage(persistedSource))) {
+                        return@lock
+                    }
+                    val parentRunId = persistedSource.parentId
+                        ?.let { parentId -> persistedMessages.find { it.id == parentId } }
+                        ?.runId
+                        ?: persistedSource.runId
+                            .takeIf(String::isNotBlank)
+                            ?.let { sourceRunId -> conversations.getRun(sourceRunId) }
+                            ?.parentRunId
+                    val generationSnapshot = requestBuilder.captureAdmissionSnapshot(
+                        conversationId = request.conversationId,
+                        runId = runId,
+                        modelId = request.modelId,
+                    )
                     val newUser = inputCloner.clone(
                         sourceInputs = listOf(persistedSource),
                         destinationRunId = runId,
@@ -183,7 +184,7 @@ internal class ConversationEditService(
                         status = MessageStatus.SENDING,
                         participant = Participant.MODEL,
                         timestamp = startTime,
-                        modelName = request.modelId,
+                        modelName = generationSnapshot.selectedModelId,
                         runId = runId,
                         runSequence = 1,
                     )
@@ -191,7 +192,7 @@ internal class ConversationEditService(
                         RunEntity(
                             id = runId,
                             conversationId = request.conversationId,
-                            parentRunId = sourceRun.parentRunId,
+                            parentRunId = parentRunId,
                             status = RunStatus.ACTIVE,
                             activeSlot = 1,
                             startedAt = newUser.timestamp,
@@ -202,6 +203,7 @@ internal class ConversationEditService(
                             newUser.parentId to newUser.id,
                             newUser.id to modelEntity.id,
                         ),
+                        conversationModelId = generationSnapshot.selectedModelId,
                     )
                     graphCommitted = true
                     val binding = state.bindPersistedRun(uiToken, runId)
@@ -247,11 +249,7 @@ internal class ConversationEditService(
                             conversationId = request.conversationId,
                             modelMessageId = modelMessageId,
                             startTime = startTime,
-                            isRegenerate = false,
-                            replaceMessageId = null,
-                            providerName = request.providerName,
-                            modelId = request.modelId,
-                            activeKey = request.activeKey,
+                            snapshot = generationSnapshot,
                             uiToken = uiToken,
                             persistId = persistId,
                             runId = runId,

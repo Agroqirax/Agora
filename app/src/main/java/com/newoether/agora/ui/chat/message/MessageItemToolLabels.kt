@@ -255,14 +255,16 @@ private fun runningSummary(
 
 internal sealed interface ShellPresentationStatus {
     data object Executing : ShellPresentationStatus
+    data class Background(val jobId: String?) : ShellPresentationStatus
     data class Exit(val code: Int?) : ShellPresentationStatus
 }
 
 internal fun shellPresentationStatus(presentation: ToolPresentation): ShellPresentationStatus =
-    if (presentation.isActive) {
-        ShellPresentationStatus.Executing
-    } else {
-        ShellPresentationStatus.Exit(presentation.exitCode)
+    when {
+        presentation.state == ToolPresentationState.BACKGROUND_RUNNING ->
+            ShellPresentationStatus.Background(presentation.jobId)
+        presentation.isActive -> ShellPresentationStatus.Executing
+        else -> ShellPresentationStatus.Exit(presentation.exitCode)
     }
 
 @Composable
@@ -273,18 +275,22 @@ internal fun shellToolSummary(presentation: ToolPresentation): String =
             R.string.tool_executing_shell,
             R.string.tool_progress_executing,
         )
+        is ShellPresentationStatus.Background ->
+            stringResource(R.string.tool_background_job_running_default)
         is ShellPresentationStatus.Exit -> status.code?.let { code ->
             stringResource(R.string.tool_shell_returned_code, code)
-        } ?: stringResource(R.string.tool_shell_returned)
+        } ?: stringResource(R.string.tool_shell_execution_completed)
     }
 
 @Composable
 internal fun shellExecutionSummary(presentation: ToolPresentation): String =
     when (val status = shellPresentationStatus(presentation)) {
         ShellPresentationStatus.Executing -> stringResource(R.string.tool_state_executing)
+        is ShellPresentationStatus.Background ->
+            stringResource(R.string.tool_background_job_running_default)
         is ShellPresentationStatus.Exit -> status.code?.let { code ->
-            stringResource(R.string.tool_exit_code, code)
-        } ?: stringResource(R.string.tool_exit)
+            stringResource(R.string.tool_shell_detail_returned_code, code)
+        } ?: stringResource(R.string.tool_shell_detail_executed)
     }
 
 internal fun singleLineShellCommand(

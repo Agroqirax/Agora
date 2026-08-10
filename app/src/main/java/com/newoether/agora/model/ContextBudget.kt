@@ -35,11 +35,18 @@ object ContextBudget {
         // into "32K" and a 64-token context into "64K".
         val normalized = tokens.coerceAtLeast(0)
         return when {
-            normalized >= 1_048_576 && normalized % 1_048_576 == 0 ->
-                "${normalized / 1_048_576}M"
-            normalized >= 1_024 && normalized % 1_024 == 0 ->
-                "${normalized / 1_024}K"
+            normalized >= 1_048_576 -> compactUnitLabel(normalized, 1_048_576, "M")
+            normalized > 1_000 -> compactUnitLabel(normalized, 1_024, "K")
             else -> normalized.toString()
+        }
+    }
+
+    private fun compactUnitLabel(tokens: Int, unit: Int, suffix: String): String {
+        val tenths = ((tokens.toLong() * 10L + unit / 2L) / unit).toInt()
+        return if (tenths % 10 == 0) {
+            "${tenths / 10}$suffix"
+        } else {
+            "${tenths / 10}.${tenths % 10}$suffix"
         }
     }
 }
