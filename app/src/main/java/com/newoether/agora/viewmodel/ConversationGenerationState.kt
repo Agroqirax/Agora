@@ -91,7 +91,6 @@ class ConversationGenerationState(
         conversationId = conversationId,
         mailbox = commandMailbox,
         nextOwnerToken = resources::nextUiToken,
-        currentRunIdentity = { runState.identityOrNull() },
     )
 
     /** Captures the current UI-ownership token right after a stop, under the lock. */
@@ -166,9 +165,9 @@ class ConversationGenerationState(
         generating.first { isGenerating -> !isGenerating }
     }
 
-    /** Identified UI-only Compact output; stale effects cannot alter the active preview. */
-    fun appendCompactPreview(identity: RunEffectIdentity, delta: String): Boolean =
-        synchronized(genLock) { resources.appendCompactPreview(identity, delta) }
+    /** Identified UI-only Compact snapshot; stale effects cannot alter the active preview. */
+    fun updateCompactPreview(identity: RunEffectIdentity, text: String): Boolean =
+        synchronized(genLock) { resources.updateCompactPreview(identity, text) }
 
     /**
      * Echoes the exact Compact result and requests the same FIFO queue drain used by an ordinary
@@ -394,7 +393,7 @@ class ConversationGenerationState(
     /** Builds the token-gated callbacks for one generation, writing ONLY to this conversation's
      *  private state. The ChatViewModel mirror pipes private→global when this conversation is
      *  open, so the callbacks need no knowledge of the current conversation id. */
-    fun callbacksFor(uiToken: Long, persistId: Long): GenerationCallbacks = GenerationCallbacks(
+    internal fun callbacksFor(uiToken: Long, persistId: Long): GenerationCallbacks = GenerationCallbacks(
         onStreamUpdate = { streamUpdate(uiToken, it) },
         onLoadingChange = { loadingChange(uiToken, it) },
         onStreamClear = { streamClear(uiToken) },
@@ -527,6 +526,12 @@ class ConversationGenerationState(
 
     /** Append a queued send (generation in progress → enqueue instead of launching). */
     fun enqueueSend(send: QueuedSend) = guidanceLeases.enqueue(send)
+
+    /** Stable evidence for orchestration that a queued batch already crossed into generation. */
+    fun guidanceClaimRevision(): Long = guidanceLeases.currentClaimRevision()
+
+    fun hasPendingOrClaimedGuidanceSince(revision: Long): Boolean =
+        guidanceLeases.hasPendingOrClaimedSince(revision)
 
     /**
      * Remove a queued send by id (X button). Returns the removed item (or null) so the caller can

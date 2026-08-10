@@ -492,51 +492,14 @@ object ConversationRuntimeReducer {
         command: ConversationCommand.CompactRequested,
     ): Transition = when (state) {
         is RunState.Idle -> {
-            if (command.mode != CompactMode.MANUAL) {
-                reject(state, CommandRejection.ILLEGAL_STATE)
-            } else {
-                val compacting = RunState.Compacting(
-                    effectIdentity = command.identity,
-                    compactRunId = command.compactRunId,
-                    mode = command.mode,
-                    resumeIdentity = null,
-                )
-                Transition(
-                    newState = compacting,
-                    effects = listOf(
-                        RunEffect.RunCompact(
-                            command.identity,
-                            command.compactRunId,
-                            command.mode,
-                        ),
-                    ),
-                )
-            }
-        }
-        is RunState.Active -> when {
-            command.mode != CompactMode.AUTOMATIC ->
-                reject(state, CommandRejection.ILLEGAL_STATE)
-            state.providerPhase != RunProviderPhase.None ->
-                reject(state, CommandRejection.ILLEGAL_STATE)
-            state.coroutineSettled ->
-                reject(state, CommandRejection.ILLEGAL_STATE)
-            state.toolPhase != RunToolPhase.None ->
-                reject(state, CommandRejection.ILLEGAL_STATE)
-            state.identity != command.identity.runIdentity() ->
-                reject(state, CommandRejection.STALE_IDENTITY)
-            else -> Transition(
-                newState = RunState.Compacting(
-                    effectIdentity = command.identity,
-                    compactRunId = command.compactRunId,
-                    mode = command.mode,
-                    resumeIdentity = state.identity,
-                ),
+            val compacting = RunState.Compacting(
+                effectIdentity = command.identity,
+                compactRunId = command.compactRunId,
+            )
+            Transition(
+                newState = compacting,
                 effects = listOf(
-                    RunEffect.RunCompact(
-                        command.identity,
-                        command.compactRunId,
-                        command.mode,
-                    ),
+                    RunEffect.RunCompact(command.identity, command.compactRunId),
                 ),
             )
         }
@@ -544,8 +507,7 @@ object ConversationRuntimeReducer {
             state,
             if (
                 state.effectIdentity == command.identity &&
-                state.compactRunId == command.compactRunId &&
-                state.mode == command.mode
+                state.compactRunId == command.compactRunId
             ) {
                 CommandRejection.DUPLICATE_RESULT
             } else {
@@ -554,6 +516,7 @@ object ConversationRuntimeReducer {
         )
         is RunState.Recovering,
         is RunState.Preparing,
+        is RunState.Active,
         is RunState.Finalizing,
         is RunState.Stopping,
         -> reject(state, CommandRejection.ILLEGAL_STATE)
@@ -570,26 +533,16 @@ object ConversationRuntimeReducer {
         }
         val effects = buildList {
             if (command.outcome == CompactOutcome.FAILED) {
-                add(RunEffect.CompactFailed(command.identity, compacting.mode))
-            } else if (compacting.mode == CompactMode.AUTOMATIC) {
-                add(RunEffect.ResumeAfterCompact(command.identity, command.outcome))
+                add(RunEffect.CompactFailed(command.identity))
             }
-            if (compacting.mode == CompactMode.MANUAL) {
-                add(
-                    RunEffect.ReleaseSlot(
-                        compacting.generationIdentity,
-                        SlotReleaseReason.NORMAL_COMPLETION,
-                    ),
-                )
-            }
-        }
-        val nextState = when (compacting.mode) {
-            CompactMode.MANUAL -> RunState.Idle(compacting.conversationId)
-            CompactMode.AUTOMATIC -> RunState.Active(
-                identity = requireNotNull(compacting.resumeIdentity),
+            add(
+                RunEffect.ReleaseSlot(
+                    compacting.generationIdentity,
+                    SlotReleaseReason.NORMAL_COMPLETION,
+                ),
             )
         }
-        return Transition(nextState, effects)
+        return Transition(RunState.Idle(compacting.conversationId), effects)
     }
 
     private fun requestFinalization(
@@ -738,25 +691,7 @@ object ConversationRuntimeReducer {
                 )
             }
         }
-        is RunState.Compacting -> {
-            val resumeIdentity = state.resumeIdentity
-                ?: return reject(state, CommandRejection.ILLEGAL_STATE)
-            if (resumeIdentity != command.identity) {
-                reject(state, CommandRejection.STALE_IDENTITY)
-            } else {
-                // The owning generation ended before its automatic Compact result. Invalidate the
-                // effect and retain the durable Run as occupied until finalization or Stop.
-                Transition(
-                    newState = RunState.Active(
-                        identity = resumeIdentity,
-                        coroutineSettled = true,
-                    ),
-                    effects = listOf(
-                        RunEffect.CompactFailed(state.effectIdentity, state.mode),
-                    ),
-                )
-            }
-        }
+        is RunState.Compacting -> reject(state, CommandRejection.ILLEGAL_STATE)
         is RunState.Finalizing -> when {
             state.identity != command.identity ->
                 reject(state, CommandRejection.STALE_IDENTITY)

@@ -1,13 +1,6 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.model.CompactMode
-import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessageStatus
-import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
-import com.newoether.agora.model.RunEffectIdentity
-import com.newoether.agora.model.RunEndReason
-import com.newoether.agora.model.RunStatus
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
@@ -21,35 +14,33 @@ import org.junit.Test
 
 class ContextCompactEffectCoordinatorTest {
     @Test
-    fun manualExecutionRunsOnlyTheClaimedEffectAndSettlesIdle() = runBlocking {
+    fun executionRunsOnlyTheClaimedStandardEffectAndSettlesIdle() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val coordinator = ContextCompactEffectCoordinator { "manual" }
+        val coordinator = ContextCompactEffectCoordinator { "standard" }
         var received: RunEffect.RunCompact? = null
 
-        val execution = coordinator.executeManual(state) { effect ->
+        val execution = coordinator.execute(state) { effect ->
             received = effect
             assertTrue(state.compacting.value)
             assertTrue(state.generating.value)
             assertTrue(state.isLoading.value)
             assertEquals("", state.compactPreview.value)
-            assertTrue(state.appendCompactPreview(effect.identity, "first"))
-            assertTrue(state.appendCompactPreview(effect.identity, " second"))
+            assertTrue(state.updateCompactPreview(effect.identity, "first"))
+            assertTrue(state.updateCompactPreview(effect.identity, "first second"))
             assertEquals("first second", state.compactPreview.value)
             assertFalse(
-                state.appendCompactPreview(
+                state.updateCompactPreview(
                     effect.identity.copy(effectId = "stale-compact"),
                     " stale",
                 )
             )
-            assertEquals("first second", state.compactPreview.value)
             CompactResult.Created("compact-message")
         }
 
         assertEquals(
             RunEffect.RunCompact(
                 identity = requireNotNull(received).identity,
-                compactRunId = "compact_run_manual",
-                mode = CompactMode.MANUAL,
+                compactRunId = "compact_run_standard",
             ),
             received,
         )
@@ -65,64 +56,12 @@ class ContextCompactEffectCoordinatorTest {
     }
 
     @Test
-    fun automaticExecutionReturnsOnlyAfterContinuationIsAuthorized() = runBlocking {
-        val state = ConversationGenerationState("conversation")
-        val token = state.acquireForSend()!!
-        state.bindRun(token, "run", pass = 3)
-        val ordinaryAssistant = ChatMessage(
-            id = "assistant-placeholder",
-            text = "ordinary partial answer",
-            participant = Participant.MODEL,
-            status = MessageStatus.SENDING,
-        )
-        state.streamUpdate(token, ordinaryAssistant)
-        val coordinator = ContextCompactEffectCoordinator { "automatic" }
-
-        val execution = coordinator.executeAutomatic(state) { effect ->
-            assertEquals("run", effect.identity.runId)
-            assertEquals(3, effect.identity.pass)
-            assertEquals("compact_run_automatic", effect.compactRunId)
-            assertTrue(state.compacting.value)
-            assertTrue(state.appendCompactPreview(effect.identity, "compact-only text"))
-            assertEquals("compact-only text", state.compactPreview.value)
-            assertEquals(ordinaryAssistant, state.streamingMessage.value)
-            CompactResult.NotNeeded
-        }
-
-        assertEquals(
-            ContextCompactEffectCoordinator.Execution.Settled(CompactResult.NotNeeded),
-            execution,
-        )
-        assertFalse(state.compacting.value)
-        assertTrue(state.generating.value)
-        assertEquals(
-            listOf("RunCompact", "ResumeAfterCompact"),
-            state.runtimeTraceSnapshot().takeLast(2).flatMap { it.effectTypes },
-        )
-        val finalizationIdentity = RunEffectIdentity(
-            conversationId = "conversation",
-            ownerToken = token,
-            runId = "run",
-            pass = 3,
-            effectId = "finalize-run-3",
-        )
-        state.commands.requestRunFinalization(
-            finalizationIdentity,
-            RunStatus.COMPLETED,
-            RunEndReason.MODEL_COMPLETED,
-            markConversationUnread = true,
-        )
-        state.finishRunFinalization(finalizationIdentity, success = true)
-        assertTrue(state.endGeneration(token))
-    }
-
-    @Test
     fun thrownEffectFailureSettlesRuntimeBeforePropagating() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val coordinator = ContextCompactEffectCoordinator { "failure" }
 
         try {
-            coordinator.executeManual(state) {
+            coordinator.execute(state) {
                 throw IllegalStateException("effect failed")
             }
             fail("Expected effect failure")
@@ -143,12 +82,12 @@ class ContextCompactEffectCoordinatorTest {
     }
 
     @Test
-    fun cancellationCannotStrandAManualCompactClaim() = runBlocking {
+    fun cancellationCannotStrandACompactClaim() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val coordinator = ContextCompactEffectCoordinator { "cancel" }
         val entered = CompletableDeferred<Unit>()
         val job = launch {
-            coordinator.executeManual(state) {
+            coordinator.execute(state) {
                 entered.complete(Unit)
                 awaitCancellation()
             }
@@ -160,7 +99,7 @@ class ContextCompactEffectCoordinatorTest {
 
         assertFalse(state.compacting.value)
         assertFalse(state.generating.value)
-        val next = state.commands.requestManualCompact("compact-run-next", "compact-effect-next")
+        val next = state.commands.requestCompact("compact-run-next", "compact-effect-next")
         assertTrue(next != null)
         state.commands.finishCompact(
             requireNotNull(next).identity,
@@ -170,23 +109,7 @@ class ContextCompactEffectCoordinatorTest {
     }
 
     @Test
-    fun automaticExecutionIsBusyWithoutAnActiveRunAndDoesNotInvokeEffect() = runBlocking {
-        val state = ConversationGenerationState("conversation")
-        val coordinator = ContextCompactEffectCoordinator { "idle" }
-        var invoked = false
-
-        val execution = coordinator.executeAutomatic(state) {
-            invoked = true
-            CompactResult.NotNeeded
-        }
-
-        assertEquals(ContextCompactEffectCoordinator.Execution.Busy, execution)
-        assertFalse(invoked)
-        assertFalse(state.compacting.value)
-    }
-
-    @Test
-    fun manualExecutionDoesNotOvertakePendingGuidance() = runBlocking {
+    fun compactKeepsPendingGuidanceQueuedForTheNextStandardRun() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val queued = QueuedSend(
             id = "guidance",
@@ -199,13 +122,16 @@ class ContextCompactEffectCoordinatorTest {
         val coordinator = ContextCompactEffectCoordinator { "queued" }
         var invoked = false
 
-        val execution = coordinator.executeManual(state) {
+        val execution = coordinator.execute(state) {
             invoked = true
             CompactResult.NotNeeded
         }
 
-        assertEquals(ContextCompactEffectCoordinator.Execution.Busy, execution)
-        assertFalse(invoked)
+        assertEquals(
+            ContextCompactEffectCoordinator.Execution.Settled(CompactResult.NotNeeded),
+            execution,
+        )
+        assertTrue(invoked)
         assertEquals(listOf(queued), state.queuedSends.value)
         assertFalse(state.compacting.value)
     }

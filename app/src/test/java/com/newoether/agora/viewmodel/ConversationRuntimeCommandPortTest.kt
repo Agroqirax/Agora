@@ -6,7 +6,6 @@ import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunState
-import com.newoether.agora.model.RuntimeRunIdentity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,23 +56,28 @@ class ConversationRuntimeCommandPortTest {
     }
 
     @Test
-    fun automaticCompactUsesTheCurrentRunIdentityAndReturnsThroughTheMailbox() = runBlocking {
+    fun compactUsesItsOwnRunIdentityAndReturnsToIdleThroughTheMailbox() = runBlocking {
         val harness = Harness()
         try {
-            val send = harness.port.requestSend("run", "input", true, false)
-            val input = send.effects.filterIsInstance<RunEffect.PersistAcceptedInput>().single()
-            harness.port.finishInputPersistence(input.identity)
+            val compact = harness.port.requestCompact("compact-run", "compact")!!
 
-            val compact = harness.port.requestAutomaticCompact("compact-run", "compact")!!
-
-            assertEquals(effectIdentity("compact"), compact.identity)
+            assertEquals(
+                RunEffectIdentity(
+                    conversationId = CONVERSATION_ID,
+                    ownerToken = OWNER_TOKEN,
+                    runId = "compact-run",
+                    pass = 0,
+                    effectId = "compact",
+                ),
+                compact.identity,
+            )
             assertTrue(
                 harness.port.finishCompact(
                     compact.identity,
                     CompactOutcome.NOT_NEEDED,
                 ).accepted,
             )
-            assertTrue(harness.state is RunState.Active)
+            assertTrue(harness.state is RunState.Idle)
         } finally {
             harness.close()
         }
@@ -94,23 +98,12 @@ class ConversationRuntimeCommandPortTest {
             conversationId = CONVERSATION_ID,
             mailbox = mailbox,
             nextOwnerToken = { OWNER_TOKEN },
-            currentRunIdentity = { state.identityOrNull() },
         )
 
         fun close() {
             scope.cancel()
         }
 
-        private fun RunState.identityOrNull(): RuntimeRunIdentity? = when (this) {
-            is RunState.Idle,
-            is RunState.Recovering,
-            -> null
-            is RunState.Preparing -> ownerIdentity
-            is RunState.Active -> identity
-            is RunState.Compacting -> resumeIdentity
-            is RunState.Finalizing -> identity
-            is RunState.Stopping -> identity
-        }
     }
 
     private fun effectIdentity(effectId: String) = RunEffectIdentity(

@@ -645,7 +645,7 @@ class ConversationGenerationStateTest {
         )
         state.onQueueDrainRequested = { queueDrainCount += 1 }
 
-        val effect = state.commands.requestManualCompact(
+        val effect = state.commands.requestCompact(
             compactRunId = "compact-run",
             effectId = "compact-effect",
         )!!
@@ -654,7 +654,7 @@ class ConversationGenerationStateTest {
         assertTrue(state.generating.value)
         assertTrue(state.isLoading.value)
         assertEquals("compact-run", state.currentRunId())
-        assertNull(state.commands.requestManualCompact("other-compact", "other-effect"))
+        assertNull(state.commands.requestCompact("other-compact", "other-effect"))
         val queued = state.commands.requestSend(
             proposedRunId = "send-run",
             effectId = "send-effect",
@@ -702,92 +702,6 @@ class ConversationGenerationStateTest {
             ),
             state.runtimeTraceSnapshot().map { it.commandType },
         )
-    }
-
-    @Test
-    fun automaticCompactRetainsGenerationUntilExactResultResumesRun() = runBlocking {
-        val state = ConversationGenerationState("conversation")
-        val token = state.acquireForSend()!!
-        state.bindRun(token, "run", pass = 2)
-
-        val effect = state.commands.requestAutomaticCompact(
-            compactRunId = "compact-run",
-            effectId = "compact-effect",
-        )!!
-
-        assertTrue(state.compacting.value)
-        assertTrue(state.generating.value)
-        assertEquals("run", state.currentRunId())
-        val settled = state.commands.finishCompact(effect.identity, CompactOutcome.NOT_NEEDED)
-        assertTrue(settled.accepted)
-        assertEquals(
-            RunEffect.ResumeAfterCompact(effect.identity, CompactOutcome.NOT_NEEDED),
-            settled.effects.single(),
-        )
-        assertFalse(state.compacting.value)
-        assertTrue(state.generating.value)
-        assertEquals("run", state.currentRunId())
-        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
-    }
-
-    @Test
-    fun SendDuringAutomaticCompactIsAcceptedAsOrdinaryGuidanceImmediately() = runBlocking {
-        val state = ConversationGenerationState("conversation")
-        val token = state.acquireForSend()!!
-        state.bindRun(token, "run", pass = 2)
-        val compact = state.commands.requestAutomaticCompact(
-            compactRunId = "compact-run",
-            effectId = "compact-effect",
-        )!!
-        val requested = state.commands.requestSend(
-            proposedRunId = "unused-send-run",
-            effectId = "guidance-effect",
-            directOnly = false,
-            hasPendingGuidance = false,
-        )
-
-        assertEquals(
-            RunEffect.AcceptGuidance(
-                RunEffectIdentity(
-                    conversationId = "conversation",
-                    ownerToken = token,
-                    runId = "run",
-                    pass = 2,
-                    effectId = "guidance-effect",
-                ),
-            ),
-            requested.effects.single(),
-        )
-        state.commands.finishCompact(compact.identity, CompactOutcome.NOT_NEEDED)
-        assertTrue(state.generating.value)
-        assertTrue(finalizeBoundRun(state, token, "run", pass = 2))
-    }
-
-    @Test
-    fun StopDuringAutomaticCompactClearsProjectionAndInvalidatesLateResult() = runBlocking {
-        val active = activeStateWithStreamingMessage()
-        val state = active.state
-        val settled = CompletableDeferred<Unit>()
-        state.onStopSettled = { settled.complete(Unit) }
-        val effect = state.commands.requestAutomaticCompact(
-            compactRunId = "compact-run",
-            effectId = "compact-effect",
-        )!!
-
-        val stopped = state.stop()
-
-        assertFalse(state.compacting.value)
-        assertTrue(state.stopping.value)
-        assertFalse(state.commands.finishCompact(effect.identity, CompactOutcome.CREATED).accepted)
-        assertEquals(
-            ConversationGenerationState.StopFinalizationOutcome.RECORDED,
-            state.finishStopFinalization(stopped.completion(success = true)),
-        )
-        active.unwind.complete(Unit)
-        active.job.join()
-        settled.await()
-        assertFalse(state.generating.value)
-        assertFalse(state.stopping.value)
     }
 
     @Test

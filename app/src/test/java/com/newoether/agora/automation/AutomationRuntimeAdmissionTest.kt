@@ -82,7 +82,7 @@ class AutomationRuntimeAdmissionTest {
     @Test
     fun manualCompact_returnsBusyWithoutCreatingAnAutomationRun() = runBlocking {
         val state = ConversationGenerationState("conversation")
-        val compact = state.commands.requestManualCompact("compact-run", "compact-effect")!!
+        val compact = state.commands.requestCompact("compact-run", "compact-effect")!!
 
         val decision = AutomationRuntimeAdmission.request(state, "new-run", "automation-send")
 

@@ -4,17 +4,17 @@ import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.local.RunEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
+import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 class ConversationCompactControllerTest {
@@ -44,88 +44,6 @@ class ConversationCompactControllerTest {
     }
 
     @Test
-    fun automaticPreflightRejectionDoesNotClaimRuntimeOrReadProjection() = runBlocking {
-        val conversations = mockk<ConversationRepository>()
-        val operation = FakeCompactOperation(automaticNeeded = false)
-        val state = ConversationGenerationState("conversation")
-        var projections = 0
-
-        controller(conversations, operation) { _, _, _ -> projections += 1 }
-            .automaticBeforeBoundary("conversation", 4096, automaticConfig(), state)
-
-        assertEquals(1, operation.automaticNeededCalls)
-        assertEquals(0, operation.automaticCalls)
-        assertEquals(0, projections)
-        assertTrue(state.runtimeTraceSnapshot().isEmpty())
-        coVerify(exactly = 0) {
-            conversations.getMessagesForConversationSnapshot(any())
-            conversations.restoreBranchSelections(any())
-        }
-        state.dispose()
-        Unit
-    }
-
-    @Test
-    fun automaticCreatedUsesIdentifiedEffectAndProjectsDurableGraph() = runBlocking {
-        val conversations = mockk<ConversationRepository>()
-        coEvery { conversations.getMessagesForConversationSnapshot("conversation") } returns emptyList()
-        coEvery { conversations.restoreBranchSelections("conversation") } returns
-            mapOf(null to "compact-message")
-        val operation = FakeCompactOperation(
-            automaticResult = CompactResult.Created("compact-message"),
-        )
-        val state = ConversationGenerationState("conversation")
-        val token = requireNotNull(state.acquireForSend())
-        state.bindRun(token, "run", pass = 2)
-        val projections = mutableListOf<Map<String?, String>>()
-        val config = automaticConfig()
-
-        val createdId = controller(conversations, operation) { _, _, selected ->
-            projections += selected
-        }
-            .automaticBeforeBoundary("conversation", 4096, config, state)
-
-        assertEquals("compact-message", createdId)
-        assertEquals("conversation", operation.automaticConversationId)
-        assertEquals(config, operation.automaticConfig)
-        assertEquals(4096, operation.automaticContextLimit)
-        assertEquals("compact_run_fixed", operation.automaticCompactRunId)
-        assertEquals("run", operation.automaticRunId)
-        assertEquals(2, operation.automaticPass)
-        assertEquals(listOf(mapOf(null to "compact-message")), projections)
-        assertEquals("", state.compactPreview.value)
-        assertFalse(state.compacting.value)
-        assertTrue(state.generating.value)
-        assertEquals(
-            listOf("RunCompact", "ResumeAfterCompact"),
-            state.runtimeTraceSnapshot().takeLast(2).flatMap { it.effectTypes },
-        )
-        state.dispose()
-        Unit
-    }
-
-    @Test
-    fun automaticFailureFallsBackToNormalProviderRollout() = runBlocking {
-        val conversations = mockk<ConversationRepository>()
-        val operation = FakeCompactOperation(
-            automaticResult = CompactResult.Failed("provider failed"),
-        )
-        val state = ConversationGenerationState("conversation")
-        val token = requireNotNull(state.acquireForSend())
-        state.bindRun(token, "run")
-
-        val boundary = controller(conversations, operation) { _, _, _ -> }
-            .automaticBeforeBoundary("conversation", 4096, automaticConfig(), state)
-
-        assertEquals(null, boundary)
-        assertEquals("", state.compactPreview.value)
-        assertFalse(state.compacting.value)
-        assertTrue(state.generating.value)
-        state.dispose()
-        Unit
-    }
-
-    @Test
     fun automaticBeforeSendDoesNotClaimRuntimeWhenCompactIsNotNeeded() = runBlocking {
         val conversations = mockk<ConversationRepository>()
         val operation = FakeCompactOperation(automaticNeeded = false)
@@ -141,7 +59,7 @@ class ConversationCompactControllerTest {
 
         assertFalse(started)
         assertEquals(1, operation.automaticNeededCalls)
-        assertEquals(0, operation.automaticCalls)
+        assertEquals(0, operation.beforeSendCalls)
         assertTrue(state.runtimeTraceSnapshot().isEmpty())
         state.dispose()
         Unit
@@ -155,9 +73,9 @@ class ConversationCompactControllerTest {
             listOf(compactEntity())
         coEvery { conversations.restoreBranchSelections("conversation") } returns
             mapOf(null to "compact_boundary")
-        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
         val operation = FakeCompactOperation(
-            automaticResult = CompactResult.Created("compact_boundary"),
+            beforeSendResult = CompactResult.Created("compact_boundary"),
             publishBeforeSendGraph = true,
             beforeSendRelease = release,
         )
@@ -184,9 +102,8 @@ class ConversationCompactControllerTest {
         assertTrue(state.compacting.value)
         assertEquals(listOf("compact_boundary"), startedRows)
         assertEquals(1, operation.automaticNeededCalls)
-        assertEquals(1, operation.automaticCalls)
-        assertEquals("compact_run_fixed", operation.automaticRunId)
-        assertEquals("compact_run_fixed", operation.automaticCompactRunId)
+        assertEquals(1, operation.beforeSendCalls)
+        assertEquals("compact_run_fixed", operation.beforeSendRunId)
         assertEquals(listOf(mapOf(null to "compact_boundary")), projections)
 
         release.complete(Unit)
@@ -293,28 +210,18 @@ class ConversationCompactControllerTest {
 
 private class FakeCompactOperation(
     private val automaticNeeded: Boolean = true,
-    private val automaticResult: CompactResult = CompactResult.NotNeeded,
+    private val beforeSendResult: CompactResult = CompactResult.NotNeeded,
     private val manualResult: CompactResult = CompactResult.NotNeeded,
     private val publishBeforeSendGraph: Boolean = false,
-    private val beforeSendRelease: kotlinx.coroutines.CompletableDeferred<Unit>? = null,
+    private val beforeSendRelease: CompletableDeferred<Unit>? = null,
 ) : ContextCompactOperation {
     var automaticNeededCalls = 0
         private set
-    var automaticCalls = 0
+    var beforeSendCalls = 0
         private set
     var manualCalls = 0
         private set
-    var automaticConversationId: String? = null
-        private set
-    var automaticConfig: AutomaticCompactConfig? = null
-        private set
-    var automaticContextLimit: Int? = null
-        private set
-    var automaticCompactRunId: String? = null
-        private set
-    var automaticRunId: String? = null
-        private set
-    var automaticPass: Int? = null
+    var beforeSendRunId: String? = null
         private set
     var manualConversationId: String? = null
         private set
@@ -332,59 +239,36 @@ private class FakeCompactOperation(
         return automaticNeeded
     }
 
-    override suspend fun compactAutomatic(
-        conversationId: String,
-        contextLimit: Int,
-        config: AutomaticCompactConfig,
-        identity: com.newoether.agora.model.RunEffectIdentity,
-        compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
-        onGraphChanged: suspend () -> Unit,
-    ): CompactResult {
-        automaticCalls += 1
-        automaticConversationId = conversationId
-        automaticConfig = config
-        automaticContextLimit = contextLimit
-        automaticRunId = identity.runId
-        automaticPass = identity.pass
-        automaticCompactRunId = compactRunId
-        onSummaryChunk("partial summary")
-        return automaticResult
-    }
-
     override suspend fun compactBeforeSend(
         conversationId: String,
         contextLimit: Int,
         config: AutomaticCompactConfig,
-        identity: com.newoether.agora.model.RunEffectIdentity,
+        identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
+        onSummaryUpdate: (String) -> Unit,
         onGraphChanged: suspend () -> Unit,
     ): CompactResult {
-        automaticCalls += 1
-        automaticConversationId = conversationId
-        automaticConfig = config
-        automaticContextLimit = contextLimit
-        automaticRunId = identity.runId
-        automaticPass = identity.pass
-        automaticCompactRunId = compactRunId
-        onSummaryChunk("partial summary")
-        return automaticResult
+        beforeSendCalls += 1
+        beforeSendRunId = identity.runId
+        onSummaryUpdate("partial summary")
+        if (publishBeforeSendGraph) onGraphChanged()
+        beforeSendRelease?.await()
+        return beforeSendResult
     }
 
     override suspend fun compactManual(
         conversationId: String,
         request: CompactRequest,
-        identity: com.newoether.agora.model.RunEffectIdentity,
+        identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
+        onSummaryUpdate: (String) -> Unit,
         onGraphChanged: suspend () -> Unit,
     ): CompactResult {
         manualCalls += 1
         manualConversationId = conversationId
         manualRequest = request
         manualCompactRunId = compactRunId
-        onSummaryChunk("partial summary")
+        onSummaryUpdate("partial summary")
         return manualResult
     }
 }

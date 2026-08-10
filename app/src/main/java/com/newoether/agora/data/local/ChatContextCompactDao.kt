@@ -171,63 +171,6 @@ interface ChatContextCompactDao {
         at: Long,
     ): Int
 
-    @Query(
-        "UPDATE messages SET runSequence = runSequence + 1 " +
-            "WHERE runId = :runId AND runSequence >= :fromSequence"
-    )
-    suspend fun shiftRunSequencesForInsertion(runId: String, fromSequence: Long): Int
-
-    /** Creates the automatic Compact's durable streaming row before its Provider pass starts. */
-    @Transaction
-    suspend fun beginAutomaticContextCompact(
-        message: MessageEntity,
-        childMessageId: String?,
-        expectedPass: Int,
-        expectedSelectedBranchesJson: String,
-        selectedBranchesJson: String,
-        at: Long,
-    ): MessageEntity {
-        require(message.id.startsWith(Constants.COMPACT_MSG_PREFIX))
-        require(message.parentId != null)
-        require(message.status == MessageStatus.SENDING)
-        val run = getRun(message.runId) ?: error("Compact Run ${message.runId} disappeared")
-        check(run.conversationId == message.conversationId)
-        check(run.status == RunStatus.ACTIVE && run.activeSlot == 1 && run.currentPass == expectedPass) {
-            "Cannot append automatic Compact to stale Run ${run.id} Pass $expectedPass"
-        }
-        val parent = getMessage(message.parentId)
-            ?: error("Compact parent ${message.parentId} disappeared")
-        check(parent.conversationId == message.conversationId)
-        val child = childMessageId?.let { id ->
-            getMessage(id)?.also {
-                check(it.conversationId == message.conversationId)
-                check(it.parentId == parent.id) { "Compact child $id moved before insertion" }
-                check(it.runId == run.id) { "Automatic Compact child must belong to Run ${run.id}" }
-            } ?: error("Compact child $id disappeared")
-        }
-        val sequence = child?.runSequence ?: nextRunSequence(run.id)
-        if (child != null) shiftRunSequencesForInsertion(run.id, sequence)
-        val assigned = message.copy(runSequence = sequence)
-        insertMessage(assigned)
-        if (child != null) check(updateMessageParent(child.id, assigned.id) == 1)
-        val conversation = getConversation(message.conversationId)
-            ?: error("Conversation ${message.conversationId} disappeared")
-        check(
-            decodeCompactSelections(conversation.selectedBranchesJson) ==
-                decodeCompactSelections(expectedSelectedBranchesJson)
-        ) { "Selected message branch changed before automatic Compact insertion" }
-        check(
-            updateSelectionsForRunDeletion(
-                conversationId = message.conversationId,
-                selectedBranchesJson = selectedBranchesJson,
-                selectedRunBranchesJson = conversation.selectedRunBranchesJson ?: "{}",
-                at = at,
-            ) == 1
-        )
-        touchRun(run.id, maxOf(run.lastCheckpointAt, at))
-        return assigned
-    }
-
     /** Restarts one selected terminal Compact row in place without disturbing its descendants. */
     @Transaction
     suspend fun beginRecompactContextCompact(
@@ -297,34 +240,6 @@ interface ChatContextCompactDao {
             ) == 1
         )
         return message.copy(runSequence = 0)
-    }
-
-    /** Settles an automatic Compact only while its owning Run/pass is still current. */
-    @Transaction
-    suspend fun settleAutomaticContextCompact(
-        messageId: String,
-        runId: String,
-        expectedPass: Int,
-        text: String,
-        status: MessageStatus,
-        at: Long,
-    ): Boolean {
-        require(status == MessageStatus.SUCCESS || status == MessageStatus.ERROR)
-        val message = getMessage(messageId) ?: return false
-        require(message.id.startsWith(Constants.COMPACT_MSG_PREFIX))
-        check(message.runId == runId)
-        if (message.status != MessageStatus.SENDING) {
-            return message.status == status && message.text == text
-        }
-        val run = getRun(runId) ?: return false
-        if (
-            run.status != RunStatus.ACTIVE ||
-            run.activeSlot != 1 ||
-            run.currentPass != expectedPass
-        ) return false
-        if (settleContextCompactMessage(messageId, runId, text, status) != 1) return false
-        touchRun(runId, maxOf(run.lastCheckpointAt, at))
-        return true
     }
 
     /** Settles a manual Compact message and its dedicated live Run in one transaction. */

@@ -115,7 +115,6 @@ fun ChatApp(
     val allMessagesState = viewModel.allMessages.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val isCompacting by viewModel.isCompacting.collectAsState()
-    val compactPreview by viewModel.compactPreview.collectAsState()
     val compactModel by viewModel.settings.contextCompactModel.collectAsState()
     val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
     val compactRetainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
@@ -542,7 +541,7 @@ fun ChatApp(
                                 // conversation generates — background conversations don't affect it.
                                 isLoading = isLoading,
                                 isCompacting = isCompacting,
-                                compactPreview = compactPreview,
+                                compactPreview = viewModel.compactPreview,
                                 isStopping = isStopping,
                                 isSwitching = isSwitching,
                                 streamingAutoFollowEnabled =

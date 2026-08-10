@@ -9,6 +9,7 @@ internal data class GenerationCompletionEffectsRequest(
     val conversationId: String,
     val modelMessageId: String,
     val foregroundLeaseAcquired: Boolean,
+    val hasPendingContinuation: Boolean = false,
 )
 
 internal data class GenerationCompletionEffectsCallbacks(
@@ -55,7 +56,9 @@ internal class GenerationCompletionEffectsExecutor(
         // A queued intervention is a separate pending generation. Avoid notifying for the Run
         // immediately before it while the next generation is about to start.
         val shouldNotify =
-            request.status == MessageStatus.SUCCESS && !callbacks.hasQueuedSends()
+            request.status == MessageStatus.SUCCESS &&
+                !request.hasPendingContinuation &&
+                !callbacks.hasQueuedSends()
         if (
             request.terminalPersisted &&
             !isAppInForeground() &&

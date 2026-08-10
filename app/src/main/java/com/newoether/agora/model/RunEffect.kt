@@ -38,26 +38,13 @@ sealed interface RunEffect {
     data class RunCompact(
         val identity: RunEffectIdentity,
         val compactRunId: String,
-        val mode: CompactMode,
     ) : RunEffect {
         init {
             require(compactRunId.isNotBlank())
-            require(mode != CompactMode.MANUAL || identity.runId == compactRunId)
-            require(mode != CompactMode.AUTOMATIC || identity.runId != compactRunId)
+            require(identity.runId == compactRunId)
         }
     }
-    data class ResumeAfterCompact(
-        val identity: RunEffectIdentity,
-        val outcome: CompactOutcome,
-    ) : RunEffect {
-        init {
-            require(outcome != CompactOutcome.FAILED)
-        }
-    }
-    data class CompactFailed(
-        val identity: RunEffectIdentity,
-        val mode: CompactMode,
-    ) : RunEffect
+    data class CompactFailed(val identity: RunEffectIdentity) : RunEffect
     data class FinalizeRun(
         val identity: RunEffectIdentity,
         val status: RunStatus,

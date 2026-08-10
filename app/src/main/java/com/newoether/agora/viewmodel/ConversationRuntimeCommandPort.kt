@@ -1,6 +1,5 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.model.CompactMode
 import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ProviderPassResult
@@ -8,7 +7,6 @@ import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.RunEffectIdentity
 import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
-import com.newoether.agora.model.RuntimeRunIdentity
 import com.newoether.agora.model.Transition
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
@@ -24,7 +22,6 @@ internal class ConversationRuntimeCommandPort(
     private val conversationId: String,
     private val mailbox: ConversationCommandMailbox,
     private val nextOwnerToken: () -> Long,
-    private val currentRunIdentity: () -> RuntimeRunIdentity?,
 ) {
     /** Submit one ordinary foreground/headless Send placement decision. */
     suspend fun requestSend(
@@ -164,8 +161,8 @@ internal class ConversationRuntimeCommandPort(
         )
     }
 
-    /** Claim an idle-only manual Compact without presenting it as a generation Run. */
-    suspend fun requestManualCompact(
+    /** Claim one isolated Compact generation from the idle conversation slot. */
+    suspend fun requestCompact(
         compactRunId: String,
         effectId: String,
     ): RunEffect.RunCompact? {
@@ -182,38 +179,6 @@ internal class ConversationRuntimeCommandPort(
                         effectId = effectId,
                     ),
                     compactRunId = compactRunId,
-                    mode = CompactMode.MANUAL,
-                )
-            },
-            cancellationCommand = { transition -> transition.failedCompactCommand() },
-        ).effects.filterIsInstance<RunEffect.RunCompact>().singleOrNull()
-    }
-
-    /** Claim an automatic Compact for the exact currently-active Run/pass. */
-    suspend fun requestAutomaticCompact(
-        compactRunId: String,
-        effectId: String,
-    ): RunEffect.RunCompact? {
-        require(compactRunId.isNotBlank())
-        require(effectId.isNotBlank())
-        return mailbox.submit(
-            commandFactory = ConversationCommandFactory {
-                val currentIdentity = currentRunIdentity()
-                val identity = if (currentIdentity?.runId != null) {
-                    currentIdentity.effectIdentity(effectId)
-                } else {
-                    RunEffectIdentity(
-                        conversationId = conversationId,
-                        ownerToken = nextOwnerToken().coerceAtLeast(1),
-                        runId = "unbound_$compactRunId",
-                        pass = 0,
-                        effectId = effectId,
-                    )
-                }
-                ConversationCommand.CompactRequested(
-                    identity = identity,
-                    compactRunId = compactRunId,
-                    mode = CompactMode.AUTOMATIC,
                 )
             },
             cancellationCommand = { transition -> transition.failedCompactCommand() },
@@ -235,14 +200,5 @@ internal class ConversationRuntimeCommandPort(
             ?.let { effect ->
                 ConversationCommand.CompactCompleted(effect.identity, CompactOutcome.FAILED)
             }
-
-    private fun RuntimeRunIdentity.effectIdentity(effectId: String): RunEffectIdentity =
-        RunEffectIdentity(
-            conversationId = conversationId,
-            ownerToken = ownerToken,
-            runId = requireNotNull(runId),
-            pass = pass,
-            effectId = effectId,
-        )
 
 }

@@ -35,12 +35,22 @@ internal data class BoundRunGenerationRequest(
  * This component owns no Run state, Job, scope, or continuation decision. Provider/tool outcomes
  * still return through the identified callbacks supplied by the conversation runtime host.
  */
+internal data class AutomaticCompactContinuationRequest(
+    val generationRequest: BoundRunGenerationRequest,
+    val parentMessageId: String,
+    val config: AutomaticCompactConfig,
+)
+
 internal class BoundRunGenerationLauncher(
     private val conversations: ConversationRepository,
     private val generationManagerProvider: () -> GenerationManager,
     private val compactController: ConversationCompactController,
     private val terminalSettlement: GenerationTerminalSettlementController,
     private val toUiMessage: (MessageEntity) -> ChatMessage,
+    private val onAutomaticCompactContinuation: (
+        request: AutomaticCompactContinuationRequest,
+        state: ConversationGenerationState,
+    ) -> Unit = { _, _ -> },
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun launch(
@@ -71,7 +81,10 @@ internal class BoundRunGenerationLauncher(
                 request.snapshot.config,
                 request.snapshot.context,
             )
-            generationManager.generate(
+            val automaticCompactConfig = request.snapshot.automaticCompact.copy(
+                fixedTokenCost = fixedTokenCost,
+            )
+            val result = generationManager.generate(
                 conversationId = request.conversationId,
                 modelMessageId = request.modelMessageId,
                 startTime = request.startTime,
@@ -85,19 +98,32 @@ internal class BoundRunGenerationLauncher(
                 generationJob = currentCoroutineContext()[Job],
                 callbacks = state.callbacksFor(request.uiToken, request.persistId).copy(
                     onToolRoundPersisted = {
-                        compactController.automaticBeforeBoundary(
-                            conversationId = request.conversationId,
-                            contextLimit = request.snapshot.config.maxContextWindow,
-                            config = request.snapshot.automaticCompact.copy(
-                                fixedTokenCost = fixedTokenCost,
-                            ),
-                            state = state,
-                        )
+                        if (
+                            compactController.automaticNeeded(
+                                conversationId = request.conversationId,
+                                contextLimit = request.snapshot.config.maxContextWindow,
+                                config = automaticCompactConfig,
+                            )
+                        ) {
+                            ToolRoundBoundaryDecision.CompleteForFollowUp
+                        } else {
+                            ToolRoundBoundaryDecision.Continue
+                        }
                     },
                 ),
                 streamScope = state.streamScope,
                 requestTrace = requestTrace,
             )
+            result.followUpParentMessageId?.let { parentMessageId ->
+                onAutomaticCompactContinuation(
+                    AutomaticCompactContinuationRequest(
+                        generationRequest = request,
+                        parentMessageId = parentMessageId,
+                        config = automaticCompactConfig,
+                    ),
+                    state,
+                )
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

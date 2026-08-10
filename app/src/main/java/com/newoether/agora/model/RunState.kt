@@ -72,35 +72,18 @@ sealed interface RunState {
         }
     }
 
-    /**
-     * One identified Context Compact generation. Automatic Compact temporarily owns an existing
-     * active Run and must settle before that Run may continue; manual Compact owns its dedicated
-     * durable Run through the same generation slot exposed to Stop, Send, and queue draining.
-     */
+    /** One isolated Context Compact generation in the ordinary conversation generation slot. */
     data class Compacting(
         val effectIdentity: RunEffectIdentity,
         val compactRunId: String,
-        val mode: CompactMode,
-        val resumeIdentity: RuntimeRunIdentity?,
     ) : RunState {
         override val conversationId: String = effectIdentity.conversationId
-        val generationIdentity: RuntimeRunIdentity =
-            resumeIdentity ?: effectIdentity.runIdentity()
+        val generationIdentity: RuntimeRunIdentity = effectIdentity.runIdentity()
 
         init {
             require(compactRunId.isNotBlank())
-            when (mode) {
-                CompactMode.MANUAL -> {
-                    require(resumeIdentity == null)
-                    require(effectIdentity.runId == compactRunId)
-                    require(effectIdentity.pass == 0)
-                }
-                CompactMode.AUTOMATIC -> {
-                    requireNotNull(resumeIdentity)
-                    require(effectIdentity.runIdentity() == resumeIdentity)
-                    require(compactRunId != effectIdentity.runId)
-                }
-            }
+            require(effectIdentity.runId == compactRunId)
+            require(effectIdentity.pass == 0)
         }
     }
 
@@ -167,11 +150,6 @@ sealed interface RunToolPhase {
         val commitIdentity: RunEffectIdentity,
         val failureReported: Boolean = false,
     ) : RunToolPhase
-}
-
-enum class CompactMode {
-    MANUAL,
-    AUTOMATIC,
 }
 
 enum class CompactOutcome {

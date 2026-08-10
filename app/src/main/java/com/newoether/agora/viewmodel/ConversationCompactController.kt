@@ -6,7 +6,15 @@ import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+internal data class StandardCompactLaunch(
+    val messageId: String,
+    val job: Job,
+)
 
 /**
  * Executes only mailbox-authorized Compact work and publishes the resulting durable graph.
@@ -26,65 +34,11 @@ internal class ConversationCompactController(
     ) -> Unit,
     private val onCompactStarted: (conversationId: String, messageId: String) -> Unit = { _, _ -> },
 ) {
-    suspend fun automaticBeforeBoundary(
+    suspend fun automaticNeeded(
         conversationId: String,
         contextLimit: Int,
         config: AutomaticCompactConfig,
-        state: ConversationGenerationState,
-    ): String? {
-        if (!operation.automaticNeeded(conversationId, contextLimit, config)) {
-            return null
-        }
-        var startedMessageId: String? = null
-        suspend fun publishGraph() {
-            startedMessageId = projectCurrentGraph(
-                conversationId = conversationId,
-                expectedMessageId = null,
-                alreadyStartedMessageId = startedMessageId,
-            )
-        }
-        when (
-            val execution = effectCoordinator.executeAutomatic(state) { effect ->
-                operation.compactAutomatic(
-                    conversationId = conversationId,
-                    contextLimit = contextLimit,
-                    config = config,
-                    identity = effect.identity,
-                    compactRunId = effect.compactRunId,
-                    onSummaryChunk = { chunk ->
-                        state.appendCompactPreview(effect.identity, chunk)
-                    },
-                    onGraphChanged = { publishGraph() },
-                ).also { result ->
-                    if (result.hasDurableMessage()) publishGraph()
-                }
-            }
-        ) {
-            is ContextCompactEffectCoordinator.Execution.Settled -> when (
-                val result = execution.result
-            ) {
-                // Auto Compact is a single best-effort opportunity before the hard-cap rollout.
-                // Its failure must not fail the already-admitted ordinary generation. Any durable
-                // failed capsule remains visible, while request projection ignores it.
-                is CompactResult.Failed -> return null
-                is CompactResult.Created -> return result.messageId
-                CompactResult.NotNeeded -> return null
-            }
-            ContextCompactEffectCoordinator.Execution.Busy -> {
-                if (state.stopping.value) {
-                    throw CancellationException("Automatic context compact was stopped")
-                }
-                error("Automatic context compact was not admitted for the active Run")
-            }
-            ContextCompactEffectCoordinator.Execution.Superseded -> {
-                if (state.stopping.value) {
-                    throw CancellationException("Automatic context compact was superseded by Stop")
-                }
-                error("Automatic context compact result was superseded")
-            }
-        }
-        return null
-    }
+    ): Boolean = operation.automaticNeeded(conversationId, contextLimit, config)
 
     /**
      * Starts an ordinary manual-style Compact generation from IDLE and returns as soon as its
@@ -96,9 +50,21 @@ internal class ConversationCompactController(
         contextLimit: Int,
         config: AutomaticCompactConfig,
         state: ConversationGenerationState,
-    ): Boolean {
-        if (!operation.automaticNeeded(conversationId, contextLimit, config)) return false
-        val rowStarted = CompletableDeferred<Boolean>()
+    ): Boolean = startAutomaticStandard(
+        conversationId = conversationId,
+        contextLimit = contextLimit,
+        config = config,
+        state = state,
+    ) != null
+
+    suspend fun startAutomaticStandard(
+        conversationId: String,
+        contextLimit: Int,
+        config: AutomaticCompactConfig,
+        state: ConversationGenerationState,
+    ): StandardCompactLaunch? {
+        if (!operation.automaticNeeded(conversationId, contextLimit, config)) return null
+        val rowStarted = CompletableDeferred<String?>()
         val job = state.scope.launch {
             var startedMessageId: String? = null
             suspend fun publishGraph() {
@@ -107,12 +73,12 @@ internal class ConversationCompactController(
                     expectedMessageId = null,
                     alreadyStartedMessageId = startedMessageId,
                 )
-                if (startedMessageId != null) rowStarted.complete(true)
+                if (startedMessageId != null) rowStarted.complete(startedMessageId)
             }
             try {
-                effectCoordinator.executeManual(state) { effect ->
+                effectCoordinator.execute(state) { effect ->
                     if (conversations.getLiveRun(conversationId) != null) {
-                        return@executeManual CompactResult.NotNeeded
+                        return@execute CompactResult.NotNeeded
                     }
                     operation.compactBeforeSend(
                         conversationId = conversationId,
@@ -120,8 +86,8 @@ internal class ConversationCompactController(
                         config = config,
                         identity = effect.identity,
                         compactRunId = effect.compactRunId,
-                        onSummaryChunk = { chunk ->
-                            state.appendCompactPreview(effect.identity, chunk)
+                        onSummaryUpdate = { snapshot ->
+                            state.updateCompactPreview(effect.identity, snapshot)
                         },
                         onGraphChanged = { publishGraph() },
                     ).also { result ->
@@ -134,11 +100,20 @@ internal class ConversationCompactController(
                 // Automatic pre-send Compact is best effort. If no row became durable, the caller
                 // continues through the ordinary direct send path.
             } finally {
-                rowStarted.complete(false)
+                rowStarted.complete(null)
             }
         }
-        job.invokeOnCompletion { rowStarted.complete(false) }
-        return rowStarted.await()
+        job.invokeOnCompletion { rowStarted.complete(null) }
+        val messageId = try {
+            rowStarted.await()
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) {
+                job.cancel(cancelled)
+                job.join()
+            }
+            throw cancelled
+        }
+        return messageId?.let { StandardCompactLaunch(it, job) }
     }
 
     suspend fun manual(
@@ -155,17 +130,17 @@ internal class ConversationCompactController(
             )
         }
         return when (
-            val execution = effectCoordinator.executeManual(state) { effect ->
+            val execution = effectCoordinator.execute(state) { effect ->
                 if (conversations.getLiveRun(conversationId) != null) {
-                    return@executeManual CompactResult.Failed("Conversation is busy")
+                    return@execute CompactResult.Failed("Conversation is busy")
                 }
                 operation.compactManual(
                     conversationId = conversationId,
                     request = request,
                     identity = effect.identity,
                     compactRunId = effect.compactRunId,
-                    onSummaryChunk = { chunk ->
-                        state.appendCompactPreview(effect.identity, chunk)
+                    onSummaryUpdate = { snapshot ->
+                        state.updateCompactPreview(effect.identity, snapshot)
                     },
                     onGraphChanged = { publishGraph() },
                 ).also { result ->

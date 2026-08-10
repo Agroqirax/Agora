@@ -2,8 +2,6 @@ package com.newoether.agora.model
 
 import com.newoether.agora.model.ConversationRuntimeReducerTestFixture.CONVERSATION_ID
 import com.newoether.agora.model.ConversationRuntimeReducerTestFixture.active
-import com.newoether.agora.model.ConversationRuntimeReducerTestFixture.effectIdentity
-import com.newoether.agora.model.ConversationRuntimeReducerTestFixture.identity
 import com.newoether.agora.model.ConversationRuntimeReducerTestFixture.sendCommand
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -92,7 +90,7 @@ class ConversationRuntimeRecoveryCompactReducerTest {
     }
 
     @Test
-    fun `manual Compact owns the generation slot queues Send and accepts Stop`() {
+    fun `Compact owns the standard generation slot queues Send and accepts Stop`() {
         val identity = RunEffectIdentity(
             conversationId = CONVERSATION_ID,
             ownerToken = 4,
@@ -103,17 +101,13 @@ class ConversationRuntimeRecoveryCompactReducerTest {
         val request = ConversationCommand.CompactRequested(
             identity = identity,
             compactRunId = "compact-run",
-            mode = CompactMode.MANUAL,
         )
 
         val started = ConversationRuntimeReducer.reduce(RunState.Idle(CONVERSATION_ID), request)
 
+        assertEquals(RunState.Compacting(identity, "compact-run"), started.newState)
         assertEquals(
-            RunState.Compacting(identity, "compact-run", CompactMode.MANUAL, null),
-            started.newState,
-        )
-        assertEquals(
-            listOf(RunEffect.RunCompact(identity, "compact-run", CompactMode.MANUAL)),
+            listOf(RunEffect.RunCompact(identity, "compact-run")),
             started.effects,
         )
         val queuedSend = ConversationRuntimeReducer.reduce(
@@ -178,147 +172,26 @@ class ConversationRuntimeRecoveryCompactReducerTest {
     }
 
     @Test
-    fun `automatic Compact resumes only after its exact successful result`() {
+    fun `Compact cannot interrupt or resume an active Run`() {
         val active = active(ownerToken = 7, runId = "run", pass = 3)
-        val identity = effectIdentity(active.identity, "compact-effect")
-        val requested = ConversationRuntimeReducer.reduce(
+        val compactIdentity = RunEffectIdentity(
+            conversationId = CONVERSATION_ID,
+            ownerToken = 8,
+            runId = "compact-run",
+            pass = 0,
+            effectId = "compact-effect",
+        )
+
+        val rejected = ConversationRuntimeReducer.reduce(
             active,
             ConversationCommand.CompactRequested(
-                identity = identity,
+                identity = compactIdentity,
                 compactRunId = "compact-run",
-                mode = CompactMode.AUTOMATIC,
             ),
         )
 
-        assertEquals(
-            RunState.Compacting(
-                effectIdentity = identity,
-                compactRunId = "compact-run",
-                mode = CompactMode.AUTOMATIC,
-                resumeIdentity = active.identity,
-            ),
-            requested.newState,
-        )
-        assertEquals(
-            RunEffect.RunCompact(identity, "compact-run", CompactMode.AUTOMATIC),
-            requested.effects.single(),
-        )
-
-        val stale = ConversationRuntimeReducer.reduce(
-            requested.newState,
-            ConversationCommand.CompactCompleted(
-                identity.copy(effectId = "old-effect"),
-                CompactOutcome.CREATED,
-            ),
-        )
-        assertEquals(CommandRejection.STALE_IDENTITY, stale.rejection)
-        assertSame(requested.newState, stale.newState)
-
-        val completed = ConversationRuntimeReducer.reduce(
-            requested.newState,
-            ConversationCommand.CompactCompleted(identity, CompactOutcome.NOT_NEEDED),
-        )
-        assertEquals(active, completed.newState)
-        assertEquals(
-            listOf(RunEffect.ResumeAfterCompact(identity, CompactOutcome.NOT_NEEDED)),
-            completed.effects,
-        )
-        val duplicate = ConversationRuntimeReducer.reduce(
-            completed.newState,
-            ConversationCommand.CompactCompleted(identity, CompactOutcome.NOT_NEEDED),
-        )
-        assertFalse(duplicate.accepted)
-        assertTrue(duplicate.effects.isEmpty())
+        assertEquals(CommandRejection.ILLEGAL_STATE, rejected.rejection)
+        assertSame(active, rejected.newState)
+        assertTrue(rejected.effects.isEmpty())
     }
-
-    @Test
-    fun `failed automatic Compact returns to Active without continuation`() {
-        val active = active(ownerToken = 9, runId = "run", pass = 1)
-        val identity = effectIdentity(active.identity, "compact-effect")
-        val requested = ConversationRuntimeReducer.reduce(
-            active,
-            ConversationCommand.CompactRequested(
-                identity,
-                compactRunId = "compact-run",
-                mode = CompactMode.AUTOMATIC,
-            ),
-        )
-
-        val failed = ConversationRuntimeReducer.reduce(
-            requested.newState,
-            ConversationCommand.CompactCompleted(identity, CompactOutcome.FAILED),
-        )
-
-        assertEquals(active, failed.newState)
-        assertEquals(
-            listOf(RunEffect.CompactFailed(identity, CompactMode.AUTOMATIC)),
-            failed.effects,
-        )
-        assertFalse(failed.effects.any { it is RunEffect.ResumeAfterCompact })
-    }
-
-    @Test
-    fun `automatic Compact cannot overlap an executing tool batch`() {
-        val active = active(ownerToken = 10, runId = "run", pass = 1)
-        val toolRequested = ConversationRuntimeReducer.reduce(
-            active,
-            ConversationCommand.ToolBatchRequested(
-                effectIdentity(active.identity, "provider-effect"),
-            ),
-        )
-        val compactIdentity = effectIdentity(active.identity, "compact-effect")
-
-        val compact = ConversationRuntimeReducer.reduce(
-            toolRequested.newState,
-            ConversationCommand.CompactRequested(
-                compactIdentity,
-                compactRunId = "compact-run",
-                mode = CompactMode.AUTOMATIC,
-            ),
-        )
-
-        assertEquals(CommandRejection.ILLEGAL_STATE, compact.rejection)
-        assertSame(toolRequested.newState, compact.newState)
-        assertTrue(compact.effects.isEmpty())
-    }
-
-    @Test
-    fun `Stop wins over automatic Compact and rejects its late result`() {
-        val active = active(ownerToken = 11, runId = "run", pass = 2)
-        val identity = effectIdentity(active.identity, "compact-effect")
-        val compacting = ConversationRuntimeReducer.reduce(
-            active,
-            ConversationCommand.CompactRequested(
-                identity,
-                compactRunId = "compact-run",
-                mode = CompactMode.AUTOMATIC,
-            ),
-        ).newState
-
-        val stopping = ConversationRuntimeReducer.reduce(
-            compacting,
-            ConversationCommand.StopRequested(
-                identity = active.identity,
-                coroutineAlreadySettled = false,
-                requiresPersistence = true,
-                effectId = "stop",
-            ),
-        )
-        assertTrue(stopping.newState is RunState.Stopping)
-        assertEquals(
-            listOf(
-                RunEffect.CancelProviderPass(active.identity),
-                RunEffect.FinalizeStop(effectIdentity(active.identity, "stop")),
-            ),
-            stopping.effects,
-        )
-
-        val late = ConversationRuntimeReducer.reduce(
-            stopping.newState,
-            ConversationCommand.CompactCompleted(identity, CompactOutcome.CREATED),
-        )
-        assertEquals(CommandRejection.ILLEGAL_STATE, late.rejection)
-        assertSame(stopping.newState, late.newState)
-    }
-
 }

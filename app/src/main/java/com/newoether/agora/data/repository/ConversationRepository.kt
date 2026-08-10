@@ -344,24 +344,6 @@ class ConversationRepository(
 
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 
-    suspend fun beginAutomaticContextCompact(
-        message: MessageEntity,
-        childMessageId: String?,
-        expectedPass: Int,
-        expectedSelections: Map<String?, String>,
-        selections: Map<String?, String>,
-        at: Long = System.currentTimeMillis(),
-    ): MessageEntity = chatDao.beginAutomaticContextCompact(
-        message = message,
-        childMessageId = childMessageId,
-        expectedPass = expectedPass,
-        expectedSelectedBranchesJson = Json.encodeToString(
-            expectedSelections.mapKeys { it.key ?: "null" },
-        ),
-        selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
-        at = at,
-    )
-
     suspend fun beginRecompactContextCompact(
         messageId: String,
         modelName: String,
@@ -387,22 +369,6 @@ class ConversationRepository(
             expectedSelections.mapKeys { it.key ?: "null" },
         ),
         selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
-        at = at,
-    )
-
-    suspend fun settleAutomaticContextCompact(
-        messageId: String,
-        runId: String,
-        expectedPass: Int,
-        text: String,
-        status: MessageStatus,
-        at: Long = System.currentTimeMillis(),
-    ): Boolean = chatDao.settleAutomaticContextCompact(
-        messageId = messageId,
-        runId = runId,
-        expectedPass = expectedPass,
-        text = text,
-        status = status,
         at = at,
     )
 

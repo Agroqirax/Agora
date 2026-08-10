@@ -79,7 +79,15 @@ internal class GuidanceLeaseStore(
     val queuedSends: StateFlow<List<QueuedSend>> = _queuedSends.asStateFlow()
 
     private val claimedGuidance = mutableMapOf<String, List<QueuedSend>>()
+    private var claimRevision = 0L
     private var disposed = false
+
+    /** Monotonic evidence that pending guidance became the next ordinary generation input. */
+    fun currentClaimRevision(): Long = synchronized(lock) { claimRevision }
+
+    fun hasPendingOrClaimedSince(revision: Long): Boolean = synchronized(lock) {
+        _queuedSends.value.isNotEmpty() || claimRevision != revision
+    }
 
     fun enqueue(send: QueuedSend) {
         synchronized(lock) {
@@ -100,6 +108,7 @@ internal class GuidanceLeaseStore(
         val lease = GuidanceBatchLease(newLeaseId(), _queuedSends.value)
         _queuedSends.value = emptyList()
         check(claimedGuidance.put(lease.id, lease.batch) == null)
+        claimRevision += 1
         lease
     }
 

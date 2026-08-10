@@ -135,7 +135,7 @@ internal data class GenerationAdmissionSnapshot(
  * [ConversationGenerationState]. These callbacks project token-gated UI state and carry identified
  * tool effects/results; GenerationManager does not directly mutate the process Run state.
  */
-data class GenerationCallbacks(
+internal data class GenerationCallbacks(
     val onStreamUpdate: (com.newoether.agora.model.ChatMessage) -> Unit,
     val onLoadingChange: (Boolean) -> Unit,
     val onStreamClear: () -> Unit,
@@ -176,6 +176,20 @@ data class GenerationCallbacks(
             if (success) RunEffect.ContinueProviderPass(identity)
             else RunEffect.ToolRoundCommitFailed(identity)
         },
-    /** Returns the newly appended Compact boundary, if automatic Compact created one. */
-    val onToolRoundPersisted: suspend () -> String? = { null },
+    /**
+     * Chooses the boundary after a durable tool round: continue the current provider loop, or
+     * terminalize this Assistant so a follow-up can start as a fresh standard generation.
+     */
+    val onToolRoundPersisted: suspend () -> ToolRoundBoundaryDecision = {
+        ToolRoundBoundaryDecision.Continue
+    },
+)
+
+internal sealed interface ToolRoundBoundaryDecision {
+    data object Continue : ToolRoundBoundaryDecision
+    data object CompleteForFollowUp : ToolRoundBoundaryDecision
+}
+
+internal data class GenerationExecutionResult(
+    val followUpParentMessageId: String? = null,
 )

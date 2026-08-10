@@ -46,10 +46,10 @@ class StreamingCheckpointWriterTest {
     }
 
     @Test
-    fun generationCheckpointOwnerRechecksLatestIdentityAtTheWriterBoundary() = runBlocking {
+    fun streamingCheckpointOwnerRechecksLatestIdentityAtTheWriterBoundary() = runBlocking {
         var latestChecks = 0
         val persisted = mutableListOf<String>()
-        val checkpoints = GenerationStreamingCheckpoints(
+        val checkpoints = StreamingMessageCheckpoints(
             scope = this,
             isLatestPersist = { ++latestChecks == 1 },
             persist = { message ->
@@ -64,6 +64,36 @@ class StreamingCheckpointWriterTest {
 
         assertTrue(latestChecks >= 2)
         assertTrue(persisted.isEmpty())
+    }
+
+    @Test
+    fun throttledLazyCheckpointDoesNotBuildGrowingSnapshot() = runBlocking {
+        var now = 1_000L
+        var snapshotsBuilt = 0
+        val checkpoints = StreamingMessageCheckpoints(
+            scope = this,
+            isLatestPersist = { true },
+            persist = { true },
+            onFailure = { throw AssertionError(it) },
+            nowMs = { now },
+        )
+
+        checkpoints.persistLazy {
+            snapshotsBuilt++
+            message("first")
+        }
+        checkpoints.persistLazy {
+            snapshotsBuilt++
+            message("suppressed")
+        }
+        now += 1_000L
+        checkpoints.persistLazy {
+            snapshotsBuilt++
+            message("second")
+        }
+        checkpoints.close()
+
+        assertEquals(2, snapshotsBuilt)
     }
 
     private fun message(text: String) = ChatMessage(

@@ -93,6 +93,21 @@ class ConversationRuntimeResourceOwnershipTest {
     }
 
     @Test
+    fun guidanceClaimRevisionRecordsAClaimAfterTheVisibleQueueIsDrained() {
+        val store = GuidanceLeaseStore { "lease" }
+        val revision = store.currentClaimRevision()
+        assertFalse(store.hasPendingOrClaimedSince(revision))
+
+        store.enqueue(queued("one", "first"))
+        assertTrue(store.hasPendingOrClaimedSince(revision))
+        store.claim()
+
+        assertTrue(store.queuedSends.value.isEmpty())
+        assertEquals(1L, store.currentClaimRevision())
+        assertTrue(store.hasPendingOrClaimedSince(revision))
+    }
+
+    @Test
     fun failedGuidanceLeaseReturnsTheExactBatchToTheFront() {
         val store = GuidanceLeaseStore { "lease" }
         val first = queued("one", "first")

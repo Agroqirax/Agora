@@ -61,6 +61,7 @@ import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.viewmodel.RegenerationTransitionRequest
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
@@ -116,7 +117,7 @@ internal fun MessageList(
     state: LazyListState = rememberLazyListState(),
     userScrollEnabled: Boolean = true,
     isLoading: Boolean = false,
-    isCompacting: Boolean = false, compactPreview: String = "",
+    isCompacting: Boolean = false, compactPreview: StateFlow<String>? = null,
     isStopping: Boolean = false,
     isSwitching: Boolean = false,
     streamingAutoFollowEnabled: Boolean = isLoading && !isSwitching,

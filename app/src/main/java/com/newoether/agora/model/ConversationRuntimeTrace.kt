@@ -119,10 +119,7 @@ class ConversationRuntimeTrace(
             is RunToolPhase.Executing -> "ExecutingTools"
             is RunToolPhase.Committing -> "CommittingToolRound"
         }
-        is RunState.Compacting -> when (mode) {
-            CompactMode.MANUAL -> "CompactingManual"
-            CompactMode.AUTOMATIC -> "CompactingAutomatic"
-        }
+        is RunState.Compacting -> "Compacting"
         is RunState.Finalizing -> "Finalizing"
         is RunState.Stopping -> "Stopping"
     }
@@ -169,7 +166,6 @@ class ConversationRuntimeTrace(
         is RunEffect.ContinueProviderPass -> "ContinueProviderPass"
         is RunEffect.ToolRoundCommitFailed -> "ToolRoundCommitFailed"
         is RunEffect.RunCompact -> "RunCompact"
-        is RunEffect.ResumeAfterCompact -> "ResumeAfterCompact"
         is RunEffect.CompactFailed -> "CompactFailed"
         is RunEffect.FinalizeRun -> "FinalizeRun"
         is RunEffect.RunFinalizationFailed -> "RunFinalizationFailed"

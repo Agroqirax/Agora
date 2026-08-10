@@ -34,6 +34,36 @@ class GenerationCompletionEffectsExecutorTest {
     }
 
     @Test
+    fun `pending standard continuation suppresses only interim notification`() {
+        val events = mutableListOf<String>()
+        val executor = GenerationCompletionEffectsExecutor(
+            isAppInForeground = { events += "foreground"; false },
+            releaseForegroundLease = { events += "release:$it" },
+            notify = { _, _ -> events += "notify" },
+        )
+
+        executor.execute(
+            request(
+                terminalPersisted = true,
+                foregroundLeaseAcquired = true,
+                hasPendingContinuation = true,
+            ),
+            callbacks(events, hasQueuedSends = { events += "queue"; false }),
+        )
+
+        assertEquals(
+            listOf(
+                "index:model:answer",
+                "clear",
+                "loading:false",
+                "release:model",
+                "foreground",
+            ),
+            events,
+        )
+    }
+
+    @Test
     fun `index failure cannot prevent terminal cleanup and queued work suppresses notification`() {
         val events = mutableListOf<String>()
         val executor = GenerationCompletionEffectsExecutor(
@@ -65,6 +95,7 @@ class GenerationCompletionEffectsExecutorTest {
     private fun request(
         terminalPersisted: Boolean,
         foregroundLeaseAcquired: Boolean,
+        hasPendingContinuation: Boolean = false,
     ) = GenerationCompletionEffectsRequest(
         terminalPersisted = terminalPersisted,
         status = MessageStatus.SUCCESS,
@@ -72,6 +103,7 @@ class GenerationCompletionEffectsExecutorTest {
         conversationId = "conversation",
         modelMessageId = "model",
         foregroundLeaseAcquired = foregroundLeaseAcquired,
+        hasPendingContinuation = hasPendingContinuation,
     )
 
     private fun callbacks(

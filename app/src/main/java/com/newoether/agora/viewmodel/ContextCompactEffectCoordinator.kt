@@ -1,17 +1,15 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.model.CompactMode
 import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.RunEffect
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
-/** Executes only the exact Context Compact effect granted by one conversation mailbox. */
+/** Executes one isolated Context Compact through the ordinary conversation generation slot. */
 internal class ContextCompactEffectCoordinator(
     private val idFactory: () -> String = { UUID.randomUUID().toString() },
 ) {
@@ -21,38 +19,21 @@ internal class ContextCompactEffectCoordinator(
         data object Superseded : Execution
     }
 
-    suspend fun executeManual(
+    suspend fun execute(
         state: ConversationGenerationState,
-        block: suspend (RunEffect.RunCompact) -> CompactResult,
-    ): Execution = execute(state, CompactMode.MANUAL, block)
-
-    suspend fun executeAutomatic(
-        state: ConversationGenerationState,
-        block: suspend (RunEffect.RunCompact) -> CompactResult,
-    ): Execution = execute(state, CompactMode.AUTOMATIC, block)
-
-    private suspend fun execute(
-        state: ConversationGenerationState,
-        mode: CompactMode,
         block: suspend (RunEffect.RunCompact) -> CompactResult,
     ): Execution {
         val operationId = idFactory()
         val compactRunId = "compact_run_$operationId"
         val effectId = "compact-$operationId"
-        val effect = when (mode) {
-            CompactMode.MANUAL -> state.queueMutationMutex.withLock {
-                if (state.queuedSends.value.isNotEmpty()) null
-                else state.commands.requestManualCompact(compactRunId, effectId)
-            }
-            CompactMode.AUTOMATIC -> state.commands.requestAutomaticCompact(compactRunId, effectId)
+        val effect = state.queueMutationMutex.withLock {
+            state.commands.requestCompact(compactRunId, effectId)
         } ?: return Execution.Busy
 
-        if (mode == CompactMode.MANUAL) {
-            val ownerJob = requireNotNull(currentCoroutineContext()[kotlinx.coroutines.Job])
-            if (!state.attachGenerationJob(effect.identity.ownerToken, ownerJob)) {
-                settleFailure(state, effect)
-                return Execution.Superseded
-            }
+        val ownerJob = requireNotNull(currentCoroutineContext()[kotlinx.coroutines.Job])
+        if (!state.attachGenerationJob(effect.identity.ownerToken, ownerJob)) {
+            settleFailure(state, effect)
+            return Execution.Superseded
         }
 
         val result = try {
@@ -70,24 +51,13 @@ internal class ContextCompactEffectCoordinator(
             state.finishCompact(effect.identity, outcome)
         }
         if (!transition.accepted) {
-            // Stop cancels an automatic Compact's installed generation Job. If cancellation has
-            // already reached this caller, preserve it; otherwise report the stale result without
-            // granting continuation.
-            currentCoroutineContext().ensureActive()
             return Execution.Superseded
         }
         check(
             transition.effects.any { it is RunEffect.CompactFailed } ==
                 (outcome == CompactOutcome.FAILED),
         )
-        check(
-            transition.effects.any { it is RunEffect.ResumeAfterCompact } ==
-                (mode == CompactMode.AUTOMATIC && outcome != CompactOutcome.FAILED),
-        )
-        check(
-            transition.effects.any { it is RunEffect.ReleaseSlot } ==
-                (mode == CompactMode.MANUAL),
-        )
+        check(transition.effects.any { it is RunEffect.ReleaseSlot })
         return Execution.Settled(result)
     }
 
@@ -99,8 +69,7 @@ internal class ContextCompactEffectCoordinator(
             try {
                 state.finishCompact(effect.identity, CompactOutcome.FAILED)
             } catch (_: Exception) {
-                // Preserve the originating cancellation/effect failure when runtime disposal has
-                // already closed the mailbox. No later continuation can be authorized there.
+                // Runtime disposal already removed the only possible continuation authority.
             }
         }
     }

@@ -32,4 +32,23 @@ class StreamingCheckpointGateTest {
         assertTrue(gate.shouldCheckpoint(nowMs = 10_000))
         assertTrue(gate.shouldCheckpoint(nowMs = 9_000))
     }
+
+    @Test
+    fun uiSnapshotsUseTheStandardFiftyMillisecondCadence() {
+        val gate = StreamingUiUpdateGate(intervalMs = 50)
+
+        assertTrue(gate.isDue(nowMs = 1_000))
+        gate.recordPublished(nowMs = 1_000)
+        assertFalse(gate.isDue(nowMs = 1_049))
+        assertTrue(gate.isDue(nowMs = 1_050))
+    }
+
+    @Test
+    fun uiSnapshotGateCanResetAtAProviderRoundBoundary() {
+        val gate = StreamingUiUpdateGate(intervalMs = 50)
+        gate.recordPublished(nowMs = 1_000)
+        gate.reset()
+
+        assertTrue(gate.isDue(nowMs = 1_001))
+    }
 }

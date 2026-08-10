@@ -42,6 +42,7 @@ import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.ui.components.*
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.mikepenz.markdown.compose.components.markdownComponents
+import kotlinx.coroutines.flow.StateFlow
 
 internal fun usesExplicitDetailBackHandler(thinkingSegmentDisplayMode: String): Boolean =
     ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
@@ -59,7 +60,7 @@ internal fun MessageItem(
     modifier: Modifier = Modifier,
     animateEntrance: Boolean = false,
     isStreaming: Boolean = false,
-    liveCompactPreview: String? = null,
+    liveCompactPreview: StateFlow<String>? = null,
     isLoading: Boolean = false,
     compactActionsEnabled: Boolean = true,
     isRegenerationExiting: Boolean = false,
@@ -340,6 +341,8 @@ internal fun MessageItem(
         )
         val compactDetailText = liveCompactPreview
             ?.takeIf { compactInProgress }
+            ?.collectAsState()
+            ?.value
             ?: message.text
         val compactDetailMessage = remember(message.id, message.status, compactDetailText) {
             val renderableText = compactDetailText.ifBlank { "\u200B" }

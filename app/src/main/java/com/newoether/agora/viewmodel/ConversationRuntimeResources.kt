@@ -93,11 +93,8 @@ internal class ConversationRuntimeResources {
                     ?: error("RunCompact must enter Compacting")
                 check(compactState.effectIdentity == effect.identity)
                 check(compactState.compactRunId == effect.compactRunId)
-                check(compactState.mode == effect.mode)
-                if (compactState.mode == com.newoether.agora.model.CompactMode.MANUAL) {
-                    activate(compactState.generationIdentity, loading = true)
-                    activated = true
-                }
+                activate(compactState.generationIdentity, loading = true)
+                activated = true
                 compactPreviewIdentity = effect.identity
                 _compactPreview.value = ""
                 _compacting.value = true
@@ -156,7 +153,7 @@ internal class ConversationRuntimeResources {
     fun stoppableOverlay(currentState: RunState): ChatMessage? = _streamingMessage.value
         ?.takeUnless {
             currentState is RunState.Idle ||
-                currentState is RunState.Compacting && currentState.resumeIdentity == null ||
+                currentState is RunState.Compacting ||
                 currentState is RunState.Finalizing && !currentState.persistenceFailureReported
         }
         ?.copy(status = MessageStatus.STOPPED)
@@ -169,9 +166,9 @@ internal class ConversationRuntimeResources {
         if (this.uiGenToken == uiToken) _isLoading.value = value
     }
 
-    fun appendCompactPreview(identity: RunEffectIdentity, delta: String): Boolean {
-        if (delta.isEmpty() || compactPreviewIdentity != identity) return false
-        _compactPreview.value += delta
+    fun updateCompactPreview(identity: RunEffectIdentity, text: String): Boolean {
+        if (compactPreviewIdentity != identity) return false
+        _compactPreview.value = text
         return true
     }
 

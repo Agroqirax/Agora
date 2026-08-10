@@ -29,9 +29,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
-private const val STREAM_UI_UPDATE_INTERVAL_MS = 50L
-private const val TOOL_UI_UPDATE_INTERVAL_MS = 50L
-
 class GenerationManager(
     private val app: Application,
     private val conversations: com.newoether.agora.data.repository.ConversationRepository,
@@ -91,7 +88,7 @@ class GenerationManager(
         tools = toolExecutor.definitions(context),
     )
 
-    suspend fun generate(
+    internal suspend fun generate(
         conversationId: String,
         modelMessageId: String,
         startTime: Long,
@@ -106,7 +103,8 @@ class GenerationManager(
         callbacks: GenerationCallbacks,
         streamScope: StreamScope? = null,
         requestTrace: com.newoether.agora.api.HttpClient.RequestTrace? = null,
-    ) = com.newoether.agora.api.HttpClient.withStreamScope(streamScope, requestTrace) {
+    ): GenerationExecutionResult =
+        com.newoether.agora.api.HttpClient.withStreamScope(streamScope, requestTrace) {
         // Bind every provider/tool stream opened by this generation to its coroutine-local
         // StreamScope. Parallel conversations therefore cannot overwrite one another's Stop
         // ownership, while child dispatcher hops inherit the same context element.
@@ -116,6 +114,8 @@ class GenerationManager(
         var foregroundLeaseAcquired = false
         // Set when this Run reaches a tool-round boundary with guidance waiting for a fresh Run.
         var endedAtGuidanceBoundary = false
+        var endedForFollowUp = false
+        var followUpParentMessageId: String? = null
         var totalText = ""
         var totalThoughts = ""
         var thinkingPlaceholder = ""
@@ -139,7 +139,7 @@ class GenerationManager(
         val transcriptionExecution = GenerationTranscriptionStage(
             TranscriptionManager(providerInstances, conversations, context),
         ).newExecution()
-        val checkpoints = GenerationStreamingCheckpoints(
+        val checkpoints = StreamingMessageCheckpoints(
             scope = CoroutineScope(currentCoroutineContext()),
             isLatestPersist = isLatestPersist,
             persist = { message ->
@@ -242,7 +242,7 @@ class GenerationManager(
             var providerRequestOrdinal = 0
             val toolRoundEffects = ToolRoundEffectCoordinator(callbacks)
 
-            var lastEmitMs = 0L
+            val uiUpdateGate = StreamingUiUpdateGate()
             var firstUiPublishPending = true
 
             fun modelMessage() = ChatMessage(
@@ -331,7 +331,7 @@ class GenerationManager(
                     overlay = toolOverlay,
                     callbacks = ToolBatchProgressCallbacks(
                         publish = ::publishStreamUpdate,
-                        onPublishedAt = { lastEmitMs = it },
+                        onPublishedAt = uiUpdateGate::recordPublished,
                     ),
                 )
                 check(outcome.identity == batchEffect.identity)
@@ -342,7 +342,7 @@ class GenerationManager(
                 toolRoundEffects.completeBatch(batchEffect.identity)
                 currentStatus = MessageStatus.SENDING
                 publishStreamUpdate(forceCheckpoint = true)
-                lastEmitMs = System.currentTimeMillis()
+                uiUpdateGate.recordPublished(System.currentTimeMillis())
             }
 
             suspend fun handleStreamEvent(event: StreamEvent) {
@@ -414,9 +414,9 @@ class GenerationManager(
                         currentStatus = MessageStatus.TOOL_CALLING
                         retryText = null
                         val now = System.currentTimeMillis()
-                        if (created || now - lastEmitMs >= TOOL_UI_UPDATE_INTERVAL_MS) {
+                        if (created || uiUpdateGate.isDue(now)) {
                             publishStreamUpdate(forceCheckpoint = created)
-                            lastEmitMs = now
+                            uiUpdateGate.recordPublished(now)
                         }
                     }
                     is StreamEvent.ToolCallRequest -> {
@@ -429,7 +429,7 @@ class GenerationManager(
                         )
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
-                        lastEmitMs = System.currentTimeMillis()
+                        uiUpdateGate.recordPublished(System.currentTimeMillis())
                     }
                     is StreamEvent.ToolCallsRequest -> {
                         event.calls.forEach { call ->
@@ -443,15 +443,15 @@ class GenerationManager(
                         }
                         currentStatus = MessageStatus.TOOL_CALLING
                         publishStreamUpdate(forceCheckpoint = true)
-                        lastEmitMs = System.currentTimeMillis()
+                        uiUpdateGate.recordPublished(System.currentTimeMillis())
                     }
                 }
 
                 val now = System.currentTimeMillis()
                 val isSignificant = event is StreamEvent.Error
-                if (now - lastEmitMs >= STREAM_UI_UPDATE_INTERVAL_MS || isSignificant) {
+                if (uiUpdateGate.isDue(now) || isSignificant) {
                     publishStreamUpdate(forceCheckpoint = isSignificant)
-                    lastEmitMs = now
+                    uiUpdateGate.recordPublished(now)
                 }
             }
 
@@ -575,10 +575,15 @@ class GenerationManager(
                 // durable. ACK is best-effort and cannot influence the already-authorized
                 // continuation; Conch's bounded retention remains the failure fallback.
                 toolExecutor.acknowledgeCommittedShellJobs(tcds, ctx)
-                val compactBoundaryId = callbacks.onToolRoundPersisted()
+                val boundaryDecision = callbacks.onToolRoundPersisted()
+                if (boundaryDecision is ToolRoundBoundaryDecision.CompleteForFollowUp) {
+                    endedForFollowUp = true
+                    followUpParentMessageId = round.lastResultId
+                }
+                val boundaryParentId = round.lastResultId
                 toolPath = apiPathBuilder.build(
                     GenerationApiPathRequest(
-                        parentId = compactBoundaryId ?: round.lastResultId,
+                        parentId = boundaryParentId,
                         conversationId = conversationId,
                         config = config,
                         context = ctx,
@@ -587,6 +592,8 @@ class GenerationManager(
 
                 toolCallData = null
                 toolCallDataList = emptyList()
+
+                if (endedForFollowUp) break
 
                 // A send queued mid-generation starts a fresh Run at this round boundary.
                 // The round's tool/result rows are already persisted above, so ending here is
@@ -597,7 +604,7 @@ class GenerationManager(
                     break
                 }
 
-                lastEmitMs = 0L
+                uiUpdateGate.reset()
 
                 val apiToolPath = projectGenerationInputMessages(
                     messages = toolPath,
@@ -621,7 +628,12 @@ class GenerationManager(
             if (currentStatus != MessageStatus.ERROR) {
                 // A queue-steered interruption is a SUCCESSFUL turn even with no answer text —
                 // its value is the persisted tool activity.
-                currentStatus = if (totalText.isNotEmpty() || totalThoughts.isNotEmpty() || endedAtGuidanceBoundary) {
+                currentStatus = if (
+                    totalText.isNotEmpty() ||
+                    totalThoughts.isNotEmpty() ||
+                    endedAtGuidanceBoundary ||
+                    endedForFollowUp
+                ) {
                     MessageStatus.SUCCESS
                 } else MessageStatus.ERROR
             }
@@ -690,7 +702,8 @@ class GenerationManager(
                         ).toMessage()
                         val terminalDisposition = generationTerminalDisposition(
                             messageStatus = currentStatus,
-                            hasPendingGuidance = callbacks.hasQueuedSends(),
+                            hasPendingGuidance =
+                                callbacks.hasQueuedSends() || endedForFollowUp,
                         )
                         val finalizationIdentity = RunEffectIdentity(
                             conversationId = conversationId,
@@ -739,9 +752,13 @@ class GenerationManager(
                     conversationId = conversationId,
                     modelMessageId = modelMessageId,
                     foregroundLeaseAcquired = foregroundLeaseAcquired,
+                    hasPendingContinuation = endedForFollowUp,
                 ),
                 callbacks = callbacks.completionEffectsCallbacks(onMessagePersisted),
             )
         }
+        GenerationExecutionResult(
+            followUpParentMessageId = followUpParentMessageId,
+        )
     }
 }

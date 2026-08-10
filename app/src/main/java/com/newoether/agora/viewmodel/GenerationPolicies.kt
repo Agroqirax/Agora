@@ -70,6 +70,35 @@ internal class StreamingCheckpointGate(
 }
 
 /**
+ * Shared visible-snapshot cadence for every ordinary generation surface, including Compact.
+ *
+ * Callers record only completed publications. A clock rollback is treated as immediately due so
+ * stream output can never become stuck behind a stale wall-clock timestamp.
+ */
+internal class StreamingUiUpdateGate(
+    private val intervalMs: Long = 50L,
+) {
+    private var lastPublishedAt: Long? = null
+
+    init {
+        require(intervalMs > 0)
+    }
+
+    fun isDue(nowMs: Long): Boolean {
+        val previous = lastPublishedAt ?: return true
+        return nowMs < previous || nowMs - previous >= intervalMs
+    }
+
+    fun recordPublished(nowMs: Long) {
+        lastPublishedAt = nowMs
+    }
+
+    fun reset() {
+        lastPublishedAt = null
+    }
+}
+
+/**
  * Returns only reasoning produced since the previous tool-round boundary.
  *
  * A model message keeps the full segment timeline for display, while each synthetic tool row must

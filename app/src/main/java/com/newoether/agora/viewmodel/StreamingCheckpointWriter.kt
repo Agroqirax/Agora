@@ -74,11 +74,12 @@ internal class StreamingCheckpointWriter(
 }
 
 /** Call-scoped owner of checkpoint throttling and the single durable writer lane. */
-internal class GenerationStreamingCheckpoints(
+internal class StreamingMessageCheckpoints(
     scope: CoroutineScope,
     private val isLatestPersist: () -> Boolean,
     persist: suspend (ChatMessage) -> Boolean,
     onFailure: (Exception) -> Unit,
+    private val nowMs: () -> Long = System::currentTimeMillis,
 ) {
     private val gate = StreamingCheckpointGate()
     private val writer = StreamingCheckpointWriter(
@@ -88,8 +89,14 @@ internal class GenerationStreamingCheckpoints(
     )
 
     suspend fun persist(message: ChatMessage, force: Boolean = false) {
+        persistLazy(force) { message }
+    }
+
+    /** Avoids building a complete growing text snapshot until the shared checkpoint gate opens. */
+    suspend fun persistLazy(force: Boolean = false, snapshot: () -> ChatMessage) {
         if (!isLatestPersist()) return
-        if (!gate.shouldCheckpoint(System.currentTimeMillis(), force)) return
+        if (!gate.shouldCheckpoint(nowMs(), force)) return
+        val message = snapshot()
         if (force) writer.flush(message) else writer.enqueue(message)
     }
 

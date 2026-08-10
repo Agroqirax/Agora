@@ -228,23 +228,13 @@ internal interface ContextCompactOperation {
         config: AutomaticCompactConfig,
     ): Boolean
 
-    suspend fun compactAutomatic(
-        conversationId: String,
-        contextLimit: Int,
-        config: AutomaticCompactConfig,
-        identity: RunEffectIdentity,
-        compactRunId: String,
-        onSummaryChunk: (String) -> Unit = {},
-        onGraphChanged: suspend () -> Unit = {},
-    ): CompactResult
-
     suspend fun compactBeforeSend(
         conversationId: String,
         contextLimit: Int,
         config: AutomaticCompactConfig,
         identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit = {},
+        onSummaryUpdate: (String) -> Unit = {},
         onGraphChanged: suspend () -> Unit = {},
     ): CompactResult
 
@@ -253,7 +243,7 @@ internal interface ContextCompactOperation {
         request: CompactRequest,
         identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit = {},
+        onSummaryUpdate: (String) -> Unit = {},
         onGraphChanged: suspend () -> Unit = {},
     ): CompactResult
 }
@@ -340,45 +330,13 @@ internal class ContextCompactor(
             config.userPostpend,
         )
 
-    override suspend fun compactAutomatic(
-        conversationId: String,
-        contextLimit: Int,
-        config: AutomaticCompactConfig,
-        identity: RunEffectIdentity,
-        compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
-        onGraphChanged: suspend () -> Unit,
-    ): CompactResult {
-        if (!config.enabled) return CompactResult.NotNeeded
-        return compact(
-            conversationId = conversationId,
-            request = config.request,
-            threshold = contextLimit.coerceAtLeast(1),
-            fixedTokenCost = config.fixedTokenCost,
-            providerAccess = CompactProviderAccess(
-                providerName = config.providerName,
-                apiKey = config.apiKey,
-                baseUrl = config.baseUrl,
-                provider = config.provider,
-                configured = config.configured,
-                generationContext = config.generationContext,
-                userPrepend = config.userPrepend,
-                userPostpend = config.userPostpend,
-            ),
-            compactRunId = compactRunId,
-            automaticIdentity = identity,
-            onSummaryChunk = onSummaryChunk,
-            onGraphChanged = onGraphChanged,
-        )
-    }
-
     override suspend fun compactBeforeSend(
         conversationId: String,
         contextLimit: Int,
         config: AutomaticCompactConfig,
         identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
+        onSummaryUpdate: (String) -> Unit,
         onGraphChanged: suspend () -> Unit,
     ): CompactResult {
         if (!config.enabled) return CompactResult.NotNeeded
@@ -398,8 +356,8 @@ internal class ContextCompactor(
                 userPostpend = config.userPostpend,
             ),
             compactRunId = compactRunId,
-            manualIdentity = identity,
-            onSummaryChunk = onSummaryChunk,
+            identity = identity,
+            onSummaryUpdate = onSummaryUpdate,
             onGraphChanged = onGraphChanged,
         )
     }
@@ -409,7 +367,7 @@ internal class ContextCompactor(
         request: CompactRequest,
         identity: RunEffectIdentity,
         compactRunId: String,
-        onSummaryChunk: (String) -> Unit,
+        onSummaryUpdate: (String) -> Unit,
         onGraphChanged: suspend () -> Unit,
     ): CompactResult = compact(
         conversationId,
@@ -417,8 +375,8 @@ internal class ContextCompactor(
         threshold = null,
         fixedTokenCost = 0,
         compactRunId = compactRunId,
-        manualIdentity = identity,
-        onSummaryChunk = onSummaryChunk,
+        identity = identity,
+        onSummaryUpdate = onSummaryUpdate,
         onGraphChanged = onGraphChanged,
     )
 
@@ -429,9 +387,8 @@ internal class ContextCompactor(
         fixedTokenCost: Int,
         providerAccess: CompactProviderAccess? = null,
         compactRunId: String,
-        automaticIdentity: RunEffectIdentity? = null,
-        manualIdentity: RunEffectIdentity? = null,
-        onSummaryChunk: (String) -> Unit,
+        identity: RunEffectIdentity,
+        onSummaryUpdate: (String) -> Unit,
         onGraphChanged: suspend () -> Unit,
     ): CompactResult {
         require(compactRunId.isNotBlank())
@@ -536,7 +493,7 @@ internal class ContextCompactor(
         val sourceRun = conversations.getRun(source.runId)
             ?: return CompactResult.Failed("Compact source run disappeared")
         val compactId = replacement?.id ?: Constants.COMPACT_MSG_PREFIX + UUID.randomUUID()
-        val runId = automaticIdentity?.runId ?: replacement?.runId ?: compactRunId
+        val runId = replacement?.runId ?: compactRunId
         val startedAt = System.currentTimeMillis()
         val compactRun = RunEntity(
             id = runId,
@@ -573,15 +530,6 @@ internal class ContextCompactor(
                 modelName = request.model,
                 expectedSelections = selected,
             )
-        } else if (automaticIdentity != null) {
-            conversations.beginAutomaticContextCompact(
-                message = compactMessage,
-                childMessageId = graphChildId,
-                expectedPass = automaticIdentity.pass,
-                expectedSelections = selected,
-                selections = repairedSelections,
-                at = startedAt,
-            )
         } else {
             conversations.beginManualContextCompact(
                 run = compactRun,
@@ -603,8 +551,17 @@ internal class ContextCompactor(
         }
 
         val summary = StringBuilder()
-        val checkpointWriter = StreamingCheckpointWriter(
+        val summaryUiGate = StreamingUiUpdateGate()
+        fun publishSummaryUpdate(force: Boolean = false) {
+            if (summary.isEmpty()) return
+            val now = System.currentTimeMillis()
+            if (!force && !summaryUiGate.isDue(now)) return
+            onSummaryUpdate(summary.toString())
+            summaryUiGate.recordPublished(now)
+        }
+        val checkpoints = StreamingMessageCheckpoints(
             scope = CoroutineScope(currentCoroutineContext()),
+            isLatestPersist = { true },
             persist = { checkpoint ->
                 if (replacement != null) {
                     conversations.updateRecompactCheckpoint(
@@ -615,7 +572,7 @@ internal class ContextCompactor(
                     conversations.updateContextCompactCheckpoint(
                         messageId = compactId,
                         runId = runId,
-                        expectedPass = automaticIdentity?.pass,
+                        expectedPass = null,
                         text = checkpoint.text,
                     )
                 }
@@ -628,15 +585,16 @@ internal class ContextCompactor(
                 )
             },
         )
-        var checkpointWriterClosed = false
-        suspend fun closeCheckpointWriter() {
-            if (!checkpointWriterClosed) {
-                checkpointWriterClosed = true
-                checkpointWriter.cancelAndJoin()
+        var checkpointsClosed = false
+        suspend fun closeCheckpoints() {
+            if (!checkpointsClosed) {
+                checkpointsClosed = true
+                checkpoints.close()
             }
         }
         suspend fun settleFailure(reason: String): CompactResult.Failed {
-            closeCheckpointWriter()
+            publishSummaryUpdate(force = true)
+            closeCheckpoints()
             val partial = summary.toString().trim()
             val failureText = if (partial.isEmpty()) {
                 "Compact failed: $reason"
@@ -646,14 +604,6 @@ internal class ContextCompactor(
             if (replacement != null) {
                 conversations.settleRecompactMessage(
                     messageId = compactId,
-                    text = failureText,
-                    status = MessageStatus.ERROR,
-                )
-            } else if (automaticIdentity != null) {
-                conversations.settleAutomaticContextCompact(
-                    messageId = compactId,
-                    runId = runId,
-                    expectedPass = automaticIdentity.pass,
                     text = failureText,
                     status = MessageStatus.ERROR,
                 )
@@ -672,7 +622,8 @@ internal class ContextCompactor(
         }
 
         suspend fun settleCancellation() {
-            closeCheckpointWriter()
+            publishSummaryUpdate(force = true)
+            closeCheckpoints()
             val partial = summary.toString().trim()
             val stoppedText = partial.ifEmpty { "Context compact was interrupted." }
             if (replacement != null) {
@@ -680,16 +631,6 @@ internal class ContextCompactor(
                     messageId = compactId,
                     text = stoppedText,
                     status = MessageStatus.STOPPED,
-                )
-            } else if (automaticIdentity != null) {
-                // A concurrent Stop owns atomic terminalization of the active Run and every
-                // SENDING row. This conditional update only applies when no Stop won the race.
-                conversations.settleAutomaticContextCompact(
-                    messageId = compactId,
-                    runId = runId,
-                    expectedPass = automaticIdentity.pass,
-                    text = stoppedText,
-                    status = MessageStatus.ERROR,
                 )
             } else {
                 conversations.settleManualContextCompact(
@@ -730,7 +671,7 @@ internal class ContextCompactor(
                 thinkingEnabled = false,
                 baseUrl = providerAccess?.baseUrl ?: providers.getEffectiveBaseUrl(providerName),
             )
-            val effectIdentity = automaticIdentity ?: checkNotNull(manualIdentity)
+            val effectIdentity = identity
             val providerIdentity = effectIdentity.copy(
                 effectId = "${effectIdentity.effectId}:provider",
             )
@@ -742,12 +683,12 @@ internal class ContextCompactor(
             ) { event ->
                 if (event is StreamEvent.TextChunk) {
                     summary.append(event.text)
-                    onSummaryChunk(event.text)
-                    checkpointWriter.enqueue(
+                    publishSummaryUpdate()
+                    checkpoints.persistLazy {
                         durableCompactMessage.toUiChatMessage { it }.copy(
                             text = summary.toString(),
                         )
-                    )
+                    }
                 }
             }
             pauseLoop(conversationId)
@@ -767,23 +708,16 @@ internal class ContextCompactor(
                 is ProviderPassOutcome.Cancelled ->
                     throw CancellationException("Compact provider pass was cancelled")
             }
+            publishSummaryUpdate(force = true)
             val summaryText = summary.toString().trim()
             if (summaryText.isBlank()) {
                 return settleFailure("Compact model returned an empty summary")
             }
             val persistedText = buildPersistedCompactText(summaryText, split.retained)
-            closeCheckpointWriter()
+            closeCheckpoints()
             val settled = if (replacement != null) {
                 conversations.settleRecompactMessage(
                     messageId = compactId,
-                    text = persistedText,
-                    status = MessageStatus.SUCCESS,
-                )
-            } else if (automaticIdentity != null) {
-                conversations.settleAutomaticContextCompact(
-                    messageId = compactId,
-                    runId = runId,
-                    expectedPass = automaticIdentity.pass,
                     text = persistedText,
                     status = MessageStatus.SUCCESS,
                 )

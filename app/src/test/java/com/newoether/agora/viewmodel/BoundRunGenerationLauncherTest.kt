@@ -49,7 +49,7 @@ class BoundRunGenerationLauncherTest {
             )
         } coAnswers {
             generationJob = arg(10)
-            Unit
+            GenerationExecutionResult()
         }
         mockDebugLog()
         try {
@@ -61,13 +61,48 @@ class BoundRunGenerationLauncherTest {
 
         assertSame(currentCoroutineContext()[Job], generationJob)
         coVerify(exactly = 1) {
-            fixture.compactController.automaticBeforeBoundary(
+            fixture.compactController.automaticNeeded(
                 conversationId = "conversation",
                 contextLimit = 4096,
                 config = fixture.snapshot.automaticCompact,
-                state = fixture.state,
             )
         }
+        fixture.state.dispose()
+        Unit
+    }
+
+    @Test
+    fun automaticCompactCompletesTheAssistantRunBeforeSchedulingFollowUp() = runBlocking {
+        val fixture = Fixture()
+        coEvery {
+            fixture.compactController.automaticNeeded(any(), any(), any())
+        } returns true
+        coEvery {
+            fixture.manager.generate(
+                any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(),
+            )
+        } coAnswers {
+            val callbacks = arg<GenerationCallbacks>(11)
+            assertEquals(
+                ToolRoundBoundaryDecision.CompleteForFollowUp,
+                callbacks.onToolRoundPersisted(),
+            )
+            GenerationExecutionResult(
+                followUpParentMessageId = "result-boundary",
+            )
+        }
+        mockDebugLog()
+        try {
+            fixture.launcher.launch(fixture.request, fixture.state)
+        } finally {
+            unmockkObject(DebugLog)
+        }
+
+        val continuation = fixture.continuationRequests.single()
+        assertEquals("result-boundary", continuation.parentMessageId)
+        assertEquals(fixture.request, continuation.generationRequest)
+        assertSame(fixture.state, fixture.continuationStates.single())
         fixture.state.dispose()
         Unit
     }
@@ -175,6 +210,8 @@ class BoundRunGenerationLauncherTest {
         val manager = mockk<GenerationManager>()
         val compactController = mockk<ConversationCompactController>()
         val terminalSettlement = mockk<GenerationTerminalSettlementController>()
+        val continuationRequests = mutableListOf<AutomaticCompactContinuationRequest>()
+        val continuationStates = mutableListOf<ConversationGenerationState>()
         val state = ConversationGenerationState("conversation")
         val uiToken = requireNotNull(state.acquireForSend())
         val snapshot = testGenerationAdmissionSnapshot(
@@ -200,14 +237,18 @@ class BoundRunGenerationLauncherTest {
             state.bindRun(uiToken, "run", pass = 3)
             every { manager.fixedContextTokenCost(any(), any()) } returns 0
             coEvery {
-                compactController.automaticBeforeBoundary(any(), any(), any(), any())
-            } returns null
+                compactController.automaticNeeded(any(), any(), any())
+            } returns false
             launcher = BoundRunGenerationLauncher(
                 conversations = conversations,
                 generationManagerProvider = { manager },
                 compactController = compactController,
                 terminalSettlement = terminalSettlement,
                 toUiMessage = ::toUiMessage,
+                onAutomaticCompactContinuation = { request, state ->
+                    continuationRequests += request
+                    continuationStates += state
+                },
                 clock = { 150L },
             )
         }

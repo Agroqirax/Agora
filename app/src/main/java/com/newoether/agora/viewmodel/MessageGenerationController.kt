@@ -9,6 +9,7 @@ import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.data.repository.SettingsRepository
 import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RunEffect
 import com.newoether.agora.model.SelectedAttachment
@@ -173,6 +174,22 @@ internal class MessageGenerationController(
         compactController = compactController,
         terminalSettlement = terminalSettlement,
         toUiMessage = { it.toUiChatMessage(appContext) },
+        onAutomaticCompactContinuation = ::scheduleAutomaticCompactContinuation,
+    )
+    private val standardContinuationLauncher = StandardGenerationContinuationLauncher(
+        conversations = convRepo,
+        executionCoordinator = executionCoordinator,
+        terminalSettlement = terminalSettlement,
+        boundRunGenerationLauncher = { boundRunGenerationLauncher },
+        toUiMessage = { it.toUiChatMessage(appContext) },
+        isConversationOpen = { currentConversationId.value == it },
+        projectGraph = { _, committedMessages, selectedChildren, streamingMessage ->
+            renderStore.commitGraph(
+                committedMessages = committedMessages,
+                selectedChildren = selectedChildren,
+                streamingMessage = streamingMessage,
+            )
+        },
     )
     private val directAcceptedInputExecutor = DirectAcceptedInputEffectExecutor(
         conversations = convRepo,
@@ -701,6 +718,46 @@ internal class MessageGenerationController(
         }
         val modelMessageId = createdModelMessageId ?: return AutomationSendOutcome.SlotBusy
         return AutomationSendOutcome.Delivered(modelMessageId)
+    }
+
+    private fun scheduleAutomaticCompactContinuation(
+        request: AutomaticCompactContinuationRequest,
+        state: ConversationGenerationState,
+    ) {
+        val guidanceClaimRevision = state.guidanceClaimRevision()
+        // The current Assistant must release first. Suppress exactly that release's ordinary queue
+        // drain so the already-decided Compact generation owns the next standard slot.
+        state.deferNextQueueDrain()
+        state.scope.launch {
+            state.awaitSendAvailable()
+            val compactLaunch = compactController.startAutomaticStandard(
+                conversationId = request.generationRequest.conversationId,
+                contextLimit = request.generationRequest.snapshot.config.maxContextWindow,
+                config = request.config,
+                state = state,
+            )
+            compactLaunch?.job?.join()
+            val compactMessageId = compactLaunch?.messageId
+            if (compactMessageId != null) {
+                val compactStatus = convRepo
+                    .getMessagesForConversationSnapshot(request.generationRequest.conversationId)
+                    .find { it.id == compactMessageId }
+                    ?.status
+                if (compactStatus == null || compactStatus == MessageStatus.STOPPED) return@launch
+            }
+
+            // User guidance queued during the preceding Assistant or Compact is itself the next
+            // standard generation and supersedes an automatic no-input continuation.
+            if (state.hasPendingOrClaimedGuidanceSince(guidanceClaimRevision)) return@launch
+            standardContinuationLauncher.launch(
+                request = StandardGenerationContinuationRequest(
+                    conversationId = request.generationRequest.conversationId,
+                    parentMessageId = compactMessageId ?: request.parentMessageId,
+                    snapshot = request.generationRequest.snapshot,
+                ),
+                state = state,
+            )
+        }
     }
 
     fun generateTitle(conversationId: String) {

@@ -90,18 +90,16 @@ sealed interface ConversationCommand {
         override val conversationId: String = identity.conversationId
     }
 
-    /** Request one Compact effect with a separately identified durable Compact Run. */
+    /** Request one isolated Compact effect with its own durable Run identity. */
     data class CompactRequested(
         val identity: RunEffectIdentity,
         val compactRunId: String,
-        val mode: CompactMode,
     ) : ConversationCommand {
         override val conversationId: String = identity.conversationId
 
         init {
             require(compactRunId.isNotBlank())
-            require(mode != CompactMode.MANUAL || identity.runId == compactRunId)
-            require(mode != CompactMode.AUTOMATIC || identity.runId != compactRunId)
+            require(identity.runId == compactRunId)
         }
     }
 
