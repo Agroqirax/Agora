@@ -33,6 +33,46 @@ class ShellDurableJobExecutorTest {
     }
 
     @Test
+    fun durableOutputCursorEmitsEachUtf8ByteExactlyOnceAcrossGrowingSnapshots() {
+        val cursor = ConchJobOutputCursor()
+        assertEquals(
+            ConchJobOutputUpdate("one\n", 0),
+            cursor.consume(jobSnapshot("one\n")),
+        )
+        assertEquals(
+            ConchJobOutputUpdate("中文\n", 0),
+            cursor.consume(jobSnapshot("one\n中文\n")),
+        )
+        assertEquals(
+            ConchJobOutputUpdate("", 0),
+            cursor.consume(jobSnapshot("one\n中文\n")),
+        )
+        assertEquals(
+            ConchJobOutputUpdate("last\n", 0),
+            cursor.consume(jobSnapshot("one\n中文\nlast\n", state = "succeeded")),
+        )
+    }
+    @Test
+    fun durableOutputCursorReportsEvictedBytesAndContinuesFromRetainedUtf8Tail() {
+        val cursor = ConchJobOutputCursor()
+        val retained = "中文-tail\n"
+        val raw = """{"state":"running","output":${jsonString(retained)},"output_bytes":30}"""
+        val update = cursor.consume(raw)
+        assertEquals(retained, update.delta)
+        assertEquals(30L - retained.toByteArray(Charsets.UTF_8).size, update.lostBytes)
+        assertEquals(ConchJobOutputUpdate("", 0), cursor.consume(raw))
+    }
+    @Test
+    fun durableOutputCursorIgnoresMalformedAndRegressiveSnapshotsWithoutReplaying() {
+        val cursor = ConchJobOutputCursor()
+        assertEquals(ConchJobOutputUpdate("", 0), cursor.consume("not-json"))
+        assertEquals(ConchJobOutputUpdate("abc", 0), cursor.consume(jobSnapshot("abc")))
+        assertEquals(
+            ConchJobOutputUpdate("", 0),
+            cursor.consume("""{"output":"ab","output_bytes":2}"""),
+        )
+    }
+    @Test
     fun committedTerminalShellResultsResolveAcknowledgementsAcrossEnvelopes() {
         val calls = listOf(
             ToolCallData(
@@ -84,4 +124,8 @@ class ShellDurableJobExecutorTest {
 
         assertTrue(terminalShellJobAcknowledgements(calls).isEmpty())
     }
+    private fun jobSnapshot(output: String, state: String = "running"): String =
+        """{"state":"$state","output":${jsonString(output)},"output_bytes":${output.toByteArray(Charsets.UTF_8).size}}"""
+    private fun jsonString(value: String): String =
+        kotlinx.serialization.json.JsonPrimitive(value).toString()
 }

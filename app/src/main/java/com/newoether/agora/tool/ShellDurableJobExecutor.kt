@@ -47,6 +47,7 @@ internal class ShellDurableJobExecutor {
         command: String,
         workdir: String,
         waitMs: Int,
+        onOutput: suspend (String) -> Unit = {},
     ): String {
         val startResult = try {
             backend.startJob(command, workdir, BACKGROUND_JOB_MAX_MS)
@@ -77,6 +78,7 @@ internal class ShellDurableJobExecutor {
         var pollIntervalMs = INITIAL_WAIT_POLL_MS
         var consecutiveFailures = 0
         var lastFailure: String? = null
+        val outputCursor = ConchJobOutputCursor()
         try {
         while (currentCoroutineContext().isActive) {
             val raw = try {
@@ -107,16 +109,28 @@ internal class ShellDurableJobExecutor {
                 }
                 null
             }
-            if (raw != null && isTerminalJobPayload(raw)) {
-                val result = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
-                return buildJsonObject {
-                    put("type", "execute_shell_command")
-                    put("server", backend.device.name)
-                    put("command", command)
-                    put("job_id", jobId)
-                    put("durable", true)
-                    if (result != null) put("result", result) else put("result_raw", raw)
-                }.toString()
+            if (raw != null) {
+                val outputUpdate = outputCursor.consume(raw)
+                if (outputUpdate.lostBytes > 0) {
+                    onOutput(
+                        "[Conch output gap: ${outputUpdate.lostBytes} earlier UTF-8 bytes " +
+                            "were evicted before Agora could read them.]\n",
+                    )
+                }
+                if (outputUpdate.delta.isNotEmpty()) {
+                    onOutput(outputUpdate.delta)
+                }
+                if (isTerminalJobPayload(raw)) {
+                    val result = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
+                    return buildJsonObject {
+                        put("type", "execute_shell_command")
+                        put("server", backend.device.name)
+                        put("command", command)
+                        put("job_id", jobId)
+                        put("durable", true)
+                        if (result != null) put("result", result) else put("result_raw", raw)
+                    }.toString()
+                }
             }
             val elapsed = System.currentTimeMillis() - start
             if (elapsed >= waitMs) {
@@ -137,7 +151,6 @@ internal class ShellDurableJobExecutor {
             }
             val remaining = (waitMs - elapsed).toInt()
             kotlinx.coroutines.delay(pollIntervalMs.coerceAtMost(remaining).toLong())
-            pollIntervalMs = (pollIntervalMs * 2).coerceAtMost(MAX_WAIT_POLL_MS)
         }
         } catch (cancelled: CancellationException) {
             // A wait expiry intentionally leaves the durable job running. An explicit generation
@@ -341,6 +354,42 @@ internal class ShellDurableJobExecutor {
     }
 }
 
+internal data class ConchJobOutputUpdate(
+    val delta: String,
+    val lostBytes: Long,
+)
+/**
+ * Converts Conch's rolling durable-job snapshots into an exactly-once best-effort output stream.
+ * `output_bytes` is the global byte position while `output` is a bounded UTF-8 tail. Tracking the
+ * global cursor avoids replaying the full tail on every poll and also detects when polling fell
+ * behind the server's retention window.
+ */
+internal class ConchJobOutputCursor {
+    private var emittedBytes = 0L
+    fun consume(raw: String): ConchJobOutputUpdate {
+        val obj = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull()
+            ?: return ConchJobOutputUpdate("", 0)
+        val output = (obj["output"] as? JsonPrimitive)
+            ?.takeIf(JsonPrimitive::isString)
+            ?.content
+            ?: return ConchJobOutputUpdate("", 0)
+        val outputBytes = (obj["output_bytes"] as? JsonPrimitive)
+            ?.takeUnless(JsonPrimitive::isString)
+            ?.content
+            ?.toLongOrNull()
+            ?.takeIf { it >= 0 }
+            ?: return ConchJobOutputUpdate("", 0)
+        val retained = output.toByteArray(Charsets.UTF_8)
+        val retainedStart = (outputBytes - retained.size).coerceAtLeast(0)
+        val lostBytes = (retainedStart - emittedBytes).coerceAtLeast(0)
+        val start = (emittedBytes.coerceAtLeast(retainedStart) - retainedStart)
+            .coerceIn(0, retained.size.toLong())
+            .toInt()
+        val delta = retained.copyOfRange(start, retained.size).toString(Charsets.UTF_8)
+        emittedBytes = maxOf(emittedBytes, outputBytes)
+        return ConchJobOutputUpdate(delta, lostBytes)
+    }
+}
 internal data class TerminalShellJobAcknowledgement(
     val serverName: String,
     val jobId: String,

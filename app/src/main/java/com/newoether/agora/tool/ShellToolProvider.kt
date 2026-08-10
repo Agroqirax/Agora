@@ -392,6 +392,9 @@ class ShellToolProvider(
                             command = command,
                             workdir = workdir,
                             waitMs = timeoutMs.coerceAtMost(maxWaitMs(ctx)),
+                            onOutput = { delta ->
+                                emit(ToolExecutionEvent.OutputDelta(delta))
+                            },
                         )
                     )
                 )
