@@ -1,0 +1,213 @@
+package com.newoether.agora.tool
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+
+internal data class ConchSseResult(
+    val output: String,
+    val exitCode: Int?,
+    val errorMessage: String?,
+    val timedOut: Boolean,
+    val warningMessage: String?,
+)
+
+/**
+ * Strictly parses Conch's one-event/one-data SSE protocol.
+ *
+ * Streaming output is intentionally emitted before the terminal frame arrives, but malformed,
+ * unknown, incomplete, duplicate-terminal, and post-terminal input fails closed. Both retained
+ * and emitted output share the same byte budget.
+ */
+internal suspend fun parseConchSseLines(
+    encrypted: Boolean,
+    readLine: () -> String?,
+    decrypt: (String) -> String,
+    onOutput: suspend (String) -> Unit,
+): ConchSseResult {
+    val output = StringBuilder()
+    var outputBytes = 0
+    var exitCode: Int? = null
+    var errorMessage: String? = null
+    var timedOut = false
+    var warningMessage: String? = null
+    var outputTruncationReported = false
+    var currentEvent: String? = null
+    var terminalSeen = false
+
+    fun fail(reason: String): Nothing =
+        throw IllegalStateException("Invalid Conch SSE stream: $reason")
+
+    fun recordWarning(message: String) {
+        val bounded = message.take(MAX_WARNING_CHARS)
+        warningMessage = when (val existing = warningMessage) {
+            null -> bounded
+            else -> (existing + "\n" + bounded).take(MAX_WARNING_CHARS)
+        }
+    }
+
+    fun recordOutputTruncation() {
+        if (outputTruncationReported) return
+        outputTruncationReported = true
+        val notice = "Conch output was truncated at $MAX_OUTPUT_BYTES UTF-8 bytes."
+        warningMessage = when (val existing = warningMessage) {
+            null -> notice
+            else -> (notice + "\n" + existing).take(MAX_WARNING_CHARS)
+        }
+    }
+
+    while (currentCoroutineContext().isActive) {
+        val line = readLine() ?: break
+        when {
+            line.isEmpty() -> {
+                if (currentEvent != null) fail("event $currentEvent has no data frame")
+            }
+            line.startsWith("event: ") -> {
+                if (terminalSeen) fail("event received after terminal frame")
+                if (currentEvent != null) fail("event $currentEvent has no data frame")
+                val event = line.substring(7).trim()
+                if (event !in SUPPORTED_EVENTS) fail("unsupported event $event")
+                currentEvent = event
+            }
+            line.startsWith("data: ") -> {
+                if (terminalSeen) fail("data received after terminal frame")
+                val event = currentEvent ?: fail("data frame has no event")
+                currentEvent = null
+                var dataText = line.substring(6).trim()
+                if (encrypted) {
+                    dataText = try {
+                        decrypt(dataText)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        fail(
+                            "decryption failed: " +
+                                (error.message ?: error.javaClass.simpleName),
+                        )
+                    }
+                }
+                val data = try {
+                    Json.parseToJsonElement(dataText).jsonObject
+                } catch (_: Exception) {
+                    fail("event $event contains invalid JSON")
+                }
+                when (event) {
+                    "line" -> {
+                        val text = data.requiredString("line", event, allowBlank = true)
+                        val stream = data.requiredString("stream", event)
+                        if (stream !in OUTPUT_STREAMS) {
+                            fail("event line has unsupported stream $stream")
+                        }
+                        val rawDelta = "$text\n"
+                        val prefix = rawDelta.utf8Prefix(MAX_OUTPUT_BYTES - outputBytes)
+                        if (prefix.value.isNotEmpty()) {
+                            output.append(prefix.value)
+                            outputBytes += prefix.byteCount
+                            onOutput(prefix.value)
+                        }
+                        if (prefix.truncated) recordOutputTruncation()
+                    }
+                    "warning" -> {
+                        recordWarning(data.requiredString("message", event))
+                    }
+                    "result" -> {
+                        exitCode = data.requiredInt("exit_code", event)
+                        terminalSeen = true
+                    }
+                    "error" -> {
+                        errorMessage = data.requiredString("message", event)
+                        timedOut = data.optionalBoolean("timed_out", event) ?: false
+                        terminalSeen = true
+                    }
+                }
+            }
+            else -> fail("unexpected line")
+        }
+    }
+
+    currentCoroutineContext().ensureActive()
+    if (currentEvent != null) fail("event $currentEvent has no data frame")
+    if (!terminalSeen) fail("stream ended without a terminal result or error")
+
+    return ConchSseResult(
+        output = output.toString().removeSuffix("\n"),
+        exitCode = exitCode,
+        errorMessage = errorMessage,
+        timedOut = timedOut,
+        warningMessage = warningMessage,
+    )
+}
+
+private fun JsonObject.requiredString(
+    key: String,
+    event: String,
+    allowBlank: Boolean = false,
+): String {
+    val value = this[key] as? JsonPrimitive
+    if (value == null || !value.isString || (!allowBlank && value.content.isBlank())) {
+        throw IllegalStateException("Invalid Conch SSE stream: event $event requires string $key")
+    }
+    return value.content
+}
+
+private fun JsonObject.requiredInt(key: String, event: String): Int {
+    val value = this[key] as? JsonPrimitive
+    if (value == null || value.isString) {
+        throw IllegalStateException("Invalid Conch SSE stream: event $event requires integer $key")
+    }
+    return value.content.toIntOrNull()
+        ?: throw IllegalStateException(
+            "Invalid Conch SSE stream: event $event requires integer $key",
+        )
+}
+
+private fun JsonObject.optionalBoolean(key: String, event: String): Boolean? {
+    val value = this[key] ?: return null
+    val primitive = value as? JsonPrimitive
+    if (primitive == null || primitive.isString) {
+        throw IllegalStateException("Invalid Conch SSE stream: event $event requires boolean $key")
+    }
+    return primitive.content.toBooleanStrictOrNull()
+        ?: throw IllegalStateException(
+            "Invalid Conch SSE stream: event $event requires boolean $key",
+        )
+}
+
+private data class Utf8Prefix(
+    val value: String,
+    val byteCount: Int,
+    val truncated: Boolean,
+)
+
+private fun String.utf8Prefix(maxBytes: Int): Utf8Prefix {
+    if (maxBytes <= 0) return Utf8Prefix("", 0, isNotEmpty())
+    var index = 0
+    var bytes = 0
+    while (index < length) {
+        val codePoint = Character.codePointAt(this, index)
+        val nextBytes = when {
+            codePoint <= 0x7f -> 1
+            codePoint <= 0x7ff -> 2
+            codePoint <= 0xffff -> 3
+            else -> 4
+        }
+        if (bytes + nextBytes > maxBytes) break
+        bytes += nextBytes
+        index += Character.charCount(codePoint)
+    }
+    return Utf8Prefix(
+        value = substring(0, index),
+        byteCount = bytes,
+        truncated = index < length,
+    )
+}
+
+private val SUPPORTED_EVENTS = setOf("line", "warning", "result", "error")
+private val OUTPUT_STREAMS = setOf("stdout", "stderr")
+private const val MAX_OUTPUT_BYTES = 1 shl 20
+private const val MAX_WARNING_CHARS = 8_192

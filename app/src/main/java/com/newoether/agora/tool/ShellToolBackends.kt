@@ -102,70 +102,23 @@ internal class ConchBackend(override val device: ShellDeviceConfig) : Backend {
             )
         }
         return try {
-            val output = StringBuilder()
-            var exitCode: Int? = null
-            var errorMessage: String? = null
-            // Conch's structured discriminator for "the deadline killed the process".
-            // Never infer this from the message text: a command's OWN timeout (curl's
-            // "Operation timed out", a Go "i/o timeout") reads identically and would cause a
-            // non-idempotent command to be silently re-run as a background job.
-            var timedOut = false
-            // Non-fatal degradation (currently output truncation). Kept apart from
-            // errorMessage so a truncated line still reports the command's real exit code
-            // instead of relabelling a successful command as execution_error.
-            var warningMessage: String? = null
-            var currentEvent: String? = null
-            val aesKey = client.getSessionKey()
-            stream@ while (currentCoroutineContext().isActive) {
-                val line = handle.readLine() ?: break
-                when {
-                    line.startsWith("event: ") -> currentEvent = line.substring(7).trim()
-                    line.startsWith("data: ") -> {
-                        var dataStr = line.substring(6).trim()
-                        if (aesKey != null) {
-                            try {
-                                dataStr = client.decryptSseData(dataStr)
-                            } catch (e: Exception) {
-                                errorMessage =
-                                    "Conch stream decryption failed at $url: " +
-                                        (e.message ?: e.javaClass.simpleName)
-                                break@stream
-                            }
-                        }
-                        val dataJson = try { Json.parseToJsonElement(dataStr).jsonObject } catch (_: Exception) { null } ?: continue
-                        when (currentEvent) {
-                            "line" -> {
-                                val text = (dataJson["line"] as? JsonPrimitive)?.content
-                                if (text != null) {
-                                    val delta = "$text\n"
-                                    output.append(delta)
-                                    onOutput(delta)
-                                }
-                            }
-                            "result" -> exitCode = (dataJson["exit_code"] as? JsonPrimitive)?.content?.toIntOrNull()
-                            "warning" -> {
-                                if (warningMessage == null) {
-                                    warningMessage =
-                                        (dataJson["message"] as? JsonPrimitive)?.content
-                                }
-                            }
-                            "error" -> {
-                                errorMessage = (dataJson["message"] as? JsonPrimitive)?.content
-                                timedOut = (dataJson["timed_out"] as? JsonPrimitive)
-                                    ?.content?.toBooleanStrictOrNull() == true
-                            }
-                        }
-                    }
-                }
-            }
+            val result = parseConchSseLines(
+                encrypted = prepared.isEncrypted,
+                readLine = handle::readLine,
+                decrypt = client::decryptSseData,
+                onOutput = onOutput,
+            )
             buildJsonObject {
                 put("type", "execute_shell_command"); put("server", deviceName); put("command", cmd)
-                if (errorMessage != null) { put("error", "execution_error"); put("message", errorMessage); if (timedOut) put("timed_out", true) }
-                else { put("exit_code", exitCode ?: -1) }
-                // Emitted alongside a normal exit code on purpose: the output is incomplete but
-                // the command itself succeeded or failed on its own terms.
-                warningMessage?.let { put("warning", it) }
-                put("output", output.toString().trimEnd())
+                if (result.errorMessage != null) {
+                    put("error", "execution_error")
+                    put("message", result.errorMessage)
+                    if (result.timedOut) put("timed_out", true)
+                } else {
+                    put("exit_code", result.exitCode ?: -1)
+                }
+                result.warningMessage?.let { put("warning", it) }
+                put("output", result.output)
             }.toString()
         } catch (e: Exception) {
             jsonError("execute_shell_command", e.message ?: "Unknown error", server = deviceName, command = cmd)

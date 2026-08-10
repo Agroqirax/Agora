@@ -16,6 +16,12 @@ class ShellDurableJobExecutorTest {
         }
         assertFalse(executor.isTerminalJobPayload("""{"state":"running"}"""))
         assertFalse(executor.isTerminalJobPayload("""{"state":"stopping"}"""))
+        assertFalse(executor.isTerminalJobPayload("""{"state":"settling","error":"process exited"}"""))
+        assertFalse(
+            executor.isTerminalJobPayload(
+                """{"state":"settling","settlement_error":"sync pending"}""",
+            ),
+        )
     }
 
     @Test

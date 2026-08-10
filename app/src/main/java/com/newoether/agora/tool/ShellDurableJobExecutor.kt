@@ -296,10 +296,10 @@ internal class ShellDurableJobExecutor {
      * Decides whether a raw `/jobs/get` payload represents a finished job.
      *
      * Conch reports lifecycle in the **`state`** field (see conch shell/jobs.go): `running` and
-     * `stopping` are live; `succeeded`, `failed`, `stopped` and `interrupted` are terminal. An
-     * explicit server-side `error` (e.g. "job not found") is also terminal, because polling again
-     * cannot change it. An unparseable or field-less payload is deliberately NOT terminal: a
-     * transport hiccup must never be reported to the model as "the job finished".
+     * `stopping` and `settling` are live; `succeeded`, `failed`, `stopped` and `interrupted` are
+     * terminal. A lifecycle state always wins over incidental error fields because settlement may
+     * still be syncing retained output. Only an explicit server-side `error` without a state (for
+     * example, "job not found") is terminal. Unparseable or field-less payloads remain nonterminal.
      */
     internal fun isTerminalJobPayload(raw: String): Boolean {
         if (raw.isBlank()) return false
@@ -309,12 +309,11 @@ internal class ShellDurableJobExecutor {
         } catch (_: Exception) {
             return false
         }
-        if (obj["error"] != null) return true
         val state = (obj["state"] as? kotlinx.serialization.json.JsonPrimitive)
             ?.content
             ?.lowercase()
-            ?: return false
-        return state in TERMINAL_JOB_STATES
+        if (state != null) return state in TERMINAL_JOB_STATES
+        return obj["error"] != null
     }
 
     companion object {
