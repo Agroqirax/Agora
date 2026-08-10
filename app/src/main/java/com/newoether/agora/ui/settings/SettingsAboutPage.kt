@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator as CircularProgressIndicator
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -24,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.ui.common.LocalAgoraHaptics
 import com.newoether.agora.viewmodel.ChatViewModel
 import com.newoether.agora.util.UpdateInfo
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,9 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         else it.versionCode.toLong()
     } ?: 0L
     val upToDateStatus = stringResource(R.string.about_up_to_date, versionName)
+    val developerOptionsEnabled by viewModel.settings.developerOptionsEnabled.collectAsState()
+    var developerTapCount by rememberSaveable { mutableIntStateOf(0) }
+    val haptics = LocalAgoraHaptics.current
 
     val autoUpdateCheck by viewModel.settings.autoUpdateCheck.collectAsState()
     var updateStatus by remember { mutableStateOf<String?>(null) }
@@ -54,6 +59,39 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     fun openUrl(url: String) {
         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    }
+
+    fun onVersionTapped() {
+        val result = DeveloperModeUnlockPolicy.advance(
+            currentTapCount = developerTapCount,
+            alreadyEnabled = developerOptionsEnabled,
+        )
+        developerTapCount = result.tapCount
+        when (result.feedback) {
+            DeveloperUnlockFeedback.NONE -> haptics.selection()
+            DeveloperUnlockFeedback.REMAINING_TAPS -> {
+                haptics.selection()
+                viewModel.emitSnackbar(
+                    context.getString(
+                        R.string.developer_options_taps_remaining,
+                        result.remainingTaps,
+                    ),
+                )
+            }
+            DeveloperUnlockFeedback.ENABLED -> {
+                haptics.confirm()
+                viewModel.settings.setDeveloperOptionsEnabled(true)
+                viewModel.emitSnackbar(
+                    context.getString(R.string.developer_options_enabled_message),
+                )
+            }
+            DeveloperUnlockFeedback.ALREADY_ENABLED -> {
+                haptics.selection()
+                viewModel.emitSnackbar(
+                    context.getString(R.string.developer_options_already_enabled_message),
+                )
+            }
+        }
     }
 
     CollapsingSettingsScaffold(
@@ -72,7 +110,8 @@ fun SettingsAboutPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 SettingsItem(
                     headlineContent = { Text(stringResource(R.string.about_version)) },
                     supportingContent = { Text("v$versionName ($versionCode)") },
-                    leadingContent = { Icon(Icons.Default.Info, contentDescription = null) }
+                    leadingContent = { Icon(Icons.Default.Info, contentDescription = null) },
+                    modifier = Modifier.clickable(onClick = ::onVersionTapped),
                 )
             }))
 

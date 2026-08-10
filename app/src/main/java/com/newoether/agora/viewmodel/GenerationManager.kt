@@ -346,6 +346,7 @@ class GenerationManager(
             }
 
             suspend fun handleStreamEvent(event: StreamEvent) {
+                requestTrace?.recordParsedEvent(event)
                 when (event) {
                     is StreamEvent.TextChunk -> {
                         val answerText = if (currentStatus == MessageStatus.THINKING) event.text.trimStart() else event.text

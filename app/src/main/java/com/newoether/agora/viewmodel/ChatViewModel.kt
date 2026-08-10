@@ -506,6 +506,12 @@ class ChatViewModel(
     val generatingInConversationId: StateFlow<String?> =
         conversationUi.generatingInConversationId
 
+    /** Content-free runtime history used only by the explicitly unlocked Developer inspector. */
+    internal fun developerRuntimeTraceSnapshot(
+        conversationId: String,
+    ): List<com.newoether.agora.model.ConversationRuntimeTraceEntry> =
+        generationRegistry.get(conversationId)?.runtimeTraceSnapshot().orEmpty()
+
     /** Per-conversation generation state registry. Each conversation owns an independent
      *  ConversationGenerationState; the global loading/render mirrors
      *  below are now a MIRROR of whichever conversation is currently open (see init collectors). */

@@ -148,6 +148,8 @@ class SettingsRepository(
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
+    val developerOptionsEnabled: StateFlow<Boolean> =
+        hot(settingsManager.developerOptionsEnabled, false)
     val shellEnabled: StateFlow<Boolean> = hot(settingsManager.shellEnabled, false)
     val automationToolsEnabled: StateFlow<Boolean> = hot(settingsManager.automationToolsEnabled, false)
     val exactExecutionEnabled: StateFlow<Boolean> = hot(settingsManager.exactExecutionEnabled, false)
@@ -466,6 +468,8 @@ class SettingsRepository(
     fun setImageGenModel(model: String?) = scope.launch { settingsManager.saveImageGenModel(model) }
     fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
+    fun setDeveloperOptionsEnabled(enabled: Boolean) =
+        scope.launch { settingsManager.saveDeveloperOptionsEnabled(enabled) }
     fun setShellEnabled(enabled: Boolean) = scope.launch { settingsManager.saveShellEnabled(enabled) }
     fun setAutomationToolsEnabled(enabled: Boolean) = scope.launch { settingsManager.saveAutomationToolsEnabled(enabled) }
     fun setExactExecutionEnabled(enabled: Boolean) = scope.launch { settingsManager.saveExactExecutionEnabled(enabled) }

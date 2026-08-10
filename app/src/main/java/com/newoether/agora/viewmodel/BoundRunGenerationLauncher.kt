@@ -3,6 +3,7 @@ package com.newoether.agora.viewmodel
 import com.newoether.agora.api.HttpClient
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
+import com.newoether.agora.diagnostics.DeveloperDiagnostics
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.util.DebugLog
@@ -49,6 +50,15 @@ internal class BoundRunGenerationLauncher(
         val requestTrace = HttpClient.RequestTrace(
             requestId = request.modelMessageId,
             origin = request.callerTag,
+            diagnosticContext = DeveloperDiagnostics.newRequestContext(
+                requestId = request.modelMessageId,
+                conversationId = request.conversationId,
+                runId = request.runId,
+                pass = request.pass,
+                provider = request.snapshot.config.providerName,
+                model = request.snapshot.selectedModelId,
+                requestKind = request.callerTag,
+            ),
         )
         requestTrace.mark(
             "prepare_start",

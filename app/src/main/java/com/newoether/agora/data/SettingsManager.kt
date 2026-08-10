@@ -147,6 +147,9 @@ class SettingsManager(private val context: Context) {
     val customProviders: Flow<List<CustomProviderConfig>> = modelPreferenceStore.customProviders
 
     val showDocumentationFab: Flow<Boolean> = context.dataStore.data.map { it[SHOW_DOCUMENTATION_FAB] ?: true }
+    /** Release-build feature gate kept local to this installation. */
+    val developerOptionsEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[DEVELOPER_OPTIONS_ENABLED] ?: false }
 
     val shellEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_ENABLED] ?: true }
     val automationToolsEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTOMATION_TOOLS_ENABLED] ?: false }
@@ -630,6 +633,10 @@ class SettingsManager(private val context: Context) {
 
     suspend fun saveShowDocumentationFab(enabled: Boolean) {
         context.dataStore.edit { it[SHOW_DOCUMENTATION_FAB] = enabled }
+    }
+
+    suspend fun saveDeveloperOptionsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[DEVELOPER_OPTIONS_ENABLED] = enabled }
     }
 
     suspend fun saveShellEnabled(enabled: Boolean) {

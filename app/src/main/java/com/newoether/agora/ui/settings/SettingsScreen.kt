@@ -233,7 +233,7 @@ private data class SettingsGroupData(
     val items: List<SettingsCategory>
 )
 
-private val settingsGroups = listOf(
+private val baseSettingsGroups = listOf(
     SettingsGroupData(titleRes = R.string.settings_group_services, items = listOf(
         SettingsCategory("provider", R.string.settings_provider, R.string.settings_provider_desc, Icons.Default.Cloud),
         SettingsCategory("models", R.string.settings_models, R.string.settings_models_desc, Icons.Default.Chat),
@@ -271,15 +271,39 @@ private val settingsGroups = listOf(
         SettingsCategory("appearance", R.string.settings_appearance, R.string.settings_appearance_desc, Icons.Default.Palette),
         SettingsCategory("language", R.string.language_title, R.string.language_desc, Icons.Default.Translate),
     )),
-    SettingsGroupData(titleRes = R.string.settings_group_about, items = listOf(
+)
+
+private val developerSettingsGroup = SettingsGroupData(
+    titleRes = R.string.settings_group_developer,
+    items = listOf(
+        SettingsCategory(
+            "developer",
+            R.string.settings_developer,
+            R.string.settings_developer_desc,
+            Icons.Default.BugReport,
+        ),
+    ),
+)
+
+private val aboutSettingsGroup = SettingsGroupData(
+    titleRes = R.string.settings_group_about,
+    items = listOf(
         SettingsCategory("about", R.string.settings_about, R.string.settings_about_desc, Icons.Default.Info),
-    )),
+    ),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
     var selectedCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    val developerOptionsEnabled by viewModel.settings.developerOptionsEnabled.collectAsState()
+    val settingsGroups = remember(developerOptionsEnabled) {
+        buildList {
+            addAll(baseSettingsGroups)
+            if (developerOptionsEnabled) add(developerSettingsGroup)
+            add(aboutSettingsGroup)
+        }
+    }
     val listState = rememberLazyListState()
     val isSyncingModels by viewModel.isSyncingModels.collectAsState()
     val fetchingModelsMessage = stringResource(R.string.snackbar_fetching_models)
@@ -322,6 +346,11 @@ fun SettingsScreen(viewModel: ChatViewModel, onBack: () -> Unit) {
                 "memory" -> SettingsMemoryPage(viewModel, onBack = { selectedCategory = null })
                 "datacontrol" -> SettingsDataControlPage(viewModel, onBack = { selectedCategory = null })
                 "appearance" -> SettingsAppearancePage(viewModel, onBack = { selectedCategory = null })
+                "developer" -> SettingsDeveloperPage(
+                    viewModel = viewModel,
+                    onBack = { selectedCategory = null },
+                    onDisabled = { selectedCategory = null },
+                )
                 "about" -> SettingsAboutPage(viewModel, onBack = { selectedCategory = null })
                 else -> {
                     CollapsingSettingsLazyScaffold(

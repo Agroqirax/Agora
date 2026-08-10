@@ -1,5 +1,6 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.diagnostics.DeveloperDiagnostics
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.ConversationRuntimeReducer
@@ -649,7 +650,8 @@ class ConversationGenerationState(
     private fun reduceLocked(command: ConversationCommand): com.newoether.agora.model.Transition {
         val oldState = runState
         val transition = ConversationRuntimeReducer.reduce(oldState, command)
-        runtimeTrace.record(oldState, command, transition)
+        val traceEntry = runtimeTrace.record(oldState, command, transition)
+        DeveloperDiagnostics.recordRuntimeTransition(traceEntry)
         if (transition.accepted) runState = transition.newState
         return transition
     }

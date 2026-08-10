@@ -1,5 +1,7 @@
 package com.newoether.agora.api
 
+import com.newoether.agora.diagnostics.DeveloperDiagnostics
+import com.newoether.agora.diagnostics.DiagnosticRequestContext
 import okhttp3.MediaType.Companion.toMediaType
 import com.newoether.agora.util.DebugLog
 import okhttp3.OkHttpClient
@@ -23,17 +25,45 @@ object HttpClient {
     class RequestTrace(
         private val requestId: String,
         private val origin: String,
+        private val diagnosticContext: DiagnosticRequestContext? = null,
     ) {
         private val startedAtNanos = System.nanoTime()
         private val markedStages = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        private val exchangeOrdinal = java.util.concurrent.atomic.AtomicLong(0L)
+
+        @Volatile
+        private var currentDiagnosticContext = diagnosticContext
+
+        internal fun beginHttpExchange(): DiagnosticRequestContext? {
+            val base = diagnosticContext ?: return null
+            val exchange = base.copy(
+                requestId = base.requestId?.let {
+                    it + ":http-" + exchangeOrdinal.incrementAndGet()
+                },
+            )
+            currentDiagnosticContext = exchange
+            return exchange
+        }
+
+        fun recordParsedEvent(event: StreamEvent) {
+            DeveloperDiagnostics.recordParsedStreamEvent(currentDiagnosticContext, event)
+        }
 
         fun mark(stage: String, detail: String = "") {
-            if (!markedStages.add(stage)) return
+            val context = currentDiagnosticContext
+            val stageIdentity = context?.requestId?.let { it + "|" + stage } ?: stage
+            if (!markedStages.add(stageIdentity)) return
             val elapsedMs = (System.nanoTime() - startedAtNanos) / 1_000_000L
             val suffix = detail.takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
             DebugLog.d(
                 "AgoraTTFT",
                 "[req=$requestId origin=$origin] stage=$stage elapsedMs=$elapsedMs$suffix",
+            )
+            DeveloperDiagnostics.recordHttpStage(
+                context = context,
+                stage = stage,
+                elapsedMillis = elapsedMs,
+                detail = detail,
             )
         }
     }
@@ -224,17 +254,28 @@ object HttpClient {
         private val call: okhttp3.Call,
         private val scope: com.newoether.agora.viewmodel.StreamScope?,
         private val trace: RequestTrace?,
+        private val diagnosticContext: DiagnosticRequestContext?,
     ) : com.newoether.agora.viewmodel.GenerationCancelHandle {
         private val response = AtomicReference<okhttp3.Response?>(null)
         private val cancelled = AtomicBoolean(false)
         private val closed = AtomicBoolean(false)
         private val firstLineObserved = AtomicBoolean(false)
+        private val wireLineNumber = java.util.concurrent.atomic.AtomicLong(0L)
 
         val code: Int get() = checkNotNull(response.get()) { "Response headers are not available" }.code
         val source: BufferedSource? get() = response.get()?.body?.source()
         val errorBody: String?
             get() = try {
-                response.get()?.body?.string()
+                val openedResponse = response.get()
+                val body = openedResponse?.body?.string()
+                if (openedResponse != null && body != null) {
+                    DeveloperDiagnostics.recordHttpResponseBody(
+                        context = diagnosticContext,
+                        code = openedResponse.code,
+                        body = body,
+                    )
+                }
+                body
             } catch (_: Exception) {
                 null
             }
@@ -264,8 +305,15 @@ object HttpClient {
 
         fun readLine(): String? {
             val line = source?.readUtf8Line()
-            if (line != null && firstLineObserved.compareAndSet(false, true)) {
-                trace?.mark("first_wire_line", "chars=${line.length}")
+            if (line != null) {
+                DeveloperDiagnostics.recordWireLine(
+                    context = diagnosticContext,
+                    lineNumber = wireLineNumber.incrementAndGet(),
+                    line = line,
+                )
+                if (firstLineObserved.compareAndSet(false, true)) {
+                    trace?.mark("first_wire_line", "chars=${line.length}")
+                }
             }
             return line
         }
@@ -307,15 +355,23 @@ object HttpClient {
         scope: com.newoether.agora.viewmodel.StreamScope?,
     ): StreamHandle {
         guardCleartextCredentials(url, headers)
+        val trace = boundRequestTrace()
+        val diagnosticContext = trace?.beginHttpExchange()
+        DeveloperDiagnostics.recordHttpRequest(
+            context = diagnosticContext,
+            method = "POST",
+            url = url,
+            headers = headers,
+            body = jsonBody,
+        )
         val body = jsonBody.toRequestBody(JSON)
         val requestBuilder = Request.Builder().url(url).post(body)
         headers.forEach { (k, v) -> requestBuilder.addHeader(k, v) }
-        val trace = boundRequestTrace()
         val request = requestBuilder.build().newBuilder()
             .tag(RequestTrace::class.java, trace)
             .build()
         val call = client.newCall(request)
-        val handle = StreamHandle(call, scope, trace)
+        val handle = StreamHandle(call, scope, trace, diagnosticContext)
         // Register before execute(): Stop must be able to cancel DNS, connect, TLS, request upload,
         // and response-header wait rather than only an already-open response body.
         if (scope != null) scope.register(handle)

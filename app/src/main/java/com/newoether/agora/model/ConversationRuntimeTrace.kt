@@ -33,23 +33,23 @@ class ConversationRuntimeTrace(
         oldState: RunState,
         command: ConversationCommand,
         transition: Transition,
-    ) {
+    ): ConversationRuntimeTraceEntry {
         val identity = command.runIdentity()
         if (entries.size == capacity) entries.removeFirst()
-        entries.addLast(
-            ConversationRuntimeTraceEntry(
-                sequence = nextSequence++,
-                conversationIdHash = hashConversationId(command.conversationId),
-                runId = identity.runId,
-                pass = identity.pass,
-                effectId = command.effectIdOrNull(),
-                oldState = oldState.traceName(),
-                commandType = command.traceName(),
-                newState = transition.newState.traceName(),
-                effectTypes = transition.effects.map { effect -> effect.traceName() },
-                timestamp = clock(),
-            ),
+        val entry = ConversationRuntimeTraceEntry(
+            sequence = nextSequence++,
+            conversationIdHash = hashConversationId(command.conversationId),
+            runId = identity.runId,
+            pass = identity.pass,
+            effectId = command.effectIdOrNull(),
+            oldState = oldState.traceName(),
+            commandType = command.traceName(),
+            newState = transition.newState.traceName(),
+            effectTypes = transition.effects.map { effect -> effect.traceName() },
+            timestamp = clock(),
         )
+        entries.addLast(entry)
+        return entry
     }
 
     @Synchronized
