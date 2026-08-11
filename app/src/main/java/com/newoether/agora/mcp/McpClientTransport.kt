@@ -53,6 +53,7 @@ internal interface McpClientTransport : AutoCloseable {
     ): JsonObject?
 
     fun resetSession()
+    fun updateProtocolVersion(protocolVersion: String)
 }
 
 internal fun createMcpClientTransport(
@@ -179,8 +180,10 @@ private suspend fun Call.awaitResponse(activeCalls: MutableSet<Call>): Response 
 private class StreamableHttpMcpTransport(
     endpoint: String,
     customHeaders: Map<String, String>,
-    private val protocolVersion: String,
+    protocolVersion: String,
 ) : McpClientTransport {
+    @Volatile
+    private var protocolVersion: String = protocolVersion
     private val endpoint = endpoint.toHttpUrl()
     private val headers = normalizedMcpHeaders(customHeaders)
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -250,6 +253,10 @@ private class StreamableHttpMcpTransport(
         sessionGeneration.incrementAndGet()
     }
 
+    override fun updateProtocolVersion(protocolVersion: String) {
+        this.protocolVersion = protocolVersion
+    }
+
     override fun close() {
         closed = true
         activeCalls.toList().forEach(Call::cancel)
@@ -267,8 +274,10 @@ private class StreamableHttpMcpTransport(
 private class LegacySseMcpTransport(
     endpoint: String,
     customHeaders: Map<String, String>,
-    private val protocolVersion: String,
+    protocolVersion: String,
 ) : McpClientTransport {
+    @Volatile
+    private var protocolVersion: String = protocolVersion
     private class Connection(
         val generation: Long,
         val messageEndpoint: CompletableDeferred<HttpUrl> = CompletableDeferred(),
@@ -370,6 +379,10 @@ private class LegacySseMcpTransport(
 
     override fun resetSession() {
         invalidateConnection(McpSessionExpiredException())
+    }
+
+    override fun updateProtocolVersion(protocolVersion: String) {
+        this.protocolVersion = protocolVersion
     }
 
     override fun close() {

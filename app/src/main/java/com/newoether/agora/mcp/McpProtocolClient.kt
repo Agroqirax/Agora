@@ -14,6 +14,15 @@ import kotlinx.serialization.json.put
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 
+internal fun isUnsupportedMcpProtocolVersion(error: Throwable): Boolean {
+    val text = generateSequence(error) { it.cause }
+        .joinToString(" ") { it.message.orEmpty() }
+        .lowercase()
+    return "unsupported protocol version" in text ||
+        "unsupported mcp protocol version" in text ||
+        "protocol version is not supported" in text
+}
+
 /**
  * Shared MCP JSON-RPC lifecycle.
  *
@@ -29,15 +38,17 @@ internal class McpProtocolClient(
         private const val STREAMABLE_HTTP_PROTOCOL_VERSION = "2025-11-25"
         private const val LEGACY_SSE_PROTOCOL_VERSION = "2024-11-05"
         private const val MAX_TOOL_PAGES = 100
-        private val SUPPORTED_PROTOCOL_VERSIONS = setOf(
+        internal val STREAMABLE_HTTP_PROTOCOL_VERSIONS = listOf(
             STREAMABLE_HTTP_PROTOCOL_VERSION,
             "2025-06-18",
             "2025-03-26",
             LEGACY_SSE_PROTOCOL_VERSION,
         )
+        private val SUPPORTED_PROTOCOL_VERSIONS = STREAMABLE_HTTP_PROTOCOL_VERSIONS.toSet()
     }
 
-    private val protocolVersion = when (transportType) {
+    private val transportType = transportType
+    private var protocolVersion = when (transportType) {
         McpTransportType.STREAMABLE_HTTP -> STREAMABLE_HTTP_PROTOCOL_VERSION
         McpTransportType.SSE -> LEGACY_SSE_PROTOCOL_VERSION
     }
@@ -118,7 +129,33 @@ internal class McpProtocolClient(
         if (initialized && initializedGeneration == generation) return
         initialized = false
         initializedGeneration = null
-        initializeLocked(generation)
+        val candidates = if (transportType == McpTransportType.STREAMABLE_HTTP) {
+            STREAMABLE_HTTP_PROTOCOL_VERSIONS.dropWhile { it != protocolVersion }
+                .ifEmpty { STREAMABLE_HTTP_PROTOCOL_VERSIONS }
+        } else {
+            listOf(LEGACY_SSE_PROTOCOL_VERSION)
+        }
+        var unsupported: IOException? = null
+        candidates.forEachIndexed { index, candidate ->
+            if (candidate != protocolVersion) {
+                protocolVersion = candidate
+                transport.updateProtocolVersion(candidate)
+                transport.resetSession()
+            }
+            try {
+                initializeLocked(transport.ensureReady())
+                return
+            } catch (error: IOException) {
+                if (!isUnsupportedMcpProtocolVersion(error) || index == candidates.lastIndex) {
+                    throw error
+                }
+                unsupported = error
+                initialized = false
+                initializedGeneration = null
+                transport.resetSession()
+            }
+        }
+        throw unsupported ?: IOException("MCP protocol negotiation failed")
     }
 
     private suspend fun initializeLocked(generation: Long) {
@@ -140,6 +177,10 @@ internal class McpProtocolClient(
             ?: throw IOException("MCP initialize returned no protocolVersion")
         if (negotiated !in SUPPORTED_PROTOCOL_VERSIONS) {
             throw IOException("Unsupported MCP protocol version: $negotiated")
+        }
+        if (negotiated != protocolVersion) {
+            protocolVersion = negotiated
+            transport.updateProtocolVersion(negotiated)
         }
         notificationLocked("notifications/initialized", buildJsonObject {})
         if (transport.ensureReady() != generation) {
