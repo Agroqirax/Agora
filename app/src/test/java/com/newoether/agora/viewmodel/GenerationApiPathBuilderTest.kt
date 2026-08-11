@@ -1,5 +1,7 @@
 package com.newoether.agora.viewmodel
 
+import com.newoether.agora.api.util.convertToOpenAiMessages
+import com.newoether.agora.api.util.prepareMessages
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.MessageStatus
@@ -42,6 +44,45 @@ class GenerationApiPathBuilderTest {
             path.providerConfig.maxContextWindow,
         )
         coVerify(exactly = 0) { repository.getMessagesForConversationSnapshot(any()) }
+    }
+
+    @Test
+    fun `stopped run queued guidance reaches first openai request exactly once`() = runTest {
+        val repository = mockk<ConversationRepository>(relaxed = true)
+        val builder = GenerationApiPathBuilder(repository) { emptyList() }
+        val oldUser = message("old-user", null, 0, Participant.USER)
+        val stoppedModel = message("stopped-model", oldUser.id, 1)
+            .copy(text = "partial answer", status = MessageStatus.STOPPED, runId = "old-run")
+        val queuedUser = message("queued-user", stoppedModel.id, 0, Participant.USER)
+            .copy(text = "first guidance\n\nsecond guidance", runId = "fresh-run")
+        val placeholder = message("placeholder", queuedUser.id, 1)
+            .copy(text = "", status = MessageStatus.SENDING, runId = "fresh-run")
+
+        val path = builder.build(
+            GenerationApiPathRequest(
+                parentId = placeholder.parentId,
+                conversationId = "conversation",
+                config = generationConfig(),
+                context = GenerationContext(),
+                loadedMessages = listOf(oldUser, stoppedModel, queuedUser, placeholder),
+            ),
+        )
+
+        assertEquals(queuedUser.id, path.messages.last().id)
+        val projected = projectGenerationInputMessages(
+            messages = path.messages,
+            includeImages = true,
+            userPrepend = path.providerConfig.userPrepend,
+            userPostpend = path.providerConfig.userPostpend,
+        )
+        val wire = convertToOpenAiMessages(
+            prepareMessages(projected, path.providerConfig.maxContextWindow),
+        )
+        val wireText = wire.flatMap { it.content.orEmpty() }.mapNotNull { it.text }.joinToString("\n")
+
+        assertEquals(1, Regex(Regex.escape("first guidance")).findAll(wireText).count())
+        assertEquals(1, Regex(Regex.escape("second guidance")).findAll(wireText).count())
+        assertEquals(1, Regex(Regex.escape("[Generation status: STOPPED]")).findAll(wireText).count())
     }
 
     @Test

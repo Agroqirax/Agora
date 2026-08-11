@@ -4,6 +4,7 @@ import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
 import com.newoether.agora.model.RuntimeRunIdentity
+import com.newoether.agora.model.RunState
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,6 +56,29 @@ class ConversationRuntimeResourceOwnershipTest {
         assertNull(resources.streamMessageForClear(OWNER_TOKEN))
 
         assertEquals(stopped, resources.streamingMessage.value)
+    }
+
+    @Test
+    fun coherentSnapshotUsesAuthoritativeRunStateForCompactEligibility() {
+        val resources = activeResources()
+        resources.streamUpdate(OWNER_TOKEN, message(MessageStatus.SENDING))
+        resources.loadingChange(OWNER_TOKEN, true)
+        resources.publishGenerationSnapshot(
+            RunState.Compacting(
+                compactRunId = "compact",
+                effectIdentity = com.newoether.agora.model.RunEffectIdentity(
+                    conversationId = "conversation",
+                    ownerToken = OWNER_TOKEN,
+                    runId = "compact",
+                    pass = 0,
+                    effectId = "compact-effect",
+                ),
+            ),
+        )
+
+        assertTrue(resources.generationSnapshot.value.isCompacting)
+        assertTrue(resources.generationSnapshot.value.isLoading)
+        assertEquals(MessageStatus.SENDING, resources.generationSnapshot.value.streamingMessage?.status)
     }
 
     @Test

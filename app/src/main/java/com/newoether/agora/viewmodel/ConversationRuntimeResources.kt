@@ -19,6 +19,14 @@ internal data class RuntimeResourceEvents(
     val released: Boolean = false,
 )
 
+data class ConversationGenerationSnapshot(
+    val conversationId: String? = null,
+    val streamingMessage: ChatMessage? = null,
+    val isLoading: Boolean = false,
+    val isGenerating: Boolean = false,
+    val isCompacting: Boolean = false,
+)
+
 /**
  * Sole owner of one conversation's process resources and UI projection.
  *
@@ -46,6 +54,10 @@ internal class ConversationRuntimeResources {
 
     private val _compactPreview = MutableStateFlow("")
     val compactPreview: StateFlow<String> = _compactPreview.asStateFlow()
+
+    private val _generationSnapshot = MutableStateFlow(ConversationGenerationSnapshot())
+    val generationSnapshot: StateFlow<ConversationGenerationSnapshot> =
+        _generationSnapshot.asStateFlow()
     private var compactPreviewIdentity: RunEffectIdentity? = null
 
     private var generationJob: Job? = null
@@ -198,6 +210,16 @@ internal class ConversationRuntimeResources {
     fun cancelStreamsAnd(job: Job?) {
         streamScope.cancelAll()
         job?.cancel()
+    }
+
+    fun publishGenerationSnapshot(currentState: RunState) {
+        _generationSnapshot.value = ConversationGenerationSnapshot(
+            conversationId = currentState.conversationId,
+            streamingMessage = _streamingMessage.value,
+            isLoading = _isLoading.value,
+            isGenerating = _generating.value,
+            isCompacting = currentState is RunState.Compacting,
+        )
     }
 
     private fun release() {

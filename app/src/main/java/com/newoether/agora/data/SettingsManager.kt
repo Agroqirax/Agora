@@ -17,6 +17,7 @@ import java.util.Locale
 import kotlinx.coroutines.flow.map
 
 internal const val DEFAULT_CONTEXT_COMPACT_ENABLED = true
+internal const val DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT = 0
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -64,7 +65,7 @@ class SettingsManager(private val context: Context) {
         pref[CONTEXT_COMPACT_PROMPT]?.takeIf { it.isNotBlank() } ?: BuiltInPrompts.CONTEXT_COMPACT_SYSTEM
     }
     val contextCompactRetainCount: Flow<Int> = context.dataStore.data.map {
-        it[CONTEXT_COMPACT_RETAIN_COUNT] ?: 6
+        it[CONTEXT_COMPACT_RETAIN_COUNT] ?: DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT
     }
     val codeExecutionEnabled: Flow<Boolean> = context.dataStore.data.map { it[CODE_EXECUTION_ENABLED] ?: false }
     val googleSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[GOOGLE_SEARCH_ENABLED] ?: false }

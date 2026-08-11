@@ -75,6 +75,7 @@ class ConversationGenerationState(
     val stopping = resources.stopping
     val compacting = resources.compacting
     val compactPreview = resources.compactPreview
+    val generationSnapshot = resources.generationSnapshot
     val queuedSends = guidanceLeases.queuedSends
 
     /** Serializes durable intervention acceptance against slot release/queue drain. */
@@ -365,10 +366,20 @@ class ConversationGenerationState(
 
     // ── Token-gated UI mutators ───────────────────────────────────────────
     fun streamUpdate(uiToken: Long, msg: ChatMessage) {
-        synchronized(genLock) { resources.streamUpdate(uiToken, msg) }
+        synchronized(genLock) {
+            if (resources.isCurrentToken(uiToken)) {
+                resources.streamUpdate(uiToken, msg)
+                resources.publishGenerationSnapshot(runState)
+            }
+        }
     }
     fun loadingChange(uiToken: Long, value: Boolean) {
-        synchronized(genLock) { resources.loadingChange(uiToken, value) }
+        synchronized(genLock) {
+            if (resources.isCurrentToken(uiToken)) {
+                resources.loadingChange(uiToken, value)
+                resources.publishGenerationSnapshot(runState)
+            }
+        }
     }
     fun streamClear(uiToken: Long) {
         synchronized(genLock) {
@@ -376,6 +387,7 @@ class ConversationGenerationState(
             // Commit before removing the overlay so the UI never exposes the empty placeholder.
             onStreamCommit?.invoke(conversationId, message)
             resources.clearStreamingMessage()
+            resources.publishGenerationSnapshot(runState)
         }
     }
 
@@ -507,6 +519,7 @@ class ConversationGenerationState(
     fun clearStoppedOverlay() {
         synchronized(genLock) {
             resources.clearStoppedOverlay()
+            resources.publishGenerationSnapshot(runState)
         }
     }
 
@@ -630,6 +643,7 @@ class ConversationGenerationState(
     /** Apply only effects whose authority has moved to the mailbox in the current phase. */
     private fun applyMailboxEffectsLocked(transition: Transition) {
         val events = resources.applyMailboxEffects(transition, runState)
+        resources.publishGenerationSnapshot(runState)
         if (events.activated) notifyActivatedLocked()
         if (events.released) notifyReleasedLocked()
     }
@@ -637,6 +651,7 @@ class ConversationGenerationState(
     private fun applyActivatedSlotLocked(identity: RuntimeRunIdentity, loading: Boolean) {
         check(runState !is RunState.Idle)
         resources.activate(identity, loading)
+        resources.publishGenerationSnapshot(runState)
         notifyActivatedLocked()
     }
 

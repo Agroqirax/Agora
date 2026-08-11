@@ -302,6 +302,15 @@ fun MainNavigation(
     val motionPolicy = LocalAgoraMotionPolicy.current
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var showTasks by rememberSaveable { mutableStateOf(false) }
+    val topLevelPresentation = remember {
+        TopLevelPresentationState(
+            initialOwner = when {
+                showTasks -> TopLevelPresentation.TASKS
+                showSettings -> TopLevelPresentation.SETTINGS
+                else -> TopLevelPresentation.CHAT
+            },
+        )
+    }
     val tasksListState = rememberLazyListState()
     var taskToOpen by rememberSaveable { mutableStateOf<String?>(null) }
     var taskHistoryPreview by rememberSaveable(
@@ -714,28 +723,34 @@ fun MainNavigation(
                         {
                             taskToOpen = taskId
                             taskHistoryPreview = taskHistoryPreview.requestReturn()
+                            topLevelPresentation.present(TopLevelPresentation.TASKS)
                             showTasks = true
                         }
                     },
                 drawerEnabled = !taskHistoryPreview.active,
                 onOpenSettings = {
+                    topLevelPresentation.present(TopLevelPresentation.SETTINGS)
                     showSettings = true
                 },
                 onOpenTasks = { taskId ->
                     taskToOpen = taskId
+                    topLevelPresentation.present(TopLevelPresentation.TASKS)
                     showTasks = true
                 },
                 onMediaClick = { urls, index ->
                     focusManager.clearFocus()
+                    topLevelPresentation.present(TopLevelPresentation.MEDIA_PREVIEW)
                     fullScreenMediaUrls = urls
                     fullScreenMediaIndex = index
                 },
                 onFileContentClick = { name, content ->
                     focusManager.clearFocus()
+                    topLevelPresentation.present(TopLevelPresentation.TEXT_PREVIEW)
                     viewModel.showFilePreview(name, content)
                 },
                 onPdfPagesClick = { pages, idx ->
                     focusManager.clearFocus()
+                    topLevelPresentation.present(TopLevelPresentation.MEDIA_PREVIEW)
                     viewModel.showPdfPreview(pages, idx)
                     fullScreenMediaUrls = pages
                     fullScreenMediaIndex = idx
@@ -743,6 +758,7 @@ fun MainNavigation(
                 },
                 onPdfPreviewSelect = { pages, idx ->
                     focusManager.clearFocus()
+                    topLevelPresentation.present(TopLevelPresentation.MEDIA_PREVIEW)
                     viewModel.showPdfPreview(pages, idx)
                     fullScreenMediaUrls = pages
                     fullScreenMediaIndex = idx
@@ -752,12 +768,16 @@ fun MainNavigation(
                 onTogglePdfSelection = onTogglePdfSelection,
                 onInitPdfSelection = onInitPdfSelection,
                 fullScreenViewerUrls = fullScreenMediaUrls,
+                topLevelPresentation = topLevelPresentation.owner,
                 onSnackbarOffsetChanged = { chatSnackbarOffset = it }
             )
 
             SettingsOverlayHost(
                 visible = showSettings,
-                onDismiss = { showSettings = false }
+                onDismiss = { showSettings = false },
+                onExitFinished = {
+                    topLevelPresentation.release(TopLevelPresentation.SETTINGS)
+                },
             ) {
                 SettingsScreen(
                     viewModel = viewModel,
@@ -770,6 +790,9 @@ fun MainNavigation(
             SettingsOverlayHost(
                 visible = showTasks,
                 onDismiss = { showTasks = false },
+                onExitFinished = {
+                    topLevelPresentation.release(TopLevelPresentation.TASKS)
+                },
                 onEnterFinished = {
                     val preview = taskHistoryPreview
                     if (preview.phase == TaskHistoryPreviewPhase.RETURNING) {
@@ -806,8 +829,21 @@ fun MainNavigation(
             }
 
             // Full screen image preview
-            AnimatedVisibility(
-                visible = fullScreenMediaUrls != null,
+            val mediaPreviewTransition = updateTransition(
+                targetState = fullScreenMediaUrls != null,
+                label = "mediaPreview",
+            )
+            LaunchedEffect(mediaPreviewTransition) {
+                snapshotFlow {
+                    mediaPreviewTransition.currentState to mediaPreviewTransition.isRunning
+                }.collect { (currentState, isRunning) ->
+                    if (!currentState && !isRunning) {
+                        topLevelPresentation.release(TopLevelPresentation.MEDIA_PREVIEW)
+                    }
+                }
+            }
+            mediaPreviewTransition.AnimatedVisibility(
+                visible = { it },
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {
@@ -845,8 +881,21 @@ fun MainNavigation(
             var savedContent by remember { mutableStateOf(fileContent) }
             var savedName by remember { mutableStateOf(fileName) }
             if (fileContent != null) { savedContent = fileContent; savedName = fileName }
-            AnimatedVisibility(
-                visible = fileContent != null,
+            val textPreviewTransition = updateTransition(
+                targetState = fileContent != null,
+                label = "textPreview",
+            )
+            LaunchedEffect(textPreviewTransition) {
+                snapshotFlow {
+                    textPreviewTransition.currentState to textPreviewTransition.isRunning
+                }.collect { (currentState, isRunning) ->
+                    if (!currentState && !isRunning) {
+                        topLevelPresentation.release(TopLevelPresentation.TEXT_PREVIEW)
+                    }
+                }
+            }
+            textPreviewTransition.AnimatedVisibility(
+                visible = { it },
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {

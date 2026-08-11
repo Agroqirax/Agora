@@ -18,7 +18,7 @@ class ConversationGenerationMirrorTest {
     fun staleConversationSendingUpdate_cannotOverwriteCurrentThinkingSnapshot() = runTest {
         val currentConversationId = MutableStateFlow<String?>("conversation-b")
         var visibleConversationId: String? = null
-        var visibleSnapshot: ConversationGenerationMirror.Snapshot? = null
+        var visibleSnapshot: ConversationGenerationSnapshot? = null
         val mirror = ConversationGenerationMirror(currentConversationId) { conversationId, snapshot ->
             visibleConversationId = conversationId
             visibleSnapshot = snapshot

@@ -72,6 +72,7 @@ internal fun SettingsOverlayHost(
     visible: Boolean,
     onDismiss: () -> Unit,
     onEnterFinished: () -> Unit = {},
+    onExitFinished: () -> Unit = {},
     content: @Composable () -> Unit,
 ) {
     val allowSpatialTransitions = LocalAgoraMotionPolicy.current.allowSpatialTransitions
@@ -81,6 +82,7 @@ internal fun SettingsOverlayHost(
     val pageScale = remember { Animatable(1f) }
     var renderOverlay by remember { mutableStateOf(visible) }
     val latestOnEnterFinished by rememberUpdatedState(onEnterFinished)
+    val latestOnExitFinished by rememberUpdatedState(onExitFinished)
 
     // Motion policy changes while the overlay is already visible must not replay its entrance.
     // The latest policy is still observed when `visible` changes and a new enter/exit begins.
@@ -179,6 +181,7 @@ internal fun SettingsOverlayHost(
                 ).joinAll()
             }
             renderOverlay = false
+            latestOnExitFinished()
         }
     }
 

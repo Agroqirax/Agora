@@ -370,22 +370,31 @@ internal fun SnackbarOffsetEffect(
     LaunchedEffect(targetSnackbarOffset) { onOffsetChanged(targetSnackbarOffset) }
 }
 
+internal fun answeringHapticEligible(
+    snapshot: com.newoether.agora.viewmodel.ConversationGenerationSnapshot,
+    currentConversationId: String?,
+    presentation: com.newoether.agora.TopLevelPresentation,
+): Boolean = presentation == com.newoether.agora.TopLevelPresentation.CHAT &&
+    snapshot.conversationId == currentConversationId &&
+    snapshot.isLoading && snapshot.isGenerating && !snapshot.isCompacting &&
+    snapshot.streamingMessage?.let { message ->
+        message.participant == Participant.MODEL &&
+            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
+    } == true
+
 @Composable
 internal fun AnsweringHapticEffect(
-    messages: State<List<com.newoether.agora.model.ChatMessage>>,
-    isLoading: Boolean,
-    generatingInConversationId: String?,
+    generationSnapshot: com.newoether.agora.viewmodel.ConversationGenerationSnapshot,
     currentConversationId: String?,
+    topLevelPresentation: com.newoether.agora.TopLevelPresentation,
     hapticsEnabled: Boolean,
     haptics: com.newoether.agora.ui.common.AgoraHaptics,
 ) {
-    // Keep the 20 Hz streaming-message read inside this tiny restart group. Reading it at the top
-    // of ChatApp invalidates the drawer, composer, backgrounds, and every overlay for each token.
-    val answeringHapticActive = isLoading &&
-        generatingInConversationId == currentConversationId &&
-        messages.value.lastOrNull { it.participant == Participant.MODEL }?.let { message ->
-            message.status == MessageStatus.SENDING && message.hasActiveAnswerSegment()
-        } == true
+    val answeringHapticActive = answeringHapticEligible(
+        generationSnapshot,
+        currentConversationId,
+        topLevelPresentation,
+    )
     val appInForeground by com.newoether.agora.service.AppForegroundTracker.foreground.collectAsState()
     DisposableEffect(answeringHapticActive, hapticsEnabled, appInForeground, haptics) {
         if (answeringHapticActive && hapticsEnabled && appInForeground) {

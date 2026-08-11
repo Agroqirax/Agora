@@ -78,9 +78,14 @@ internal class ConversationUiStateAssembler(
     val generatingInConversationId: StateFlow<String?> =
         _generatingInConversationId.asStateFlow()
 
+    private val _generationSnapshot = MutableStateFlow(ConversationGenerationSnapshot())
+    val generationSnapshot: StateFlow<ConversationGenerationSnapshot> =
+        _generationSnapshot.asStateFlow()
+
     private val generationMirror = ConversationGenerationMirror(
         currentConversationId = currentConversationId,
         onSnapshot = { conversationId, snapshot ->
+            _generationSnapshot.value = snapshot
             renderStore.setStreamingMessage(snapshot.streamingMessage)
             _isLoading.value = snapshot.isLoading
             _generatingInConversationId.value =
@@ -146,6 +151,7 @@ internal class ConversationUiStateAssembler(
 
     private fun clearAllProjection() {
         clearConversationGraph()
+        _generationSnapshot.value = ConversationGenerationSnapshot()
         _isLoading.value = false
         _generatingInConversationId.value = null
     }

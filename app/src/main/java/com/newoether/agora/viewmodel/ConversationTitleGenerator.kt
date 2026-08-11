@@ -23,6 +23,26 @@ private val TITLE_WHITESPACE = Regex("\\s+")
 internal fun fallbackConversationTitle(response: String): String =
     response.replace(TITLE_WHITESPACE, " ").trim().take(60)
 
+internal fun titleSourceText(message: ChatMessage): String {
+    if (message.text.isNotBlank()) return message.text.trim()
+    val attachmentText = message.attachmentMeta?.items.orEmpty().joinToString("\n\n") { item ->
+        val label = item.fileName ?: item.type
+        when {
+            !item.textContent.isNullOrBlank() -> "--- File: $label ---\n${item.textContent}"
+            !item.transcription.isNullOrBlank() ->
+                "--- Image Transcription: $label ---\n${item.transcription}"
+            else -> buildString {
+                append("--- Attachment: ")
+                append(label)
+                append(" ---")
+                append("\nType: ")
+                append(item.mimeType ?: item.type)
+            }
+        }
+    }
+    return attachmentText.trim()
+}
+
 /**
  * UI-independent conversation title generation shared by foreground chats and headless Tasks.
  * It owns provider/key resolution and persistence so both paths obey the same cold-start,
@@ -46,25 +66,15 @@ class ConversationTitleGenerator(
             ?: return Result.Failure("Conversation not found")
         val snapshot = conversations.getMessagesForConversationSnapshot(conversationId)
         val path = ConversationUiState.resolvePath(
-            allMessages = snapshot.map { entity ->
-                ChatMessage(
-                    id = entity.id,
-                    parentId = entity.parentId,
-                    text = entity.text,
-                    participant = entity.participant,
-                    timestamp = entity.timestamp,
-                    status = entity.status,
-                    modelName = entity.modelName,
-                    runId = entity.runId,
-                    runSequence = entity.runSequence,
-                    consumedAtPass = entity.consumedAtPass,
-                )
-            },
+            allMessages = projectProviderMessages(
+                entities = snapshot,
+                includeStoredTranscriptions = true,
+            ),
             streamingMsg = null,
             selectedChildren = conversations.restoreBranchSelections(conversationId),
         )
         val firstUser = path.firstOrNull {
-            it.participant == Participant.USER && it.text.isNotBlank()
+            it.participant == Participant.USER && titleSourceText(it).isNotBlank()
         } ?: return Result.Failure("Conversation has no user message")
         val firstModel = path.firstOrNull {
             it.participant == Participant.MODEL && it.text.isNotBlank()
@@ -84,10 +94,11 @@ class ConversationTitleGenerator(
             return Result.Failure("Provider not configured: $providerName")
         }
 
+        val firstUserSource = titleSourceText(firstUser)
         val summary = if (firstModel != null) {
-            "User: ${firstUser.text}\nAssistant: ${firstModel.text.take(500)}"
+            "User: $firstUserSource\nAssistant: ${firstModel.text.take(500)}"
         } else {
-            firstUser.text
+            firstUserSource
         }
         val titlePrompt = listOf(
             ChatMessage(

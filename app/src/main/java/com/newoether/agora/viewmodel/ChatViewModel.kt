@@ -505,6 +505,8 @@ class ChatViewModel(
     val isLoading: StateFlow<Boolean> = conversationUi.isLoading
     val generatingInConversationId: StateFlow<String?> =
         conversationUi.generatingInConversationId
+    val generationSnapshot: StateFlow<ConversationGenerationSnapshot> =
+        conversationUi.generationSnapshot
 
     /** Content-free runtime history used only by the explicitly unlocked Developer inspector. */
     internal fun developerRuntimeTraceSnapshot(

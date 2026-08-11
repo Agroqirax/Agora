@@ -45,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.TopLevelPresentation
 import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.ContextBudget
@@ -86,6 +87,7 @@ fun ChatApp(
     onTogglePdfSelection: ((Int) -> Unit)? = null,
     onInitPdfSelection: ((Set<Int>) -> Unit)? = null,
     fullScreenViewerUrls: List<String>? = null,
+    topLevelPresentation: TopLevelPresentation = TopLevelPresentation.CHAT,
     onSnackbarOffsetChanged: (androidx.compose.ui.unit.Dp) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
@@ -127,7 +129,7 @@ fun ChatApp(
     val loadedMessagesConversationId by viewModel.loadedMessagesConversationId.collectAsState()
     val currentLoop by viewModel.currentLoop.collectAsState()
     val runningLoopIds by viewModel.runningLoopConversationIds.collectAsState()
-    val generatingInConversationId by viewModel.generatingInConversationId.collectAsState()
+    val generationSnapshot by viewModel.generationSnapshot.collectAsState()
     val selectedModel by viewModel.currentActiveModel.collectAsState()
     val enabledModels by viewModel.settings.enabledModels.collectAsState()
     val modelAliases by viewModel.settings.modelAliases.collectAsState()
@@ -196,7 +198,6 @@ fun ChatApp(
     // haptics there gives every accepted send exactly one confirm(), independent of which path
     // triggered it or which scroll policy applies.
     SendAcceptedHapticBindingEffect(viewModel, haptics)
-
 
     var isExpanded by remember { mutableStateOf(false) }
     // Composer-expand spacer collapse (44dp → 0). An Animatable driven from an effect replaces the
@@ -340,10 +341,9 @@ fun ChatApp(
     )
 
     AnsweringHapticEffect(
-        messages = messagesState,
-        isLoading = isLoading,
-        generatingInConversationId = generatingInConversationId,
+        generationSnapshot = generationSnapshot,
         currentConversationId = currentConversationId,
+        topLevelPresentation = topLevelPresentation,
         hapticsEnabled = hapticsEnabled,
         haptics = haptics,
     )

@@ -193,6 +193,13 @@ class ConversationUiStateAssemblerTest {
         every { state.streamingMessage } returns MutableStateFlow(null)
         every { state.isLoading } returns MutableStateFlow(isLoading)
         every { state.generating } returns MutableStateFlow(generating)
+        every { state.generationSnapshot } returns MutableStateFlow(
+            ConversationGenerationSnapshot(
+                conversationId = CONVERSATION_ID,
+                isLoading = isLoading,
+                isGenerating = generating,
+            ),
+        )
     }
 
     private companion object {
