@@ -568,27 +568,18 @@ class ProotSandboxManager(
             val dst = File(tmpDir, fn); f.copyTo(dst, true); f.delete(); paths.add("/tmp/$fn")
         }
 
-        // 5. Pre-install: if we're replacing /bin/sh provider, install that first
-        // to avoid post-install scripts failing when busybox-binsh is purged.
-        val shPkgs = toInstall.filter { "binsh" in it || it == "yash" }.toList()
-        if (shPkgs.isNotEmpty()) {
-            val shPaths = paths.filter { p -> shPkgs.any { p.contains(it) } }
-            if (shPaths.isNotEmpty()) {
-                onProgress("Installing shell provider first...")
-                val r = executeRaw("apk add --allow-untrusted --no-network ${shPaths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 60000)
-                onProgress(r.stdout)
-                paths.removeAll(shPaths)
-            }
-        }
-
-        // 6. Main install
+        // Install the complete dependency closure as one apk transaction.
+        // Splitting shell providers first leaves the main transaction incomplete.
         onProgress("Installing ${paths.size} packages...")
         val result = if (paths.isNotEmpty()) {
             executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 120000)
         } else {
             SandboxManager.SandboxResult("", "", 0)
         }
-        onProgress(result.stdout); tmpDir.listFiles()?.forEach { it.delete() }
+        onProgress(result.stdout)
+        if (result.stderr.isNotBlank()) onProgress(result.stderr)
+        onProgress("apk exit code: ${result.exitCode}")
+        tmpDir.listFiles()?.forEach { it.delete() }
         // Verify install — apk may return non-zero on minor post-install script errors
         val installedOk = requested in readInstalledVersions()
         if (!installedOk) { lastError = result.stderr.ifBlank { result.stdout }; return@withContext false }
@@ -740,7 +731,10 @@ class ProotSandboxManager(
 
         onProgress("Installing ${paths.size} packages...")
         val result = executeRaw("apk add --allow-untrusted --no-network ${paths.joinToString(" ") { shellQuote(it) }}", timeoutMs = 300000)
-        onProgress(result.stdout); tmpDir.listFiles()?.forEach { it.delete() }
+        onProgress(result.stdout)
+        if (result.stderr.isNotBlank()) onProgress(result.stderr)
+        onProgress("apk exit code: ${result.exitCode}")
+        tmpDir.listFiles()?.forEach { it.delete() }
         normalizeWorld()
         val after = readInstalledVersions()
         val upgradedCount = toUpgrade.count { name ->
