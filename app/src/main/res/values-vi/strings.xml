@@ -380,6 +380,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API tìm kiếm tập trung vào quyền riêng tư. Có gói miễn phí.</string>
     <string name="web_search_serper_desc">API tìm kiếm Google nhanh. 2,500 truy vấn miễn phí/tháng.</string>
@@ -585,6 +589,8 @@
     <string name="visual_effects">Hiệu ứng thị giác</string>
     <string name="blur_effects">Hiệu ứng làm mờ</string>
     <string name="blur_effects_desc">Làm mờ phần đầu của danh sách trò chuyện dưới thanh công cụ. Tắt đi để tiết kiệm hiệu năng.</string>
+    <string name="parse_inline_dollar_math">Parse $…$ as inline math</string>
+    <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">Giảm chuyển động</string>
     <string name="reduce_motion_desc">Giảm chuyển động liên tục và dịch chuyển không gian lớn, đồng thời giữ hiệu ứng mờ dần, cử chỉ trực tiếp và phản hồi trạng thái hữu ích.</string>
     <string name="interaction_feedback">Phản hồi tương tác</string>

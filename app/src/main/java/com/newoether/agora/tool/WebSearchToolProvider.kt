@@ -84,7 +84,57 @@ internal fun normalizeKagiSearchResponse(
     }.toString()
 }
 
+internal const val OPENAI_WEB_SEARCH_MODEL = "gpt-5.6"
+
+internal fun openAiWebSearchRequestBody(query: String): String =
+    Json.encodeToString(buildJsonObject {
+        put("model", OPENAI_WEB_SEARCH_MODEL)
+        put("tools", buildJsonArray { add(buildJsonObject { put("type", "web_search") }) })
+        put("input", query)
+    })
+
+internal fun normalizeOpenAiWebSearchResponse(responseBody: String, query: String, numResults: Int): String {
+    val root = Json.parseToJsonElement(responseBody) as? JsonObject
+    val output = root?.get("output") as? JsonArray
+    val message = output.orEmpty().mapNotNull { it as? JsonObject }
+        .firstOrNull { (it["type"] as? JsonPrimitive)?.content == "message" }
+    val content = message?.get("content") as? JsonArray
+    val outputText = content.orEmpty().mapNotNull { it as? JsonObject }
+        .firstOrNull { (it["type"] as? JsonPrimitive)?.content == "output_text" }
+    val answer = (outputText?.get("text") as? JsonPrimitive)?.content.orEmpty()
+    val annotations = outputText?.get("annotations") as? JsonArray
+    val seenUrls = linkedSetOf<String>()
+    var added = 0
+    val normalizedResults = buildJsonArray {
+        for (element in annotations.orEmpty()) {
+            if (added >= numResults.coerceIn(1, 10)) break
+            val annotation = element as? JsonObject ?: continue
+            if ((annotation["type"] as? JsonPrimitive)?.content != "url_citation") continue
+            val url = (annotation["url"] as? JsonPrimitive)?.content.orEmpty()
+            if (url.isBlank() || !seenUrls.add(url)) continue
+            add(buildJsonObject {
+                put("title", (annotation["title"] as? JsonPrimitive)?.content.orEmpty())
+                put("url", url)
+                put("description", "")
+            })
+            added++
+        }
+    }
+    if (answer.isBlank() && normalizedResults.isEmpty()) return buildJsonObject {
+        put("type", "web_search")
+        put("query", query)
+        put("error", "no_results")
+    }.toString()
+    return buildJsonObject {
+        put("type", "web_search")
+        put("query", query)
+        if (answer.isNotBlank()) put("answer", answer)
+        put("results", normalizedResults)
+    }.toString()
+}
+
 internal fun webSearchProviderDisplayName(provider: String): String = when (provider) {
+    "openai" -> "OpenAI"
     "kagi" -> "Kagi"
     "serper" -> "Serper"
     "tavily" -> "Tavily"
@@ -190,6 +240,12 @@ class WebSearchToolProvider : ToolProvider {
                 }.toString()
             }
             val body = when (ctx.webSearchProvider) {
+                "openai" -> HttpClient.post(
+                    "https://api.openai.com/v1/responses",
+                    openAiWebSearchRequestBody(query),
+                    mapOf("Authorization" to "Bearer $apiKey"),
+                    callTimeoutMillis = Constants.NETWORK_TOOL_TIMEOUT_MS,
+                )
                 "kagi" -> HttpClient.post(
                     "https://kagi.com/api/v1/search",
                     kagiSearchRequestBody(query, numResults),
@@ -236,6 +292,9 @@ class WebSearchToolProvider : ToolProvider {
                 )
             } ?: return buildJsonObject { put("type", "web_search"); put("query", query); put("error", "no_response") }.toString()
 
+            if (ctx.webSearchProvider == "openai") {
+                return normalizeOpenAiWebSearchResponse(body, query, numResults)
+            }
             if (ctx.webSearchProvider == "kagi") {
                 return normalizeKagiSearchResponse(body, query, numResults)
             }

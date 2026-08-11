@@ -48,6 +48,7 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val dynamicColor by viewModel.settings.dynamicColor.collectAsState()
     val blurEffectsEnabled by viewModel.settings.blurEffectsEnabled.collectAsState()
     val reduceMotion by viewModel.settings.reduceMotion.collectAsState()
+    val parseInlineDollarMath by viewModel.settings.parseInlineDollarMath.collectAsState()
     val hapticsEnabled by viewModel.settings.hapticsEnabled.collectAsState()
     val detailedTokenUsage by viewModel.settings.detailedTokenUsage.collectAsState()
     val toolCallDisplayMode by viewModel.settings.toolCallDisplayMode.collectAsState()
@@ -238,6 +239,21 @@ fun SettingsAppearancePage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 modifier = Modifier.clickable {
                                     viewModel.settings.setReduceMotion(!reduceMotion)
                                 }
+                            )
+                        }
+                        add {
+                            SettingsItem(
+                                headlineContent = { Text(stringResource(R.string.parse_inline_dollar_math)) },
+                                supportingContent = { Text(stringResource(R.string.parse_inline_dollar_math_desc)) },
+                                trailingContent = {
+                                    Switch(
+                                        checked = parseInlineDollarMath,
+                                        onCheckedChange = viewModel.settings::setParseInlineDollarMath,
+                                    )
+                                },
+                                modifier = Modifier.clickable {
+                                    viewModel.settings.setParseInlineDollarMath(!parseInlineDollarMath)
+                                },
                             )
                         }
                         add {

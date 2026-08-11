@@ -18,11 +18,27 @@ import org.junit.Test
 
 class LiteralAngleBracketMarkdownTest {
     @Test
+    fun inlineDollarMathDefaultsToLiteralText() {
+        val prepared = "value \$x + 1\$".toRenderableMarkdownText()
+
+        assertTrue(prepared.contains("\\\$x + 1\\\$"))
+        assertFalse(prepared.contains("![latex](latex://inline/"))
+    }
+
+    @Test
+    fun disabledInlineDollarMathIsEscapedAsLiteralText() {
+        val prepared = "value \$x + 1\$ and \\(y + 2\\)"
+            .toRenderableMarkdownText(parseInlineDollarMath = false)
+
+        assertTrue(prepared.contains("\\\$x + 1\\\$"))
+        assertTrue(prepared.contains("![latex](latex://inline/"))
+    }
+    @Test
     fun renderPreparationLeavesHtmlLookingTextUntouched() {
         val source = "<widget id=\"x\">value</widget> <T>"
 
-        assertEquals(source, source.toRenderableMarkdownText())
-        assertFalse(source.toRenderableMarkdownText().contains('\u200B'))
+        assertEquals(source, source.toRenderableMarkdownText(parseInlineDollarMath = true))
+        assertFalse(source.toRenderableMarkdownText(parseInlineDollarMath = true).contains('\u200B'))
     }
 
     @Test
@@ -102,7 +118,7 @@ class LiteralAngleBracketMarkdownTest {
     fun commonMarkAutolinksAndCodeKeepParserSemantics() {
         val autolinks = "<irc://example.org/channel> <foo:bar> <person@example.com>"
         val autolinkRoot = parse(autolinks)
-        assertEquals(autolinks, autolinks.toRenderableMarkdownText())
+        assertEquals(autolinks, autolinks.toRenderableMarkdownText(parseInlineDollarMath = true))
         assertEquals(2, autolinkRoot.countType(MarkdownElementTypes.AUTOLINK))
         assertEquals(1, autolinkRoot.countType(MarkdownTokenTypes.EMAIL_AUTOLINK))
 
@@ -115,7 +131,7 @@ class LiteralAngleBracketMarkdownTest {
             ```
         """.trimIndent()
         val codeRoot = parse(code)
-        assertEquals(code, code.toRenderableMarkdownText())
+        assertEquals(code, code.toRenderableMarkdownText(parseInlineDollarMath = true))
         assertTrue(codeRoot.types().contains(MarkdownElementTypes.CODE_SPAN))
         assertTrue(codeRoot.types().contains(MarkdownElementTypes.CODE_FENCE))
         val fence = codeRoot.children.single {

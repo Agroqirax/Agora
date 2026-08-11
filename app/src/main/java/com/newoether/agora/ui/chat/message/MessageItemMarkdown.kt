@@ -158,6 +158,7 @@ internal class ChatMarkdownRenderContext(
     val imageTransformer: ImageTransformer,
     val flavour: MarkdownFlavourDescriptor,
     val plainTextStyle: TextStyle,
+    val parseInlineDollarMath: Boolean,
 )
 
 @Composable
@@ -168,7 +169,9 @@ internal fun MarkdownTextContent(
     includeFirstSpacer: Boolean = true,
     onReady: () -> Unit = {}
 ) {
-    val markdownText = remember(text) { text.toRenderableMarkdownText() }
+    val markdownText = remember(text, renderContext.parseInlineDollarMath) {
+        text.toRenderableMarkdownText(renderContext.parseInlineDollarMath)
+    }
     MarkdownPreparedTextContent(
         text = markdownText,
         renderContext = renderContext,
@@ -193,7 +196,9 @@ internal fun LazyMarkdownTextContent(
     includeFirstSpacer: Boolean = true,
     onReady: () -> Unit = {},
 ) {
-    val markdownText = remember(text) { text.toRenderableMarkdownText() }
+    val markdownText = remember(text, renderContext.parseInlineDollarMath) {
+        text.toRenderableMarkdownText(renderContext.parseInlineDollarMath)
+    }
     MarkdownPreparedTextContent(
         text = markdownText,
         renderContext = renderContext,
@@ -319,8 +324,8 @@ private fun LazyMarkdownSuccessWithSpacing(
     }
 }
 
-internal fun String.toRenderableMarkdownText(): String {
-    val spans = parseLatexSpans(this)
+internal fun String.toRenderableMarkdownText(parseInlineDollarMath: Boolean = false): String {
+    val spans = parseLatexSpans(this, parseInlineDollarMath)
     val markdown = if (spans.all { !it.isLatex }) {
         this
     } else {

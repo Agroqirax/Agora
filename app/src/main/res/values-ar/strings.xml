@@ -381,6 +381,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">واجهة بحث تركّز على الخصوصية. تتوفر باقة مجانية.</string>
     <string name="web_search_serper_desc">واجهة بحث Google سريعة. 2,500 استعلام مجاني شهريًا.</string>
@@ -585,6 +589,8 @@
     <string name="visual_effects">المؤثرات البصرية</string>
     <string name="blur_effects">تأثيرات التمويه</string>
     <string name="blur_effects_desc">تمويه أعلى قائمة الدردشة أسفل شريط الأدوات. عطّله لتوفير الأداء.</string>
+    <string name="parse_inline_dollar_math">Parse $…$ as inline math</string>
+    <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">تقليل الحركة</string>
     <string name="reduce_motion_desc">يقلّل الحركة المستمرة والانتقالات المكانية الكبيرة مع الإبقاء على التلاشي والإيماءات المباشرة وملاحظات الحالة المفيدة.</string>
 

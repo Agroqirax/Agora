@@ -11,7 +11,7 @@ class LatexRendererTest {
         // Raw text as received: 显存带宽 $BW = 672\ \mathrm{GB/s}$ 在 $p$ 值 $p < 0.01$
         val text = "显存带宽 \$BW = 672\\ \\mathrm{GB/s}\$ 在 \$p\$ 值 \$p < 0.01\$ 的显著性检验里确实落后了。"
         println("=== Full paragraph ===")
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         for ((i, s) in spans.withIndex()) {
             val tag = if (s.isLatex) if (s.display) "DISPLAY" else "INLINE" else "TEXT"
             println("  [$i] $tag: '${s.content.take(120)}'")
@@ -37,7 +37,7 @@ class LatexRendererTest {
         )
         println("=== Dollar cases ===")
         for ((input, shouldBeLatex) in cases) {
-            val spans = parseLatexSpans(input)
+            val spans = parseLatexSpans(input, parseInlineDollarMath = true)
             val latexSpans = spans.filter { it.isLatex }
             val ok = if (shouldBeLatex) latexSpans.size == 1 else latexSpans.isEmpty()
             val status = if (ok) "PASS" else "FAIL"
@@ -54,7 +54,7 @@ class LatexRendererTest {
         // Model may output no space between closing $ and Chinese text
         val text = "显存带宽 \$BW = 672\\ \\mathrm{GB/s}在\$p\$值\$p < 0.01\$ 的显著性检验里确实落后了。"
         println("=== No space after closing $ ===")
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         spans.forEachIndexed { i, s ->
             val tag = if (s.isLatex) "LATEX" else "TEXT"
             println("  [$i] $tag: '${s.content.take(100)}'")
@@ -76,7 +76,7 @@ class LatexRendererTest {
         )
         println("=== Dollar amount cases ===")
         for ((input, expectedLatexCount) in cases) {
-            val spans = parseLatexSpans(input)
+            val spans = parseLatexSpans(input, parseInlineDollarMath = true)
             val latexCount = spans.count { it.isLatex }
             val ok = latexCount == expectedLatexCount
             println("${if (ok) "PASS" else "FAIL"}: '$input' -> $latexCount latex spans (expected $expectedLatexCount)")
@@ -91,7 +91,7 @@ class LatexRendererTest {
                    "二手市场上 Quadro RTX 6000 现在只要 \$600–\$800，但显存带宽 " +
                    "\$BW = 672\\ \\mathrm{GB/s}\$ 在 \$p\$ 值 \$p < 0.01\$ 的显著性检验里确实落后了。"
         println("=== User paragraph ===")
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         spans.forEachIndexed { i, s ->
             val tag = if (s.isLatex) if (s.display) "D" else "L" else "T"
             println("  [$i] $tag: '${s.content.take(100)}'")
@@ -107,9 +107,22 @@ class LatexRendererTest {
     }
 
     @Test
+    fun disablingInlineDollarMathKeepsDollarSyntaxLiteralAndOtherDelimitersActive() {
+        val text = "inline \$x + 1\$ slash \\(y + 2\\) display \$\$z + 3\$\$"
+        val spans = parseLatexSpans(text, parseInlineDollarMath = false)
+
+        assertEquals(listOf("y + 2", "z + 3"), spans.filter { it.isLatex }.map { it.content })
+        assertTrue(
+            spans.filterNot { it.isLatex }
+                .joinToString("") { it.content }
+                .contains("\\\$x + 1\\\$"),
+        )
+    }
+
+    @Test
     fun testInvalidDisplayCandidateDoesNotConsumeLaterDisplayMath() {
         val text = "标题 \$\$ 误触发\n\n\$\$\nD\n\$\$\n后续 \$x\$"
-        val latexSpans = parseLatexSpans(text).filter { it.isLatex }
+        val latexSpans = parseLatexSpans(text, parseInlineDollarMath = true).filter { it.isLatex }
 
         assertEquals(listOf("D", "x"), latexSpans.map { it.content })
         assertEquals(listOf(true, false), latexSpans.map { it.display })
@@ -128,7 +141,7 @@ class LatexRendererTest {
     @Test
     fun testCodeFenceProtectsDollarMath() {
         val text = "```kotlin\nval price = \"\$5$\"\n```\noutside \$x\$"
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         val textContent = spans.filter { !it.isLatex }.joinToString("") { it.content }
 
         assertEquals(listOf("x"), spans.filter { it.isLatex }.map { it.content })
@@ -138,7 +151,7 @@ class LatexRendererTest {
     @Test
     fun testUnclosedCodeFenceProtectsToEndOfText() {
         val text = "```kotlin\nval price = \"\$5$\"\noutside \$x\$"
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         val textContent = spans.joinToString("") { it.content }
 
         assertEquals(0, spans.count { it.isLatex })
@@ -148,7 +161,7 @@ class LatexRendererTest {
     @Test
     fun testUnclosedInlineCodeProtectsCurrentLine() {
         val text = "`echo \$HOME and \$x\$\noutside \$y\$"
-        val spans = parseLatexSpans(text)
+        val spans = parseLatexSpans(text, parseInlineDollarMath = true)
         val textContent = spans.filter { !it.isLatex }.joinToString("") { it.content }
 
         assertEquals(listOf("y"), spans.filter { it.isLatex }.map { it.content })

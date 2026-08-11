@@ -133,6 +133,7 @@ internal fun MessageList(
     thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
     detailedTokenUsage: Boolean = false,
+    parseInlineDollarMath: Boolean = false,
     contextRetainedMessageIds: Set<String> = emptySet(),
     modelAliases: StableModelAliases = StableModelAliases(),
     customProviders: List<com.newoether.agora.data.CustomProviderConfig> = emptyList(),
@@ -745,6 +746,7 @@ internal fun MessageList(
             thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
             autoExpandActiveGroup = autoExpandActiveGroup,
             detailedTokenUsage = detailedTokenUsage,
+            parseInlineDollarMath = parseInlineDollarMath,
             groupedSegmentAutoExpansionController =
                 groupedSegmentAutoExpansionController,
             onStartEdit = {

@@ -372,6 +372,7 @@ internal class IncrementalMarkdownDocument(
 @Stable
 private class StreamingMarkdownRenderState(
     flavour: MarkdownFlavourDescriptor,
+    private val parseInlineDollarMath: Boolean,
     initialContent: String,
     initialIsStreaming: Boolean,
 ) : StreamingMarkdownInteractionController {
@@ -429,7 +430,7 @@ private class StreamingMarkdownRenderState(
             }
             val next = withContext(Dispatchers.Default) {
                 document.update(
-                    preparedSource = input.content.toRenderableMarkdownText(),
+                    preparedSource = input.content.toRenderableMarkdownText(parseInlineDollarMath),
                     inputContent = input.content,
                     isStreaming = input.isStreaming,
                 )
@@ -477,9 +478,10 @@ internal fun ChatStreamingMarkdown(
         return
     }
 
-    val state = remember(renderContext.flavour) {
+    val state = remember(renderContext.flavour, renderContext.parseInlineDollarMath) {
         StreamingMarkdownRenderState(
             flavour = renderContext.flavour,
+            parseInlineDollarMath = renderContext.parseInlineDollarMath,
             initialContent = content,
             initialIsStreaming = isStreaming,
         )

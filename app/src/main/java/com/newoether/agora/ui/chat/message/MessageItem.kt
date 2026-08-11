@@ -75,6 +75,7 @@ internal fun MessageItem(
     thinkingSegmentDisplayMode: String = ThinkingSegmentDisplayModes.DEFAULT,
     autoExpandActiveGroup: Boolean = true,
     detailedTokenUsage: Boolean = false,
+    parseInlineDollarMath: Boolean = false,
     groupedSegmentAutoExpansionController: GroupedSegmentAutoExpansionController =
         remember { GroupedSegmentAutoExpansionController() },
     onStartEdit: () -> Unit = {},
@@ -184,7 +185,11 @@ internal fun MessageItem(
             onMatchPosition = onSearchMatchPosition,
         )
     }
-    val markdownAssets = rememberChatMarkdownAssets(textColor, searchHighlight)
+    val markdownAssets = rememberChatMarkdownAssets(
+        textColor,
+        searchHighlight,
+        parseInlineDollarMath,
+    )
     val markdownRenderContext = markdownAssets.renderContext
     val thoughtMarkdownRenderContext = markdownAssets.thoughtRenderContext
 

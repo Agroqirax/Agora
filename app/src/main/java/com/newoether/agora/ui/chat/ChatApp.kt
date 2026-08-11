@@ -157,6 +157,7 @@ fun ChatApp(
     val thinkingSegmentDisplayMode by viewModel.settings.thinkingSegmentDisplayMode.collectAsState()
     val autoExpandActiveGroup by viewModel.settings.autoExpandActiveGroup.collectAsState()
     val detailedTokenUsage by viewModel.settings.detailedTokenUsage.collectAsState()
+    val parseInlineDollarMath by viewModel.settings.parseInlineDollarMath.collectAsState()
     val conversationSettings by viewModel.settings.conversationSettings.collectAsState()
     val pendingSettings by viewModel.pendingConversationSettings.collectAsState()
     // Resolved per-conversation values: override → global default
@@ -566,6 +567,7 @@ fun ChatApp(
                                 thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
                                 autoExpandActiveGroup = autoExpandActiveGroup,
                                 detailedTokenUsage = detailedTokenUsage,
+                                parseInlineDollarMath = parseInlineDollarMath,
                                 contextRetainedMessageIds = contextProjection.retainedMessageIds,
                                 modelAliases = StableModelAliases(modelAliases),
                                 customProviders = customProviders,

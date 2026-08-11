@@ -384,6 +384,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API Key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">通过 Responses API 使用 OpenAI 自带的联网搜索。需要单独配置 OpenAI API Key。</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">注重隐私的搜索 API。提供免费套餐。</string>
     <string name="web_search_kagi_desc">支持个性化结果的高级搜索 API，按量付费。</string>
@@ -592,6 +596,8 @@
     <string name="visual_effects">视觉效果</string>
     <string name="blur_effects">模糊效果</string>
     <string name="blur_effects_desc">对聊天列表顶部工具栏下方应用模糊。关闭可节省性能。</string>
+    <string name="parse_inline_dollar_math">解析 $…$ 行内公式</string>
+    <string name="parse_inline_dollar_math_desc">关闭后，$ x $ 这类单美元符号表达式将按普通文本显示，其他数学公式分隔符不受影响。</string>
     <string name="reduce_motion">减少动态效果</string>
     <string name="reduce_motion_desc">减少持续运动和大范围空间位移，同时保留淡入淡出、直接手势和必要的状态反馈。</string>
     <string name="message_display">消息显示</string>

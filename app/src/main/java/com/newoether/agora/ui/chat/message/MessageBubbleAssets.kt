@@ -98,6 +98,7 @@ internal class ChatMarkdownAssets(
 internal fun rememberChatMarkdownAssets(
     textColor: Color,
     searchHighlight: SearchHighlightSpec? = null,
+    parseInlineDollarMath: Boolean = false,
 ): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
@@ -334,6 +335,7 @@ internal fun rememberChatMarkdownAssets(
         customMarkdownComponents,
         latexImageTransformer,
         markdownFlavour,
+        parseInlineDollarMath,
     ) {
         ChatMarkdownRenderContext(
             colors = customMarkdownColors,
@@ -344,6 +346,7 @@ internal fun rememberChatMarkdownAssets(
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
             plainTextStyle = ChatType.body,
+            parseInlineDollarMath = parseInlineDollarMath,
         )
     }
     val thoughtMarkdownRenderContext = remember(
@@ -353,6 +356,7 @@ internal fun rememberChatMarkdownAssets(
         thoughtMarkdownComponents,
         latexImageTransformer,
         markdownFlavour,
+        parseInlineDollarMath,
     ) {
         ChatMarkdownRenderContext(
             colors = customMarkdownColors,
@@ -363,6 +367,7 @@ internal fun rememberChatMarkdownAssets(
             imageTransformer = latexImageTransformer,
             flavour = markdownFlavour,
             plainTextStyle = ChatType.thoughtBody,
+            parseInlineDollarMath = parseInlineDollarMath,
         )
     }
 

@@ -236,7 +236,10 @@ fun String.escapeDollarForMarkdown(): String = buildString {
 
 // ── Span parser ────────────────────────────────────────────────────────
 
-fun parseLatexSpans(text: String): List<LatexSpan> {
+fun parseLatexSpans(
+    text: String,
+    parseInlineDollarMath: Boolean = false,
+): List<LatexSpan> {
     val spans = mutableListOf<LatexSpan>()
     val buf = StringBuilder()
     val protectedRanges = findMarkdownProtectedRanges(text)
@@ -343,7 +346,7 @@ fun parseLatexSpans(text: String): List<LatexSpan> {
         }
 
         // $ inline math — skip if preceded by \ (escaped)
-        if (remaining[0] == '$' && !remaining.startsWith("$$")) {
+        if (parseInlineDollarMath && remaining[0] == '$' && !remaining.startsWith("$$")) {
             val prevChar = if (i > 0) text[i - 1] else ' '
             if (prevChar != '\\') {
                 // Find real closing $ on the same line (skip escaped \$)

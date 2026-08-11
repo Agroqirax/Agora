@@ -381,6 +381,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">プライバシー重視の検索 API。無料枠あり。</string>
     <string name="web_search_serper_desc">高速な Google 検索 API。月 2,500 回まで無料。</string>
@@ -585,6 +589,8 @@
     <string name="visual_effects">視覚効果</string>
     <string name="blur_effects">ぼかし効果</string>
     <string name="blur_effects_desc">ツールバー下のチャット一覧上部をぼかします。オフにするとパフォーマンスを節約できます。</string>
+    <string name="parse_inline_dollar_math">Parse $…$ as inline math</string>
+    <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">モーションを減らす</string>
     <string name="reduce_motion_desc">継続的な動きや大きな空間移動を減らし、フェード、直接操作、必要な状態フィードバックは維持します。</string>
 

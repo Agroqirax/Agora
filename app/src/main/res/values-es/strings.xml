@@ -381,6 +381,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API de búsqueda centrada en la privacidad. Nivel gratuito disponible.</string>
     <string name="web_search_serper_desc">API rápida de Google Search. 2.500 consultas gratis al mes.</string>
@@ -585,6 +589,8 @@
     <string name="visual_effects">Efectos visuales</string>
     <string name="blur_effects">Efectos de desenfoque</string>
     <string name="blur_effects_desc">Desenfoca la parte superior de la lista de chat bajo la barra. Desactívalo para ahorrar rendimiento.</string>
+    <string name="parse_inline_dollar_math">Parse $…$ as inline math</string>
+    <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">Reducir movimiento</string>
     <string name="reduce_motion_desc">Reduce el movimiento continuo y los desplazamientos espaciales amplios, y conserva los fundidos, los gestos directos y la información de estado útil.</string>
 

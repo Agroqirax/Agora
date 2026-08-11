@@ -185,6 +185,8 @@ class SettingsManager(private val context: Context) {
     val dynamicColor: Flow<Boolean> = context.dataStore.data.map { it[DYNAMIC_COLOR] ?: true }
     val blurEffectsEnabled: Flow<Boolean> = context.dataStore.data.map { it[BLUR_EFFECTS_ENABLED] ?: true }
     val reduceMotion: Flow<Boolean> = context.dataStore.data.map { it[REDUCE_MOTION] ?: false }
+    val parseInlineDollarMath: Flow<Boolean> =
+        context.dataStore.data.map { it[PARSE_INLINE_DOLLAR_MATH] ?: false }
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HAPTICS_ENABLED] ?: true }
     val detailedTokenUsage: Flow<Boolean> =
         context.dataStore.data.map { it[DETAILED_TOKEN_USAGE] ?: false }
@@ -699,6 +701,10 @@ class SettingsManager(private val context: Context) {
         context.dataStore.edit { it[REDUCE_MOTION] = enabled }
     }
 
+    suspend fun saveParseInlineDollarMath(enabled: Boolean) {
+        context.dataStore.edit { it[PARSE_INLINE_DOLLAR_MATH] = enabled }
+    }
+
     suspend fun saveHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[HAPTICS_ENABLED] = enabled }
     }
@@ -857,6 +863,7 @@ class SettingsManager(private val context: Context) {
             prefs.remove(DYNAMIC_COLOR)
             prefs.remove(BLUR_EFFECTS_ENABLED)
             prefs.remove(REDUCE_MOTION)
+            prefs.remove(PARSE_INLINE_DOLLAR_MATH)
             prefs.remove(HAPTICS_ENABLED)
             prefs.remove(DETAILED_TOKEN_USAGE)
             prefs.remove(TOOL_CALL_DISPLAY_MODE)
