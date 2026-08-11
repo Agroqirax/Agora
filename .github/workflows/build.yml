@@ -42,6 +42,11 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      - name: Build PRoot runtime
+        run: |
+          chmod +x ./build-proot.sh
+          ./build-proot.sh
+
       - name: Test and verify Kotlin source budget
         run: |
           chmod +x ./gradlew
@@ -50,6 +55,21 @@ jobs:
 
       - name: Build F-Droid Release APK
         run: ./gradlew assembleFdroidRelease
+
+      - name: Verify PRoot runtime packaging
+        run: |
+          apk_path=$(find app/build/outputs/apk/fdroid/release -name '*.apk' -print -quit)
+          test -n "$apk_path"
+          apk_entries=$(mktemp)
+          trap 'rm -f "$apk_entries"' EXIT
+          unzip -Z1 "$apk_path" > "$apk_entries"
+          for library in libproot_exec.so libproot_loader.so libtalloc.so; do
+            entry="lib/arm64-v8a/$library"
+            grep -Fxq "$entry" "$apk_entries" || {
+              echo "Missing PRoot runtime library: $library" >&2
+              exit 1
+            }
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
