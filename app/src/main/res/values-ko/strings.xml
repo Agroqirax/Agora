@@ -77,6 +77,40 @@
     <string name="tool_call_failed">도구 호출 실패</string>
     <string name="tool_done">완료</string>
     <string name="tool_context">도구</string>
+    <string name="tool_execution_stopped">도구 실행 중지됨</string>
+    <string name="tool_state_executing">실행 중</string>
+    <string name="tool_state_running">실행 중</string>
+    <string name="tool_state_succeeded">성공</string>
+    <string name="tool_state_failed">실패</string>
+    <string name="tool_state_stopped">중지됨</string>
+    <string name="tool_unknown_device">알 수 없는 기기</string>
+    <string name="tool_no_output">(출력 없음)</string>
+    <string name="tool_background_job_running">백그라운드 작업 %1$s 실행 중</string>
+    <string name="tool_shell_jobs">셸 작업</string>
+    <string name="tool_shell_job">셸 작업</string>
+    <string name="tool_stop_shell_job">셸 작업 중지</string>
+    <string name="tool_listing_shell_jobs">셸 작업 목록 가져오는 중…</string>
+    <string name="tool_reading_shell_job">셸 작업 %1$s 읽는 중…</string>
+    <string name="tool_stopping_shell_job">셸 작업 %1$s 중지 중…</string>
+    <string name="tool_no_shell_jobs">셸 작업 없음</string>
+    <string name="tool_shell_job_count">셸 작업 %1$d개를 표시했습니다</string>
+    <string name="tool_shell_job_status">셸 작업 %1$s 읽음</string>
+    <string name="tool_stopped_shell_job">셸 작업 %1$s 중지됨</string>
+    <string name="tool_shell_exit_summary">종료 %1$d · %2$d바이트</string>
+    <string name="tool_shell_executed_successfully">명령을 성공적으로 실행했습니다</string>
+    <string name="tool_shell_execution_completed">명령 실행이 완료되었습니다</string>
+    <string name="tool_shell_returned_exit_code">명령이 종료 코드 %1$d을(를) 반환했습니다</string>
+    <string name="tool_read_file_empty">%1$s 읽음 · 비어 있음</string>
+    <string name="tool_found_no_matches">일치하는 항목이 없습니다</string>
+    <string name="file_path_unknown">알 수 없는 파일</string>
+    <string name="tool_exit_code">종료 %1$d</string>
+    <string name="tool_exit">종료</string>
+    <string name="tool_shell_returned_code">명령이 %1$d을(를) 반환했습니다</string>
+    <string name="tool_shell_detail_executed">실행됨</string>
+    <string name="tool_shell_detail_returned_code">반환값 %1$d</string>
+    <string name="tool_shell_returned">반환</string>
+    <string name="tool_line_count">%1$d줄</string>
+    <string name="tool_web_result">결과 %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">List Conversations</string>
     <string name="tool_read_conversation">Read Conversation</string>
@@ -208,6 +242,7 @@
     <string name="custom_provider_badge">사용자 지정</string>
     <string name="custom_provider_add">추가</string>
     <string name="custom_provider_add_title">제공자 추가</string>
+    <string name="custom_provider_protocol_label">API 형식</string>
     <string name="custom_provider_empty">추가된 사용자 지정 제공자가 없습니다</string>
     <string name="settings_group_multimodal">멀티모달</string>
     <string name="settings_image_gen">이미지 생성</string>
@@ -217,6 +252,36 @@
     <string name="image_gen_model">이미지 모델</string>
     <string name="image_gen_no_model">선택된 모델 없음</string>
     <string name="image_gen_select_model">이미지 모델 선택</string>
+    <string name="settings_chat_widgets">채팅 위젯</string>
+    <string name="settings_chat_widgets_desc">모델이 채팅에서 대화형 위젯을 인라인으로 렌더링하도록 허용</string>
+    <string name="settings_html_chat_widgets">HTML 위젯</string>
+    <string name="html_chat_widgets_enable">HTML 위젯 활성화</string>
+    <string name="html_chat_widgets_enable_desc">모델이 샌드박스 WebView에서 대화형 위젯을 렌더링하도록 허용</string>
+    <string name="html_chat_widgets_network_enable">네트워크 액세스 허용</string>
+    <string name="html_chat_widgets_network_enable_desc">위젯이 원격 이미지, 글꼴 및 스크립트를 로드하도록 합니다.</string>
+    <string name="html_chat_widgets_theme_enable">앱 테마 일치</string>
+    <string name="html_chat_widgets_theme_enable_desc">위젯에 앱 테마를 적용합니다. 대비 &amp; 접근성을 보장할 수 없습니다.</string>
+    <string name="html_chat_widgets_js_enable">자바스크립트 허용</string>
+    <string name="html_chat_widgets_js_enable_desc">위젯이 JavaScript를 실행하도록 합니다. 위젯을 정적 HTML/CSS로만 렌더링하려면 끄세요.</string>
+    <string name="settings_mermaid_chat_widgets">인어 다이어그램</string>
+    <string name="mermaid_chat_widgets_enable">인어 다이어그램 활성화</string>
+    <string name="mermaid_chat_widgets_enable_desc">모델이 인어 다이어그램을 인라인으로 렌더링하도록 합니다.</string>
+    <string name="settings_vega_lite_chat_widgets">Vega-Lite 차트</string>
+    <string name="vega_lite_chat_widgets_enable">Vega-Lite 차트 활성화</string>
+    <string name="vega_lite_chat_widgets_enable_desc">모델이 Vega-Lite 차트를 인라인으로 렌더링하도록 합니다.</string>
+    <string name="settings_geojson_chat_widgets">지도</string>
+    <string name="geojson_chat_widgets_enable">지도 활성화</string>
+    <string name="geojson_chat_widgets_enable_desc">모델이 GeoJSON, GPX 또는 KML에서 지도를 인라인으로 렌더링하도록 합니다.</string>
+    <string name="geojson_tile_url_label">맵 타일 서버</string>
+    <string name="geojson_tile_url_desc">{s}/{z}/{x}/{y} 자리 표시자를 사용하는 베이스맵 타일 이미지용 URL 템플릿입니다.</string>
+    <string name="geojson_theme_enable">앱 테마 일치</string>
+    <string name="geojson_theme_enable_desc">In dark mode, invert and recolor map tiles to roughly match the app\'s theme.</string>
+    <string name="geojson_route_provider_label">경로 링크 열기 위치</string>
+    <string name="geojson_select_route_provider">경로 제공업체 선택</string>
+    <string name="geojson_route_provider_osm">오픈스트리트맵</string>
+    <string name="geojson_route_provider_osm_desc">openstreetmap.org 또는 설치된 OSM 기반 앱에서 길찾기를 엽니다.</string>
+    <string name="geojson_route_provider_google">구글 지도</string>
+    <string name="geojson_route_provider_google_desc">Google 지도에서 경로를 열거나 브라우저가 설치되지 않은 경우 브라우저를 엽니다.</string>
     <string name="image_gen_size">기본 크기</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">모든 모델 표시</string>
@@ -225,6 +290,13 @@
     <string name="tool_generated_image">이미지 생성됨</string>
     <string name="img_action_save">갤러리에 저장</string>
     <string name="img_action_share">공유</string>
+    <string name="conversation_fork">대화 분기</string>
+    <string name="conversation_fork_from_here">여기서 분기</string>
+    <string name="conversation_share">공유</string>
+    <string name="conversation_search">검색</string>
+    <string name="conversation_search_hint">검색…</string>
+    <string name="conversation_fork_failed">대화를 분기할 수 없습니다: %1$s</string>
+    <string name="conversation_share_failed">대화를 공유할 수 없습니다: %1$s</string>
     <string name="img_saved">갤러리에 저장됨</string>
     <string name="img_save_failed">저장 실패</string>
     <string name="img_info_dimensions">해상도</string>
@@ -308,8 +380,8 @@
     <string name="context_window">컨텍스트 창</string>
     <string name="context_window_desc">한 번의 생성에 사용할 수 있는 최대 컨텍스트</string>
     <string name="context_window_default">기본 컨텍스트 창</string>
-    <string name="context_token_budget_value">예상 토큰 %1$s개</string>
     <string name="context_retain">최근 메시지 %1$d개 유지</string>
+    <string name="context_token_budget_value">예상 토큰 %1$s개</string>
     <string name="context_visualize">컨텍스트 전개 시각화</string>
     <string name="context_visualize_desc">컨텍스트 창 밖의 메시지를 흐리게 표시</string>
     <string name="gen_temperature">온도</string>
@@ -331,10 +403,10 @@
     <string name="gen_thinking_enabled_desc">모델의 사고/추론 기능 활성화</string>
     <string name="gen_thinking_level">사고 수준</string>
     <string name="gen_thinking_level_desc">사고 깊이 제어. 높을수록 더 철저한 추론</string>
+    <string name="gen_thinking_level_minimal">매우 낮음</string>
     <string name="gen_thinking_level_low">낮음</string>
     <string name="gen_thinking_level_medium">중간</string>
     <string name="gen_thinking_level_high">높음</string>
-    <string name="gen_thinking_level_minimal">매우 낮음</string>
     <string name="gen_thinking_level_xhigh">매우 높음</string>
     <string name="gen_thinking_level_max">최대</string>
     <string name="thinking_effort_label">사고 강도</string>
@@ -357,7 +429,6 @@
     <string name="advanced_settings">고급</string>
     <string name="advanced_generation_title">고급 설정</string>
     <string name="advanced_per_conversation">대화별 재정의</string>
-    <string name="appearance_interface">인터페이스</string>
     <string name="message_display">메시지 표시</string>
     <string name="tool_call_display_mode">사고 및 도구 블록</string>
     <string name="tool_call_display_mode_timeline">타임라인</string>
@@ -368,9 +439,6 @@
     <string name="auto_expand_active_group">활성 그룹 자동 펼치기</string>
     <string name="auto_expand_active_group_desc">현재 사고 및 도구 그룹을 자동으로 펼치고 모델이 다음 단계로 진행하면 접습니다.</string>
     <string name="tool_call_display_mode_compact_desc">사고와 도구 블록을 답변 위에 모아 표시합니다</string>
-    <string name="interaction_feedback">상호작용 피드백</string>
-    <string name="haptic_feedback">햅틱 피드백</string>
-    <string name="haptic_feedback_desc">생성 상태와 주요 동작에 약한 진동을 사용합니다.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">웹 검색</string>
@@ -378,6 +446,7 @@
     <string name="web_search_enable_desc">도구 호출을 통해 모델이 웹을 검색하도록 허용</string>
     <string name="web_search_provider_label">검색 제공자</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -387,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">개인정보 보호 중심 검색 API. 무료 등급 제공.</string>
+    <string name="web_search_kagi_desc">개인화된 결과를 제공하는 프리미엄 검색 API. 사용량 기반 과금.</string>
     <string name="web_search_serper_desc">빠른 Google 검색 API. 월 2,500회 무료 쿼리.</string>
     <string name="web_search_tavily_desc">AI에 최적화된 검색 API. LLM 에이전트용으로 제작.</string>
     <string name="web_search_searxng_desc">자체 호스팅 메타 검색 엔진. 자체 인스턴스에서 사용하는 것이 가장 좋습니다.</string>
@@ -394,6 +464,8 @@
     <string name="web_search_select_provider">검색 제공자 선택</string>
     <string name="web_search_brave_key">Brave Search API 키</string>
     <string name="web_search_brave_key_hint">brave.com/search/api/의 API 키</string>
+    <string name="web_search_kagi_key">Kagi Search API 키</string>
+    <string name="web_search_kagi_key_hint">kagi.com/api/keys의 API 키</string>
     <string name="web_search_serper_key">Serper API 키</string>
     <string name="web_search_serper_key_hint">serper.dev의 API 키</string>
     <string name="web_search_tavily_key">Tavily API 키</string>
@@ -448,6 +520,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">디스크 사용량</string>
     <string name="sandbox_install">설치</string>
+    <string name="sandbox_upgrade">업그레이드</string>
     <string name="sandbox_install_packages">패키지 설치</string>
     <string name="sandbox_package_name">패키지 이름</string>
     <string name="sandbox_quick_install">빠른 설치</string>
@@ -486,7 +559,6 @@
     <string name="sandbox_manage_desc">패키지 설치, 구성 또는 재설정</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">설치된 패키지(%d)</string>
-    <string name="sandbox_upgrade">업그레이드</string>
     <string name="sandbox_browse_files">파일 찾아보기</string>
     <string name="sandbox_browse_files_desc">시스템 파일 관리자에서 샌드박스 디렉토리 열기</string>
 
@@ -559,6 +631,7 @@
     <string name="settings_appearance">모양</string>
     <string name="settings_appearance_desc">테마, 색 구성표 및 동적 색상</string>
     <string name="appearance_title">모양</string>
+    <string name="appearance_interface">인터페이스</string>
     <string name="theme_mode">테마 모드</string>
     <string name="theme_mode_light">밝게</string>
     <string name="theme_mode_dark">어둡게</string>
@@ -593,6 +666,9 @@
     <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">모션 줄이기</string>
     <string name="reduce_motion_desc">지속적인 움직임과 큰 공간 이동을 줄이면서 페이드, 직접 제스처, 유용한 상태 피드백은 유지합니다.</string>
+    <string name="interaction_feedback">상호작용 피드백</string>
+    <string name="haptic_feedback">햅틱 피드백</string>
+    <string name="haptic_feedback_desc">생성 상태와 주요 동작에 약한 진동을 사용합니다.</string>
 
     <!-- Language -->
     <string name="language_title">언어</string>
@@ -693,6 +769,8 @@
     <string name="remove">제거</string>
     <string name="menu">메뉴</string>
     <string name="options">옵션</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">모두 지우기</string>
     <string name="video_thumbnail">동영상 썸네일</string>
     <string name="play">재생</string>
     <string name="video_preview">동영상 미리보기</string>
@@ -709,10 +787,10 @@
     <string name="delete_chat">채팅을 삭제하시겠습니까?</string>
     <string name="delete_chat_confirm">이 대화를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.</string>
     <string name="delete_message_title">메시지를 삭제하시겠습니까?</string>
+    <string name="delete_message_confirm">이 메시지와 이후의 모든 답글이 영구적으로 제거됩니다.</string>
     <string name="delete_compact_message_title">압축 메시지를 삭제하시겠습니까?</string>
     <string name="delete_compact_message_confirm">이 압축 메시지만 삭제됩니다.</string>
     <string name="recompact">다시 압축</string>
-    <string name="delete_message_confirm">이 메시지와 이후의 모든 답글이 영구적으로 제거됩니다.</string>
     <string name="conversation_prompt">대화 프롬프트</string>
     <string name="global_default_format">전역 기본값(%1$s)</string>
     <string name="save">저장</string>
@@ -886,12 +964,15 @@
     <string name="no_api_key_configured">구성된 API 키가 없습니다.</string>
     <string name="no_api_key_for_provider">%s에 대한 자격 증명이 구성되지 않았습니다. 설정에서 API 키 또는 기본 URL을 추가하세요.</string>
     <string name="local_model_not_found">로컬 모델 파일을 찾을 수 없습니다. 모델을 다시 가져오세요.</string>
+    <string name="local_context_exceeded">이 대화에는 %1$d개의 프롬프트 토큰이 필요하지만 로컬 모델 컨텍스트는 %2$d 토큰입니다. 컨텍스트 창을 줄이거나 모델 컨텍스트 크기를 늘리세요.</string>
     <string name="all_messages_cached">%1$d개의 메시지를 모두 캐시했습니다.</string>
     <string name="cached_partial_failed">%2$d개 중 %1$d개를 캐시했습니다. %3$d개 실패.</string>
     <string name="retry">다시 시도</string>
     <string name="parse_error">구문 분석 오류</string>
     <string name="unknown_error">알 수 없는 오류</string>
     <string name="could_not_read_file">파일을 읽을 수 없습니다</string>
+    <string name="import_file_too_large">파일이 너무 큽니다(%1$d MB). 더 작은 내보내기 파일을 선택하세요.</string>
+    <string name="import_out_of_memory">이 파일을 가져올 메모리가 부족합니다. 더 작은 내보내기 파일을 선택하세요.</string>
 
     <!-- Documentation -->
     <string name="documentation">문서</string>
@@ -1002,56 +1083,6 @@
     <string name="proxy_password">비밀번호(선택)</string>
     <string name="proxy_bypass">우회 목록</string>
     <string name="proxy_bypass_desc">직접 연결하는 호스트와 CIDR 범위, 한 줄에 하나씩</string>
-    <string name="conversation_fork">대화 분기</string>
-    <string name="conversation_fork_failed">대화를 분기할 수 없습니다: %1$s</string>
-    <string name="conversation_fork_from_here">여기서 분기</string>
-    <string name="conversation_search">검색</string>
-    <string name="conversation_search_hint">검색…</string>
-    <string name="conversation_share">공유</string>
-    <string name="conversation_share_failed">대화를 공유할 수 없습니다: %1$s</string>
-    <string name="custom_provider_protocol_label">API 형식</string>
-    <string name="file_path_unknown">알 수 없는 파일</string>
-    <string name="import_file_too_large">파일이 너무 큽니다(%1$d MB). 더 작은 내보내기 파일을 선택하세요.</string>
-    <string name="import_out_of_memory">이 파일을 가져올 메모리가 부족합니다. 더 작은 내보내기 파일을 선택하세요.</string>
-    <string name="local_context_exceeded">이 대화에는 %1$d개의 프롬프트 토큰이 필요하지만 로컬 모델 컨텍스트는 %2$d 토큰입니다. 컨텍스트 창을 줄이거나 모델 컨텍스트 크기를 늘리세요.</string>
-    <string name="queue_clear_all">모두 지우기</string>
-    <string name="tool_background_job_running">백그라운드 작업 %1$s 실행 중</string>
-    <string name="tool_execution_stopped">도구 실행 중지됨</string>
-    <string name="tool_exit_code">종료 %1$d</string>
-    <string name="tool_exit">종료</string>
-    <string name="tool_shell_returned_code">명령이 %1$d을(를) 반환했습니다</string>
-    <string name="tool_shell_detail_executed">실행됨</string>
-    <string name="tool_shell_detail_returned_code">반환값 %1$d</string>
-    <string name="tool_shell_returned">반환</string>
-    <string name="tool_found_no_matches">일치하는 항목이 없습니다</string>
-    <string name="tool_line_count">%1$d줄</string>
-    <string name="tool_listing_shell_jobs">셸 작업 목록 가져오는 중…</string>
-    <string name="tool_no_output">(출력 없음)</string>
-    <string name="tool_no_shell_jobs">셸 작업 없음</string>
-    <string name="tool_read_file_empty">%1$s 읽음 · 비어 있음</string>
-    <string name="tool_reading_shell_job">셸 작업 %1$s 읽는 중…</string>
-    <string name="tool_shell_executed_successfully">명령을 성공적으로 실행했습니다</string>
-    <string name="tool_shell_execution_completed">명령 실행이 완료되었습니다</string>
-    <string name="tool_shell_exit_summary">종료 %1$d · %2$d바이트</string>
-    <string name="tool_shell_job">셸 작업</string>
-    <string name="tool_shell_job_count">셸 작업 %1$d개를 표시했습니다</string>
-    <string name="tool_shell_job_status">셸 작업 %1$s 읽음</string>
-    <string name="tool_shell_jobs">셸 작업</string>
-    <string name="tool_shell_returned_exit_code">명령이 종료 코드 %1$d을(를) 반환했습니다</string>
-    <string name="tool_state_executing">실행 중</string>
-    <string name="tool_state_failed">실패</string>
-    <string name="tool_state_running">실행 중</string>
-    <string name="tool_state_stopped">중지됨</string>
-    <string name="tool_state_succeeded">성공</string>
-    <string name="tool_stop_shell_job">셸 작업 중지</string>
-    <string name="tool_stopped_shell_job">셸 작업 %1$s 중지됨</string>
-    <string name="tool_stopping_shell_job">셸 작업 %1$s 중지 중…</string>
-    <string name="tool_unknown_device">알 수 없는 기기</string>
-    <string name="tool_web_result">결과 %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">개인화된 결과를 제공하는 프리미엄 검색 API. 사용량 기반 과금.</string>
-    <string name="web_search_kagi_key">Kagi Search API 키</string>
-    <string name="web_search_kagi_key_hint">kagi.com/api/keys의 API 키</string>
     <string name="default_service_tier">기본 서비스 티어</string>
     <string name="openai_service_tier_title">서비스 티어</string>
     <string name="openai_service_tier_desc">OpenAI 프로토콜 요청의 지연 시간과 처리 우선순위를 제어합니다.</string>
@@ -1076,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">약 %1$s / %2$s tokens</string>
+    <string name="context_boundary_active">컴팩트 경계 활성화됨</string>
+    <string name="context_boundary_none">컴팩트 경계 없음</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">약 %1$s / %2$s tokens</string>
-    <string name="context_boundary_active">컴팩트 경계 활성화됨</string>
-    <string name="context_boundary_none">컴팩트 경계 없음</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">개발자</string>

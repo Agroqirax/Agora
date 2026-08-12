@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.map
 
 internal const val DEFAULT_CONTEXT_COMPACT_ENABLED = true
 internal const val DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT = 0
+internal const val DEFAULT_GEOJSON_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -129,6 +130,19 @@ class SettingsManager(private val context: Context) {
     // Selected image model "Provider:modelId" (null = none chosen). Creds reused from that provider.
     val imageGenModel: Flow<String?> = context.dataStore.data.map { it[IMAGE_GEN_MODEL] }
     val imageGenSize: Flow<String> = context.dataStore.data.map { it[IMAGE_GEN_SIZE] ?: "1024x1024" }
+
+    // ── Chat widgets ───────────────────────────────────────────
+    val htmlChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_CHAT_WIDGETS_ENABLED] ?: true }
+    val htmlChatWidgetsNetworkEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_CHAT_WIDGETS_NETWORK_ENABLED] ?: true }
+    val htmlChatWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_CHAT_WIDGETS_THEME_ENABLED] ?: true }
+    val htmlChatWidgetsJsEnabled: Flow<Boolean> = context.dataStore.data.map { it[HTML_CHAT_WIDGETS_JS_ENABLED] ?: true }
+    val mermaidChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[MERMAID_CHAT_WIDGETS_ENABLED] ?: true }
+    val vegaLiteChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[VEGA_LITE_CHAT_WIDGETS_ENABLED] ?: true }
+    val geoJsonChatWidgetsEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_CHAT_WIDGETS_ENABLED] ?: true }
+    val geoJsonTileUrl: Flow<String> = context.dataStore.data.map { it[GEOJSON_TILE_URL] ?: DEFAULT_GEOJSON_TILE_URL }
+    val geoJsonChatWidgetsThemeEnabled: Flow<Boolean> = context.dataStore.data.map { it[GEOJSON_CHAT_WIDGETS_THEME_ENABLED] ?: true }
+    val geoJsonRouteProvider: Flow<String> = context.dataStore.data.map { it[GEOJSON_ROUTE_PROVIDER] ?: "osm" }
+
     val searchContextWindow: Flow<Int> = context.dataStore.data.map { it[SEARCH_CONTEXT_WINDOW] ?: 8 }
     val searchMatchLimit: Flow<Int> = context.dataStore.data.map { it[SEARCH_MATCH_LIMIT] ?: 10 }
     val ragThreshold: Flow<Float> = context.dataStore.data.map { it[RAG_THRESHOLD]?.toFloatOrNull() ?: 0.5f }
@@ -505,6 +519,38 @@ class SettingsManager(private val context: Context) {
     suspend fun saveImageGenSize(size: String) {
         context.dataStore.edit { it[IMAGE_GEN_SIZE] = size }
     }
+
+    suspend fun setHtmlChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[HTML_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setHtmlChatWidgetsNetworkEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[HTML_CHAT_WIDGETS_NETWORK_ENABLED] = enabled }
+    }
+    suspend fun setHtmlChatWidgetsThemeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[HTML_CHAT_WIDGETS_THEME_ENABLED] = enabled }
+    }
+    suspend fun setHtmlChatWidgetsJsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[HTML_CHAT_WIDGETS_JS_ENABLED] = enabled }
+    }
+    suspend fun setMermaidChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[MERMAID_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setVegaLiteChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[VEGA_LITE_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setGeoJsonChatWidgetsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEOJSON_CHAT_WIDGETS_ENABLED] = enabled }
+    }
+    suspend fun setGeoJsonTileUrl(url: String) {
+        context.dataStore.edit { it[GEOJSON_TILE_URL] = url }
+    }
+    suspend fun setGeoJsonChatWidgetsThemeEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[GEOJSON_CHAT_WIDGETS_THEME_ENABLED] = enabled }
+    }
+    suspend fun setGeoJsonRouteProvider(provider: String) {
+        context.dataStore.edit { it[GEOJSON_ROUTE_PROVIDER] = provider }
+    }
+
     suspend fun saveSearchMatchLimit(n: Int) {
         context.dataStore.edit { it[SEARCH_MATCH_LIMIT] = n }
     }
@@ -843,6 +889,16 @@ class SettingsManager(private val context: Context) {
             prefs.remove(IMAGE_GEN_ENABLED)
             prefs.remove(IMAGE_GEN_MODEL)
             prefs.remove(IMAGE_GEN_SIZE)
+            prefs.remove(HTML_CHAT_WIDGETS_ENABLED)
+            prefs.remove(HTML_CHAT_WIDGETS_NETWORK_ENABLED)
+            prefs.remove(HTML_CHAT_WIDGETS_THEME_ENABLED)
+            prefs.remove(HTML_CHAT_WIDGETS_JS_ENABLED)
+            prefs.remove(MERMAID_CHAT_WIDGETS_ENABLED)
+            prefs.remove(VEGA_LITE_CHAT_WIDGETS_ENABLED)
+            prefs.remove(GEOJSON_CHAT_WIDGETS_ENABLED)
+            prefs.remove(GEOJSON_TILE_URL)
+            prefs.remove(GEOJSON_CHAT_WIDGETS_THEME_ENABLED)
+            prefs.remove(GEOJSON_ROUTE_PROVIDER)
             prefs.remove(SEARCH_CONTEXT_WINDOW)
             prefs.remove(SEARCH_MATCH_LIMIT)
             prefs.remove(RAG_THRESHOLD)

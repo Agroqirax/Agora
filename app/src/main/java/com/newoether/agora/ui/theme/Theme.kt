@@ -7,6 +7,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -17,6 +19,11 @@ import androidx.compose.ui.text.font.FontWeight
 import java.io.File
 
 enum class ThemeMode { LIGHT, DARK, FOLLOW_DEVICE }
+
+/** The app's currently-resolved dark/light state, exposed for consumers (e.g. widget WebViews)
+ *  that need to match app theme but can't derive it reliably from [MaterialTheme]'s color scheme
+ *  luminance, which can misfire against unusual custom color-scheme presets. */
+val LocalDarkTheme = compositionLocalOf { false }
 
 /**
  * Returns the effective [FontFamily] for non-mono typography based on the font preference.
@@ -103,9 +110,11 @@ fun AgoraTheme(
     chatFontFamily = fontFamily
     val typography = remember(fontFamily) { typographyWithFont(fontFamily) }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalDarkTheme provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = typography,
+            content = content
+        )
+    }
 }

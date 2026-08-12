@@ -53,6 +53,12 @@ data class GenerationContext(
     val imageGenBaseUrl: String = "",
     val imageGenModel: String = "gpt-image-1",
     val imageGenSize: String = "1024x1024",
+    /** Whether each chat widget kind's fence language renders inline in the chat UI (see
+     *  MessageBubbleAssets.kt) — a pure rendering concern; the model isn't told about these
+     *  flags. vega-lite is deliberately absent here since it's never gated at generation time. */
+    val htmlChatWidgetsEnabled: Boolean = false,
+    val mermaidChatWidgetsEnabled: Boolean = false,
+    val geoJsonChatWidgetsEnabled: Boolean = false,
     val automationToolsEnabled: Boolean = false,
     /** Workers use WorkManager's foreground execution instead of starting our service. */
     val foregroundServiceManagedExternally: Boolean = false,

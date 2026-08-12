@@ -77,6 +77,40 @@
     <string name="tool_call_failed">La llamada a la herramienta falló</string>
     <string name="tool_done">Listo</string>
     <string name="tool_context">Herramienta</string>
+    <string name="tool_execution_stopped">Ejecución de herramienta detenida</string>
+    <string name="tool_state_executing">Ejecutando</string>
+    <string name="tool_state_running">En ejecución</string>
+    <string name="tool_state_succeeded">Correcto</string>
+    <string name="tool_state_failed">Falló</string>
+    <string name="tool_state_stopped">Detenido</string>
+    <string name="tool_unknown_device">Dispositivo desconocido</string>
+    <string name="tool_no_output">(Sin salida)</string>
+    <string name="tool_background_job_running">La tarea en segundo plano %1$s está en ejecución</string>
+    <string name="tool_shell_jobs">Tareas de shell</string>
+    <string name="tool_shell_job">Tarea de shell</string>
+    <string name="tool_stop_shell_job">Detener tarea de shell</string>
+    <string name="tool_listing_shell_jobs">Listando tareas de shell…</string>
+    <string name="tool_reading_shell_job">Leyendo la tarea de shell %1$s…</string>
+    <string name="tool_stopping_shell_job">Deteniendo la tarea de shell %1$s…</string>
+    <string name="tool_no_shell_jobs">No hay tareas de shell</string>
+    <string name="tool_shell_job_count">Se listaron %1$d tareas de shell</string>
+    <string name="tool_shell_job_status">Tarea de shell %1$s leída</string>
+    <string name="tool_stopped_shell_job">Se detuvo la tarea de shell %1$s</string>
+    <string name="tool_shell_exit_summary">Salida %1$d · %2$d bytes</string>
+    <string name="tool_shell_executed_successfully">Comando ejecutado correctamente</string>
+    <string name="tool_shell_execution_completed">Ejecución del comando completada</string>
+    <string name="tool_shell_returned_exit_code">El comando devolvió el código de salida %1$d</string>
+    <string name="tool_read_file_empty">%1$s leído · vacío</string>
+    <string name="tool_found_no_matches">No se encontraron coincidencias</string>
+    <string name="file_path_unknown">Archivo desconocido</string>
+    <string name="tool_exit_code">Salida %1$d</string>
+    <string name="tool_exit">Salida</string>
+    <string name="tool_shell_returned_code">El comando devolvió %1$d</string>
+    <string name="tool_shell_detail_executed">Ejecutado</string>
+    <string name="tool_shell_detail_returned_code">Devuelto %1$d</string>
+    <string name="tool_shell_returned">Devuelto</string>
+    <string name="tool_line_count">%1$d líneas</string>
+    <string name="tool_web_result">Resultado %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">List Conversations</string>
     <string name="tool_read_conversation">Read Conversation</string>
@@ -208,6 +242,7 @@
     <string name="custom_provider_badge">Personalizado</string>
     <string name="custom_provider_add">Añadir</string>
     <string name="custom_provider_add_title">Añadir proveedor</string>
+    <string name="custom_provider_protocol_label">Formato de API</string>
     <string name="custom_provider_empty">No se ha añadido ningún proveedor personalizado</string>
     <string name="settings_group_multimodal">Multimodal</string>
     <string name="settings_image_gen">Generación de imágenes</string>
@@ -217,6 +252,36 @@
     <string name="image_gen_model">Modelo de imagen</string>
     <string name="image_gen_no_model">Ningún modelo seleccionado</string>
     <string name="image_gen_select_model">Seleccionar modelo de imagen</string>
+    <string name="settings_chat_widgets">Widgets de chat</string>
+    <string name="settings_chat_widgets_desc">Deje que el modelo muestre widgets interactivos en línea en el chat</string>
+    <string name="settings_html_chat_widgets">Elementos HTML</string>
+    <string name="html_chat_widgets_enable">Habilitar widgets HTML</string>
+    <string name="html_chat_widgets_enable_desc">Deje que el modelo represente widgets interactivos en un WebView de espacio aislado</string>
+    <string name="html_chat_widgets_network_enable">Permitir acceso a la red</string>
+    <string name="html_chat_widgets_network_enable_desc">Permita que los widgets carguen imágenes, fuentes y scripts remotos.</string>
+    <string name="html_chat_widgets_theme_enable">Tema de la aplicación Match</string>
+    <string name="html_chat_widgets_theme_enable_desc">Aplicar el tema de la aplicación al widget. Contraste y No se puede garantizar la accesibilidad.</string>
+    <string name="html_chat_widgets_js_enable">Permitir JavaScript</string>
+    <string name="html_chat_widgets_js_enable_desc">Deje que los widgets ejecuten JavaScript. Desactívelo para representar los widgets solo como HTML/CSS estático.</string>
+    <string name="settings_mermaid_chat_widgets">Diagramas de sirena</string>
+    <string name="mermaid_chat_widgets_enable">Habilitar diagramas de sirena</string>
+    <string name="mermaid_chat_widgets_enable_desc">Deje que el modelo represente diagramas de sirena en línea.</string>
+    <string name="settings_vega_lite_chat_widgets">Gráficos Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable">Habilitar gráficos Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable_desc">Deje que el modelo represente gráficos Vega-Lite en línea.</string>
+    <string name="settings_geojson_chat_widgets">Mapas</string>
+    <string name="geojson_chat_widgets_enable">Habilitar mapas</string>
+    <string name="geojson_chat_widgets_enable_desc">Deje que el modelo represente mapas en línea desde GeoJSON, GPX o KML.</string>
+    <string name="geojson_tile_url_label">Servidor de mosaicos de mapas</string>
+    <string name="geojson_tile_url_desc">Plantilla de URL para imágenes de mosaicos de mapa base, utilizando marcadores de posición {s}/{z}/{x}/{y}.</string>
+    <string name="geojson_theme_enable">Tema de la aplicación Match</string>
+    <string name="geojson_theme_enable_desc">En modo oscuro, invierta y cambie el color de los mosaicos del mapa para que coincidan aproximadamente con el tema de la aplicación.</string>
+    <string name="geojson_route_provider_label">Enlaces de ruta abiertos en</string>
+    <string name="geojson_select_route_provider">Seleccionar proveedor de ruta</string>
+    <string name="geojson_route_provider_osm">OpenStreetMap</string>
+    <string name="geojson_route_provider_osm_desc">Abre direcciones en openstreetmap.org o una aplicación basada en OSM instalada</string>
+    <string name="geojson_route_provider_google">mapas de google</string>
+    <string name="geojson_route_provider_google_desc">Abre direcciones en Google Maps o en un navegador si no está instalado</string>
     <string name="image_gen_size">Tamaño predeterminado</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Mostrar todos los modelos</string>
@@ -225,6 +290,13 @@
     <string name="tool_generated_image">Imagen generada</string>
     <string name="img_action_save">Guardar en galería</string>
     <string name="img_action_share">Compartir</string>
+    <string name="conversation_fork">Bifurcar conversación</string>
+    <string name="conversation_fork_from_here">Bifurcar desde aquí</string>
+    <string name="conversation_share">Compartir</string>
+    <string name="conversation_search">Buscar</string>
+    <string name="conversation_search_hint">Buscar…</string>
+    <string name="conversation_fork_failed">No se pudo bifurcar la conversación: %1$s</string>
+    <string name="conversation_share_failed">No se pudo compartir la conversación: %1$s</string>
     <string name="img_saved">Guardado en la galería</string>
     <string name="img_save_failed">Error al guardar</string>
     <string name="img_info_dimensions">Dimensiones</string>
@@ -308,8 +380,8 @@
     <string name="context_window">Ventana de contexto</string>
     <string name="context_window_desc">Contexto máximo disponible para una generación</string>
     <string name="context_window_default">Ventana de contexto predeterminada</string>
-    <string name="context_token_budget_value">Aproximadamente %1$s tokens</string>
     <string name="context_retain">Conservar %1$d mensajes recientes</string>
+    <string name="context_token_budget_value">Aproximadamente %1$s tokens</string>
     <string name="context_visualize">Visualizar el despliegue del contexto</string>
     <string name="context_visualize_desc">Atenuar los mensajes fuera de la ventana de contexto</string>
     <string name="gen_temperature">Temperatura</string>
@@ -331,10 +403,10 @@
     <string name="gen_thinking_enabled_desc">Activa la capacidad de razonamiento del modelo</string>
     <string name="gen_thinking_level">Nivel de razonamiento</string>
     <string name="gen_thinking_level_desc">Controla la profundidad del razonamiento; mayor = razonamiento más exhaustivo</string>
+    <string name="gen_thinking_level_minimal">Muy bajo</string>
     <string name="gen_thinking_level_low">Bajo</string>
     <string name="gen_thinking_level_medium">Medio</string>
     <string name="gen_thinking_level_high">Alto</string>
-    <string name="gen_thinking_level_minimal">Muy bajo</string>
     <string name="gen_thinking_level_xhigh">Muy alto</string>
     <string name="gen_thinking_level_max">Máximo</string>
     <string name="thinking_effort_label">Esfuerzo de razonamiento</string>
@@ -357,7 +429,6 @@
     <string name="advanced_settings">Avanzado</string>
     <string name="advanced_generation_title">Ajustes avanzados</string>
     <string name="advanced_per_conversation">Anulaciones por conversación</string>
-    <string name="appearance_interface">Interfaz</string>
     <string name="message_display">Visualización de mensajes</string>
     <string name="tool_call_display_mode">Bloques de razonamiento y herramientas</string>
     <string name="tool_call_display_mode_timeline">Cronología</string>
@@ -368,9 +439,6 @@
     <string name="auto_expand_active_group">Expandir automáticamente el grupo activo</string>
     <string name="auto_expand_active_group_desc">Expande automáticamente el grupo actual de razonamiento y herramientas y lo contrae cuando el modelo continúa.</string>
     <string name="tool_call_display_mode_compact_desc">Agrupa los bloques de razonamiento y herramientas encima de la respuesta</string>
-    <string name="interaction_feedback">Respuesta de interacción</string>
-    <string name="haptic_feedback">Respuesta háptica</string>
-    <string name="haptic_feedback_desc">Usa vibraciones sutiles para el estado de generación y acciones importantes.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Búsqueda web</string>
@@ -378,6 +446,7 @@
     <string name="web_search_enable_desc">Permite que los modelos busquen en la web mediante llamadas a herramientas</string>
     <string name="web_search_provider_label">Proveedor de búsqueda</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -387,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API de búsqueda centrada en la privacidad. Nivel gratuito disponible.</string>
+    <string name="web_search_kagi_desc">API de búsqueda prémium con resultados personalizados. Pago por uso.</string>
     <string name="web_search_serper_desc">API rápida de Google Search. 2.500 consultas gratis al mes.</string>
     <string name="web_search_tavily_desc">API de búsqueda optimizada para IA. Creada para agentes LLM.</string>
     <string name="web_search_searxng_desc">Motor de metabúsqueda autoalojado. Mejor con tu propia instancia.</string>
@@ -394,6 +464,8 @@
     <string name="web_search_select_provider">Seleccionar proveedor de búsqueda</string>
     <string name="web_search_brave_key">Clave de API de Brave Search</string>
     <string name="web_search_brave_key_hint">Clave de API de brave.com/search/api/</string>
+    <string name="web_search_kagi_key">Clave de API de Kagi Search</string>
+    <string name="web_search_kagi_key_hint">Clave de API de kagi.com/api/keys</string>
     <string name="web_search_serper_key">Clave de API de Serper</string>
     <string name="web_search_serper_key_hint">Clave de API de serper.dev</string>
     <string name="web_search_tavily_key">Clave de API de Tavily</string>
@@ -448,6 +520,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">Uso del disco</string>
     <string name="sandbox_install">Instalar</string>
+    <string name="sandbox_upgrade">Actualizar</string>
     <string name="sandbox_install_packages">Instalar paquetes</string>
     <string name="sandbox_package_name">Nombre del paquete</string>
     <string name="sandbox_quick_install">Instalación rápida</string>
@@ -486,7 +559,6 @@
     <string name="sandbox_manage_desc">Instalar, configurar paquetes o restablecer</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">Paquetes instalados (%d)</string>
-    <string name="sandbox_upgrade">Actualizar</string>
     <string name="sandbox_browse_files">Explorar archivos</string>
     <string name="sandbox_browse_files_desc">Abrir directorio sandbox en administrador de archivos</string>
 
@@ -559,6 +631,7 @@
     <string name="settings_appearance">Apariencia</string>
     <string name="settings_appearance_desc">Tema, esquema de color y color dinámico</string>
     <string name="appearance_title">Apariencia</string>
+    <string name="appearance_interface">Interfaz</string>
     <string name="theme_mode">Modo de tema</string>
     <string name="theme_mode_light">Claro</string>
     <string name="theme_mode_dark">Oscuro</string>
@@ -593,6 +666,9 @@
     <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">Reducir movimiento</string>
     <string name="reduce_motion_desc">Reduce el movimiento continuo y los desplazamientos espaciales amplios, y conserva los fundidos, los gestos directos y la información de estado útil.</string>
+    <string name="interaction_feedback">Respuesta de interacción</string>
+    <string name="haptic_feedback">Respuesta háptica</string>
+    <string name="haptic_feedback_desc">Usa vibraciones sutiles para el estado de generación y acciones importantes.</string>
 
     <!-- Language -->
     <string name="language_title">Idioma</string>
@@ -693,6 +769,8 @@
     <string name="remove">Quitar</string>
     <string name="menu">Menú</string>
     <string name="options">Opciones</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">Borrar todo</string>
     <string name="video_thumbnail">Miniatura del vídeo</string>
     <string name="play">Reproducir</string>
     <string name="video_preview">Vista previa del vídeo</string>
@@ -709,10 +787,10 @@
     <string name="delete_chat">¿Eliminar chat?</string>
     <string name="delete_chat_confirm">¿Seguro que quieres eliminar esta conversación? Esta acción no se puede deshacer.</string>
     <string name="delete_message_title">¿Eliminar mensaje?</string>
+    <string name="delete_message_confirm">Este mensaje y todas las respuestas posteriores se eliminarán permanentemente.</string>
     <string name="delete_compact_message_title">¿Eliminar mensaje de compactación?</string>
     <string name="delete_compact_message_confirm">Solo se eliminará este mensaje de compactación.</string>
     <string name="recompact">Volver a compactar</string>
-    <string name="delete_message_confirm">Este mensaje y todas las respuestas posteriores se eliminarán permanentemente.</string>
     <string name="conversation_prompt">Instrucción de la conversación</string>
     <string name="global_default_format">Predeterminado global (%1$s)</string>
     <string name="save">Guardar</string>
@@ -886,12 +964,15 @@
     <string name="no_api_key_configured">No hay clave de API configurada.</string>
     <string name="no_api_key_for_provider">No hay credenciales configuradas para %s. Añade una clave de API o una URL base en Ajustes.</string>
     <string name="local_model_not_found">No se encontró el archivo del modelo local. Vuelve a importar el modelo.</string>
+    <string name="local_context_exceeded">Esta conversación necesita %1$d tokens de entrada, pero el contexto del modelo local es de %2$d tokens. Reduce la ventana de contexto o aumenta el contexto del modelo.</string>
     <string name="all_messages_cached">Los %1$d mensajes están en caché.</string>
     <string name="cached_partial_failed">%1$d de %2$d en caché. %3$d fallaron.</string>
     <string name="retry">Reintentar</string>
     <string name="parse_error">Error de análisis</string>
     <string name="unknown_error">Error desconocido</string>
     <string name="could_not_read_file">No se pudo leer el archivo</string>
+    <string name="import_file_too_large">El archivo es demasiado grande (%1$d MB). Elige un archivo de exportación más pequeño.</string>
+    <string name="import_out_of_memory">No hay memoria suficiente para importar este archivo. Elige una exportación más pequeña.</string>
 
     <!-- Documentation -->
     <string name="documentation">Documentación</string>
@@ -1002,56 +1083,6 @@
     <string name="proxy_password">Contraseña (opcional)</string>
     <string name="proxy_bypass">Lista de exclusión</string>
     <string name="proxy_bypass_desc">Hosts y rangos CIDR que se conectan directamente, uno por línea</string>
-    <string name="conversation_fork">Bifurcar conversación</string>
-    <string name="conversation_fork_failed">No se pudo bifurcar la conversación: %1$s</string>
-    <string name="conversation_fork_from_here">Bifurcar desde aquí</string>
-    <string name="conversation_search">Buscar</string>
-    <string name="conversation_search_hint">Buscar…</string>
-    <string name="conversation_share">Compartir</string>
-    <string name="conversation_share_failed">No se pudo compartir la conversación: %1$s</string>
-    <string name="custom_provider_protocol_label">Formato de API</string>
-    <string name="file_path_unknown">Archivo desconocido</string>
-    <string name="import_file_too_large">El archivo es demasiado grande (%1$d MB). Elige un archivo de exportación más pequeño.</string>
-    <string name="import_out_of_memory">No hay memoria suficiente para importar este archivo. Elige una exportación más pequeña.</string>
-    <string name="local_context_exceeded">Esta conversación necesita %1$d tokens de entrada, pero el contexto del modelo local es de %2$d tokens. Reduce la ventana de contexto o aumenta el contexto del modelo.</string>
-    <string name="queue_clear_all">Borrar todo</string>
-    <string name="tool_background_job_running">La tarea en segundo plano %1$s está en ejecución</string>
-    <string name="tool_execution_stopped">Ejecución de herramienta detenida</string>
-    <string name="tool_exit_code">Salida %1$d</string>
-    <string name="tool_exit">Salida</string>
-    <string name="tool_shell_returned_code">El comando devolvió %1$d</string>
-    <string name="tool_shell_detail_executed">Ejecutado</string>
-    <string name="tool_shell_detail_returned_code">Devuelto %1$d</string>
-    <string name="tool_shell_returned">Devuelto</string>
-    <string name="tool_found_no_matches">No se encontraron coincidencias</string>
-    <string name="tool_line_count">%1$d líneas</string>
-    <string name="tool_listing_shell_jobs">Listando tareas de shell…</string>
-    <string name="tool_no_output">(Sin salida)</string>
-    <string name="tool_no_shell_jobs">No hay tareas de shell</string>
-    <string name="tool_read_file_empty">%1$s leído · vacío</string>
-    <string name="tool_reading_shell_job">Leyendo la tarea de shell %1$s…</string>
-    <string name="tool_shell_executed_successfully">Comando ejecutado correctamente</string>
-    <string name="tool_shell_execution_completed">Ejecución del comando completada</string>
-    <string name="tool_shell_exit_summary">Salida %1$d · %2$d bytes</string>
-    <string name="tool_shell_job">Tarea de shell</string>
-    <string name="tool_shell_job_count">Se listaron %1$d tareas de shell</string>
-    <string name="tool_shell_job_status">Tarea de shell %1$s leída</string>
-    <string name="tool_shell_jobs">Tareas de shell</string>
-    <string name="tool_shell_returned_exit_code">El comando devolvió el código de salida %1$d</string>
-    <string name="tool_state_executing">Ejecutando</string>
-    <string name="tool_state_failed">Falló</string>
-    <string name="tool_state_running">En ejecución</string>
-    <string name="tool_state_stopped">Detenido</string>
-    <string name="tool_state_succeeded">Correcto</string>
-    <string name="tool_stop_shell_job">Detener tarea de shell</string>
-    <string name="tool_stopped_shell_job">Se detuvo la tarea de shell %1$s</string>
-    <string name="tool_stopping_shell_job">Deteniendo la tarea de shell %1$s…</string>
-    <string name="tool_unknown_device">Dispositivo desconocido</string>
-    <string name="tool_web_result">Resultado %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">API de búsqueda prémium con resultados personalizados. Pago por uso.</string>
-    <string name="web_search_kagi_key">Clave de API de Kagi Search</string>
-    <string name="web_search_kagi_key_hint">Clave de API de kagi.com/api/keys</string>
     <string name="default_service_tier">Nivel de servicio predeterminado</string>
     <string name="openai_service_tier_title">Nivel de servicio</string>
     <string name="openai_service_tier_desc">Controla la latencia y la prioridad de las solicitudes con protocolo OpenAI.</string>
@@ -1076,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">~%1$s / %2$s tokens</string>
+    <string name="context_boundary_active">Límite de compactación activo</string>
+    <string name="context_boundary_none">Sin límite de compactación</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s tokens</string>
-    <string name="context_boundary_active">Límite de compactación activo</string>
-    <string name="context_boundary_none">Sin límite de compactación</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">Desarrollador</string>

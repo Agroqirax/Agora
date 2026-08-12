@@ -162,6 +162,8 @@ internal fun MessageList(
     segmentAppearanceRegistry: SegmentAppearanceRegistry =
         remember { SegmentAppearanceRegistry() },
     lifecycleEntranceTargetMessageId: String? = null,
+    chatWidgetSettings: ChatWidgetSettings = ChatWidgetSettings(),
+    onChatWidgetClick: (ExpandedChatWidget) -> Unit = {},
 ) {
     val motionPolicy = LocalAgoraMotionPolicy.current
     val groupedSegmentAutoExpansionController = remember(conversationId) {
@@ -868,6 +870,8 @@ internal fun MessageList(
                 }
             },
             thoughtExpandedStates = thoughtExpandedStates,
+            chatWidgetSettings = chatWidgetSettings,
+            onChatWidgetClick = onChatWidgetClick,
         )
     }
 

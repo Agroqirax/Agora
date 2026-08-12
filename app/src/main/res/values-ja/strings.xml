@@ -77,6 +77,40 @@
     <string name="tool_call_failed">ツール呼び出しに失敗しました</string>
     <string name="tool_done">完了</string>
     <string name="tool_context">ツール</string>
+    <string name="tool_execution_stopped">ツールの実行を停止しました</string>
+    <string name="tool_state_executing">実行中</string>
+    <string name="tool_state_running">実行中</string>
+    <string name="tool_state_succeeded">成功</string>
+    <string name="tool_state_failed">失敗</string>
+    <string name="tool_state_stopped">停止</string>
+    <string name="tool_unknown_device">不明なデバイス</string>
+    <string name="tool_no_output">（出力なし）</string>
+    <string name="tool_background_job_running">バックグラウンドジョブ %1$s を実行中</string>
+    <string name="tool_shell_jobs">シェルジョブ</string>
+    <string name="tool_shell_job">シェルジョブ</string>
+    <string name="tool_stop_shell_job">シェルジョブを停止</string>
+    <string name="tool_listing_shell_jobs">シェルジョブを一覧表示中…</string>
+    <string name="tool_reading_shell_job">シェルジョブ %1$s を読み取り中…</string>
+    <string name="tool_stopping_shell_job">シェルジョブ %1$s を停止中…</string>
+    <string name="tool_no_shell_jobs">シェルジョブはありません</string>
+    <string name="tool_shell_job_count">%1$d 件のシェルジョブを一覧表示</string>
+    <string name="tool_shell_job_status">シェルジョブ %1$s を読み取りました</string>
+    <string name="tool_stopped_shell_job">シェルジョブ %1$s を停止しました</string>
+    <string name="tool_shell_exit_summary">終了 %1$d · %2$d バイト</string>
+    <string name="tool_shell_executed_successfully">コマンドを正常に実行しました</string>
+    <string name="tool_shell_execution_completed">コマンドの実行が完了しました</string>
+    <string name="tool_shell_returned_exit_code">コマンドが終了コード %1$d を返しました</string>
+    <string name="tool_read_file_empty">%1$s を読み取り · 空</string>
+    <string name="tool_found_no_matches">一致する項目はありません</string>
+    <string name="file_path_unknown">不明なファイル</string>
+    <string name="tool_exit_code">終了 %1$d</string>
+    <string name="tool_exit">終了</string>
+    <string name="tool_shell_returned_code">コマンドは %1$d を返しました</string>
+    <string name="tool_shell_detail_executed">実行済み</string>
+    <string name="tool_shell_detail_returned_code">戻り値 %1$d</string>
+    <string name="tool_shell_returned">戻り値</string>
+    <string name="tool_line_count">%1$d 行</string>
+    <string name="tool_web_result">結果 %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">List Conversations</string>
     <string name="tool_read_conversation">Read Conversation</string>
@@ -208,6 +242,7 @@
     <string name="custom_provider_badge">カスタム</string>
     <string name="custom_provider_add">追加</string>
     <string name="custom_provider_add_title">プロバイダーを追加</string>
+    <string name="custom_provider_protocol_label">API 形式</string>
     <string name="custom_provider_empty">カスタムプロバイダーが追加されていません</string>
     <string name="settings_group_multimodal">マルチモーダル</string>
     <string name="settings_image_gen">画像生成</string>
@@ -217,6 +252,36 @@
     <string name="image_gen_model">画像モデル</string>
     <string name="image_gen_no_model">モデル未選択</string>
     <string name="image_gen_select_model">画像モデルを選択</string>
+    <string name="settings_chat_widgets">チャットウィジェット</string>
+    <string name="settings_chat_widgets_desc">Let the model render interactive widgets inline in chat</string>
+    <string name="settings_html_chat_widgets">HTML Widgets</string>
+    <string name="html_chat_widgets_enable">HTML ウィジェットを有効にする</string>
+    <string name="html_chat_widgets_enable_desc">モデルがサンドボックス化された WebView でインタラクティブなウィジェットをレンダリングできるようにします。</string>
+    <string name="html_chat_widgets_network_enable">ネットワークアクセスを許可する</string>
+    <string name="html_chat_widgets_network_enable_desc">ウィジェットにリモートの画像、フォント、スクリプトをロードさせます。</string>
+    <string name="html_chat_widgets_theme_enable">マッチアプリのテーマ</string>
+    <string name="html_chat_widgets_theme_enable_desc">アプリのテーマをウィジェットに適用します。コントラストとコントラストアクセシビリティは保証できません。</string>
+    <string name="html_chat_widgets_js_enable">JavaScriptを許可する</string>
+    <string name="html_chat_widgets_js_enable_desc">ウィジェットで JavaScript を実行できるようにします。ウィジェットを静的 HTML/CSS のみとしてレンダリングする場合はオフにします。</string>
+    <string name="settings_mermaid_chat_widgets">人魚の図</string>
+    <string name="mermaid_chat_widgets_enable">人魚図を有効にする</string>
+    <string name="mermaid_chat_widgets_enable_desc">Let the model render Mermaid diagrams inline.</string>
+    <string name="settings_vega_lite_chat_widgets">Vega-Lite チャート</string>
+    <string name="vega_lite_chat_widgets_enable">Vega-Lite チャートを有効にする</string>
+    <string name="vega_lite_chat_widgets_enable_desc">モデルに Vega-Lite チャートをインラインでレンダリングさせます。</string>
+    <string name="settings_geojson_chat_widgets">地図</string>
+    <string name="geojson_chat_widgets_enable">マップを有効にする</string>
+    <string name="geojson_chat_widgets_enable_desc">モデルに GeoJSON、GPX、または KML からマップをインラインでレンダリングさせます。</string>
+    <string name="geojson_tile_url_label">マップタイルサーバー</string>
+    <string name="geojson_tile_url_desc">{s}/{z}/{x}/{y} プレースホルダーを使用した、ベースマップ タイル画像の URL テンプレート。</string>
+    <string name="geojson_theme_enable">マッチアプリのテーマ</string>
+    <string name="geojson_theme_enable_desc">In dark mode, invert and recolor map tiles to roughly match the app\'s theme.</string>
+    <string name="geojson_route_provider_label">ルートリンクを開く</string>
+    <string name="geojson_select_route_provider">ルートプロバイダーの選択</string>
+    <string name="geojson_route_provider_osm">オープンストリートマップ</string>
+    <string name="geojson_route_provider_osm_desc">openstreetmap.org またはインストールされている OSM ベースのアプリで道順を開きます</string>
+    <string name="geojson_route_provider_google">Googleマップ</string>
+    <string name="geojson_route_provider_google_desc">Google マップでルート案内を開くか、ブラウザがインストールされていない場合はブラウザでルート案内を開きます</string>
     <string name="image_gen_size">デフォルトサイズ</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">すべてのモデルを表示</string>
@@ -225,6 +290,13 @@
     <string name="tool_generated_image">画像を生成しました</string>
     <string name="img_action_save">ギャラリーに保存</string>
     <string name="img_action_share">共有</string>
+    <string name="conversation_fork">会話を分岐</string>
+    <string name="conversation_fork_from_here">ここから分岐</string>
+    <string name="conversation_share">共有</string>
+    <string name="conversation_search">検索</string>
+    <string name="conversation_search_hint">検索…</string>
+    <string name="conversation_fork_failed">会話を分岐できませんでした: %1$s</string>
+    <string name="conversation_share_failed">会話を共有できませんでした: %1$s</string>
     <string name="img_saved">ギャラリーに保存しました</string>
     <string name="img_save_failed">保存に失敗しました</string>
     <string name="img_info_dimensions">寸法</string>
@@ -308,8 +380,8 @@
     <string name="context_window">コンテキストウィンドウ</string>
     <string name="context_window_desc">1 回の生成で利用できる最大コンテキスト</string>
     <string name="context_window_default">デフォルトのコンテキストウィンドウ</string>
-    <string name="context_token_budget_value">推定 %1$s トークン</string>
     <string name="context_retain">直近 %1$d 件のメッセージを保持</string>
+    <string name="context_token_budget_value">推定 %1$s トークン</string>
     <string name="context_visualize">コンテキストの展開を可視化</string>
     <string name="context_visualize_desc">コンテキストウィンドウ外のメッセージを暗くする</string>
     <string name="gen_temperature">温度</string>
@@ -331,10 +403,10 @@
     <string name="gen_thinking_enabled_desc">モデルの思考・推論機能を有効にする</string>
     <string name="gen_thinking_level">思考レベル</string>
     <string name="gen_thinking_level_desc">思考の深さを制御。高いほど徹底的な推論</string>
+    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_low">低</string>
     <string name="gen_thinking_level_medium">中</string>
     <string name="gen_thinking_level_high">高</string>
-    <string name="gen_thinking_level_minimal">極低</string>
     <string name="gen_thinking_level_xhigh">超高</string>
     <string name="gen_thinking_level_max">最大</string>
     <string name="thinking_effort_label">思考強度</string>
@@ -357,7 +429,6 @@
     <string name="advanced_settings">詳細</string>
     <string name="advanced_generation_title">詳細設定</string>
     <string name="advanced_per_conversation">会話ごとの上書き</string>
-    <string name="appearance_interface">インターフェース</string>
     <string name="message_display">メッセージ表示</string>
     <string name="tool_call_display_mode">思考とツールブロック</string>
     <string name="tool_call_display_mode_timeline">タイムライン</string>
@@ -368,9 +439,6 @@
     <string name="auto_expand_active_group">アクティブなグループを自動展開</string>
     <string name="auto_expand_active_group_desc">現在の思考・ツールグループを自動で展開し、モデルが次へ進むと折りたたみます。</string>
     <string name="tool_call_display_mode_compact_desc">思考とツールブロックを回答の上にまとめて表示します</string>
-    <string name="interaction_feedback">操作フィードバック</string>
-    <string name="haptic_feedback">触覚フィードバック</string>
-    <string name="haptic_feedback_desc">生成状態と重要な操作に控えめな振動を使用します。</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">ウェブ検索</string>
@@ -378,6 +446,7 @@
     <string name="web_search_enable_desc">ツール呼び出しによりモデルがウェブを検索できるようにする</string>
     <string name="web_search_provider_label">検索プロバイダー</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -387,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">プライバシー重視の検索 API。無料枠あり。</string>
+    <string name="web_search_kagi_desc">パーソナライズされた結果を提供するプレミアム検索 API。従量課金。</string>
     <string name="web_search_serper_desc">高速な Google 検索 API。月 2,500 回まで無料。</string>
     <string name="web_search_tavily_desc">AI 最適化された検索 API。LLM エージェント向けに構築。</string>
     <string name="web_search_searxng_desc">セルフホスト型のメタ検索エンジン。自分のインスタンスでの利用が最適。</string>
@@ -394,6 +464,8 @@
     <string name="web_search_select_provider">検索プロバイダーを選択</string>
     <string name="web_search_brave_key">Brave Search API キー</string>
     <string name="web_search_brave_key_hint">brave.com/search/api/ の API キー</string>
+    <string name="web_search_kagi_key">Kagi Search API キー</string>
+    <string name="web_search_kagi_key_hint">kagi.com/api/keys の API キー</string>
     <string name="web_search_serper_key">Serper API キー</string>
     <string name="web_search_serper_key_hint">serper.dev の API キー</string>
     <string name="web_search_tavily_key">Tavily API キー</string>
@@ -448,6 +520,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">ディスク使用量</string>
     <string name="sandbox_install">インストール</string>
+    <string name="sandbox_upgrade">アップグレード</string>
     <string name="sandbox_install_packages">パッケージをインストール</string>
     <string name="sandbox_package_name">パッケージ名</string>
     <string name="sandbox_quick_install">クイックインストール</string>
@@ -486,7 +559,6 @@
     <string name="sandbox_manage_desc">パッケージのインストール、設定、またはリセット</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">インストール済みパッケージ（%d）</string>
-    <string name="sandbox_upgrade">アップグレード</string>
     <string name="sandbox_browse_files">ファイルを閲覧</string>
     <string name="sandbox_browse_files_desc">システムのファイルマネージャーでサンドボックスディレクトリを開く</string>
 
@@ -559,6 +631,7 @@
     <string name="settings_appearance">外観</string>
     <string name="settings_appearance_desc">テーマ、配色、ダイナミックカラー</string>
     <string name="appearance_title">外観</string>
+    <string name="appearance_interface">インターフェース</string>
     <string name="theme_mode">テーマモード</string>
     <string name="theme_mode_light">ライト</string>
     <string name="theme_mode_dark">ダーク</string>
@@ -593,6 +666,9 @@
     <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">モーションを減らす</string>
     <string name="reduce_motion_desc">継続的な動きや大きな空間移動を減らし、フェード、直接操作、必要な状態フィードバックは維持します。</string>
+    <string name="interaction_feedback">操作フィードバック</string>
+    <string name="haptic_feedback">触覚フィードバック</string>
+    <string name="haptic_feedback_desc">生成状態と重要な操作に控えめな振動を使用します。</string>
 
     <!-- Language -->
     <string name="language_title">言語</string>
@@ -693,6 +769,8 @@
     <string name="remove">削除</string>
     <string name="menu">メニュー</string>
     <string name="options">オプション</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">すべて消去</string>
     <string name="video_thumbnail">動画のサムネイル</string>
     <string name="play">再生</string>
     <string name="video_preview">動画のプレビュー</string>
@@ -709,10 +787,10 @@
     <string name="delete_chat">チャットを削除しますか?</string>
     <string name="delete_chat_confirm">この会話を削除してもよろしいですか? この操作は取り消せません。</string>
     <string name="delete_message_title">メッセージを削除しますか?</string>
+    <string name="delete_message_confirm">このメッセージとそれに続くすべての返信が完全に削除されます。</string>
     <string name="delete_compact_message_title">コンパクト メッセージを削除しますか?</string>
     <string name="delete_compact_message_confirm">このコンパクト メッセージだけが削除されます。</string>
     <string name="recompact">再コンパクト</string>
-    <string name="delete_message_confirm">このメッセージとそれに続くすべての返信が完全に削除されます。</string>
     <string name="conversation_prompt">会話プロンプト</string>
     <string name="global_default_format">グローバルデフォルト（%1$s）</string>
     <string name="save">保存</string>
@@ -886,12 +964,15 @@
     <string name="no_api_key_configured">API キーが設定されていません。</string>
     <string name="no_api_key_for_provider">%s の認証情報が設定されていません。設定で API キーまたはベース URL を追加してください。</string>
     <string name="local_model_not_found">ローカルモデルファイルが見つかりません。モデルを再インポートしてください。</string>
+    <string name="local_context_exceeded">この会話には %1$d 個のプロンプトトークンが必要ですが、ローカルモデルのコンテキストは %2$d トークンです。コンテキストウィンドウを減らすか、モデルのコンテキストサイズを増やしてください。</string>
     <string name="all_messages_cached">%1$d 件すべてのメッセージをキャッシュしました。</string>
     <string name="cached_partial_failed">%2$d 件中 %1$d 件をキャッシュしました。%3$d 件失敗しました。</string>
     <string name="retry">再試行</string>
     <string name="parse_error">解析エラー</string>
     <string name="unknown_error">不明なエラー</string>
     <string name="could_not_read_file">ファイルを読み込めませんでした</string>
+    <string name="import_file_too_large">ファイルが大きすぎます（%1$d MB）。より小さいエクスポートファイルを選択してください。</string>
+    <string name="import_out_of_memory">このファイルをインポートするためのメモリが不足しています。より小さいエクスポートを選択してください。</string>
 
     <!-- Documentation -->
     <string name="documentation">ドキュメント</string>
@@ -1002,56 +1083,6 @@
     <string name="proxy_password">パスワード(任意)</string>
     <string name="proxy_bypass">バイパスリスト</string>
     <string name="proxy_bypass_desc">直接接続するホストと CIDR 範囲(1 行に 1 つ)</string>
-    <string name="conversation_fork">会話を分岐</string>
-    <string name="conversation_fork_failed">会話を分岐できませんでした: %1$s</string>
-    <string name="conversation_fork_from_here">ここから分岐</string>
-    <string name="conversation_search">検索</string>
-    <string name="conversation_search_hint">検索…</string>
-    <string name="conversation_share">共有</string>
-    <string name="conversation_share_failed">会話を共有できませんでした: %1$s</string>
-    <string name="custom_provider_protocol_label">API 形式</string>
-    <string name="file_path_unknown">不明なファイル</string>
-    <string name="import_file_too_large">ファイルが大きすぎます（%1$d MB）。より小さいエクスポートファイルを選択してください。</string>
-    <string name="import_out_of_memory">このファイルをインポートするためのメモリが不足しています。より小さいエクスポートを選択してください。</string>
-    <string name="local_context_exceeded">この会話には %1$d 個のプロンプトトークンが必要ですが、ローカルモデルのコンテキストは %2$d トークンです。コンテキストウィンドウを減らすか、モデルのコンテキストサイズを増やしてください。</string>
-    <string name="queue_clear_all">すべて消去</string>
-    <string name="tool_background_job_running">バックグラウンドジョブ %1$s を実行中</string>
-    <string name="tool_execution_stopped">ツールの実行を停止しました</string>
-    <string name="tool_exit_code">終了 %1$d</string>
-    <string name="tool_exit">終了</string>
-    <string name="tool_shell_returned_code">コマンドは %1$d を返しました</string>
-    <string name="tool_shell_detail_executed">実行済み</string>
-    <string name="tool_shell_detail_returned_code">戻り値 %1$d</string>
-    <string name="tool_shell_returned">戻り値</string>
-    <string name="tool_found_no_matches">一致する項目はありません</string>
-    <string name="tool_line_count">%1$d 行</string>
-    <string name="tool_listing_shell_jobs">シェルジョブを一覧表示中…</string>
-    <string name="tool_no_output">（出力なし）</string>
-    <string name="tool_no_shell_jobs">シェルジョブはありません</string>
-    <string name="tool_read_file_empty">%1$s を読み取り · 空</string>
-    <string name="tool_reading_shell_job">シェルジョブ %1$s を読み取り中…</string>
-    <string name="tool_shell_executed_successfully">コマンドを正常に実行しました</string>
-    <string name="tool_shell_execution_completed">コマンドの実行が完了しました</string>
-    <string name="tool_shell_exit_summary">終了 %1$d · %2$d バイト</string>
-    <string name="tool_shell_job">シェルジョブ</string>
-    <string name="tool_shell_job_count">%1$d 件のシェルジョブを一覧表示</string>
-    <string name="tool_shell_job_status">シェルジョブ %1$s を読み取りました</string>
-    <string name="tool_shell_jobs">シェルジョブ</string>
-    <string name="tool_shell_returned_exit_code">コマンドが終了コード %1$d を返しました</string>
-    <string name="tool_state_executing">実行中</string>
-    <string name="tool_state_failed">失敗</string>
-    <string name="tool_state_running">実行中</string>
-    <string name="tool_state_stopped">停止</string>
-    <string name="tool_state_succeeded">成功</string>
-    <string name="tool_stop_shell_job">シェルジョブを停止</string>
-    <string name="tool_stopped_shell_job">シェルジョブ %1$s を停止しました</string>
-    <string name="tool_stopping_shell_job">シェルジョブ %1$s を停止中…</string>
-    <string name="tool_unknown_device">不明なデバイス</string>
-    <string name="tool_web_result">結果 %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">パーソナライズされた結果を提供するプレミアム検索 API。従量課金。</string>
-    <string name="web_search_kagi_key">Kagi Search API キー</string>
-    <string name="web_search_kagi_key_hint">kagi.com/api/keys の API キー</string>
     <string name="default_service_tier">デフォルトのサービス階層</string>
     <string name="openai_service_tier_title">サービス階層</string>
     <string name="openai_service_tier_desc">OpenAI プロトコルのリクエストの遅延と処理優先度を制御します。</string>
@@ -1076,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">約 %1$s / %2$s tokens</string>
+    <string name="context_boundary_active">コンパクト境界が有効</string>
+    <string name="context_boundary_none">コンパクト境界なし</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">約 %1$s / %2$s tokens</string>
-    <string name="context_boundary_active">コンパクト境界が有効</string>
-    <string name="context_boundary_none">コンパクト境界なし</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">開発者</string>

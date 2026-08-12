@@ -342,7 +342,7 @@ fun MainNavigation(
         }
     }
     var fullScreenMediaUrls by remember { mutableStateOf<List<String>?>(null) }
-    var fullScreenMediaIndex by remember { mutableIntStateOf(0) }
+    var fullScreenMediaIndex by remember { mutableIntStateOf(0) }; var fullScreenChatWidget by remember { mutableStateOf<com.newoether.agora.ui.chat.ExpandedChatWidget?>(null) }
     var pdfViewerSelection by remember { mutableStateOf(setOf<Int>()) }
     val onTogglePdfSelection: (Int) -> Unit = { page ->
         pdfViewerSelection = if (page in pdfViewerSelection) pdfViewerSelection - page else pdfViewerSelection + page
@@ -364,7 +364,7 @@ fun MainNavigation(
     // Full-screen media viewer (and settings) drop the snackbar to the bottom (nav-bar inset only);
     // in chat it floats above the bottom bar. The animateDpAsState below turns the change into a
     // rise/fall animation as the viewer opens/closes.
-    val targetSnackbarPadding = if (showSettings || fullScreenMediaUrls != null) navBarPadding else chatSnackbarOffset
+    val targetSnackbarPadding = if (showSettings || fullScreenMediaUrls != null || fullScreenChatWidget != null) navBarPadding else chatSnackbarOffset
     val snackbarBottomPadding by animateDpAsState(
         targetValue = targetSnackbarPadding,
         animationSpec = if (motionPolicy.allowSpatialTransitions) {
@@ -769,7 +769,8 @@ fun MainNavigation(
                 onInitPdfSelection = onInitPdfSelection,
                 fullScreenViewerUrls = fullScreenMediaUrls,
                 topLevelPresentation = topLevelPresentation.owner,
-                onSnackbarOffsetChanged = { chatSnackbarOffset = it }
+                onSnackbarOffsetChanged = { chatSnackbarOffset = it },
+                onChatWidgetClick = { widget -> focusManager.clearFocus(); topLevelPresentation.present(TopLevelPresentation.WIDGET_PREVIEW); fullScreenChatWidget = widget }
             )
 
             SettingsOverlayHost(
@@ -874,6 +875,9 @@ fun MainNavigation(
                     hapticsEnabled = hapticsEnabled
                 )
             }
+
+            // Full screen chat widget
+            ChatWidgetPreviewOverlay(fullScreenChatWidget, topLevelPresentation, onClose = { fullScreenChatWidget = null })
 
             // Text file viewer
             val fileContent by viewModel.previewFileContent.collectAsState()

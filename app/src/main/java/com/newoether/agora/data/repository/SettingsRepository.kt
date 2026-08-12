@@ -7,6 +7,7 @@ import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_ENABLED
 import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT
+import com.newoether.agora.data.DEFAULT_GEOJSON_TILE_URL
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
@@ -151,6 +152,16 @@ class SettingsRepository(
     val imageGenEnabled: StateFlow<Boolean> = hot(settingsManager.imageGenEnabled, false)
     val imageGenModel: StateFlow<String?> = hot(settingsManager.imageGenModel, null)
     val imageGenSize: StateFlow<String> = hot(settingsManager.imageGenSize, "1024x1024")
+    val htmlChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlChatWidgetsEnabled, true)
+    val htmlChatWidgetsNetworkEnabled: StateFlow<Boolean> = hot(settingsManager.htmlChatWidgetsNetworkEnabled, true)
+    val htmlChatWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.htmlChatWidgetsThemeEnabled, true)
+    val htmlChatWidgetsJsEnabled: StateFlow<Boolean> = hot(settingsManager.htmlChatWidgetsJsEnabled, true)
+    val mermaidChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.mermaidChatWidgetsEnabled, true)
+    val vegaLiteChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.vegaLiteChatWidgetsEnabled, true)
+    val geoJsonChatWidgetsEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonChatWidgetsEnabled, true)
+    val geoJsonTileUrl: StateFlow<String> = hot(settingsManager.geoJsonTileUrl, DEFAULT_GEOJSON_TILE_URL)
+    val geoJsonChatWidgetsThemeEnabled: StateFlow<Boolean> = hot(settingsManager.geoJsonChatWidgetsThemeEnabled, true)
+    val geoJsonRouteProvider: StateFlow<String> = hot(settingsManager.geoJsonRouteProvider, "osm")
     val showDocumentationFab: StateFlow<Boolean> = hot(settingsManager.showDocumentationFab, true)
     val developerOptionsEnabled: StateFlow<Boolean> =
         hot(settingsManager.developerOptionsEnabled, false)
@@ -472,6 +483,16 @@ class SettingsRepository(
     fun setImageGenEnabled(enabled: Boolean) = scope.launch { settingsManager.saveImageGenEnabled(enabled) }
     fun setImageGenModel(model: String?) = scope.launch { settingsManager.saveImageGenModel(model) }
     fun setImageGenSize(size: String) = scope.launch { settingsManager.saveImageGenSize(size) }
+    fun setHtmlChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setHtmlChatWidgetsEnabled(enabled) }
+    fun setHtmlChatWidgetsNetworkEnabled(enabled: Boolean) = scope.launch { settingsManager.setHtmlChatWidgetsNetworkEnabled(enabled) }
+    fun setHtmlChatWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.setHtmlChatWidgetsThemeEnabled(enabled) }
+    fun setHtmlChatWidgetsJsEnabled(enabled: Boolean) = scope.launch { settingsManager.setHtmlChatWidgetsJsEnabled(enabled) }
+    fun setMermaidChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setMermaidChatWidgetsEnabled(enabled) }
+    fun setVegaLiteChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setVegaLiteChatWidgetsEnabled(enabled) }
+    fun setGeoJsonChatWidgetsEnabled(enabled: Boolean) = scope.launch { settingsManager.setGeoJsonChatWidgetsEnabled(enabled) }
+    fun setGeoJsonTileUrl(url: String) = scope.launch { settingsManager.setGeoJsonTileUrl(url) }
+    fun setGeoJsonChatWidgetsThemeEnabled(enabled: Boolean) = scope.launch { settingsManager.setGeoJsonChatWidgetsThemeEnabled(enabled) }
+    fun setGeoJsonRouteProvider(provider: String) = scope.launch { settingsManager.setGeoJsonRouteProvider(provider) }
     fun setShowDocumentationFab(enabled: Boolean) = scope.launch { settingsManager.saveShowDocumentationFab(enabled) }
     fun setDeveloperOptionsEnabled(enabled: Boolean) =
         scope.launch { settingsManager.saveDeveloperOptionsEnabled(enabled) }

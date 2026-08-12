@@ -104,7 +104,9 @@ internal fun MessageItem(
     onToggleSelection: () -> Unit = {},
     onLayoutMutationStarted: (String) -> Unit = {},
     onLayoutMutationSettled: (String) -> Unit = {},
-    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
+    thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() },
+    chatWidgetSettings: com.newoether.agora.ui.chat.ChatWidgetSettings = com.newoether.agora.ui.chat.ChatWidgetSettings(),
+    onChatWidgetClick: (com.newoether.agora.ui.chat.ExpandedChatWidget) -> Unit = {}
 ) {
     var showSegmentDetail by remember { mutableStateOf(false) }
     var detailUsesExplicitBackHandler by remember { mutableStateOf(false) }
@@ -186,9 +188,11 @@ internal fun MessageItem(
         )
     }
     val markdownAssets = rememberChatMarkdownAssets(
-        textColor,
-        searchHighlight,
-        parseInlineDollarMath,
+        textColor = textColor,
+        searchHighlight = searchHighlight,
+        parseInlineDollarMath = parseInlineDollarMath,
+        chatWidgetSettings = chatWidgetSettings,
+        onChatWidgetClick = onChatWidgetClick,
     )
     val markdownRenderContext = markdownAssets.renderContext
     val thoughtMarkdownRenderContext = markdownAssets.thoughtRenderContext

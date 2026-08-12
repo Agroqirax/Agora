@@ -11,6 +11,7 @@ enum class TopLevelPresentation {
     TASKS,
     MEDIA_PREVIEW,
     TEXT_PREVIEW,
+    WIDGET_PREVIEW,
 }
 
 /** Single main-thread owner for the top-level surface currently covering Chat. */

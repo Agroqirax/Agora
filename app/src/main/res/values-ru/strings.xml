@@ -77,6 +77,40 @@
     <string name="tool_call_failed">Вызов инструмента не выполнен</string>
     <string name="tool_done">Готово</string>
     <string name="tool_context">Инструмент</string>
+    <string name="tool_execution_stopped">Выполнение инструмента остановлено</string>
+    <string name="tool_state_executing">Выполнение</string>
+    <string name="tool_state_running">Выполняется</string>
+    <string name="tool_state_succeeded">Успешно</string>
+    <string name="tool_state_failed">Ошибка</string>
+    <string name="tool_state_stopped">Остановлено</string>
+    <string name="tool_unknown_device">Неизвестное устройство</string>
+    <string name="tool_no_output">(Нет вывода)</string>
+    <string name="tool_background_job_running">Фоновая задача %1$s выполняется</string>
+    <string name="tool_shell_jobs">Задачи оболочки</string>
+    <string name="tool_shell_job">Задача оболочки</string>
+    <string name="tool_stop_shell_job">Остановить задачу оболочки</string>
+    <string name="tool_listing_shell_jobs">Получение списка задач оболочки…</string>
+    <string name="tool_reading_shell_job">Чтение задачи оболочки %1$s…</string>
+    <string name="tool_stopping_shell_job">Остановка задачи оболочки %1$s…</string>
+    <string name="tool_no_shell_jobs">Нет задач оболочки</string>
+    <string name="tool_shell_job_count">Показано задач оболочки: %1$d</string>
+    <string name="tool_shell_job_status">Задача оболочки %1$s прочитана</string>
+    <string name="tool_stopped_shell_job">Задача оболочки %1$s остановлена</string>
+    <string name="tool_shell_exit_summary">Код выхода %1$d · %2$d байт</string>
+    <string name="tool_shell_executed_successfully">Команда успешно выполнена</string>
+    <string name="tool_shell_execution_completed">Выполнение команды завершено</string>
+    <string name="tool_shell_returned_exit_code">Команда вернула код выхода %1$d</string>
+    <string name="tool_read_file_empty">Прочитано %1$s · пусто</string>
+    <string name="tool_found_no_matches">Совпадений не найдено</string>
+    <string name="file_path_unknown">Неизвестный файл</string>
+    <string name="tool_exit_code">Код выхода %1$d</string>
+    <string name="tool_exit">Выход</string>
+    <string name="tool_shell_returned_code">Команда вернула %1$d</string>
+    <string name="tool_shell_detail_executed">Выполнено</string>
+    <string name="tool_shell_detail_returned_code">Возвращено %1$d</string>
+    <string name="tool_shell_returned">Возврат</string>
+    <string name="tool_line_count">%1$d строк</string>
+    <string name="tool_web_result">Результат %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">List Conversations</string>
     <string name="tool_read_conversation">Read Conversation</string>
@@ -208,6 +242,7 @@
     <string name="custom_provider_badge">Свой</string>
     <string name="custom_provider_add">Добавить</string>
     <string name="custom_provider_add_title">Добавить провайдера</string>
+    <string name="custom_provider_protocol_label">Формат API</string>
     <string name="custom_provider_empty">Пользовательские провайдеры не добавлены</string>
     <string name="settings_group_multimodal">Мультимодальность</string>
     <string name="settings_image_gen">Генерация изображений</string>
@@ -217,6 +252,36 @@
     <string name="image_gen_model">Модель изображений</string>
     <string name="image_gen_no_model">Модель не выбрана</string>
     <string name="image_gen_select_model">Выбрать модель изображений</string>
+    <string name="settings_chat_widgets">Виджеты чата</string>
+    <string name="settings_chat_widgets_desc">Позвольте модели отображать интерактивные виджеты прямо в чате.</string>
+    <string name="settings_html_chat_widgets">HTML-виджеты</string>
+    <string name="html_chat_widgets_enable">Enable HTML Widgets</string>
+    <string name="html_chat_widgets_enable_desc">Позвольте модели отображать интерактивные виджеты в изолированном WebView.</string>
+    <string name="html_chat_widgets_network_enable">Разрешить доступ к сети</string>
+    <string name="html_chat_widgets_network_enable_desc">Let widgets load remote images, fonts, and scripts.</string>
+    <string name="html_chat_widgets_theme_enable">Соответствующая тема приложения</string>
+    <string name="html_chat_widgets_theme_enable_desc">Apply app theme to widget. Contrast &amp; accessibility cannot be guaranteed.</string>
+    <string name="html_chat_widgets_js_enable">Разрешить JavaScript</string>
+    <string name="html_chat_widgets_js_enable_desc">Разрешите виджетам запускать JavaScript. Отключите эту опцию, чтобы виджеты отображались только как статический HTML/CSS.</string>
+    <string name="settings_mermaid_chat_widgets">Схемы Русалок</string>
+    <string name="mermaid_chat_widgets_enable">Включить диаграммы русалки</string>
+    <string name="mermaid_chat_widgets_enable_desc">Позвольте модели отображать диаграммы Mermaid в режиме онлайн.</string>
+    <string name="settings_vega_lite_chat_widgets">Графики Вега-Лайт</string>
+    <string name="vega_lite_chat_widgets_enable">Включить графики Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable_desc">Позвольте модели отображать диаграммы Vega-Lite в режиме онлайн.</string>
+    <string name="settings_geojson_chat_widgets">Maps</string>
+    <string name="geojson_chat_widgets_enable">Включить карты</string>
+    <string name="geojson_chat_widgets_enable_desc">Позвольте модели визуализировать карты из GeoJSON, GPX или KML.</string>
+    <string name="geojson_tile_url_label">Сервер тайлов карты</string>
+    <string name="geojson_tile_url_desc">Шаблон URL-адреса для изображений фрагментов базовой карты с использованием заполнителей {s}/{z}/{x}/{y}.</string>
+    <string name="geojson_theme_enable">Match App Theme</string>
+    <string name="geojson_theme_enable_desc">В темном режиме инвертируйте и перекрашивайте фрагменты карты, чтобы они примерно соответствовали теме приложения.</string>
+    <string name="geojson_route_provider_label">Ссылки на маршруты открыты в</string>
+    <string name="geojson_select_route_provider">Выберите поставщика маршрутов</string>
+    <string name="geojson_route_provider_osm">OpenStreetMap</string>
+    <string name="geojson_route_provider_osm_desc">Открывает маршруты на openstreetmap.org или в установленном приложении на базе OSM.</string>
+    <string name="geojson_route_provider_google">Карты Google</string>
+    <string name="geojson_route_provider_google_desc">Открывает маршруты в Картах Google или в браузере, если он не установлен.</string>
     <string name="image_gen_size">Размер по умолчанию</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Показать все модели</string>
@@ -225,6 +290,13 @@
     <string name="tool_generated_image">Изображение создано</string>
     <string name="img_action_save">Сохранить в галерею</string>
     <string name="img_action_share">Поделиться</string>
+    <string name="conversation_fork">Создать ветку диалога</string>
+    <string name="conversation_fork_from_here">Создать ветку отсюда</string>
+    <string name="conversation_share">Поделиться</string>
+    <string name="conversation_search">Поиск</string>
+    <string name="conversation_search_hint">Поиск…</string>
+    <string name="conversation_fork_failed">Не удалось создать ветку диалога: %1$s</string>
+    <string name="conversation_share_failed">Не удалось поделиться диалогом: %1$s</string>
     <string name="img_saved">Сохранено в галерею</string>
     <string name="img_save_failed">Ошибка сохранения</string>
     <string name="img_info_dimensions">Размеры</string>
@@ -308,8 +380,8 @@
     <string name="context_window">Окно контекста</string>
     <string name="context_window_desc">Максимальный контекст, доступный для одной генерации</string>
     <string name="context_window_default">Окно контекста по умолчанию</string>
-    <string name="context_token_budget_value">Примерно %1$s токенов</string>
     <string name="context_retain">Сохранять %1$d последних сообщений</string>
+    <string name="context_token_budget_value">Примерно %1$s токенов</string>
     <string name="context_visualize">Визуализировать заполнение контекста</string>
     <string name="context_visualize_desc">Затемнять сообщения вне окна контекста</string>
     <string name="gen_temperature">Температура</string>
@@ -331,10 +403,10 @@
     <string name="gen_thinking_enabled_desc">Включить способность модели к размышлению/рассуждению</string>
     <string name="gen_thinking_level">Уровень размышления</string>
     <string name="gen_thinking_level_desc">Управляет глубиной размышления; выше = более тщательное рассуждение</string>
+    <string name="gen_thinking_level_minimal">Очень низкий</string>
     <string name="gen_thinking_level_low">Низкий</string>
     <string name="gen_thinking_level_medium">Средний</string>
     <string name="gen_thinking_level_high">Высокий</string>
-    <string name="gen_thinking_level_minimal">Очень низкий</string>
     <string name="gen_thinking_level_xhigh">Очень высокий</string>
     <string name="gen_thinking_level_max">Максимум</string>
     <string name="thinking_effort_label">Глубина размышления</string>
@@ -357,7 +429,6 @@
     <string name="advanced_settings">Дополнительно</string>
     <string name="advanced_generation_title">Дополнительные настройки</string>
     <string name="advanced_per_conversation">Переопределения для отдельной беседы</string>
-    <string name="appearance_interface">Интерфейс</string>
     <string name="message_display">Отображение сообщений</string>
     <string name="tool_call_display_mode">Блоки размышлений и инструментов</string>
     <string name="tool_call_display_mode_timeline">Хронология</string>
@@ -368,9 +439,6 @@
     <string name="auto_expand_active_group">Автоматически раскрывать активную группу</string>
     <string name="auto_expand_active_group_desc">Автоматически раскрывает текущую группу размышлений и инструментов и сворачивает её, когда модель продолжает.</string>
     <string name="tool_call_display_mode_compact_desc">Группировать блоки размышлений и инструментов над ответом</string>
-    <string name="interaction_feedback">Обратная связь взаимодействия</string>
-    <string name="haptic_feedback">Тактильная отдача</string>
-    <string name="haptic_feedback_desc">Использовать легкую вибрацию для статуса генерации и важных действий.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">Веб-поиск</string>
@@ -378,6 +446,7 @@
     <string name="web_search_enable_desc">Разрешить моделям искать в сети через вызовы инструментов</string>
     <string name="web_search_provider_label">Провайдер поиска</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -387,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API поиска с упором на конфиденциальность. Доступен бесплатный тариф.</string>
+    <string name="web_search_kagi_desc">Премиальный поисковый API с персонализированными результатами. Оплата по мере использования.</string>
     <string name="web_search_serper_desc">Быстрый API Google Search. 2 500 бесплатных запросов в месяц.</string>
     <string name="web_search_tavily_desc">API поиска, оптимизированный для ИИ. Создан для LLM-агентов.</string>
     <string name="web_search_searxng_desc">Самостоятельно размещаемый метапоисковик. Лучше использовать со своим экземпляром.</string>
@@ -394,6 +464,8 @@
     <string name="web_search_select_provider">Выбрать провайдера поиска</string>
     <string name="web_search_brave_key">API-ключ Brave Search</string>
     <string name="web_search_brave_key_hint">API-ключ с brave.com/search/api/</string>
+    <string name="web_search_kagi_key">API-ключ Kagi Search</string>
+    <string name="web_search_kagi_key_hint">API-ключ с kagi.com/api/keys</string>
     <string name="web_search_serper_key">API-ключ Serper</string>
     <string name="web_search_serper_key_hint">API-ключ с serper.dev</string>
     <string name="web_search_tavily_key">API-ключ Tavily</string>
@@ -448,6 +520,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">Использование диска</string>
     <string name="sandbox_install">Установить</string>
+    <string name="sandbox_upgrade">Обновить</string>
     <string name="sandbox_install_packages">Установить пакеты</string>
     <string name="sandbox_package_name">Имя пакета</string>
     <string name="sandbox_quick_install">Быстрая установка</string>
@@ -486,7 +559,6 @@
     <string name="sandbox_manage_desc">Установка, настройка пакетов или сброс</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">Установленные пакеты (%d)</string>
-    <string name="sandbox_upgrade">Обновить</string>
     <string name="sandbox_browse_files">Обзор файлов</string>
     <string name="sandbox_browse_files_desc">Открыть каталог песочницы в системном файловом менеджере</string>
 
@@ -559,6 +631,7 @@
     <string name="settings_appearance">Оформление</string>
     <string name="settings_appearance_desc">Тема, цветовая схема и динамические цвета</string>
     <string name="appearance_title">Оформление</string>
+    <string name="appearance_interface">Интерфейс</string>
     <string name="theme_mode">Режим темы</string>
     <string name="theme_mode_light">Светлая</string>
     <string name="theme_mode_dark">Тёмная</string>
@@ -593,6 +666,9 @@
     <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">Уменьшить движение</string>
     <string name="reduce_motion_desc">Уменьшает непрерывное движение и крупные пространственные перемещения, сохраняя переходы прозрачности, прямые жесты и полезную обратную связь о состоянии.</string>
+    <string name="interaction_feedback">Обратная связь взаимодействия</string>
+    <string name="haptic_feedback">Тактильная отдача</string>
+    <string name="haptic_feedback_desc">Использовать легкую вибрацию для статуса генерации и важных действий.</string>
 
     <!-- Language -->
     <string name="language_title">Язык</string>
@@ -693,6 +769,8 @@
     <string name="remove">Удалить</string>
     <string name="menu">Меню</string>
     <string name="options">Параметры</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">Очистить всё</string>
     <string name="video_thumbnail">Эскиз видео</string>
     <string name="play">Воспроизвести</string>
     <string name="video_preview">Предпросмотр видео</string>
@@ -709,10 +787,10 @@
     <string name="delete_chat">Удалить чат?</string>
     <string name="delete_chat_confirm">Вы уверены, что хотите удалить эту беседу? Это действие нельзя отменить.</string>
     <string name="delete_message_title">Удалить сообщение?</string>
+    <string name="delete_message_confirm">Это сообщение и все последующие ответы будут безвозвратно удалены.</string>
     <string name="delete_compact_message_title">Удалить сообщение сжатия?</string>
     <string name="delete_compact_message_confirm">Будет удалено только это сообщение сжатия.</string>
     <string name="recompact">Сжать повторно</string>
-    <string name="delete_message_confirm">Это сообщение и все последующие ответы будут безвозвратно удалены.</string>
     <string name="conversation_prompt">Промпт беседы</string>
     <string name="global_default_format">Глобальное значение по умолчанию (%1$s)</string>
     <string name="save">Сохранить</string>
@@ -886,12 +964,15 @@
     <string name="no_api_key_configured">API-ключ не настроен.</string>
     <string name="no_api_key_for_provider">Учётные данные для %s не настроены. Добавьте API-ключ или базовый URL в настройках.</string>
     <string name="local_model_not_found">Файл локальной модели не найден. Импортируйте модель повторно.</string>
+    <string name="local_context_exceeded">Для этого диалога требуется %1$d токенов запроса, но контекст локальной модели составляет %2$d токенов. Уменьшите окно контекста или увеличьте размер контекста модели.</string>
     <string name="all_messages_cached">Все %1$d сообщений кэшированы.</string>
     <string name="cached_partial_failed">Кэшировано %1$d из %2$d. Ошибок: %3$d.</string>
     <string name="retry">Повторить</string>
     <string name="parse_error">Ошибка разбора</string>
     <string name="unknown_error">Неизвестная ошибка</string>
     <string name="could_not_read_file">Не удалось прочитать файл</string>
+    <string name="import_file_too_large">Файл слишком большой (%1$d МБ). Выберите файл экспорта меньшего размера.</string>
+    <string name="import_out_of_memory">Недостаточно памяти для импорта этого файла. Выберите экспорт меньшего размера.</string>
 
     <!-- Documentation -->
     <string name="documentation">Документация</string>
@@ -1002,56 +1083,6 @@
     <string name="proxy_password">Пароль (необязательно)</string>
     <string name="proxy_bypass">Список исключений</string>
     <string name="proxy_bypass_desc">Хосты и диапазоны CIDR для прямого подключения, по одному в строке</string>
-    <string name="conversation_fork">Создать ветку диалога</string>
-    <string name="conversation_fork_failed">Не удалось создать ветку диалога: %1$s</string>
-    <string name="conversation_fork_from_here">Создать ветку отсюда</string>
-    <string name="conversation_search">Поиск</string>
-    <string name="conversation_search_hint">Поиск…</string>
-    <string name="conversation_share">Поделиться</string>
-    <string name="conversation_share_failed">Не удалось поделиться диалогом: %1$s</string>
-    <string name="custom_provider_protocol_label">Формат API</string>
-    <string name="file_path_unknown">Неизвестный файл</string>
-    <string name="import_file_too_large">Файл слишком большой (%1$d МБ). Выберите файл экспорта меньшего размера.</string>
-    <string name="import_out_of_memory">Недостаточно памяти для импорта этого файла. Выберите экспорт меньшего размера.</string>
-    <string name="local_context_exceeded">Для этого диалога требуется %1$d токенов запроса, но контекст локальной модели составляет %2$d токенов. Уменьшите окно контекста или увеличьте размер контекста модели.</string>
-    <string name="queue_clear_all">Очистить всё</string>
-    <string name="tool_background_job_running">Фоновая задача %1$s выполняется</string>
-    <string name="tool_execution_stopped">Выполнение инструмента остановлено</string>
-    <string name="tool_exit_code">Код выхода %1$d</string>
-    <string name="tool_exit">Выход</string>
-    <string name="tool_shell_returned_code">Команда вернула %1$d</string>
-    <string name="tool_shell_detail_executed">Выполнено</string>
-    <string name="tool_shell_detail_returned_code">Возвращено %1$d</string>
-    <string name="tool_shell_returned">Возврат</string>
-    <string name="tool_found_no_matches">Совпадений не найдено</string>
-    <string name="tool_line_count">%1$d строк</string>
-    <string name="tool_listing_shell_jobs">Получение списка задач оболочки…</string>
-    <string name="tool_no_output">(Нет вывода)</string>
-    <string name="tool_no_shell_jobs">Нет задач оболочки</string>
-    <string name="tool_read_file_empty">Прочитано %1$s · пусто</string>
-    <string name="tool_reading_shell_job">Чтение задачи оболочки %1$s…</string>
-    <string name="tool_shell_executed_successfully">Команда успешно выполнена</string>
-    <string name="tool_shell_execution_completed">Выполнение команды завершено</string>
-    <string name="tool_shell_exit_summary">Код выхода %1$d · %2$d байт</string>
-    <string name="tool_shell_job">Задача оболочки</string>
-    <string name="tool_shell_job_count">Показано задач оболочки: %1$d</string>
-    <string name="tool_shell_job_status">Задача оболочки %1$s прочитана</string>
-    <string name="tool_shell_jobs">Задачи оболочки</string>
-    <string name="tool_shell_returned_exit_code">Команда вернула код выхода %1$d</string>
-    <string name="tool_state_executing">Выполнение</string>
-    <string name="tool_state_failed">Ошибка</string>
-    <string name="tool_state_running">Выполняется</string>
-    <string name="tool_state_stopped">Остановлено</string>
-    <string name="tool_state_succeeded">Успешно</string>
-    <string name="tool_stop_shell_job">Остановить задачу оболочки</string>
-    <string name="tool_stopped_shell_job">Задача оболочки %1$s остановлена</string>
-    <string name="tool_stopping_shell_job">Остановка задачи оболочки %1$s…</string>
-    <string name="tool_unknown_device">Неизвестное устройство</string>
-    <string name="tool_web_result">Результат %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">Премиальный поисковый API с персонализированными результатами. Оплата по мере использования.</string>
-    <string name="web_search_kagi_key">API-ключ Kagi Search</string>
-    <string name="web_search_kagi_key_hint">API-ключ с kagi.com/api/keys</string>
     <string name="default_service_tier">Уровень обслуживания по умолчанию</string>
     <string name="openai_service_tier_title">Уровень обслуживания</string>
     <string name="openai_service_tier_desc">Управляет задержкой и приоритетом запросов по протоколу OpenAI.</string>
@@ -1076,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">~%1$s / %2$s токенов</string>
+    <string name="context_boundary_active">Граница сжатия активна</string>
+    <string name="context_boundary_none">Граница сжатия отсутствует</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s токенов</string>
-    <string name="context_boundary_active">Граница сжатия активна</string>
-    <string name="context_boundary_none">Граница сжатия отсутствует</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">Для разработчиков</string>

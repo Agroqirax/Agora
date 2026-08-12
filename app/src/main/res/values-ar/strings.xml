@@ -77,6 +77,40 @@
     <string name="tool_call_failed">فشل استدعاء الأداة</string>
     <string name="tool_done">تم</string>
     <string name="tool_context">أداة</string>
+    <string name="tool_execution_stopped">توقف تنفيذ الأداة</string>
+    <string name="tool_state_executing">جارٍ التنفيذ</string>
+    <string name="tool_state_running">قيد التشغيل</string>
+    <string name="tool_state_succeeded">نجح</string>
+    <string name="tool_state_failed">فشل</string>
+    <string name="tool_state_stopped">متوقف</string>
+    <string name="tool_unknown_device">جهاز غير معروف</string>
+    <string name="tool_no_output">(لا يوجد إخراج)</string>
+    <string name="tool_background_job_running">المهمة الخلفية %1$s قيد التشغيل</string>
+    <string name="tool_shell_jobs">مهام الصدفة</string>
+    <string name="tool_shell_job">مهمة صدفة</string>
+    <string name="tool_stop_shell_job">إيقاف مهمة الصدفة</string>
+    <string name="tool_listing_shell_jobs">جارٍ عرض مهام الصدفة…</string>
+    <string name="tool_reading_shell_job">جارٍ قراءة مهمة الصدفة %1$s…</string>
+    <string name="tool_stopping_shell_job">جارٍ إيقاف مهمة الصدفة %1$s…</string>
+    <string name="tool_no_shell_jobs">لا توجد مهام صدفة</string>
+    <string name="tool_shell_job_count">تم عرض %1$d من مهام الصدفة</string>
+    <string name="tool_shell_job_status">تمت قراءة مهمة الصدفة %1$s</string>
+    <string name="tool_stopped_shell_job">تم إيقاف مهمة الصدفة %1$s</string>
+    <string name="tool_shell_exit_summary">الخروج %1$d · %2$d بايت</string>
+    <string name="tool_shell_executed_successfully">تم تنفيذ الأمر بنجاح</string>
+    <string name="tool_shell_execution_completed">اكتمل تنفيذ الأمر</string>
+    <string name="tool_shell_returned_exit_code">أعاد الأمر رمز الخروج %1$d</string>
+    <string name="tool_read_file_empty">تمت قراءة %1$s · فارغ</string>
+    <string name="tool_found_no_matches">لم يتم العثور على تطابقات</string>
+    <string name="file_path_unknown">ملف غير معروف</string>
+    <string name="tool_exit_code">الخروج %1$d</string>
+    <string name="tool_exit">الخروج</string>
+    <string name="tool_shell_returned_code">أعاد الأمر %1$d</string>
+    <string name="tool_shell_detail_executed">تم التنفيذ</string>
+    <string name="tool_shell_detail_returned_code">القيمة المرجعة %1$d</string>
+    <string name="tool_shell_returned">أرجع</string>
+    <string name="tool_line_count">%1$d سطر</string>
+    <string name="tool_web_result">النتيجة %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">List Conversations</string>
     <string name="tool_read_conversation">Read Conversation</string>
@@ -208,6 +242,7 @@
     <string name="custom_provider_badge">مخصص</string>
     <string name="custom_provider_add">إضافة</string>
     <string name="custom_provider_add_title">إضافة مزوّد</string>
+    <string name="custom_provider_protocol_label">تنسيق API</string>
     <string name="custom_provider_empty">لم تتم إضافة أي مزوّد مخصص</string>
     <string name="settings_group_multimodal">متعدد الوسائط</string>
     <string name="settings_image_gen">توليد الصور</string>
@@ -217,6 +252,36 @@
     <string name="image_gen_model">نموذج الصور</string>
     <string name="image_gen_no_model">لم يتم اختيار نموذج</string>
     <string name="image_gen_select_model">اختر نموذج الصور</string>
+    <string name="settings_chat_widgets">أدوات الدردشة</string>
+    <string name="settings_chat_widgets_desc">اسمح للنموذج بعرض عناصر واجهة المستخدم التفاعلية المضمنة في الدردشة</string>
+    <string name="settings_html_chat_widgets">HTML الحاجيات</string>
+    <string name="html_chat_widgets_enable">تمكين عناصر واجهة المستخدم HTML</string>
+    <string name="html_chat_widgets_enable_desc">اسمح للنموذج بعرض عناصر واجهة المستخدم التفاعلية في WebView في وضع الحماية</string>
+    <string name="html_chat_widgets_network_enable">السماح بالوصول إلى الشبكة</string>
+    <string name="html_chat_widgets_network_enable_desc">اسمح للأدوات بتحميل الصور والخطوط والبرامج النصية عن بعد.</string>
+    <string name="html_chat_widgets_theme_enable">مطابقة موضوع التطبيق</string>
+    <string name="html_chat_widgets_theme_enable_desc">تطبيق سمة التطبيق على القطعة. التباين &amp; ولا يمكن ضمان إمكانية الوصول.</string>
+    <string name="html_chat_widgets_js_enable">السماح بجافا سكريبت</string>
+    <string name="html_chat_widgets_js_enable_desc">السماح للأدوات بتشغيل JavaScript. قم بإيقاف تشغيله لعرض عناصر واجهة المستخدم بتنسيق HTML/CSS ثابت فقط.</string>
+    <string name="settings_mermaid_chat_widgets">مخططات حورية البحر</string>
+    <string name="mermaid_chat_widgets_enable">تمكين مخططات حورية البحر</string>
+    <string name="mermaid_chat_widgets_enable_desc">دع النموذج يعرض مخططات حورية البحر بشكل مضمّن.</string>
+    <string name="settings_vega_lite_chat_widgets">مخططات فيجا لايت</string>
+    <string name="vega_lite_chat_widgets_enable">تمكين مخططات Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable_desc">اسمح للنموذج بعرض مخططات Vega-Lite مضمنة.</string>
+    <string name="settings_geojson_chat_widgets">خرائط</string>
+    <string name="geojson_chat_widgets_enable">تمكين الخرائط</string>
+    <string name="geojson_chat_widgets_enable_desc">اسمح للنموذج بعرض الخرائط بشكل مضمّن من GeoJSON، أو GPX، أو KML.</string>
+    <string name="geojson_tile_url_label">خادم بلاط الخريطة</string>
+    <string name="geojson_tile_url_desc">قالب عنوان URL لصور تجانب خريطة الأساس، باستخدام العناصر النائبة {s}/{z}/{x}/{y}.</string>
+    <string name="geojson_theme_enable">Match App Theme</string>
+    <string name="geojson_theme_enable_desc">في الوضع المظلم، قم بعكس مربعات الخريطة وإعادة تلوينها لتتناسب تقريبًا مع سمة التطبيق.</string>
+    <string name="geojson_route_provider_label">روابط الطريق مفتوحة في</string>
+    <string name="geojson_select_route_provider">حدد موفر الطريق</string>
+    <string name="geojson_route_provider_osm">خريطة الشارع المفتوحة</string>
+    <string name="geojson_route_provider_osm_desc">يفتح الاتجاهات على opentreetmap.org، أو تطبيق مثبت يعتمد على OSM</string>
+    <string name="geojson_route_provider_google">خرائط جوجل</string>
+    <string name="geojson_route_provider_google_desc">Opens directions in Google Maps, or a browser if it isn\'t installed</string>
     <string name="image_gen_size">الحجم الافتراضي</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">عرض كل النماذج</string>
@@ -225,6 +290,13 @@
     <string name="tool_generated_image">تم توليد الصورة</string>
     <string name="img_action_save">حفظ في المعرض</string>
     <string name="img_action_share">مشاركة</string>
+    <string name="conversation_fork">تفريع المحادثة</string>
+    <string name="conversation_fork_from_here">تفريع من هنا</string>
+    <string name="conversation_share">مشاركة</string>
+    <string name="conversation_search">بحث</string>
+    <string name="conversation_search_hint">بحث…</string>
+    <string name="conversation_fork_failed">تعذر تفريع المحادثة: %1$s</string>
+    <string name="conversation_share_failed">تعذرت مشاركة المحادثة: %1$s</string>
     <string name="img_saved">تم الحفظ في المعرض</string>
     <string name="img_save_failed">فشل الحفظ</string>
     <string name="img_info_dimensions">الأبعاد</string>
@@ -308,8 +380,8 @@
     <string name="context_window">نافذة السياق</string>
     <string name="context_window_desc">الحد الأقصى للسياق المتاح لعملية التوليد</string>
     <string name="context_window_default">نافذة السياق الافتراضية</string>
-    <string name="context_token_budget_value">حوالي %1$s من الرموز</string>
     <string name="context_retain">الاحتفاظ بـ %1$d رسالة حديثة</string>
+    <string name="context_token_budget_value">حوالي %1$s من الرموز</string>
     <string name="context_visualize">تصوّر امتداد السياق</string>
     <string name="context_visualize_desc">تعتيم الرسائل خارج نافذة السياق</string>
     <string name="gen_temperature">درجة الحرارة</string>
@@ -331,10 +403,10 @@
     <string name="gen_thinking_enabled_desc">تفعيل قدرة النموذج على التفكير/الاستدلال</string>
     <string name="gen_thinking_level">مستوى التفكير</string>
     <string name="gen_thinking_level_desc">يتحكم في عمق التفكير؛ أعلى = استدلال أكثر دقة</string>
+    <string name="gen_thinking_level_minimal">منخفض جدًا</string>
     <string name="gen_thinking_level_low">منخفض</string>
     <string name="gen_thinking_level_medium">متوسط</string>
     <string name="gen_thinking_level_high">عالٍ</string>
-    <string name="gen_thinking_level_minimal">منخفض جدًا</string>
     <string name="gen_thinking_level_xhigh">عالٍ جدًا</string>
     <string name="gen_thinking_level_max">الحد الأقصى</string>
     <string name="thinking_effort_label">جهد التفكير</string>
@@ -357,7 +429,6 @@
     <string name="advanced_settings">متقدم</string>
     <string name="advanced_generation_title">الإعدادات المتقدمة</string>
     <string name="advanced_per_conversation">تجاوزات لكل محادثة</string>
-    <string name="appearance_interface">الواجهة</string>
     <string name="message_display">عرض الرسائل</string>
     <string name="tool_call_display_mode">كتل التفكير والأدوات</string>
     <string name="tool_call_display_mode_timeline">المخطط الزمني</string>
@@ -368,9 +439,6 @@
     <string name="auto_expand_active_group">توسيع المجموعة النشطة تلقائيًا</string>
     <string name="auto_expand_active_group_desc">وسّع مجموعة التفكير والأدوات الحالية تلقائيًا، ثم اطوها عندما ينتقل النموذج إلى المرحلة التالية.</string>
     <string name="tool_call_display_mode_compact_desc">تجميع كتل التفكير والأدوات فوق الإجابة</string>
-    <string name="interaction_feedback">تعليقات التفاعل</string>
-    <string name="haptic_feedback">الاهتزاز اللمسي</string>
-    <string name="haptic_feedback_desc">استخدام اهتزاز خفيف لحالة التوليد والإجراءات المهمة.</string>
 
     <!-- Settings - Web Search Page -->
     <string name="web_search_title">بحث الويب</string>
@@ -378,6 +446,7 @@
     <string name="web_search_enable_desc">السماح للنماذج بالبحث في الويب عبر استدعاء الأدوات</string>
     <string name="web_search_provider_label">مزوّد البحث</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -387,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">واجهة بحث تركّز على الخصوصية. تتوفر باقة مجانية.</string>
+    <string name="web_search_kagi_desc">واجهة بحث مميزة بنتائج مخصصة. الدفع حسب الاستخدام.</string>
     <string name="web_search_serper_desc">واجهة بحث Google سريعة. 2,500 استعلام مجاني شهريًا.</string>
     <string name="web_search_tavily_desc">واجهة بحث محسّنة للذكاء الاصطناعي. مصممة لوكلاء LLM.</string>
     <string name="web_search_searxng_desc">محرك بحث وصفي ذاتي الاستضافة. يُفضّل استخدامه مع نسختك الخاصة.</string>
@@ -394,6 +464,8 @@
     <string name="web_search_select_provider">اختيار مزوّد البحث</string>
     <string name="web_search_brave_key">مفتاح API لـ Brave Search</string>
     <string name="web_search_brave_key_hint">مفتاح API من brave.com/search/api/</string>
+    <string name="web_search_kagi_key">مفتاح API لـ Kagi Search</string>
+    <string name="web_search_kagi_key_hint">مفتاح API من kagi.com/api/keys</string>
     <string name="web_search_serper_key">مفتاح API لـ Serper</string>
     <string name="web_search_serper_key_hint">مفتاح API من serper.dev</string>
     <string name="web_search_tavily_key">مفتاح API لـ Tavily</string>
@@ -448,6 +520,7 @@
     <string name="sandbox_alpine_version">Alpine Linux</string>
     <string name="sandbox_disk_usage">استخدام القرص</string>
     <string name="sandbox_install">تثبيت</string>
+    <string name="sandbox_upgrade">ترقية</string>
     <string name="sandbox_install_packages">تثبيت الحزم</string>
     <string name="sandbox_package_name">اسم الحزمة</string>
     <string name="sandbox_quick_install">تثبيت سريع</string>
@@ -486,7 +559,6 @@
     <string name="sandbox_manage_desc">تثبيت الحزم أو تهيئتها أو إعادة التعيين</string>
     <string name="sandbox_package_placeholder">python3, git, curl...</string>
     <string name="sandbox_installed_fmt">الحزم المثبتة (%d)</string>
-    <string name="sandbox_upgrade">ترقية</string>
     <string name="sandbox_browse_files">استعراض الملفات</string>
     <string name="sandbox_browse_files_desc">فتح دليل الصندوق الرملي في مدير ملفات النظام</string>
 
@@ -559,6 +631,7 @@
     <string name="settings_appearance">المظهر</string>
     <string name="settings_appearance_desc">السمة ونظام الألوان واللون الديناميكي</string>
     <string name="appearance_title">المظهر</string>
+    <string name="appearance_interface">الواجهة</string>
     <string name="theme_mode">وضع السمة</string>
     <string name="theme_mode_light">فاتح</string>
     <string name="theme_mode_dark">داكن</string>
@@ -593,6 +666,9 @@
     <string name="parse_inline_dollar_math_desc">When disabled, single-dollar expressions such as $ x $ remain ordinary text. Other math delimiters are unchanged.</string>
     <string name="reduce_motion">تقليل الحركة</string>
     <string name="reduce_motion_desc">يقلّل الحركة المستمرة والانتقالات المكانية الكبيرة مع الإبقاء على التلاشي والإيماءات المباشرة وملاحظات الحالة المفيدة.</string>
+    <string name="interaction_feedback">تعليقات التفاعل</string>
+    <string name="haptic_feedback">الاهتزاز اللمسي</string>
+    <string name="haptic_feedback_desc">استخدام اهتزاز خفيف لحالة التوليد والإجراءات المهمة.</string>
 
     <!-- Language -->
     <string name="language_title">اللغة</string>
@@ -693,6 +769,8 @@
     <string name="remove">إزالة</string>
     <string name="menu">القائمة</string>
     <string name="options">الخيارات</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">مسح الكل</string>
     <string name="video_thumbnail">صورة مصغّرة للفيديو</string>
     <string name="play">تشغيل</string>
     <string name="video_preview">معاينة الفيديو</string>
@@ -709,10 +787,10 @@
     <string name="delete_chat">حذف المحادثة؟</string>
     <string name="delete_chat_confirm">هل أنت متأكد أنك تريد حذف هذه المحادثة؟ لا يمكن التراجع عن هذا الإجراء.</string>
     <string name="delete_message_title">حذف الرسالة؟</string>
+    <string name="delete_message_confirm">ستتم إزالة هذه الرسالة وجميع الردود اللاحقة نهائيًا.</string>
     <string name="delete_compact_message_title">حذف رسالة ضغط السياق؟</string>
     <string name="delete_compact_message_confirm">سيتم حذف رسالة ضغط السياق هذه فقط.</string>
     <string name="recompact">إعادة الضغط</string>
-    <string name="delete_message_confirm">ستتم إزالة هذه الرسالة وجميع الردود اللاحقة نهائيًا.</string>
     <string name="conversation_prompt">موجّه المحادثة</string>
     <string name="global_default_format">الافتراضي العام (%1$s)</string>
     <string name="save">حفظ</string>
@@ -886,12 +964,15 @@
     <string name="no_api_key_configured">لا يوجد مفتاح API مهيأ.</string>
     <string name="no_api_key_for_provider">لا توجد بيانات اعتماد مهيأة لـ %s. يرجى إضافة مفتاح API أو عنوان URL أساسي في الإعدادات.</string>
     <string name="local_model_not_found">لم يتم العثور على ملف النموذج المحلي. يرجى إعادة استيراد النموذج.</string>
+    <string name="local_context_exceeded">تحتاج هذه المحادثة إلى %1$d من رموز المطالبة، لكن سياق النموذج المحلي هو %2$d رمزًا. قلّل نافذة السياق أو زِد حجم سياق النموذج.</string>
     <string name="all_messages_cached">تم تخزين جميع الرسائل البالغ عددها %1$d مؤقتًا.</string>
     <string name="cached_partial_failed">تم تخزين %1$d من %2$d مؤقتًا. فشل %3$d.</string>
     <string name="retry">إعادة المحاولة</string>
     <string name="parse_error">خطأ في التحليل</string>
     <string name="unknown_error">خطأ غير معروف</string>
     <string name="could_not_read_file">تعذّر قراءة الملف</string>
+    <string name="import_file_too_large">الملف كبير جدًا (%1$d م.ب.). اختر ملف تصدير أصغر.</string>
+    <string name="import_out_of_memory">لا توجد ذاكرة كافية لاستيراد هذا الملف. اختر ملف تصدير أصغر.</string>
 
     <!-- Documentation -->
     <string name="documentation">الوثائق</string>
@@ -1002,56 +1083,6 @@
     <string name="proxy_password">كلمة المرور (اختياري)</string>
     <string name="proxy_bypass">قائمة التجاوز</string>
     <string name="proxy_bypass_desc">المضيفون ونطاقات CIDR التي تتصل مباشرةً، واحد في كل سطر</string>
-    <string name="conversation_fork">تفريع المحادثة</string>
-    <string name="conversation_fork_failed">تعذر تفريع المحادثة: %1$s</string>
-    <string name="conversation_fork_from_here">تفريع من هنا</string>
-    <string name="conversation_search">بحث</string>
-    <string name="conversation_search_hint">بحث…</string>
-    <string name="conversation_share">مشاركة</string>
-    <string name="conversation_share_failed">تعذرت مشاركة المحادثة: %1$s</string>
-    <string name="custom_provider_protocol_label">تنسيق API</string>
-    <string name="file_path_unknown">ملف غير معروف</string>
-    <string name="import_file_too_large">الملف كبير جدًا (%1$d م.ب.). اختر ملف تصدير أصغر.</string>
-    <string name="import_out_of_memory">لا توجد ذاكرة كافية لاستيراد هذا الملف. اختر ملف تصدير أصغر.</string>
-    <string name="local_context_exceeded">تحتاج هذه المحادثة إلى %1$d من رموز المطالبة، لكن سياق النموذج المحلي هو %2$d رمزًا. قلّل نافذة السياق أو زِد حجم سياق النموذج.</string>
-    <string name="queue_clear_all">مسح الكل</string>
-    <string name="tool_background_job_running">المهمة الخلفية %1$s قيد التشغيل</string>
-    <string name="tool_execution_stopped">توقف تنفيذ الأداة</string>
-    <string name="tool_exit_code">الخروج %1$d</string>
-    <string name="tool_exit">الخروج</string>
-    <string name="tool_shell_returned_code">أعاد الأمر %1$d</string>
-    <string name="tool_shell_detail_executed">تم التنفيذ</string>
-    <string name="tool_shell_detail_returned_code">القيمة المرجعة %1$d</string>
-    <string name="tool_shell_returned">أرجع</string>
-    <string name="tool_found_no_matches">لم يتم العثور على تطابقات</string>
-    <string name="tool_line_count">%1$d سطر</string>
-    <string name="tool_listing_shell_jobs">جارٍ عرض مهام الصدفة…</string>
-    <string name="tool_no_output">(لا يوجد إخراج)</string>
-    <string name="tool_no_shell_jobs">لا توجد مهام صدفة</string>
-    <string name="tool_read_file_empty">تمت قراءة %1$s · فارغ</string>
-    <string name="tool_reading_shell_job">جارٍ قراءة مهمة الصدفة %1$s…</string>
-    <string name="tool_shell_executed_successfully">تم تنفيذ الأمر بنجاح</string>
-    <string name="tool_shell_execution_completed">اكتمل تنفيذ الأمر</string>
-    <string name="tool_shell_exit_summary">الخروج %1$d · %2$d بايت</string>
-    <string name="tool_shell_job">مهمة صدفة</string>
-    <string name="tool_shell_job_count">تم عرض %1$d من مهام الصدفة</string>
-    <string name="tool_shell_job_status">تمت قراءة مهمة الصدفة %1$s</string>
-    <string name="tool_shell_jobs">مهام الصدفة</string>
-    <string name="tool_shell_returned_exit_code">أعاد الأمر رمز الخروج %1$d</string>
-    <string name="tool_state_executing">جارٍ التنفيذ</string>
-    <string name="tool_state_failed">فشل</string>
-    <string name="tool_state_running">قيد التشغيل</string>
-    <string name="tool_state_stopped">متوقف</string>
-    <string name="tool_state_succeeded">نجح</string>
-    <string name="tool_stop_shell_job">إيقاف مهمة الصدفة</string>
-    <string name="tool_stopped_shell_job">تم إيقاف مهمة الصدفة %1$s</string>
-    <string name="tool_stopping_shell_job">جارٍ إيقاف مهمة الصدفة %1$s…</string>
-    <string name="tool_unknown_device">جهاز غير معروف</string>
-    <string name="tool_web_result">النتيجة %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">واجهة بحث مميزة بنتائج مخصصة. الدفع حسب الاستخدام.</string>
-    <string name="web_search_kagi_key">مفتاح API لـ Kagi Search</string>
-    <string name="web_search_kagi_key_hint">مفتاح API من kagi.com/api/keys</string>
     <string name="default_service_tier">مستوى الخدمة الافتراضي</string>
     <string name="openai_service_tier_title">مستوى الخدمة</string>
     <string name="openai_service_tier_desc">يتحكم في زمن الاستجابة وأولوية طلبات بروتوكول OpenAI.</string>
@@ -1076,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">~%1$s / %2$s tokens</string>
+    <string name="context_boundary_active">حد الضغط مفعّل</string>
+    <string name="context_boundary_none">لا يوجد حد ضغط</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s tokens</string>
-    <string name="context_boundary_active">حد الضغط مفعّل</string>
-    <string name="context_boundary_none">لا يوجد حد ضغط</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">المطوّر</string>

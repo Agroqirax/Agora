@@ -77,7 +77,40 @@
     <string name="tool_call_failed">Gọi công cụ thất bại</string>
     <string name="tool_done">Đã xong</string>
     <string name="tool_context">Công cụ</string>
-
+    <string name="tool_execution_stopped">Đã dừng thực thi công cụ</string>
+    <string name="tool_state_executing">Đang thực thi</string>
+    <string name="tool_state_running">Đang chạy</string>
+    <string name="tool_state_succeeded">Thành công</string>
+    <string name="tool_state_failed">Thất bại</string>
+    <string name="tool_state_stopped">Đã dừng</string>
+    <string name="tool_unknown_device">Thiết bị không xác định</string>
+    <string name="tool_no_output">(Không có đầu ra)</string>
+    <string name="tool_background_job_running">Tác vụ nền %1$s đang chạy</string>
+    <string name="tool_shell_jobs">Tác vụ shell</string>
+    <string name="tool_shell_job">Tác vụ shell</string>
+    <string name="tool_stop_shell_job">Dừng tác vụ shell</string>
+    <string name="tool_listing_shell_jobs">Đang liệt kê tác vụ shell…</string>
+    <string name="tool_reading_shell_job">Đang đọc tác vụ shell %1$s…</string>
+    <string name="tool_stopping_shell_job">Đang dừng tác vụ shell %1$s…</string>
+    <string name="tool_no_shell_jobs">Không có tác vụ shell</string>
+    <string name="tool_shell_job_count">Đã liệt kê %1$d tác vụ shell</string>
+    <string name="tool_shell_job_status">Đã đọc tác vụ shell %1$s</string>
+    <string name="tool_stopped_shell_job">Đã dừng tác vụ shell %1$s</string>
+    <string name="tool_shell_exit_summary">Thoát %1$d · %2$d byte</string>
+    <string name="tool_shell_executed_successfully">Đã thực thi lệnh thành công</string>
+    <string name="tool_shell_execution_completed">Đã hoàn tất thực thi lệnh</string>
+    <string name="tool_shell_returned_exit_code">Lệnh trả về mã thoát %1$d</string>
+    <string name="tool_read_file_empty">Đã đọc %1$s · trống</string>
+    <string name="tool_found_no_matches">Không tìm thấy kết quả phù hợp</string>
+    <string name="file_path_unknown">Tệp không xác định</string>
+    <string name="tool_exit_code">Thoát %1$d</string>
+    <string name="tool_exit">Thoát</string>
+    <string name="tool_shell_returned_code">Lệnh trả về %1$d</string>
+    <string name="tool_shell_detail_executed">Đã thực thi</string>
+    <string name="tool_shell_detail_returned_code">Trả về %1$d</string>
+    <string name="tool_shell_returned">Trả về</string>
+    <string name="tool_line_count">%1$d dòng</string>
+    <string name="tool_web_result">Kết quả %1$d</string>
     <!-- New tool display names (P0) -->
     <string name="tool_list_conversations">Liệt kê cuộc trò chuyện</string>
     <string name="tool_read_conversation">Đọc cuộc trò chuyện</string>
@@ -86,7 +119,6 @@
     <string name="tool_file_edit">Sửa tệp</string>
     <string name="tool_file_glob">Tìm tệp</string>
     <string name="tool_file_grep">Tìm kiếm tệp</string>
-
     <!-- Tool in-progress states (doing) -->
     <string name="tool_listing_conversations">Đang liệt kê cuộc trò chuyện…</string>
     <string name="tool_reading_conversation">Đang đọc cuộc trò chuyện…</string>
@@ -104,7 +136,6 @@
     <string name="tool_updating_active">Đang cập nhật ký ức hoạt động…</string>
     <string name="tool_listing_shells">Đang liệt kê shell…</string>
     <string name="tool_searching_for">Đang tìm kiếm \'%1$s\'…</string>
-
     <!-- Tool done states (P0 + P1) -->
     <string name="tool_listed_conversations">Đã liệt kê %1$d cuộc trò chuyện</string>
     <string name="tool_listed_no_conversations">Không tìm thấy cuộc trò chuyện nào</string>
@@ -211,6 +242,7 @@
     <string name="custom_provider_badge">Tùy chỉnh</string>
     <string name="custom_provider_add">Thêm</string>
     <string name="custom_provider_add_title">Thêm nhà cung cấp</string>
+    <string name="custom_provider_protocol_label">Định dạng API</string>
     <string name="custom_provider_empty">Chưa thêm nhà cung cấp tùy chỉnh nào</string>
     <string name="settings_group_multimodal">Đa phương thức</string>
     <string name="settings_image_gen">Tạo hình ảnh</string>
@@ -220,6 +252,36 @@
     <string name="image_gen_model">Mô hình hình ảnh</string>
     <string name="image_gen_no_model">Chưa chọn mô hình</string>
     <string name="image_gen_select_model">Chọn mô hình hình ảnh</string>
+    <string name="settings_chat_widgets">Tiện ích trò chuyện</string>
+    <string name="settings_chat_widgets_desc">Cho phép mô hình hiển thị nội tuyến các tiện ích tương tác trong cuộc trò chuyện</string>
+    <string name="settings_html_chat_widgets">HTML Widgets</string>
+    <string name="html_chat_widgets_enable">Kích hoạt tiện ích HTML</string>
+    <string name="html_chat_widgets_enable_desc">Let the model render interactive widgets in a sandboxed WebView</string>
+    <string name="html_chat_widgets_network_enable">Cho phép truy cập mạng</string>
+    <string name="html_chat_widgets_network_enable_desc">Cho phép các widget tải hình ảnh, phông chữ và tập lệnh từ xa.</string>
+    <string name="html_chat_widgets_theme_enable">Match App Theme</string>
+    <string name="html_chat_widgets_theme_enable_desc">Apply app theme to widget. Contrast &amp; accessibility cannot be guaranteed.</string>
+    <string name="html_chat_widgets_js_enable">Cho phép JavaScript</string>
+    <string name="html_chat_widgets_js_enable_desc">Cho phép các widget chạy JavaScript. Tắt để chỉ hiển thị các tiện ích dưới dạng HTML/CSS tĩnh.</string>
+    <string name="settings_mermaid_chat_widgets">Sơ đồ nàng tiên cá</string>
+    <string name="mermaid_chat_widgets_enable">Kích hoạt sơ đồ nàng tiên cá</string>
+    <string name="mermaid_chat_widgets_enable_desc">Hãy để mô hình hiển thị nội tuyến sơ đồ Nàng tiên cá.</string>
+    <string name="settings_vega_lite_chat_widgets">Biểu đồ Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable">Kích hoạt biểu đồ Vega-Lite</string>
+    <string name="vega_lite_chat_widgets_enable_desc">Hãy để mô hình hiển thị nội tuyến các biểu đồ Vega-Lite.</string>
+    <string name="settings_geojson_chat_widgets">Bản đồ</string>
+    <string name="geojson_chat_widgets_enable">Bật bản đồ</string>
+    <string name="geojson_chat_widgets_enable_desc">Cho phép mô hình hiển thị bản đồ nội tuyến từ GeoJSON, GPX hoặc KML.</string>
+    <string name="geojson_tile_url_label">Máy chủ xếp bản đồ</string>
+    <string name="geojson_tile_url_desc">Mẫu URL cho hình ảnh ô bản đồ cơ sở, sử dụng phần giữ chỗ {s}/{z}/{x}/{y}.</string>
+    <string name="geojson_theme_enable">Chủ đề ứng dụng phù hợp</string>
+    <string name="geojson_theme_enable_desc">Ở chế độ tối, đảo ngược và đổi màu các ô bản đồ để gần giống với chủ đề của ứng dụng.</string>
+    <string name="geojson_route_provider_label">Tuyến đường liên kết mở trong</string>
+    <string name="geojson_select_route_provider">Chọn nhà cung cấp tuyến đường</string>
+    <string name="geojson_route_provider_osm">OpenStreetMap</string>
+    <string name="geojson_route_provider_osm_desc">Mở chỉ đường trên openstreetmap.org hoặc ứng dụng dựa trên OSM đã cài đặt</string>
+    <string name="geojson_route_provider_google">Bản đồ Google</string>
+    <string name="geojson_route_provider_google_desc">Mở chỉ đường trong Google Maps hoặc trình duyệt nếu nó chưa được cài đặt</string>
     <string name="image_gen_size">Kích thước mặc định</string>
     <string name="image_gen_size_hint">1024x1024</string>
     <string name="image_gen_show_all">Hiển thị tất cả mô hình</string>
@@ -228,6 +290,13 @@
     <string name="tool_generated_image">Đã tạo hình ảnh</string>
     <string name="img_action_save">Lưu vào thư viện</string>
     <string name="img_action_share">Chia sẻ</string>
+    <string name="conversation_fork">Rẽ nhánh cuộc trò chuyện</string>
+    <string name="conversation_fork_from_here">Rẽ nhánh từ đây</string>
+    <string name="conversation_share">Chia sẻ</string>
+    <string name="conversation_search">Tìm kiếm</string>
+    <string name="conversation_search_hint">Tìm kiếm…</string>
+    <string name="conversation_fork_failed">Không thể rẽ nhánh cuộc trò chuyện: %1$s</string>
+    <string name="conversation_share_failed">Không thể chia sẻ cuộc trò chuyện: %1$s</string>
     <string name="img_saved">Đã lưu vào thư viện</string>
     <string name="img_save_failed">Lưu thất bại</string>
     <string name="img_info_dimensions">Kích thước</string>
@@ -311,8 +380,8 @@
     <string name="context_window">Cửa sổ ngữ cảnh</string>
     <string name="context_window_desc">Ngữ cảnh tối đa khả dụng cho một lần tạo</string>
     <string name="context_window_default">Cửa sổ ngữ cảnh mặc định</string>
-    <string name="context_token_budget_value">Ước tính %1$s token</string>
     <string name="context_retain">Giữ lại %1$d tin nhắn gần đây</string>
+    <string name="context_token_budget_value">Ước tính %1$s token</string>
     <string name="context_visualize">Trực quan hóa ngữ cảnh bị loại bỏ</string>
     <string name="context_visualize_desc">Làm mờ tin nhắn nằm ngoài cửa sổ ngữ cảnh</string>
     <string name="gen_temperature">Nhiệt độ (Temperature)</string>
@@ -377,6 +446,7 @@
     <string name="web_search_enable_desc">Cho phép mô hình tìm kiếm web thông qua gọi công cụ</string>
     <string name="web_search_provider_label">Nhà cung cấp tìm kiếm</string>
     <string name="web_search_brave">Brave</string>
+    <string name="web_search_kagi">Kagi</string>
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
@@ -386,6 +456,7 @@
     <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API tìm kiếm tập trung vào quyền riêng tư. Có gói miễn phí.</string>
+    <string name="web_search_kagi_desc">API tìm kiếm cao cấp với kết quả được cá nhân hóa. Trả phí theo mức sử dụng.</string>
     <string name="web_search_serper_desc">API tìm kiếm Google nhanh. 2,500 truy vấn miễn phí/tháng.</string>
     <string name="web_search_tavily_desc">API tìm kiếm tối ưu hóa cho AI. Được xây dựng cho các tác nhân LLM.</string>
     <string name="web_search_searxng_desc">Công cụ tìm kiếm tổng hợp tự lưu trữ. Tốt nhất nên dùng với máy chủ của riêng bạn.</string>
@@ -393,6 +464,8 @@
     <string name="web_search_select_provider">Chọn nhà cung cấp tìm kiếm</string>
     <string name="web_search_brave_key">Khóa API Brave Search</string>
     <string name="web_search_brave_key_hint">Khóa API từ brave.com/search/api/</string>
+    <string name="web_search_kagi_key">Khóa API Kagi Search</string>
+    <string name="web_search_kagi_key_hint">Khóa API từ kagi.com/api/keys</string>
     <string name="web_search_serper_key">Khóa API Serper</string>
     <string name="web_search_serper_key_hint">Khóa API từ serper.dev</string>
     <string name="web_search_tavily_key">Khóa API Tavily</string>
@@ -696,6 +769,8 @@
     <string name="remove">Xóa bỏ</string>
     <string name="menu">Trình đơn</string>
     <string name="options">Tùy chọn</string>
+    <!-- Queued messages banner -->
+    <string name="queue_clear_all">Xóa tất cả</string>
     <string name="video_thumbnail">Ảnh thu nhỏ video</string>
     <string name="play">Phát</string>
     <string name="video_preview">Xem trước video</string>
@@ -712,10 +787,10 @@
     <string name="delete_chat">Xóa cuộc trò chuyện?</string>
     <string name="delete_chat_confirm">Bạn có chắc chắn muốn xóa cuộc trò chuyện này? Hành động này không thể hoàn tác.</string>
     <string name="delete_message_title">Xóa tin nhắn?</string>
+    <string name="delete_message_confirm">Tin nhắn này và tất cả các phản hồi tiếp theo sẽ bị xóa vĩnh viễn.</string>
     <string name="delete_compact_message_title">Xóa tin nhắn thu gọn?</string>
     <string name="delete_compact_message_confirm">Chỉ tin nhắn thu gọn này sẽ bị xóa.</string>
     <string name="recompact">Thu gọn lại</string>
-    <string name="delete_message_confirm">Tin nhắn này và tất cả các phản hồi tiếp theo sẽ bị xóa vĩnh viễn.</string>
     <string name="conversation_prompt">Gợi ý cuộc trò chuyện</string>
     <string name="global_default_format">Mặc định toàn cục (%1$s)</string>
     <string name="save">Lưu</string>
@@ -810,6 +885,7 @@
     <string name="export_button">Xuất</string>
     <string name="exporting_label">Đang xuất…</string>
     <string name="export_success">Xuất dữ liệu thành công.</string>
+
     <string name="export_failed">Xuất thất bại: %1$s</string>
     <string name="import_preview_title">Nhập dữ liệu</string>
     <string name="import_from">Xuất ngày %1$s\nTừ Agora v%2$s</string>
@@ -942,7 +1018,6 @@
     <string name="onboarding_invalid_gguf_desc">Tệp được chọn dường như không phải là mô hình GGUF hợp lệ.</string>
     <string name="onboarding_hide_key">Ẩn khóa</string>
     <string name="onboarding_show_key">Hiển thị khóa</string>
-
     <!-- ── Auto Backup ── -->
     <string name="auto_backup_title">Tự động sao lưu</string>
     <string name="auto_backup_subtitle">Tự động xuất dữ liệu theo lịch trình</string>
@@ -963,7 +1038,6 @@
     <string name="auto_delete_period_1w">1 tuần</string>
     <string name="auto_delete_period_1mo">1 tháng</string>
     <string name="auto_delete_period_1y">1 năm</string>
-
     <!-- PDF page selection dialog -->
     <string name="pdf_select_title">Chọn các trang PDF</string>
     <string name="pdf_select_subtitle">%1$d trang — chọn các trang để bao gồm</string>
@@ -972,7 +1046,6 @@
     <string name="pdf_page_content_desc">Trang %1$d</string>
     <string name="pdf_pages_selected">Đã chọn %1$d trang</string>
     <string name="video_between_frames">~%1$s giữa các khung hình</string>
-
     <!-- SSH host-key pinning -->
     <string name="shell_ssh_verify_host_key">Xác minh &amp; ghim khóa máy chủ</string>
     <string name="shell_ssh_host_key_pinned">Khóa máy chủ đã được ghim</string>
@@ -983,7 +1056,6 @@
     <string name="shell_ssh_verify_failed">Không thể kết nối tới máy chủ: %1$s</string>
     <string name="shell_ssh_verifying">Đang kết nối…</string>
     <string name="shell_ssh_unpin">Gỡ bỏ khóa đã ghim</string>
-
     <!-- Remote shell confirmation gate -->
     <string name="shell_confirm_title">Cho phép hành động trên \"%1$s\"?</string>
     <string name="shell_confirm_allow">Cho phép một lần</string>
@@ -1011,53 +1083,6 @@
     <string name="proxy_password">Mật khẩu (tùy chọn)</string>
     <string name="proxy_bypass">Danh sách bỏ qua</string>
     <string name="proxy_bypass_desc">Các máy chủ và dải CIDR kết nối trực tiếp, mỗi địa chỉ một dòng</string>
-    <string name="conversation_fork">Rẽ nhánh cuộc trò chuyện</string>
-    <string name="conversation_fork_failed">Không thể rẽ nhánh cuộc trò chuyện: %1$s</string>
-    <string name="conversation_fork_from_here">Rẽ nhánh từ đây</string>
-    <string name="conversation_search">Tìm kiếm</string>
-    <string name="conversation_search_hint">Tìm kiếm…</string>
-    <string name="conversation_share">Chia sẻ</string>
-    <string name="conversation_share_failed">Không thể chia sẻ cuộc trò chuyện: %1$s</string>
-    <string name="custom_provider_protocol_label">Định dạng API</string>
-    <string name="file_path_unknown">Tệp không xác định</string>
-    <string name="queue_clear_all">Xóa tất cả</string>
-    <string name="tool_background_job_running">Tác vụ nền %1$s đang chạy</string>
-    <string name="tool_execution_stopped">Đã dừng thực thi công cụ</string>
-    <string name="tool_exit_code">Thoát %1$d</string>
-    <string name="tool_exit">Thoát</string>
-    <string name="tool_shell_returned_code">Lệnh trả về %1$d</string>
-    <string name="tool_shell_detail_executed">Đã thực thi</string>
-    <string name="tool_shell_detail_returned_code">Trả về %1$d</string>
-    <string name="tool_shell_returned">Trả về</string>
-    <string name="tool_found_no_matches">Không tìm thấy kết quả phù hợp</string>
-    <string name="tool_line_count">%1$d dòng</string>
-    <string name="tool_listing_shell_jobs">Đang liệt kê tác vụ shell…</string>
-    <string name="tool_no_output">(Không có đầu ra)</string>
-    <string name="tool_no_shell_jobs">Không có tác vụ shell</string>
-    <string name="tool_read_file_empty">Đã đọc %1$s · trống</string>
-    <string name="tool_reading_shell_job">Đang đọc tác vụ shell %1$s…</string>
-    <string name="tool_shell_executed_successfully">Đã thực thi lệnh thành công</string>
-    <string name="tool_shell_execution_completed">Đã hoàn tất thực thi lệnh</string>
-    <string name="tool_shell_exit_summary">Thoát %1$d · %2$d byte</string>
-    <string name="tool_shell_job">Tác vụ shell</string>
-    <string name="tool_shell_job_count">Đã liệt kê %1$d tác vụ shell</string>
-    <string name="tool_shell_job_status">Đã đọc tác vụ shell %1$s</string>
-    <string name="tool_shell_jobs">Tác vụ shell</string>
-    <string name="tool_shell_returned_exit_code">Lệnh trả về mã thoát %1$d</string>
-    <string name="tool_state_executing">Đang thực thi</string>
-    <string name="tool_state_failed">Thất bại</string>
-    <string name="tool_state_running">Đang chạy</string>
-    <string name="tool_state_stopped">Đã dừng</string>
-    <string name="tool_state_succeeded">Thành công</string>
-    <string name="tool_stop_shell_job">Dừng tác vụ shell</string>
-    <string name="tool_stopped_shell_job">Đã dừng tác vụ shell %1$s</string>
-    <string name="tool_stopping_shell_job">Đang dừng tác vụ shell %1$s…</string>
-    <string name="tool_unknown_device">Thiết bị không xác định</string>
-    <string name="tool_web_result">Kết quả %1$d</string>
-    <string name="web_search_kagi">Kagi</string>
-    <string name="web_search_kagi_desc">API tìm kiếm cao cấp với kết quả được cá nhân hóa. Trả phí theo mức sử dụng.</string>
-    <string name="web_search_kagi_key">Khóa API Kagi Search</string>
-    <string name="web_search_kagi_key_hint">Khóa API từ kagi.com/api/keys</string>
     <string name="default_service_tier">Cấp dịch vụ mặc định</string>
     <string name="openai_service_tier_title">Cấp dịch vụ</string>
     <string name="openai_service_tier_desc">Kiểm soát độ trễ và mức ưu tiên cho các yêu cầu theo giao thức OpenAI.</string>
@@ -1082,14 +1107,14 @@
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
+    <string name="context_usage_messages">~%1$s / %2$s token</string>
+    <string name="context_boundary_active">Ranh giới thu gọn đang hoạt động</string>
+    <string name="context_boundary_none">Không có ranh giới thu gọn</string>
     <string name="thinking_segment_display_mode">Thinking segments</string>
     <string name="thinking_segment_display_mode_desc">Choose where thinking segments open</string>
     <string name="thinking_segment_display_card">Card</string>
     <string name="thinking_segment_display_bottom_sheet">Bottom sheet</string>
     <string name="thinking_segments_title">Thinking segments</string>
-    <string name="context_usage_messages">~%1$s / %2$s token</string>
-    <string name="context_boundary_active">Ranh giới thu gọn đang hoạt động</string>
-    <string name="context_boundary_none">Không có ranh giới thu gọn</string>
 
     <!-- Developer Options -->
     <string name="settings_group_developer">Nhà phát triển</string>

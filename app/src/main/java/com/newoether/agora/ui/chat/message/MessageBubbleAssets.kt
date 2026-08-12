@@ -41,6 +41,16 @@ import androidx.compose.ui.unit.dp
 import com.newoether.agora.ui.components.LatexImageTransformer
 import com.newoether.agora.ui.chat.caseInsensitiveMatchRanges
 import com.newoether.agora.ui.chat.visibleMarkdownMatchRanges
+import com.newoether.agora.ui.chat.ChatWidgetSettings
+import com.newoether.agora.ui.chat.ExpandedChatWidget
+import com.newoether.agora.ui.chat.GeoJsonChatWidgetCard
+import com.newoether.agora.ui.chat.GpxChatWidgetCard
+import com.newoether.agora.ui.chat.HtmlChatWidgetCard
+import com.newoether.agora.ui.chat.KmlChatWidgetCard
+import com.newoether.agora.ui.chat.MarkdownChatWidgetFence
+import com.newoether.agora.ui.chat.MermaidChatWidgetCard
+import com.newoether.agora.ui.chat.VegaLiteChatWidgetCard
+import com.newoether.agora.ui.chat.ChatWidgetFenceSpec
 import com.newoether.agora.ui.theme.ChatType
 import com.mikepenz.markdown.compose.LocalMarkdownColors
 import com.mikepenz.markdown.compose.LocalMarkdownDimens
@@ -99,6 +109,8 @@ internal fun rememberChatMarkdownAssets(
     textColor: Color,
     searchHighlight: SearchHighlightSpec? = null,
     parseInlineDollarMath: Boolean = false,
+    chatWidgetSettings: ChatWidgetSettings = ChatWidgetSettings(),
+    onChatWidgetClick: (ExpandedChatWidget) -> Unit = {},
 ): ChatMarkdownAssets {
     // Chat-specific markdown scale — optimized for immersive reading.
     // Outfit's large x-height means 15sp reads like ~16sp Roboto.
@@ -159,10 +171,71 @@ internal fun rememberChatMarkdownAssets(
     val searchHighlightColor = SearchHighlightBackground
     val activeSearchHighlightColor = ActiveSearchHighlightBackground
 
+    val chatWidgetFenceSpecs = remember(chatWidgetSettings, onChatWidgetClick) {
+        val s = chatWidgetSettings
+        listOf(
+            ChatWidgetFenceSpec(fenceLanguage = "html", enabled = s.htmlEnabled) { body ->
+                HtmlChatWidgetCard(
+                    html = body,
+                    allowNetwork = s.htmlNetworkEnabled,
+                    allowJavaScript = s.htmlJsEnabled,
+                    matchAppTheme = s.htmlThemeEnabled,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "mermaid", enabled = s.mermaidEnabled) { body ->
+                MermaidChatWidgetCard(
+                    diagramSource = body,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "vega-lite", enabled = s.vegaLiteEnabled) { body ->
+                VegaLiteChatWidgetCard(
+                    specSource = body,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "geojson", enabled = s.geoJsonEnabled) { body ->
+                GeoJsonChatWidgetCard(
+                    source = body,
+                    tileUrl = s.geoJsonTileUrl,
+                    themeTiles = s.geoJsonThemeEnabled,
+                    routeProvider = s.geoJsonRouteProvider,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "gpx", enabled = s.geoJsonEnabled) { body ->
+                GpxChatWidgetCard(
+                    source = body,
+                    tileUrl = s.geoJsonTileUrl,
+                    themeTiles = s.geoJsonThemeEnabled,
+                    routeProvider = s.geoJsonRouteProvider,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+            ChatWidgetFenceSpec(fenceLanguage = "kml", enabled = s.geoJsonEnabled) { body ->
+                KmlChatWidgetCard(
+                    source = body,
+                    tileUrl = s.geoJsonTileUrl,
+                    themeTiles = s.geoJsonThemeEnabled,
+                    routeProvider = s.geoJsonRouteProvider,
+                    onExpand = onChatWidgetClick,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+            },
+        )
+    }
+
     val customMarkdownComponents = remember(
         searchHighlight,
         searchHighlightColor,
         activeSearchHighlightColor,
+        chatWidgetFenceSpecs,
     ) {
         lateinit var components: MarkdownComponents
         components = markdownComponents(
@@ -264,12 +337,18 @@ internal fun rememberChatMarkdownAssets(
                 )
             },
             codeFence = { model ->
-                SearchHighlightedMarkdownCode(
+                MarkdownChatWidgetFence(
                     model = model,
-                    fenced = true,
-                    spec = searchHighlight,
-                    highlightColor = searchHighlightColor,
-                    activeHighlightColor = activeSearchHighlightColor,
+                    specs = chatWidgetFenceSpecs,
+                    fallback = {
+                        SearchHighlightedMarkdownCode(
+                            model = model,
+                            fenced = true,
+                            spec = searchHighlight,
+                            highlightColor = searchHighlightColor,
+                            activeHighlightColor = activeSearchHighlightColor,
+                        )
+                    },
                 )
             },
             codeBlock = { model ->

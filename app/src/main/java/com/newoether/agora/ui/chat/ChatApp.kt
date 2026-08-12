@@ -88,7 +88,7 @@ fun ChatApp(
     onInitPdfSelection: ((Set<Int>) -> Unit)? = null,
     fullScreenViewerUrls: List<String>? = null,
     topLevelPresentation: TopLevelPresentation = TopLevelPresentation.CHAT,
-    onSnackbarOffsetChanged: (androidx.compose.ui.unit.Dp) -> Unit = {}
+    onSnackbarOffsetChanged: (androidx.compose.ui.unit.Dp) -> Unit = {}, onChatWidgetClick: (ExpandedChatWidget) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -150,7 +150,7 @@ fun ChatApp(
     val globalThinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
     val globalOpenAiServiceTierEnabled by viewModel.settings.openAiServiceTierEnabled.collectAsState()
     val globalOpenAiServiceTier by viewModel.settings.openAiServiceTier.collectAsState()
-    val customProviders by viewModel.settings.customProviders.collectAsState()
+    val customProviders by viewModel.settings.customProviders.collectAsState(); val chatWidgetSettings = rememberChatWidgetSettings(viewModel.settings)
     val globalWebSearch by viewModel.settings.webSearchEnabled.collectAsState()
     val webSearchApiKeys by viewModel.settings.webSearchApiKeys.collectAsState()
     val globalShell by viewModel.settings.shellEnabled.collectAsState()
@@ -629,7 +629,7 @@ fun ChatApp(
                                 onPdfPagesClick = { pages, idx ->
                                     onPdfPagesClick?.invoke(pages, idx)
                                 },
-                                thoughtExpandedStates = thoughtExpandedStates,
+                                thoughtExpandedStates = thoughtExpandedStates, chatWidgetSettings = chatWidgetSettings, onChatWidgetClick = onChatWidgetClick,
                                 contentPadding = PaddingValues(
                                     start = 8.dp,
                                     end = 8.dp,
