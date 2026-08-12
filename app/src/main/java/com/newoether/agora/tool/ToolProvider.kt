@@ -10,6 +10,9 @@ sealed interface ToolExecutionEvent {
     /** Incremental user-visible output. It is never sent to the model as a partial result. */
     data class OutputDelta(val text: String) : ToolExecutionEvent
 
+    /** Bounded full output as of now. Consumers replace the visible body instead of appending. */
+    data class OutputSnapshot(val text: String) : ToolExecutionEvent
+
     /** The concrete device selected after resolving optional tool arguments. */
     data class TargetResolved(val target: String) : ToolExecutionEvent
 

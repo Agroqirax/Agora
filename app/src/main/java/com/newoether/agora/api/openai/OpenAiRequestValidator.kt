@@ -2,6 +2,12 @@ package com.newoether.agora.api.openai
 
 import com.newoether.agora.api.OpenAiChatRequest
 import com.newoether.agora.api.OpenAiContentPart
+import com.newoether.agora.api.OpenAiMessage
+import com.newoether.agora.api.OpenAiResponseInputContent
+import com.newoether.agora.api.OpenAiResponseInputItem
+import com.newoether.agora.api.OpenAiResponseTool
+import com.newoether.agora.api.OpenAiResponsesRequest
+import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.util.requireValidRequestFormat
 import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.api.util.safeWireToolName
@@ -113,6 +119,169 @@ internal fun OpenAiChatRequest.requireValidWireFormat(provider: String) {
         violations += "history does not end in user/tool input"
     }
     requireValidRequestFormat(provider, violations)
+}
+
+internal fun List<OpenAiMessage>.toResponsesInput(): List<OpenAiResponseInputItem> = buildList {
+    this@toResponsesInput.forEach { message ->
+        if (message.role == "tool") {
+            add(
+                OpenAiResponseInputItem(
+                    type = "function_call_output",
+                    callId = message.toolCallId,
+                    output = message.content.orEmpty().joinToString("") { it.text.orEmpty() },
+                ),
+            )
+            return@forEach
+        }
+
+        val content = message.content.orEmpty().map { part ->
+            when (part.type) {
+                "image_url" -> OpenAiResponseInputContent(
+                    type = "input_image",
+                    imageUrl = part.imageUrl?.url,
+                    detail = "auto",
+                )
+                else -> OpenAiResponseInputContent(
+                    type = if (message.role == "assistant") "output_text" else "input_text",
+                    text = part.text.orEmpty(),
+                )
+            }
+        }
+        if (content.isNotEmpty()) {
+            add(OpenAiResponseInputItem(type = "message", role = message.role, content = content))
+        }
+        message.toolCalls.orEmpty().forEach { call ->
+            add(
+                OpenAiResponseInputItem(
+                    type = "function_call",
+                    callId = call.id,
+                    name = call.function.name,
+                    arguments = call.function.arguments,
+                ),
+            )
+        }
+    }
+}
+
+internal fun List<ToolDefinition>.toResponsesTools(): List<OpenAiResponseTool> = map { tool ->
+    OpenAiResponseTool(
+        name = tool.function.name,
+        description = tool.function.description,
+        parameters = tool.function.parameters,
+    )
+}
+
+internal fun OpenAiResponsesRequest.requireValidWireFormat(provider: String) {
+    val violations = mutableListOf<String>()
+    if (model.isBlank()) violations += "model is blank"
+    if (input.isEmpty()) violations += "input is empty"
+    if (maxOutputTokens != null && maxOutputTokens <= 0) {
+        violations += "max_output_tokens must be positive"
+    }
+    if (topP != null && topP !in 0f..1f) violations += "top_p is outside 0..1"
+    tools.orEmpty().forEachIndexed { index, tool ->
+        when (tool.type) {
+            "web_search" -> if (tool.name != null || tool.description != null || tool.parameters != null) {
+                violations += "tools[$index] hosted web search has function fields"
+            }
+            "function" -> if (!tool.name.orEmpty().matches(safeWireToolName)) {
+                violations += "tools[$index] name is not wire-safe"
+            }
+            else -> violations += "tools[$index] has unsupported type ${tool.type}"
+        }
+    }
+
+    val pending = linkedSetOf<String>()
+    val seen = mutableSetOf<String>()
+    input.forEachIndexed { index, item ->
+        val location = "input[$index]"
+        when (item.type) {
+            "message" -> {
+                if (item.role !in setOf("system", "user", "assistant", "developer")) {
+                    violations += "$location has invalid message role ${item.role}"
+                }
+                if (pending.isNotEmpty()) violations += "$location interrupts pending tool results"
+                if (item.content.isNullOrEmpty()) violations += "$location content is empty"
+                item.content.orEmpty().forEachIndexed { contentIndex, content ->
+                    validateResponseContent(
+                        content = content,
+                        role = item.role,
+                        location = "$location.content[$contentIndex]",
+                        violations = violations,
+                    )
+                }
+                if (item.callId != null || item.name != null || item.arguments != null || item.output != null) {
+                    violations += "$location message carries tool fields"
+                }
+            }
+            "function_call" -> {
+                if (item.callId.isNullOrBlank() || !item.callId.matches(safeWireToolCallId)) {
+                    violations += "$location call_id is not wire-safe"
+                } else {
+                    if (!seen.add(item.callId)) violations += "$location reuses call_id ${item.callId}"
+                    pending += item.callId
+                }
+                if (item.name.isNullOrBlank() || !item.name.matches(safeWireToolName)) {
+                    violations += "$location name is not wire-safe"
+                }
+                if (item.arguments == null || !isJsonObject(item.arguments)) {
+                    violations += "$location arguments are not a JSON object"
+                }
+                if (item.role != null || item.content != null || item.output != null) {
+                    violations += "$location function call carries unrelated fields"
+                }
+            }
+            "function_call_output" -> {
+                val callId = item.callId
+                if (callId.isNullOrBlank()) {
+                    violations += "$location call_id is blank"
+                } else if (!pending.remove(callId)) {
+                    violations += "$location does not match a pending function call"
+                }
+                if (item.output == null) violations += "$location output is absent"
+                if (item.role != null || item.content != null || item.name != null || item.arguments != null) {
+                    violations += "$location function output carries unrelated fields"
+                }
+            }
+            else -> violations += "$location has unsupported type ${item.type}"
+        }
+    }
+    if (pending.isNotEmpty()) violations += "function calls are missing outputs"
+    if (input.lastOrNull()?.let { it.type == "message" && it.role == "user" ||
+            it.type == "function_call_output" } != true
+    ) {
+        violations += "input does not end in user/function output"
+    }
+    requireValidRequestFormat(provider, violations)
+}
+
+private fun validateResponseContent(
+    content: OpenAiResponseInputContent,
+    role: String?,
+    location: String,
+    violations: MutableList<String>,
+) {
+    when (content.type) {
+        "input_text" -> {
+            if (role == "assistant") violations += "$location assistant text must use output_text"
+            if (content.text == null || content.imageUrl != null || content.detail != null) {
+                violations += "$location is not valid input_text"
+            }
+        }
+        "output_text" -> {
+            if (role != "assistant") violations += "$location $role text must use input_text"
+            if (content.text == null || content.imageUrl != null || content.detail != null) {
+                violations += "$location is not valid output_text"
+            }
+        }
+        "input_image" -> {
+            if (role == "assistant") violations += "$location assistant message cannot contain input_image"
+            if (content.imageUrl.isNullOrBlank() || content.text != null || content.detail.isNullOrBlank()) {
+                violations += "$location is not valid input_image"
+            }
+        }
+        else -> violations += "$location has unsupported type ${content.type}"
+    }
 }
 
 private val validationJson = Json { ignoreUnknownKeys = true }

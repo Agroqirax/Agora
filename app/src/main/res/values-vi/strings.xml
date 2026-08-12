@@ -16,6 +16,7 @@
     <string name="tools">Công cụ</string>
     <string name="code_execution">Thực thi mã</string>
     <string name="google_search">Tìm kiếm Google</string>
+    <string name="openai_search">Tìm kiếm OpenAI</string>
     <string name="thinking">Đang suy nghĩ</string>
     <string name="web_search">Tìm kiếm Web</string>
     <string name="ask_agora">Hỏi Agora bất cứ điều gì...</string>
@@ -380,10 +381,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API tìm kiếm tập trung vào quyền riêng tư. Có gói miễn phí.</string>
     <string name="web_search_serper_desc">API tìm kiếm Google nhanh. 2,500 truy vấn miễn phí/tháng.</string>
@@ -1075,6 +1072,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Tin nhắn được giữ nguyên văn sau mỗi lần thu gọn</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1134,4 +1133,7 @@
     <string name="developer_options_export_desc">Chia sẻ gói JSON có giới hạn. Nội dung nhạy cảm được che và tệp không bao giờ tự động tải lên.</string>
     <string name="developer_options_export_share_title">Chia sẻ gói chẩn đoán Agora</string>
     <string name="developer_options_export_failed">Không thể tạo gói chẩn đoán.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Dùng điểm cuối /responses của nhà cung cấp thay cho Chat Completions.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

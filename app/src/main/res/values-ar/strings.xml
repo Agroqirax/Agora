@@ -16,6 +16,7 @@
     <string name="tools">الأدوات</string>
     <string name="code_execution">تنفيذ التعليمات البرمجية</string>
     <string name="google_search">بحث Google</string>
+    <string name="openai_search">بحث OpenAI</string>
     <string name="thinking">التفكير</string>
     <string name="web_search">بحث الويب</string>
     <string name="ask_agora">اسأل Agora أي شيء...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">واجهة بحث تركّز على الخصوصية. تتوفر باقة مجانية.</string>
     <string name="web_search_serper_desc">واجهة بحث Google سريعة. 2,500 استعلام مجاني شهريًا.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">الرسائل المحفوظة حرفيًا بعد كل ضغط</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">مشاركة حزمة JSON محدودة. يتم تنقيح المحتوى الحساس ولا يتم رفع الملف تلقائيًا.</string>
     <string name="developer_options_export_share_title">مشاركة حزمة تشخيص Agora</string>
     <string name="developer_options_export_failed">تعذر إنشاء حزمة التشخيص.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">استخدم نقطة نهاية /responses الخاصة بالموفّر بدلاً من Chat Completions.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

@@ -33,6 +33,12 @@ class GenerationToolBatchEffectExecutorTest {
         overlay.start(call())
         overlay.applyProgress("call", ToolExecutionEvent.TargetResolved("resolved"))
         overlay.applyProgress("call", ToolExecutionEvent.OutputDelta("partial"))
+        overlay.applyProgress("call", ToolExecutionEvent.OutputSnapshot("first\n"))
+        overlay.applyProgress("call", ToolExecutionEvent.OutputSnapshot("first\nsecond\n"))
+        assertEquals(
+            "first\nsecond\n",
+            overlay.snapshot().single { it.type == "tool" }.toolProgress,
+        )
         val completed = overlay.complete(
             call(),
             ToolExecutionResult(text = "done", displayText = "shown"),
@@ -41,12 +47,20 @@ class GenerationToolBatchEffectExecutorTest {
         assertEquals("done", completed.data.result)
         assertEquals("Display tool", completed.data.displayName)
         assertEquals("resolved", completed.segment.toolTarget)
-        assertEquals("partial", completed.segment.toolProgress)
+        assertEquals("first\nsecond\n", completed.segment.toolProgress)
         assertEquals(ToolExecutionStates.SUCCEEDED, completed.segment.toolState)
         assertEquals("provider", completed.segment.signatureProvider)
 
         overlay.replaceAll(emptyList())
         assertNull(overlay.snapshot().singleOrNull())
+    }
+
+    @Test
+    fun `snapshot clipping never starts with half of a surrogate pair`() {
+        assertEquals("😀b", takeLastWholeCodePoints("a😀b", 3))
+        assertEquals("b", takeLastWholeCodePoints("a😀b", 2))
+        assertEquals("", takeLastWholeCodePoints("😀", 1))
+        assertEquals("😀", takeLastWholeCodePoints("😀", 2))
     }
 
     @Test

@@ -16,6 +16,7 @@
     <string name="tools">Ferramentas</string>
     <string name="code_execution">Execução de código</string>
     <string name="google_search">Pesquisa Google</string>
+    <string name="openai_search">Pesquisa OpenAI</string>
     <string name="thinking">Raciocínio</string>
     <string name="web_search">Pesquisa na web</string>
     <string name="ask_agora">Pergunte qualquer coisa ao Agora...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API de pesquisa focada em privacidade. Nível gratuito disponível.</string>
     <string name="web_search_serper_desc">API rápida do Google Search. 2.500 consultas gratuitas por mês.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Mensagens preservadas literalmente após cada compactação</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">Compartilha um pacote JSON limitado. O conteúdo sensível é ocultado e o arquivo nunca é enviado automaticamente.</string>
     <string name="developer_options_export_share_title">Compartilhar pacote de diagnóstico do Agora</string>
     <string name="developer_options_export_failed">Não foi possível criar o pacote de diagnóstico.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Usar o endpoint /responses do provedor em vez de Chat Completions.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

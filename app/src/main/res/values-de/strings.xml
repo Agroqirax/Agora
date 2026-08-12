@@ -16,6 +16,7 @@
     <string name="tools">Werkzeuge</string>
     <string name="code_execution">Codeausführung</string>
     <string name="google_search">Google-Suche</string>
+    <string name="openai_search">OpenAI-Suche</string>
     <string name="thinking">Nachdenken</string>
     <string name="web_search">Websuche</string>
     <string name="ask_agora">Frag Agora alles...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">Datenschutzorientierte Such-API. Kostenlose Stufe verfügbar.</string>
     <string name="web_search_serper_desc">Schnelle Google-Such-API. 2.500 kostenlose Abfragen/Monat.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Nachrichten, die nach jeder Kompaktierung wörtlich erhalten bleiben</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">Gibt ein begrenztes JSON-Paket frei. Vertrauliche Inhalte werden geschwärzt und die Datei wird nie automatisch hochgeladen.</string>
     <string name="developer_options_export_share_title">Agora-Diagnosepaket teilen</string>
     <string name="developer_options_export_failed">Das Diagnosepaket konnte nicht erstellt werden.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Den /responses-Endpunkt des Anbieters anstelle von Chat Completions verwenden.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

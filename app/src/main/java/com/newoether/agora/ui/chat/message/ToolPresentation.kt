@@ -192,6 +192,7 @@ internal object ToolPresentationResolver {
         "execute_shell_command" -> ToolKind.SHELL_EXECUTE
         "list_shell_jobs" -> ToolKind.SHELL_JOB_LIST
         "get_shell_job" -> ToolKind.SHELL_JOB_GET
+        "wait_for_job" -> ToolKind.SHELL_JOB_GET
         "stop_shell_job" -> ToolKind.SHELL_JOB_STOP
         "file_read" -> ToolKind.FILE_READ
         "file_write" -> ToolKind.FILE_WRITE

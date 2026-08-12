@@ -76,7 +76,6 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 supportingContent = {
                                     Text(
                                         when (webSearchProvider) {
-                                            "openai" -> stringResource(R.string.web_search_openai)
                                             "searxng" -> stringResource(R.string.web_search_searxng)
                                             "kagi" -> stringResource(R.string.web_search_kagi)
                                             "serper" -> stringResource(R.string.web_search_serper)
@@ -106,7 +105,6 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                             Text(
                                                 stringResource(
                                                     when (webSearchProvider) {
-                                                        "openai" -> R.string.web_search_openai_key
                                                         "kagi" -> R.string.web_search_kagi_key
                                                         "serper" -> R.string.web_search_serper_key
                                                         "tavily" -> R.string.web_search_tavily_key
@@ -123,7 +121,6 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                                         Text(
                                                             stringResource(
                                                                 when (webSearchProvider) {
-                                                                    "openai" -> R.string.web_search_openai_key_hint
                                                                     "kagi" -> R.string.web_search_kagi_key_hint
                                                                     "serper" -> R.string.web_search_serper_key_hint
                                                                     "tavily" -> R.string.web_search_tavily_key_hint
@@ -262,9 +259,13 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             onDismissRequest = { showProviderDialog = false },
             title = { Text(stringResource(R.string.web_search_select_provider), fontWeight = FontWeight.Bold) },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 480.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
                     val providers = listOf(
-                        "openai" to R.string.web_search_openai,
                         "brave" to R.string.web_search_brave,
                         "kagi" to R.string.web_search_kagi,
                         "serper" to R.string.web_search_serper,
@@ -279,7 +280,6 @@ fun SettingsWebSearchPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 Text(
                                     stringResource(
                                         when (key) {
-                                            "openai" -> R.string.web_search_openai_desc
                                             "brave" -> R.string.web_search_brave_desc
                                             "kagi" -> R.string.web_search_kagi_desc
                                             "serper" -> R.string.web_search_serper_desc

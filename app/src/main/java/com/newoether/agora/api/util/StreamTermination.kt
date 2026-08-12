@@ -34,6 +34,8 @@ internal data class StreamTermination(
     val alreadyReportedError: Boolean = false,
     /** Reads stopped because the socket went silent past the read-timeout budget. */
     val timedOut: Boolean = false,
+    /** Whether an in-stream API error is safe to replay. Explicit provider terminal failures are not. */
+    val retryableStreamError: Boolean = true,
 ) {
     val truncatedByTokenCap: Boolean get() = stopReason in TOKEN_CAP_REASONS
 
@@ -48,7 +50,8 @@ internal data class StreamTermination(
         get() = !producedContent &&
             !alreadyReportedError &&
             !truncatedByTokenCap &&
-            (timedOut || streamError != null || toolCallInFlight || !sawTerminalMarker)
+            (timedOut || streamError != null && retryableStreamError ||
+                toolCallInFlight || !sawTerminalMarker)
 
     /** Terminal diagnostic to surface, or null when the stream ended cleanly. */
     fun toError(provider: String): GenerationError? = when {

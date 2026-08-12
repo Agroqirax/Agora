@@ -16,6 +16,7 @@
     <string name="tools">Инструменты</string>
     <string name="code_execution">Выполнение кода</string>
     <string name="google_search">Поиск Google</string>
+    <string name="openai_search">Поиск OpenAI</string>
     <string name="thinking">Размышление</string>
     <string name="web_search">Веб-поиск</string>
     <string name="ask_agora">Спросите Agora о чём угодно...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API поиска с упором на конфиденциальность. Доступен бесплатный тариф.</string>
     <string name="web_search_serper_desc">Быстрый API Google Search. 2 500 бесплатных запросов в месяц.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Сообщения, сохраняемые дословно после каждого сжатия</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">Создаёт ограниченный пакет JSON для отправки. Конфиденциальное содержимое скрывается, файл никогда не загружается автоматически.</string>
     <string name="developer_options_export_share_title">Поделиться пакетом диагностики Agora</string>
     <string name="developer_options_export_failed">Не удалось создать пакет диагностики.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Использовать конечную точку /responses провайдера вместо Chat Completions.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

@@ -33,6 +33,9 @@ internal data class RestoredCustomFont(
  * device-local paths/models/sandbox state, app lifecycle metadata, backup scheduling, secrets,
  * and per-conversation overrides are intentionally absent.
  */
+internal fun importedContextCompactThresholdPercent(value: Int?): Int? =
+    value?.takeIf(CONTEXT_COMPACT_THRESHOLD_PERCENT_RANGE::contains)
+
 internal object PortableSettingsArchive {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -50,6 +53,7 @@ internal object PortableSettingsArchive {
         putNullableString("contextCompactModel", sm.contextCompactModel.first())
         put("contextCompactPrompt", JsonPrimitive(sm.contextCompactPrompt.first()))
         put("contextCompactRetainCount", JsonPrimitive(sm.contextCompactRetainCount.first()))
+        put("contextCompactThresholdPercent", JsonPrimitive(sm.contextCompactThresholdPercent.first()))
         put("codeExecutionEnabled", JsonPrimitive(sm.codeExecutionEnabled.first()))
         put("googleSearchEnabled", JsonPrimitive(sm.googleSearchEnabled.first()))
         put("thinkingEnabled", JsonPrimitive(sm.thinkingEnabled.first()))
@@ -58,6 +62,7 @@ internal object PortableSettingsArchive {
         put("thinkingBudgetTokens", JsonPrimitive(sm.thinkingBudgetTokens.first()))
         put("openAiServiceTierEnabled", JsonPrimitive(sm.openAiServiceTierEnabled.first()))
         put("openAiServiceTier", JsonPrimitive(sm.openAiServiceTier.first()))
+        put("openAiResponsesApiEnabled", JsonPrimitive(sm.openAiResponsesApiEnabled.first()))
         putEncoded("providerBaseUrls", sm.providerBaseUrls.first())
         put("titleGenerationEnabled", JsonPrimitive(sm.titleGenerationEnabled.first()))
         putNullableString("titleGenerationModel", sm.titleGenerationModel.first())
@@ -219,6 +224,9 @@ internal object PortableSettingsArchive {
         }
         obj.string("contextCompactPrompt")?.let { sm.saveContextCompactPrompt(it) }
         obj.int("contextCompactRetainCount")?.takeIf { it >= 0 }?.let { sm.saveContextCompactRetainCount(it) }
+        importedContextCompactThresholdPercent(
+            obj.int("contextCompactThresholdPercent"),
+        )?.let { sm.saveContextCompactThresholdPercent(it) }
         obj.boolean("codeExecutionEnabled")?.let { sm.saveCodeExecutionEnabled(it) }
         obj.boolean("googleSearchEnabled")?.let { sm.saveGoogleSearchEnabled(it) }
         obj.boolean("thinkingEnabled")?.let { sm.saveThinkingEnabled(it) }
@@ -237,6 +245,9 @@ internal object PortableSettingsArchive {
         obj.boolean("openAiServiceTierEnabled")?.let { sm.saveOpenAiServiceTierEnabled(it) }
         obj.string("openAiServiceTier")?.let {
             sm.saveOpenAiServiceTier(OpenAiServiceTiers.normalize(it))
+        }
+        obj.boolean("openAiResponsesApiEnabled")?.let {
+            sm.saveOpenAiResponsesApiEnabled(it)
         }
 
         obj.decode<Map<String, String>>("providerBaseUrls")?.let { imported ->

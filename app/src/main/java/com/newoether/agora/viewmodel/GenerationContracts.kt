@@ -22,6 +22,8 @@ data class GenerationConfig(
     val thinkingBudgetEnabled: Boolean = false,
     val thinkingBudgetTokens: Int = 4096,
     val openAiServiceTier: String? = null,
+    val responsesApiEnabled: Boolean = false,
+    val openAiWebSearchEnabled: Boolean = false,
     val baseUrl: String?,
     val userPrepend: String? = null,
     val userPostpend: String? = null,

@@ -7,6 +7,7 @@ import com.newoether.agora.data.ApiKeyEntry
 import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_ENABLED
 import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT
+import com.newoether.agora.data.DEFAULT_CONTEXT_COMPACT_THRESHOLD_PERCENT
 import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomEndpointResolution
@@ -107,6 +108,10 @@ class SettingsRepository(
         settingsManager.contextCompactRetainCount,
         DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT,
     )
+    val contextCompactThresholdPercent: StateFlow<Int> = hot(
+        settingsManager.contextCompactThresholdPercent,
+        DEFAULT_CONTEXT_COMPACT_THRESHOLD_PERCENT,
+    )
     val codeExecutionEnabled: StateFlow<Boolean> = hot(settingsManager.codeExecutionEnabled, false)
     val googleSearchEnabled: StateFlow<Boolean> = hot(settingsManager.googleSearchEnabled, false)
     val thinkingEnabled: StateFlow<Boolean> = hot(settingsManager.thinkingEnabled, true)
@@ -117,6 +122,8 @@ class SettingsRepository(
         hot(settingsManager.openAiServiceTierEnabled, false)
     val openAiServiceTier: StateFlow<String> =
         hot(settingsManager.openAiServiceTier, OpenAiServiceTiers.AUTO)
+    val openAiResponsesApiEnabled: StateFlow<Boolean> =
+        hot(settingsManager.openAiResponsesApiEnabled, false)
     val providerBaseUrls: StateFlow<Map<String, String>> = hot(settingsManager.providerBaseUrls, emptyMap())
     val customEndpointResolutions: StateFlow<Map<String, CustomEndpointResolution>> =
         hot(settingsManager.customEndpointResolutions, emptyMap())
@@ -386,6 +393,15 @@ class SettingsRepository(
         }
     }
 
+    fun setCustomProviderResponsesApiEnabled(name: String, enabled: Boolean) {
+        if (!CustomProviderNamePolicy.isAllowed(name)) return
+        scope.launch {
+            settingsManager.saveCustomProviders(customProviders.value.map { config ->
+                if (config.name == name) config.copy(responsesApiEnabled = enabled) else config
+            })
+        }
+    }
+
     fun updateCustomProviderProtocol(name: String, protocol: CustomEndpointProtocol) {
         if (!CustomProviderNamePolicy.isAllowed(name)) return
         scope.launch {
@@ -446,6 +462,9 @@ class SettingsRepository(
     fun setContextCompactModel(model: String?) = scope.launch { settingsManager.saveContextCompactModel(model) }
     fun setContextCompactPrompt(prompt: String) = scope.launch { settingsManager.saveContextCompactPrompt(prompt) }
     fun setContextCompactRetainCount(count: Int) = scope.launch { settingsManager.saveContextCompactRetainCount(count) }
+    fun setContextCompactThresholdPercent(percent: Int) = scope.launch {
+        settingsManager.saveContextCompactThresholdPercent(percent)
+    }
 
     fun setTitleGenerationModel(model: String?) = scope.launch { settingsManager.saveTitleGenerationModel(model) }
     fun setTitleGenerationPrompt(prompt: String) = scope.launch { settingsManager.saveTitleGenerationPrompt(prompt) }
@@ -496,6 +515,8 @@ class SettingsRepository(
         scope.launch { settingsManager.saveOpenAiServiceTierEnabled(enabled) }
     fun setOpenAiServiceTier(tier: String) =
         scope.launch { settingsManager.saveOpenAiServiceTier(tier) }
+    fun setOpenAiResponsesApiEnabled(enabled: Boolean) =
+        scope.launch { settingsManager.saveOpenAiResponsesApiEnabled(enabled) }
     fun setDefaultTemperature(v: Float?) = scope.launch { settingsManager.saveDefaultTemperature(v) }
     fun setDefaultMaxTokens(v: Int?) = scope.launch { settingsManager.saveDefaultMaxTokens(v) }
     fun setDefaultTopP(v: Float?) = scope.launch { settingsManager.saveDefaultTopP(v) }

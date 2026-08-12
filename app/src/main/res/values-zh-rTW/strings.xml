@@ -16,6 +16,7 @@
     <string name="tools">工具</string>
     <string name="code_execution">程式碼執行</string>
     <string name="google_search">Google 搜尋</string>
+    <string name="openai_search">OpenAI 搜尋</string>
     <string name="thinking">思考</string>
     <string name="web_search">網頁搜尋</string>
     <string name="ask_agora">向 Agora 提問…</string>
@@ -286,10 +287,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API Key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">透過 Responses API 使用 OpenAI 內建的網路搜尋。需要另外設定 OpenAI API Key。</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">注重隱私的搜尋 API。提供免費方案。</string>
     <string name="web_search_kagi_desc">支援個人化結果的進階搜尋 API，按量付費。</string>
@@ -1077,6 +1074,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">自動壓縮閾值</string>
+    <string name="context_compact_threshold_desc">估算內容達到所選視窗的此百分比時進行壓縮</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">每次壓縮後按原文保留的訊息</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1136,4 +1135,7 @@
     <string name="developer_options_export_desc">分享有大小限制的 JSON 診斷套件。敏感內容會被遮蔽，檔案絕不會自動上傳。</string>
     <string name="developer_options_export_share_title">分享 Agora 診斷套件</string>
     <string name="developer_options_export_failed">無法建立診斷套件。</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">使用供應商的 /responses 端點，而非 Chat Completions。</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

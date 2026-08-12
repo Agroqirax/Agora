@@ -16,6 +16,7 @@
     <string name="tools">Outils</string>
     <string name="code_execution">Exécution de code</string>
     <string name="google_search">Recherche Google</string>
+    <string name="openai_search">Recherche OpenAI</string>
     <string name="thinking">Réflexion</string>
     <string name="web_search">Recherche web</string>
     <string name="ask_agora">Demandez ce que vous voulez à Agora...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">API de recherche axée sur la confidentialité. Offre gratuite disponible.</string>
     <string name="web_search_serper_desc">API Google Search rapide. 2 500 requêtes gratuites par mois.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Messages conservés mot pour mot après chaque compactage</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">Partage un paquet JSON limité. Le contenu sensible est masqué et le fichier n’est jamais téléversé automatiquement.</string>
     <string name="developer_options_export_share_title">Partager le paquet de diagnostic Agora</string>
     <string name="developer_options_export_failed">Impossible de créer le paquet de diagnostic.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Utiliser le point de terminaison /responses du fournisseur au lieu de Chat Completions.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

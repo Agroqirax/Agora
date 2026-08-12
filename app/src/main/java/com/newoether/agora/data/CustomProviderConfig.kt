@@ -49,6 +49,8 @@ data class CustomProviderConfig(
     val id: String = "",
     /** Temporary crash-safe bridge until legacy name-prefixed Room references are migrated. */
     val legacyNames: Set<String> = emptySet(),
+    /** Retained across protocol changes, but consumed only while [protocol] is OpenAI. */
+    val responsesApiEnabled: Boolean = false,
 ) {
     val providerId: String
         get() = id.takeIf(CustomProviderIdentityPolicy::isStableId) ?: name
@@ -66,6 +68,17 @@ fun isOpenAiProtocolProvider(
             (it.name == providerName || it.ownsIdentity(providerName)) &&
                 it.protocol == CustomEndpointProtocol.OPENAI
         }
+
+fun isResponsesApiEnabledForProvider(
+    providerName: String,
+    builtInOpenAiEnabled: Boolean,
+    customProviders: List<CustomProviderConfig>,
+): Boolean = when (providerName) {
+    Constants.PROVIDER_OPENAI -> builtInOpenAiEnabled
+    else -> customProviders.firstOrNull {
+        it.name == providerName || it.ownsIdentity(providerName)
+    }?.let { it.protocol == CustomEndpointProtocol.OPENAI && it.responsesApiEnabled } == true
+}
 
 /**
  * Derived endpoint discovered during model sync.

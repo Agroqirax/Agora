@@ -14,18 +14,21 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 
-internal fun getConchBackend(
+internal fun resolveConchDevice(
     serverName: String,
     ctx: GenerationContext,
-): ConchBackend? {
-    val conchDevices = ctx.shellDevices.filter { it.type != "ssh" }
-    val device = if (serverName.isNotBlank()) {
+) = ctx.shellDevices.filter { it.type != "ssh" }.let { conchDevices ->
+    if (serverName.isNotBlank()) {
         conchDevices.find { it.name.equals(serverName, ignoreCase = true) }
     } else {
         conchDevices.singleOrNull()
-    } ?: return null
-    return ConchBackend(device)
+    }
 }
+
+internal fun getConchBackend(
+    serverName: String,
+    ctx: GenerationContext,
+): ConchBackend? = resolveConchDevice(serverName, ctx)?.let(::ConchBackend)
 
 internal fun conchServerNotFoundMessage(serverName: String, ctx: GenerationContext): String {
     val names = ctx.shellDevices
@@ -41,6 +44,10 @@ internal fun conchServerNotFoundMessage(serverName: String, ctx: GenerationConte
     }
 }
 
+internal fun interface ShellJobPoller {
+    suspend fun getJob(): String
+}
+
 internal class ShellDurableJobExecutor {
     suspend fun executeDurableForeground(
         backend: ConchBackend,
@@ -51,6 +58,8 @@ internal class ShellDurableJobExecutor {
     ): String {
         val startResult = try {
             backend.startJob(command, workdir, BACKGROUND_JOB_MAX_MS)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             return jsonError(
                 "execute_shell_command",
@@ -83,6 +92,8 @@ internal class ShellDurableJobExecutor {
         while (currentCoroutineContext().isActive) {
             val raw = try {
                 backend.getJob(jobId).also { consecutiveFailures = 0 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 consecutiveFailures++
                 lastFailure = e.message ?: e.javaClass.simpleName
@@ -177,12 +188,16 @@ internal class ShellDurableJobExecutor {
             )
         return try {
             backend.listJobs()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             jsonError(
                 "list_shell_jobs",
                 e.message ?: "Failed to list shell jobs",
                 server = backend.device.name,
             )
+        } finally {
+            backend.close()
         }
     }
 
@@ -199,54 +214,90 @@ internal class ShellDurableJobExecutor {
             )
         return try {
             backend.getJob(jobId)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             jsonError(
                 "get_shell_job",
                 e.message ?: "Failed to get shell job",
                 server = backend.device.name,
             )
+        } finally {
+            backend.close()
         }
     }
 
-    suspend fun waitForShellJob(arguments: String, ctx: GenerationContext): String {
+    suspend fun waitForShellJob(
+        arguments: String,
+        ctx: GenerationContext,
+        onOutputSnapshot: suspend (String) -> Unit = {},
+    ): String {
         val args = parseToolArgs(arguments)
         val jobId = arg(args, "job_id")
         if (jobId.isBlank()) return jsonError("wait_for_job", "job_id is required")
         val serverName = arg(args, "server")
+        val rawTimeout = arg(args, "timeout_ms")
+        if (rawTimeout.isBlank()) return jsonError(
+            "wait_for_job", "timeout_ms is required", server = serverName,
+        )
+        val requestedMs = rawTimeout.toIntOrNull()
+            ?: return jsonError(
+                "wait_for_job",
+                "timeout_ms must be an integer, got \"$rawTimeout\"",
+                server = serverName,
+            )
         val backend = getConchBackend(serverName, ctx)
             ?: return jsonError(
                 "wait_for_job",
                 conchServerNotFoundMessage(serverName, ctx),
                 server = serverName,
             )
-        val rawTimeout = arg(args, "timeout_ms")
-        if (rawTimeout.isBlank()) return jsonError(
-            "wait_for_job", "timeout_ms is required", server = backend.device.name,
-        )
-        val requestedMs = rawTimeout.toIntOrNull()
-            ?: return jsonError(
-                "wait_for_job",
-                "timeout_ms must be an integer, got \"$rawTimeout\"",
-                server = backend.device.name,
+        return try {
+            // The whole tool call runs under GenerationManager's withTimeout(ctx.toolTimeoutMs). A
+            // wait that reaches that outer ceiling is killed as a generic tool timeout, so its
+            // graceful "still running" note never fires. Leave enough margin for the result.
+            val ceilingMs = maxWaitMs(ctx)
+            val timeoutMs = requestedMs.coerceIn(MIN_WAIT_JOB_MS, ceilingMs)
+            // Report silent clamping so the model does not infer it waited for the requested time.
+            val clampedFrom = requestedMs.takeIf { it > ceilingMs }
+            waitForShellJobPolling(
+                jobId = jobId,
+                serverName = backend.device.name,
+                timeoutMs = timeoutMs,
+                clampedFrom = clampedFrom,
+                ceilingMs = ceilingMs,
+                poller = ShellJobPoller { backend.getJob(jobId) },
+                onOutputSnapshot = onOutputSnapshot,
             )
-        // The whole tool call runs under GenerationManager's withTimeout(ctx.toolTimeoutMs). A wait
-        // that reaches that outer ceiling is killed as a generic tool timeout, so its graceful
-        // "still running, call again" note never fires. Cap the effective wait strictly below the
-        // outer budget (leaving a margin to emit the note) so the structured result always wins.
-        val ceilingMs = maxWaitMs(ctx)
-        val timeoutMs = requestedMs.coerceIn(MIN_WAIT_JOB_MS, ceilingMs)
-        // Report silent clamping. Otherwise a model that asked for 10 minutes reads timed_out=true
-        // after ~5 and concludes the job hung for the full budget it never actually waited.
-        val clampedFrom = requestedMs.takeIf { it > ceilingMs }
-        val start = System.currentTimeMillis()
+        } finally {
+            backend.close()
+        }
+    }
+
+    internal suspend fun waitForShellJobPolling(
+        jobId: String,
+        serverName: String,
+        timeoutMs: Int,
+        clampedFrom: Int? = null,
+        ceilingMs: Int = timeoutMs,
+        poller: ShellJobPoller,
+        onOutputSnapshot: suspend (String) -> Unit = {},
+        nowMs: () -> Long = System::currentTimeMillis,
+        delayMs: suspend (Long) -> Unit = { delay -> kotlinx.coroutines.delay(delay) },
+    ): String {
+        val start = nowMs()
         // A transient poll failure must not abort the wait: the job keeps running on the device.
         // Only a sustained run of failures is fatal.
         var consecutiveFailures = 0
         var lastFailure: String? = null
         var pollIntervalMs = INITIAL_WAIT_POLL_MS
+        var latestSnapshot: ConchJobOutputSnapshot? = null
+        var lastPublishedSnapshot: String? = null
         while (kotlinx.coroutines.currentCoroutineContext().isActive) {
             val raw = try {
-                backend.getJob(jobId).also { consecutiveFailures = 0 }
+                poller.getJob().also { consecutiveFailures = 0 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 consecutiveFailures++
                 lastFailure = e.message ?: e.javaClass.simpleName
@@ -258,10 +309,15 @@ internal class ShellDurableJobExecutor {
                             "message",
                             "Failed to poll job $consecutiveFailures times in a row: $lastFailure",
                         )
-                        put("server", backend.device.name)
+                        put("server", serverName)
                         put("job_id", jobId)
                         put("durable", true)
                         put("state", "unknown")
+                        latestSnapshot?.let { snapshot ->
+                            put("output", snapshot.text)
+                            put("output_bytes", snapshot.outputBytes)
+                            put("truncated", snapshot.truncated)
+                        }
                         put(
                             "note",
                             "The job may still be running. Retry with the same job_id; it was not " +
@@ -271,16 +327,25 @@ internal class ShellDurableJobExecutor {
                 }
                 null
             }
+            if (raw != null) {
+                conchJobOutputSnapshot(raw)?.let { snapshot ->
+                    latestSnapshot = snapshot
+                    if (snapshot.text != lastPublishedSnapshot) {
+                        onOutputSnapshot(snapshot.text)
+                        lastPublishedSnapshot = snapshot.text
+                    }
+                }
+            }
             if (raw != null && isTerminalJobPayload(raw)) {
                 val result = runCatching { Json.parseToJsonElement(raw) }.getOrNull()
                 return buildJsonObject {
                     put("type", "wait_for_job")
                     put("job_id", jobId)
-                    put("waited_ms", System.currentTimeMillis() - start)
+                    put("waited_ms", nowMs() - start)
                     if (result != null) put("result", result) else put("result_raw", raw)
                 }.toString()
             }
-            val elapsed = System.currentTimeMillis() - start
+            val elapsed = nowMs() - start
             if (elapsed >= timeoutMs) {
                 val clampNote = clampedFrom?.let {
                     " The requested timeout_ms=$it exceeded this tool call's ceiling of ${ceilingMs}ms and was clamped, so the job has only been waited on for that long."
@@ -290,6 +355,11 @@ internal class ShellDurableJobExecutor {
                     put("job_id", jobId)
                     put("waited_ms", elapsed)
                     put("timed_out", true)
+                    latestSnapshot?.let { snapshot ->
+                        put("output", snapshot.text)
+                        put("output_bytes", snapshot.outputBytes)
+                        put("truncated", snapshot.truncated)
+                    }
                     put(
                         "note",
                         "Job still running. Call wait_for_job again to keep waiting, or " +
@@ -299,10 +369,10 @@ internal class ShellDurableJobExecutor {
             }
             // Back off so a long wait does not hammer the device, but never overshoot the deadline.
             val remaining = (timeoutMs - elapsed).toInt()
-            kotlinx.coroutines.delay(pollIntervalMs.coerceAtMost(remaining).toLong())
+            delayMs(pollIntervalMs.coerceAtMost(remaining).toLong())
             pollIntervalMs = (pollIntervalMs * 2).coerceAtMost(MAX_WAIT_POLL_MS)
         }
-        return jsonError("wait_for_job", "cancelled", server = backend.device.name)
+        return jsonError("wait_for_job", "cancelled", server = serverName)
     }
 
     /**
@@ -317,8 +387,7 @@ internal class ShellDurableJobExecutor {
     internal fun isTerminalJobPayload(raw: String): Boolean {
         if (raw.isBlank()) return false
         val obj = try {
-            kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                .parseToJsonElement(raw).jsonObject
+            Json.parseToJsonElement(raw).jsonObject
         } catch (_: Exception) {
             return false
         }
@@ -352,6 +421,32 @@ internal class ShellDurableJobExecutor {
             "interrupted",
         )
     }
+}
+
+internal data class ConchJobOutputSnapshot(
+    val text: String,
+    val outputBytes: Long,
+    val truncated: Boolean,
+)
+
+internal fun conchJobOutputSnapshot(raw: String): ConchJobOutputSnapshot? {
+    val obj = runCatching { Json.parseToJsonElement(raw).jsonObject }.getOrNull() ?: return null
+    val output = (obj["output"] as? JsonPrimitive)
+        ?.takeIf(JsonPrimitive::isString)
+        ?.content
+        ?: return null
+    val outputBytes = (obj["output_bytes"] as? JsonPrimitive)
+        ?.takeUnless(JsonPrimitive::isString)
+        ?.content
+        ?.toLongOrNull()
+        ?.takeIf { it >= 0 }
+        ?: return null
+    val truncated = (obj["truncated"] as? JsonPrimitive)
+        ?.takeUnless(JsonPrimitive::isString)
+        ?.content
+        ?.toBooleanStrictOrNull()
+        ?: (outputBytes > output.toByteArray(Charsets.UTF_8).size)
+    return ConchJobOutputSnapshot(output, outputBytes, truncated)
 }
 
 internal data class ConchJobOutputUpdate(

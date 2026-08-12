@@ -1,19 +1,33 @@
 package com.newoether.agora.ui.chat.bottombar
 
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.R
 import com.newoether.agora.ui.theme.ChatType
 
 fun Modifier.verticalScrollbar(
@@ -32,15 +46,46 @@ fun Modifier.verticalScrollbar(
 }
 
 @Composable
+internal fun NativeSearchMenuItem(
+    checked: Boolean,
+    provider: String,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    DropdownMenuItem(
+        text = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = painterResource(R.drawable.provider_openai),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(stringResource(R.string.openai_search))
+                Spacer(modifier = Modifier.width(10.dp))
+                ProviderBadge(provider)
+            }
+        },
+        trailingIcon = {
+            Switch(
+                checked = checked,
+                onCheckedChange = onCheckedChange,
+                modifier = Modifier.scale(0.7f),
+            )
+        },
+        onClick = { onCheckedChange(!checked) },
+    )
+}
+
+@Composable
 internal fun ProviderBadge(provider: String) {
     val badgeColor = when (provider.lowercase()) {
-        "google", "gemini" -> MaterialTheme.colorScheme.onPrimaryContainer
+        "google", "gemini", "openai" -> MaterialTheme.colorScheme.onPrimaryContainer
         "anthropic" -> Color(0xFFD97757)
-        "openai" -> Color(0xFF74AA9C)
         else -> MaterialTheme.colorScheme.primary
     }
     val badgeBackground = when (provider.lowercase()) {
-        "google", "gemini" -> MaterialTheme.colorScheme.primaryContainer
+        "google", "gemini", "openai" -> MaterialTheme.colorScheme.primaryContainer
         else -> badgeColor.copy(alpha = 0.15f)
     }
     Surface(
@@ -55,3 +100,6 @@ internal fun ProviderBadge(provider: String) {
         )
     }
 }
+
+internal fun contextUsageAtCapacity(estimatedTokens: Int, tokenBudget: Int): Boolean =
+    tokenBudget > 0 && estimatedTokens >= tokenBudget

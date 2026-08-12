@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.ApiKeyEntry
+import com.newoether.agora.data.CustomEndpointProtocol
 import com.newoether.agora.data.CustomProviderNamePolicy
 import com.newoether.agora.data.LocalChatModelConfig
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
@@ -60,6 +61,7 @@ fun SettingsProviderDetailPage(
     val activeApiKeyIds by viewModel.settings.activeApiKeyIds.collectAsState()
     val providerBaseUrls by viewModel.settings.providerBaseUrls.collectAsState()
     val customProviders by viewModel.settings.customProviders.collectAsState()
+    val openAiResponsesApiEnabled by viewModel.settings.openAiResponsesApiEnabled.collectAsState()
     val localChatModels by viewModel.settings.localChatModels.collectAsState()
 
     var currentName by rememberSaveable(providerName) { mutableStateOf(providerName) }
@@ -256,7 +258,36 @@ fun SettingsProviderDetailPage(
                                     )
                                 }
                             }
-                        }
+                            if (config.protocol == CustomEndpointProtocol.OPENAI) {
+                                add {
+                                    SettingsItem(
+                                        headlineContent = { Text(stringResource(R.string.responses_api)) },
+                                        supportingContent = { Text(stringResource(R.string.responses_api_desc)) },
+                                        trailingContent = {
+                                            Switch(
+                                                checked = config.responsesApiEnabled,
+                                                onCheckedChange = {
+                                                    viewModel.settings.setCustomProviderResponsesApiEnabled(currentName, it)
+                                                },
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        } ?: if (currentName == Constants.PROVIDER_OPENAI) {
+                            add {
+                                SettingsItem(
+                                    headlineContent = { Text(stringResource(R.string.responses_api)) },
+                                    supportingContent = { Text(stringResource(R.string.responses_api_desc)) },
+                                    trailingContent = {
+                                        Switch(
+                                            checked = openAiResponsesApiEnabled,
+                                            onCheckedChange = viewModel.settings::setOpenAiResponsesApiEnabled,
+                                        )
+                                    },
+                                )
+                            }
+                        } else Unit
                     },
                 )
             }

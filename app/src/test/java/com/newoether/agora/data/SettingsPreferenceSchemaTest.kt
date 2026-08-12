@@ -11,6 +11,8 @@ class SettingsPreferenceSchemaTest {
         assertEquals("context_token_budget", CONTEXT_TOKEN_BUDGET.name)
         assertEquals("max_context_window", MAX_CONTEXT_WINDOW.name)
         assertEquals("context_compact_retain_count", CONTEXT_COMPACT_RETAIN_COUNT.name)
+        assertEquals("context_compact_threshold_percent", CONTEXT_COMPACT_THRESHOLD_PERCENT.name)
+        assertEquals("openai_responses_api_enabled", OPENAI_RESPONSES_API_ENABLED.name)
         assertEquals("mcp_servers_json", MCP_SERVERS_JSON.name)
         assertEquals("last_models_fetch_fingerprint", LAST_MODELS_FETCH_FINGERPRINT.name)
     }

@@ -87,7 +87,7 @@ internal object ShellToolDefinitions {
                 )))
                 add(ToolDefinition(function = ToolFunction(
                     name = "wait_for_job",
-                    description = "Block until a durable Conch shell job finishes or timeout_ms elapses, then return its final output. Preferred over polling get_shell_job. If it returns timed_out=true the job is still running — call wait_for_job again to keep waiting.",
+                    description = "Block until a durable Conch shell job finishes or timeout_ms elapses while updating one shell-style output block with bounded full cumulative snapshots. A timed-out result includes the current full retained output and leaves the job running; call wait_for_job again to keep waiting.",
                     parameters = ToolParameters(
                         properties = mapOf(
                             "job_id" to ToolProperty("string", "The Conch job id."),

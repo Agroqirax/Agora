@@ -1,5 +1,12 @@
 package com.newoether.agora.api.openai
 
+import com.newoether.agora.api.GenerationError
+import com.newoether.agora.api.OpenAiResponseOutputItem
+import com.newoether.agora.api.OpenAiResponseStreamEvent
+import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.api.toTokenUsage
+import com.newoether.agora.api.util.ToolArgumentAccumulator
+import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.api.util.safeWireToolName
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -142,6 +149,215 @@ internal object ToolCallTextParser {
         return (runCatching { Json.parseToJsonElement(raw) }.getOrNull() as? JsonObject)?.toString()
     }
 
+}
+
+internal class OpenAiResponsesEventRouter(
+    private val json: Json,
+    private val thinkingEnabled: Boolean,
+) {
+    private data class FunctionCall(
+        val streamKey: String,
+        var itemId: String? = null,
+        var callId: String? = null,
+        var name: String? = null,
+        val arguments: ToolArgumentAccumulator = ToolArgumentAccumulator(),
+        var completed: Boolean = false,
+    )
+
+    private val callsByOutputIndex = linkedMapOf<Int, FunctionCall>()
+    private val callsByItemId = mutableMapOf<String, FunctionCall>()
+    private val completedCalls = mutableListOf<StreamEvent.ToolCallRequest>()
+    private val emittedCallIds = mutableSetOf<String>()
+    private val emittedCitationUrls = mutableSetOf<String>()
+    private var lastSequenceNumber: Int? = null
+    var sawTerminalMarker: Boolean = false
+        private set
+    var stopReason: String? = null
+        private set
+    var streamError: GenerationError? = null
+        private set
+    var reportedError: Boolean = false
+        private set
+
+    val toolCallInFlight: Boolean
+        get() = callsByOutputIndex.values.any { !it.completed }
+
+    fun route(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        if (streamError != null || reportedError) return emptyList()
+        if (sawTerminalMarker) return fail(event.type, "event received after terminal response")
+        validateSequence(event)?.let { return fail(event.type, it) }
+        return when (event.type) {
+            "response.created", "response.in_progress",
+            "response.output_text.done", "response.reasoning_text.done",
+            "response.reasoning_summary_text.done", "response.content_part.added",
+            "response.content_part.done" -> emptyList()
+            "response.output_text.delta" -> event.delta?.takeIf(String::isNotEmpty)
+                ?.let { listOf(StreamEvent.TextChunk(it)) }.orEmpty()
+            "response.output_text.annotation.added" -> routeCitation(event)
+            "response.reasoning_text.delta", "response.reasoning_summary_text.delta" ->
+                event.delta?.takeIf { thinkingEnabled && it.isNotEmpty() }
+                    ?.let { listOf(StreamEvent.ThoughtChunk(it)) }.orEmpty()
+            "response.output_item.added" -> addOutputItem(event)
+            "response.function_call_arguments.delta" -> updateArguments(event)
+            "response.function_call_arguments.done" -> completeArguments(event)
+            "response.output_item.done" -> completeOutputItem(event)
+            "response.completed" -> completeResponse(event)
+            "response.failed" -> failResponse(event, "failed")
+            "response.incomplete" -> failResponse(event, "incomplete")
+            "error" -> failApi(event.error, "Provider reported a Responses stream error")
+            else -> emptyList()
+        }
+    }
+
+    private fun routeCitation(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val annotation = event.annotation ?: return fail(event.type, "missing annotation")
+        if (annotation.type != "url_citation") return emptyList()
+        val url = annotation.url?.takeIf {
+            (it.startsWith("https://") || it.startsWith("http://")) && it.none(Char::isWhitespace)
+        } ?: return fail(event.type, "url citation has invalid url")
+        if (!emittedCitationUrls.add(url)) return emptyList()
+        val title = (annotation.title?.takeIf(String::isNotBlank) ?: url)
+            .replace("[", "\\[").replace("]", "\\]")
+        return listOf(StreamEvent.TextChunk("\n\n[$title](${url.replace(")", "%29")})"))
+    }
+
+    private fun addOutputItem(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val item = event.item ?: return fail(event.type, "missing output item")
+        if (item.type != "function_call") return emptyList()
+        val index = event.outputIndex ?: return fail(event.type, "missing output_index")
+        if (callsByOutputIndex.containsKey(index)) return fail(event.type, "duplicate output_index")
+        val call = FunctionCall(
+            streamKey = item.id ?: "response_tool_$index",
+            itemId = item.id,
+            callId = item.callId,
+            name = item.name,
+        )
+        call.arguments.append(item.arguments)
+        callsByOutputIndex[index] = call
+        item.id?.let { id ->
+            if (callsByItemId.put(id, call) != null) return fail(event.type, "duplicate item id")
+        }
+        return listOf(call.updateEvent())
+    }
+
+    private fun updateArguments(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val call = findCall(event) ?: return fail(event.type, "function call item was not added")
+        if (call.completed) return fail(event.type, "function call already completed")
+        call.arguments.append(event.delta)
+        return listOf(call.updateEvent())
+    }
+
+    private fun completeArguments(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val call = findCall(event) ?: return fail(event.type, "function call item was not added")
+        if (call.completed) return fail(event.type, "function call already completed")
+        event.name?.let { call.name = it }
+        event.arguments?.let { finalArguments ->
+            val accumulated = call.arguments.toString()
+            if (accumulated.isNotEmpty() && finalArguments != accumulated) {
+                return fail(event.type, "final arguments differ from streamed arguments")
+            }
+            if (accumulated.isEmpty()) call.arguments.append(finalArguments)
+        }
+        return listOf(call.updateEvent())
+    }
+
+    private fun completeOutputItem(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val item = event.item ?: return fail(event.type, "missing output item")
+        if (item.type != "function_call") return emptyList()
+        val call = findCall(event) ?: return fail(event.type, "function call item was not added")
+        item.callId?.let { call.callId = it }
+        item.name?.let { call.name = it }
+        item.arguments?.let { finalArguments ->
+            val accumulated = call.arguments.toString()
+            if (accumulated.isNotEmpty() && finalArguments != accumulated) {
+                return fail(event.type, "final arguments differ from streamed arguments")
+            }
+            if (accumulated.isEmpty()) call.arguments.append(finalArguments)
+        }
+        return completeCall(call, event.type)
+    }
+
+    private fun completeCall(call: FunctionCall, rawType: String): List<StreamEvent> {
+        if (call.completed) return fail(rawType, "function call completed twice")
+        val callId = call.callId.orEmpty()
+        val name = call.name.orEmpty()
+        val arguments = call.arguments.toString().ifEmpty { "{}" }
+        if (!callId.matches(safeWireToolCallId)) return fail(rawType, "invalid call_id")
+        if (!name.matches(safeWireToolName)) return fail(rawType, "invalid function name")
+        if (runCatching { json.parseToJsonElement(arguments) is JsonObject }.getOrDefault(false).not()) {
+            return fail(rawType, "function arguments are not a complete JSON object")
+        }
+        if (!emittedCallIds.add(callId)) return fail(rawType, "duplicate call_id")
+        call.completed = true
+        completedCalls += StreamEvent.ToolCallRequest(
+            callId,
+            name,
+            arguments,
+            streamKey = call.streamKey,
+        )
+        return emptyList()
+    }
+
+    private fun completeResponse(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        if (toolCallInFlight) return fail(event.type, "response completed with an open function call")
+        val response = event.response ?: return fail(event.type, "missing response envelope")
+        if (response.status != "completed") {
+            return fail(event.type, "unexpected terminal status ${response.status}")
+        }
+        sawTerminalMarker = true
+        stopReason = "completed"
+        val output = mutableListOf<StreamEvent>()
+        if (completedCalls.size == 1) output += completedCalls.single()
+        if (completedCalls.size > 1) output += StreamEvent.ToolCallsRequest(completedCalls.toList())
+        response.usage?.let { output += StreamEvent.UsageUpdate(it.toTokenUsage()) }
+        return output
+    }
+
+    private fun failResponse(event: OpenAiResponseStreamEvent, fallback: String): List<StreamEvent> {
+        val response = event.response
+        response?.usage?.let { return failApi(response.error, response.incompleteDetails?.reason ?: fallback, it) }
+        return failApi(response?.error, response?.incompleteDetails?.reason ?: fallback)
+    }
+
+    private fun failApi(
+        error: com.newoether.agora.api.OpenAiError?,
+        fallback: String,
+        usage: com.newoether.agora.api.OpenAiResponseUsage? = null,
+    ): List<StreamEvent> {
+        sawTerminalMarker = true
+        stopReason = fallback.lowercase()
+        streamError = GenerationError.Api(
+            code = error?.code,
+            type = error?.type ?: "responses_error",
+            message = error?.message?.takeIf(String::isNotBlank) ?: fallback,
+        )
+        return usage?.let { listOf(StreamEvent.UsageUpdate(it.toTokenUsage())) }.orEmpty()
+    }
+
+    private fun findCall(event: OpenAiResponseStreamEvent): FunctionCall? =
+        event.itemId?.let(callsByItemId::get)
+            ?: event.item?.id?.let(callsByItemId::get)
+            ?: event.outputIndex?.let(callsByOutputIndex::get)
+
+    private fun validateSequence(event: OpenAiResponseStreamEvent): String? {
+        val sequence = event.sequenceNumber ?: return "missing sequence_number"
+        val previous = lastSequenceNumber
+        if (previous != null && sequence <= previous) return "non-increasing sequence_number"
+        lastSequenceNumber = sequence
+        return null
+    }
+
+    private fun fail(rawType: String, cause: String): List<StreamEvent> {
+        reportedError = true
+        return listOf(StreamEvent.Error(GenerationError.SseParse(rawType, cause)))
+    }
+
+    private fun FunctionCall.updateEvent() = StreamEvent.ToolCallUpdate(
+        streamKey = streamKey,
+        id = callId,
+        name = name.orEmpty(),
+        arguments = arguments.toString(),
+    )
 }
 
 /**

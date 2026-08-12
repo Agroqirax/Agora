@@ -26,7 +26,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
-import okhttp3.HttpUrl.Companion.toHttpUrl
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -111,6 +110,9 @@ abstract class BaseOpenAiProvider : LlmProvider {
      */
     protected open val terminalSseGraceMillis: Long = 1_000L
 
+    protected open fun retryDelayMillis(attempt: Int): Long =
+        ProviderRetryPolicy.delayMillis(attempt)
+
     // -- Template method --
 
     override fun generateResponse(
@@ -118,44 +120,70 @@ abstract class BaseOpenAiProvider : LlmProvider {
         config: ProviderConfig
     ): Flow<StreamEvent> = flow {
         val baseUrl = config.baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
-        val endpointUrls = endpointCandidates(baseUrl, "chat/completions")
-
+        val endpointUrls = openAiEndpointCandidates(
+            baseUrl = baseUrl,
+            path = if (config.responsesApiEnabled) "responses" else "chat/completions",
+            retryMissingV1BaseUrl = retryMissingV1BaseUrl,
+        )
         val validatedMessages = prepareMessages(messages, config.maxContextWindow)
-
         val apiMessages = convertToOpenAiMessages(
             messages = validatedMessages,
             systemPrompt = transformSystemPrompt(config.systemPrompt),
             includeImages = config.includeImages
         )
 
-        var request = OpenAiChatRequest(
-            model = config.modelId,
-            messages = apiMessages,
-            stream = true,
-            streamOptions = OpenAiStreamOptions(includeUsage = true),
-            tools = config.tools,
-            serviceTier = config.openAiServiceTier,
-            temperature = config.temperature,
-            maxTokens = config.maxTokens,
-            topP = config.topP,
-            frequencyPenalty = config.frequencyPenalty,
-            presencePenalty = config.presencePenalty
-        )
-        request = customizeRequest(request, config)
-
         try {
-            request.requireValidWireFormat(name)
-            val requestBodyJson = json.encodeToString(OpenAiChatRequest.serializer(), request)
+            if (config.openAiWebSearchEnabled && !config.responsesApiEnabled) {
+                throw RequestFormatException(
+                    name,
+                    listOf("hosted web search requires Responses API transport"),
+                )
+            }
+            val requestBodyJson = if (config.responsesApiEnabled) {
+                val request = OpenAiResponsesRequest(
+                    model = config.modelId,
+                    input = apiMessages.toResponsesInput(),
+                    tools = buildList {
+                        addAll(config.tools.orEmpty().toResponsesTools())
+                        if (config.openAiWebSearchEnabled) add(OpenAiResponseTool(type = "web_search"))
+                    }.ifEmpty { null },
+                    reasoning = config.thinkingLevel.takeIf { config.thinkingEnabled }
+                        ?.let { OpenAiReasoning(effort = it) },
+                    serviceTier = config.openAiServiceTier,
+                    temperature = config.temperature,
+                    maxOutputTokens = config.maxTokens,
+                    topP = config.topP,
+                )
+                request.requireValidWireFormat(name)
+                json.encodeToString(OpenAiResponsesRequest.serializer(), request)
+            } else {
+                var request = OpenAiChatRequest(
+                    model = config.modelId,
+                    messages = apiMessages,
+                    stream = true,
+                    streamOptions = OpenAiStreamOptions(includeUsage = true),
+                    tools = config.tools,
+                    serviceTier = config.openAiServiceTier,
+                    temperature = config.temperature,
+                    maxTokens = config.maxTokens,
+                    topP = config.topP,
+                    frequencyPenalty = config.frequencyPenalty,
+                    presencePenalty = config.presencePenalty
+                )
+                request = customizeRequest(request, config)
+                request.requireValidWireFormat(name)
+                json.encodeToString(OpenAiChatRequest.serializer(), request)
+            }
             requireValidSerializedRequest(
                 provider = name,
                 body = requestBodyJson,
                 requiredStringFields = setOf("model"),
-                requiredArrayFields = setOf("messages"),
+                requiredArrayFields = setOf(if (config.responsesApiEnabled) "input" else "messages"),
             )
             DebugLog.d(
                 "AgoraAPI",
-                "[$name] request model=${config.modelId} messages=${apiMessages.size} " +
-                    "tools=${config.tools?.size ?: 0}",
+                "[$name] request transport=${if (config.responsesApiEnabled) "responses" else "chat"} " +
+                    "model=${config.modelId} messages=${apiMessages.size} tools=${config.tools?.size ?: 0}",
             )
 
             val headers = mutableMapOf("Content-Type" to "application/json")
@@ -184,7 +212,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                     } catch (e: Exception) {
                         val retryable = e.asRetryableTransportError()
                         if (retryable != null && attempt < maxAttempts) {
-                            val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                            val retryDelayMs = retryDelayMillis(attempt)
                             DebugLog.w(
                                 "AgoraAPI",
                                 "[$name] Transport failure opening stream on attempt " +
@@ -204,8 +232,11 @@ abstract class BaseOpenAiProvider : LlmProvider {
                             // completed is decided from semantic markers below, so a relay that
                             // cuts the stream at a content-block boundary can no longer pass as a
                             // finished answer.
-                            val termination =
+                            val termination = if (config.responsesApiEnabled) {
+                                consumeResponsesStream(handle, config) { emit(it) }
+                            } else {
                                 consumeSuccessfulStream(handle, config) { emit(it) }
+                            }
                             DebugLog.d(
                                 "AgoraSSE",
                                 "[$name] stream_end ${termination.describe()} " +
@@ -217,7 +248,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                                     "AgoraAPI",
                                     "[$name] Incomplete stream on attempt $attempt/$maxAttempts, retrying",
                                 )
-                                val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                                val retryDelayMs = retryDelayMillis(attempt)
                                 emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                                 delay(retryDelayMs)
                                 retryScheduled = true
@@ -251,7 +282,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                                     retryableStatusCodes,
                                 ) && attempt < maxAttempts
                             ) {
-                                val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
+                                val retryDelayMs = retryDelayMillis(attempt)
                                 DebugLog.w("AgoraAPI", "[$name] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${retryDelayMs}ms...")
                                 emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                                 delay(retryDelayMs)
@@ -283,6 +314,76 @@ abstract class BaseOpenAiProvider : LlmProvider {
             }
         }
     }.flowOn(Dispatchers.IO)
+
+    private suspend fun consumeResponsesStream(
+        handle: HttpClient.StreamHandle,
+        config: ProviderConfig,
+        emit: suspend (StreamEvent) -> Unit,
+    ): StreamTermination {
+        val router = OpenAiResponsesEventRouter(json, config.thinkingEnabled)
+        var producedContent = false
+        var reportedError = false
+        var timedOut = false
+        var consecutiveReadTimeouts = 0
+
+        while (currentCoroutineContext().isActive) {
+            val line = try {
+                handle.readLine()
+            } catch (error: SocketTimeoutException) {
+                if (!currentCoroutineContext().isActive) break
+                if (++consecutiveReadTimeouts >= 3) {
+                    timedOut = true
+                    break
+                }
+                continue
+            } ?: break
+            consecutiveReadTimeouts = 0
+            if (!line.startsWith("data: ")) continue
+            val payload = line.substring(6).trim()
+            if (payload == "[DONE]") break
+
+            val routed = try {
+                router.route(json.decodeFromString<OpenAiResponseStreamEvent>(payload))
+            } catch (error: Exception) {
+                DebugLog.e(
+                    "AgoraAPI",
+                    "[$name] malformed Responses payload exception=${error.javaClass.simpleName}",
+                )
+                reportedError = true
+                listOf(
+                    StreamEvent.Error(
+                        GenerationError.SseParse(
+                            rawLine = payload.take(512),
+                            cause = error.localizedMessage ?: "Malformed Responses SSE payload",
+                        )
+                    )
+                )
+            }
+            routed.forEach { event ->
+                if (event.carriesModelOutput()) producedContent = true
+                if (event is StreamEvent.Error) reportedError = true
+                emit(event)
+            }
+            if (
+                reportedError || router.streamError != null ||
+                router.sawTerminalMarker
+            ) break
+        }
+
+        if (!currentCoroutineContext().isActive) {
+            throw CancellationException("Responses stream cancelled")
+        }
+        return StreamTermination(
+            sawTerminalMarker = router.sawTerminalMarker,
+            stopReason = router.stopReason,
+            producedContent = producedContent,
+            toolCallInFlight = router.toolCallInFlight,
+            streamError = router.streamError,
+            alreadyReportedError = reportedError || router.reportedError,
+            timedOut = timedOut,
+            retryableStreamError = !router.sawTerminalMarker,
+        )
+    }
 
     /**
      * Consume one 200 SSE stream and report HOW it ended.
@@ -633,18 +734,6 @@ abstract class BaseOpenAiProvider : LlmProvider {
         )
     }
 
-    private fun endpointCandidates(baseUrl: String, path: String): List<String> {
-        val normalizedBaseUrl = baseUrl.trimEnd('/')
-        val cleanPath = path.trimStart('/')
-        val primary = "$normalizedBaseUrl/$cleanPath"
-        if (!retryMissingV1BaseUrl || normalizedBaseUrl.isBlank() ||
-            BaseUrlResolver.hasVersionSegment(normalizedBaseUrl)
-        ) {
-            return listOf(primary)
-        }
-        return listOf(primary, "$normalizedBaseUrl/v1/$cleanPath")
-    }
-
     /** Synthetic id for tool calls recovered from content text (#33 path B), where the server
      *  provides no id. Unique per call so the result can still be paired back to the request. */
     private fun syntheticToolCallId(): String =
@@ -671,9 +760,6 @@ abstract class BaseOpenAiProvider : LlmProvider {
             GenerationError.Network(statusCode = statusCode, message = errorRaw + endpointHint)
         }
     }
-
-    private fun authHeaders(apiKey: String): Map<String, String> =
-        if (apiKey.isBlank()) emptyMap() else mapOf("Authorization" to "Bearer $apiKey")
 
     private fun fetchModelPages(
         endpointUrl: String,
@@ -724,11 +810,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
                 return modelIds.sorted()
             }
 
-            pageUrl = endpointUrl.toHttpUrl()
-                .newBuilder()
-                .addQueryParameter("after", cursor)
-                .build()
-                .toString()
+            pageUrl = nextOpenAiModelPageUrl(endpointUrl, cursor)
         }
 
         DebugLog.w(
@@ -741,8 +823,12 @@ abstract class BaseOpenAiProvider : LlmProvider {
 
     override suspend fun fetchModels(apiKey: String, baseUrl: String?): List<String> = withContext(Dispatchers.IO) {
         val effectiveBaseUrl = baseUrl?.trimEnd('/')?.ifBlank { null } ?: defaultBaseUrl
-        val endpointUrls = endpointCandidates(effectiveBaseUrl, "models")
-        val headers = authHeaders(apiKey)
+        val endpointUrls = openAiEndpointCandidates(
+            effectiveBaseUrl,
+            "models",
+            retryMissingV1BaseUrl,
+        )
+        val headers = openAiAuthHeaders(apiKey)
         var lastFailure: Exception? = null
 
         for ((index, endpointUrl) in endpointUrls.withIndex()) {

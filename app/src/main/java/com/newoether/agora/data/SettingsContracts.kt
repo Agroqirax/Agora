@@ -1,8 +1,12 @@
 package com.newoether.agora.data
 
+import androidx.datastore.preferences.core.Preferences
 import com.newoether.agora.util.Constants
+import com.newoether.agora.util.DebugLog
+import com.newoether.agora.util.SecretCrypto
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import java.util.UUID
 
 @Serializable
@@ -69,6 +73,37 @@ data class SystemPromptEntry(
         else emptyList()
 }
 
+internal val WEB_SEARCH_PROVIDERS = setOf(
+    "brave", "kagi", "serper", "tavily", "searxng", "duckduckgo",
+)
+
+internal fun normalizeWebSearchProvider(provider: String?): String =
+    provider?.trim()?.lowercase()?.takeIf(WEB_SEARCH_PROVIDERS::contains) ?: "duckduckgo"
+
+internal fun decodeWebSearchApiKeys(preferences: Preferences, json: Json): Map<String, String> {
+    val raw = SecretCrypto.decrypt(preferences[WEB_SEARCH_API_KEYS_JSON] ?: "{}")
+    return try {
+        json.decodeFromString<Map<String, String>>(raw)
+    } catch (error: Exception) {
+        DebugLog.e("SettingsManager", "Failed to decode webSearchApiKeys", error)
+        emptyMap()
+    }
+}
+
+internal fun decodeConversationSettings(
+    preferences: Preferences,
+    json: Json,
+): Map<String, ConversationSettings> = try {
+    json.decodeFromString(preferences[CONVERSATION_SETTINGS_JSON] ?: "{}")
+} catch (_: Exception) {
+    emptyMap()
+}
+
+internal fun decodeEncryptedShellDevices(preferences: Preferences, json: Json): List<ShellDeviceConfig> {
+    val raw = SecretCrypto.decrypt(preferences[SHELL_DEVICES_JSON] ?: "[]")
+    return runCatching { json.decodeFromString<List<ShellDeviceConfig>>(raw) }.getOrDefault(emptyList())
+}
+
 @Serializable
 data class ConversationSettings(
     /** Provider-visible conversation token budget. Values <=100 are legacy message windows. */
@@ -80,6 +115,7 @@ data class ConversationSettings(
     val presencePenalty: Float? = null,
     val codeExecutionEnabled: Boolean? = null,
     val googleSearchEnabled: Boolean? = null,
+    val openAiWebSearchEnabled: Boolean? = null,
     val thinkingEnabled: Boolean? = null,
     val thinkingLevel: String? = null,
     val thinkingBudgetEnabled: Boolean? = null,
@@ -91,7 +127,8 @@ data class ConversationSettings(
 ) {
     fun isAllNull() = contextWindow == null && temperature == null && maxTokens == null && topP == null
         && frequencyPenalty == null && presencePenalty == null
-        && codeExecutionEnabled == null && googleSearchEnabled == null && thinkingEnabled == null
+        && codeExecutionEnabled == null && googleSearchEnabled == null
+        && openAiWebSearchEnabled == null && thinkingEnabled == null
         && thinkingLevel == null && thinkingBudgetEnabled == null && thinkingBudgetTokens == null
         && openAiServiceTierEnabled == null && openAiServiceTier == null
         && webSearchEnabled == null && shellEnabled == null

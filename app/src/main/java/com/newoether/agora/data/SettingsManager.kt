@@ -18,6 +18,8 @@ import kotlinx.coroutines.flow.map
 
 internal const val DEFAULT_CONTEXT_COMPACT_ENABLED = true
 internal const val DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT = 0
+internal const val DEFAULT_CONTEXT_COMPACT_THRESHOLD_PERCENT = 90
+internal val CONTEXT_COMPACT_THRESHOLD_PERCENT_RANGE = 50..100
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
 
@@ -67,6 +69,11 @@ class SettingsManager(private val context: Context) {
     val contextCompactRetainCount: Flow<Int> = context.dataStore.data.map {
         it[CONTEXT_COMPACT_RETAIN_COUNT] ?: DEFAULT_CONTEXT_COMPACT_RETAIN_COUNT
     }
+    val contextCompactThresholdPercent: Flow<Int> = context.dataStore.data.map {
+        it[CONTEXT_COMPACT_THRESHOLD_PERCENT]
+            ?.takeIf(CONTEXT_COMPACT_THRESHOLD_PERCENT_RANGE::contains)
+            ?: DEFAULT_CONTEXT_COMPACT_THRESHOLD_PERCENT
+    }
     val codeExecutionEnabled: Flow<Boolean> = context.dataStore.data.map { it[CODE_EXECUTION_ENABLED] ?: false }
     val googleSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[GOOGLE_SEARCH_ENABLED] ?: false }
     val thinkingEnabled: Flow<Boolean> = context.dataStore.data.map { it[THINKING_ENABLED] ?: true }
@@ -84,6 +91,8 @@ class SettingsManager(private val context: Context) {
     val openAiServiceTier: Flow<String> = context.dataStore.data.map { pref ->
         OpenAiServiceTiers.normalize(pref[OPENAI_SERVICE_TIER])
     }
+    val openAiResponsesApiEnabled: Flow<Boolean> =
+        context.dataStore.data.map { it[OPENAI_RESPONSES_API_ENABLED] ?: false }
     val titleGenerationEnabled: Flow<Boolean> = context.dataStore.data.map { it[TITLE_GENERATION_ENABLED] ?: true }
     val titleGenerationModel: Flow<String?> = context.dataStore.data.map { it[TITLE_GENERATION_MODEL] }
     val titleGenerationPrompt: Flow<String> = context.dataStore.data.map { pref ->
@@ -116,10 +125,11 @@ class SettingsManager(private val context: Context) {
 
     val appLanguage: Flow<String> = context.dataStore.data.map { it[APP_LANGUAGE] ?: "system" }
     val webSearchEnabled: Flow<Boolean> = context.dataStore.data.map { it[WEB_SEARCH_ENABLED] ?: true }
-    val webSearchProvider: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_PROVIDER] ?: "duckduckgo" }
-    val webSearchApiKeys: Flow<Map<String, String>> = context.dataStore.data.map { pref ->
-        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[WEB_SEARCH_API_KEYS_JSON] ?: "{}")
-        try { json.decodeFromString<Map<String, String>>(jsonStr) } catch (e: Exception) { DebugLog.e("SettingsManager", "Failed to decode webSearchApiKeys", e); emptyMap() }
+    val webSearchProvider: Flow<String> = context.dataStore.data.map {
+        normalizeWebSearchProvider(it[WEB_SEARCH_PROVIDER])
+    }
+    val webSearchApiKeys: Flow<Map<String, String>> = context.dataStore.data.map { preferences ->
+        decodeWebSearchApiKeys(preferences, json)
     }
     val webSearchNumResults: Flow<Int> = context.dataStore.data.map { it[WEB_SEARCH_NUM_RESULTS] ?: 5 }
     val webSearchBaseUrl: Flow<String> = context.dataStore.data.map { it[WEB_SEARCH_BASE_URL] ?: "" }
@@ -137,10 +147,8 @@ class SettingsManager(private val context: Context) {
     val defaultTopP: Flow<Float?> = context.dataStore.data.map { it[DEFAULT_TOP_P]?.toFloatOrNull() }
     val defaultFrequencyPenalty: Flow<Float?> = context.dataStore.data.map { it[DEFAULT_FREQUENCY_PENALTY]?.toFloatOrNull() }
     val defaultPresencePenalty: Flow<Float?> = context.dataStore.data.map { it[DEFAULT_PRESENCE_PENALTY]?.toFloatOrNull() }
-    val conversationSettings: Flow<Map<String, ConversationSettings>> = context.dataStore.data.map { pref ->
-        val jsonStr = pref[CONVERSATION_SETTINGS_JSON] ?: "{}"
-        try { json.decodeFromString<Map<String, ConversationSettings>>(jsonStr) } catch (e: Exception) { emptyMap() }
-    }
+    val conversationSettings: Flow<Map<String, ConversationSettings>> =
+        context.dataStore.data.map { preferences -> decodeConversationSettings(preferences, json) }
     val autoCacheEnabled: Flow<Boolean> = context.dataStore.data.map { it[AUTO_CACHE_ENABLED] ?: true }
     val autoUpdateCheck: Flow<Boolean> = context.dataStore.data.map { it[AUTO_UPDATE_CHECK] ?: true }
     val lastUpdateCheckTime: Flow<Long> = context.dataStore.data.map { it[LAST_UPDATE_CHECK_TIME] ?: 0L }
@@ -164,10 +172,8 @@ class SettingsManager(private val context: Context) {
     val proxyBypass: Flow<String> = context.dataStore.data.map { it[PROXY_BYPASS] ?: DEFAULT_PROXY_BYPASS }
     // Confirm before the model runs state-changing commands on remote shell servers. Default on.
     val shellConfirmEnabled: Flow<Boolean> = context.dataStore.data.map { it[SHELL_CONFIRM_ENABLED] ?: true }
-    val shellDevices: Flow<List<ShellDeviceConfig>> = context.dataStore.data.map { pref ->
-        val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[SHELL_DEVICES_JSON] ?: "[]")
-        try { json.decodeFromString<List<ShellDeviceConfig>>(jsonStr) } catch (e: Exception) { emptyList() }
-    }
+    val shellDevices: Flow<List<ShellDeviceConfig>> =
+        context.dataStore.data.map { preferences -> decodeEncryptedShellDevices(preferences, json) }
     val mcpServers: Flow<List<McpServerConfig>> = context.dataStore.data.map { pref ->
         val jsonStr = com.newoether.agora.util.SecretCrypto.decrypt(pref[MCP_SERVERS_JSON] ?: "[]")
         try {
@@ -279,7 +285,6 @@ class SettingsManager(private val context: Context) {
     suspend fun saveSystemPrompts(prompts: List<SystemPromptEntry>) {
         context.dataStore.edit { it[SYSTEM_PROMPTS_JSON] = json.encodeToString(prompts) }
     }
-
     suspend fun initializeFirstInstallDefaults(
         locale: Locale = Locale.getDefault(),
         now: Long = System.currentTimeMillis()
@@ -361,69 +366,57 @@ class SettingsManager(private val context: Context) {
         size == other.size && zip(other).all { (left, right) ->
             left.type == right.type && left.value == right.value
         }
-
     suspend fun setActiveSystemPromptId(id: String?) {
         context.dataStore.edit { 
             if (id == null) it.remove(ACTIVE_SYSTEM_PROMPT_ID) else it[ACTIVE_SYSTEM_PROMPT_ID] = id 
         }
     }
-
     suspend fun saveMaxContextWindow(window: Int) {
         context.dataStore.edit {
             it[CONTEXT_TOKEN_BUDGET] = ContextBudget.normalize(window).toString()
         }
     }
-
     suspend fun saveVisualizeContextRollout(enabled: Boolean) {
         context.dataStore.edit { it[VISUALIZE_CONTEXT_ROLLOUT] = enabled }
     }
-
     suspend fun saveCodeExecutionEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CODE_EXECUTION_ENABLED] = enabled }
     }
-
     suspend fun saveGoogleSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[GOOGLE_SEARCH_ENABLED] = enabled }
     }
-
     suspend fun saveThinkingEnabled(enabled: Boolean) {
         context.dataStore.edit { it[THINKING_ENABLED] = enabled }
     }
-
     suspend fun saveThinkingLevel(level: String) {
         context.dataStore.edit { it[THINKING_LEVEL] = ThinkingLevels.normalize(level) }
     }
-
     suspend fun saveThinkingBudgetEnabled(enabled: Boolean) {
         context.dataStore.edit { it[THINKING_BUDGET_ENABLED] = enabled }
     }
-
     suspend fun saveThinkingBudgetTokens(tokens: Int) {
         context.dataStore.edit { it[THINKING_BUDGET_TOKENS] = tokens.coerceAtLeast(1) }
     }
-
     suspend fun saveOpenAiServiceTierEnabled(enabled: Boolean) {
         context.dataStore.edit { it[OPENAI_SERVICE_TIER_ENABLED] = enabled }
     }
-
     suspend fun saveOpenAiServiceTier(tier: String) {
         context.dataStore.edit {
             it[OPENAI_SERVICE_TIER] = OpenAiServiceTiers.normalize(tier)
         }
     }
-
+    suspend fun saveOpenAiResponsesApiEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[OPENAI_RESPONSES_API_ENABLED] = enabled }
+    }
     suspend fun saveTitleGenerationEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TITLE_GENERATION_ENABLED] = enabled }
     }
-
     suspend fun saveTitleGenerationNotificationsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[TITLE_GENERATION_NOTIFICATIONS_ENABLED] = enabled }
     }
-
     suspend fun saveAccessPastConversations(enabled: Boolean) {
         context.dataStore.edit { it[ACCESS_PAST_CONVERSATIONS] = enabled }
     }
-
     suspend fun saveAccessSavedMemories(enabled: Boolean) {
         context.dataStore.edit { it[ACCESS_SAVED_MEMORIES] = enabled }
     }
@@ -457,15 +450,12 @@ class SettingsManager(private val context: Context) {
     suspend fun saveAppLanguage(language: String) {
         context.dataStore.edit { it[APP_LANGUAGE] = language }
     }
-
     suspend fun saveWebSearchEnabled(enabled: Boolean) {
         context.dataStore.edit { it[WEB_SEARCH_ENABLED] = enabled }
     }
-
     suspend fun saveWebSearchProvider(provider: String) {
-        context.dataStore.edit { it[WEB_SEARCH_PROVIDER] = provider }
+        context.dataStore.edit { it[WEB_SEARCH_PROVIDER] = normalizeWebSearchProvider(provider) }
     }
-
     suspend fun saveWebSearchApiKey(provider: String, apiKey: String) {
         context.dataStore.edit { prefs ->
             val current = com.newoether.agora.util.SecretCrypto.decrypt(prefs[WEB_SEARCH_API_KEYS_JSON] ?: "{}")
@@ -474,7 +464,6 @@ class SettingsManager(private val context: Context) {
             prefs[WEB_SEARCH_API_KEYS_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(map))
         }
     }
-
     suspend fun saveWebSearchApiKeys(keys: Map<String, String>) {
         val nonBlank = keys.filterValues { it.isNotBlank() }
         context.dataStore.edit { prefs ->
@@ -486,14 +475,12 @@ class SettingsManager(private val context: Context) {
             }
         }
     }
-
     suspend fun saveWebSearchNumResults(n: Int) {
         context.dataStore.edit { it[WEB_SEARCH_NUM_RESULTS] = n.coerceIn(1, 10) }
     }
     suspend fun saveWebSearchBaseUrl(url: String) {
         context.dataStore.edit { it[WEB_SEARCH_BASE_URL] = url }
     }
-
     suspend fun saveImageGenEnabled(enabled: Boolean) {
         context.dataStore.edit { it[IMAGE_GEN_ENABLED] = enabled }
     }
@@ -548,7 +535,6 @@ class SettingsManager(private val context: Context) {
             prefs[CONVERSATION_SETTINGS_JSON] = json.encodeToString(map)
         }
     }
-
     suspend fun saveConversationSettingsMap(settings: Map<String, ConversationSettings>) {
         val nonEmpty = settings.filterValues { !it.isAllNull() }
         context.dataStore.edit { prefs ->
@@ -559,7 +545,6 @@ class SettingsManager(private val context: Context) {
             }
         }
     }
-
     suspend fun saveLocalChatModels(models: List<LocalChatModelConfig>) =
         modelPreferenceStore.saveLocalChatModels(models)
 
@@ -576,22 +561,24 @@ class SettingsManager(private val context: Context) {
     suspend fun saveContextCompactEnabled(enabled: Boolean) {
         context.dataStore.edit { it[CONTEXT_COMPACT_ENABLED] = enabled }
     }
-
     suspend fun saveContextCompactModel(model: String?) {
         context.dataStore.edit { prefs ->
             if (model == null) prefs.remove(CONTEXT_COMPACT_MODEL) else prefs[CONTEXT_COMPACT_MODEL] = model
         }
     }
-
     suspend fun saveContextCompactPrompt(prompt: String) {
         context.dataStore.edit { prefs ->
             if (prompt.isBlank()) prefs.remove(CONTEXT_COMPACT_PROMPT) else prefs[CONTEXT_COMPACT_PROMPT] = prompt
         }
     }
-
     suspend fun saveContextCompactRetainCount(count: Int) {
         require(count >= 0)
         context.dataStore.edit { it[CONTEXT_COMPACT_RETAIN_COUNT] = count }
+    }
+
+    suspend fun saveContextCompactThresholdPercent(percent: Int) {
+        require(percent in CONTEXT_COMPACT_THRESHOLD_PERCENT_RANGE)
+        context.dataStore.edit { it[CONTEXT_COMPACT_THRESHOLD_PERCENT] = percent }
     }
 
     suspend fun saveTitleGenerationModel(model: String?) {
@@ -600,56 +587,45 @@ class SettingsManager(private val context: Context) {
             else it[TITLE_GENERATION_MODEL] = model
         }
     }
-
     suspend fun saveTitleGenerationPrompt(prompt: String) {
         context.dataStore.edit {
             if (prompt.isBlank()) it.remove(TITLE_GENERATION_PROMPT)
             else it[TITLE_GENERATION_PROMPT] = prompt
         }
     }
-
     suspend fun saveImageTranscriptionEnabledModels(models: Set<String>) {
         context.dataStore.edit { it[IMAGE_TRANSCRIPTION_ENABLED_MODELS] = models }
     }
-
     suspend fun saveImageTranscriptionEnabled(enabled: Boolean) {
         context.dataStore.edit { it[IMAGE_TRANSCRIPTION_ENABLED] = enabled }
     }
-
     suspend fun saveImageTranscriptionModel(model: String?) {
         context.dataStore.edit {
             if (model == null) it.remove(IMAGE_TRANSCRIPTION_MODEL)
             else it[IMAGE_TRANSCRIPTION_MODEL] = model
         }
     }
-
     suspend fun saveImageTranscriptionBatchSize(size: Int) {
         context.dataStore.edit { it[IMAGE_TRANSCRIPTION_BATCH_SIZE] = size.coerceIn(1, 10) }
     }
-
     suspend fun saveImageTranscriptionPrompt(prompt: String) {
         context.dataStore.edit {
             if (prompt.isBlank()) it.remove(IMAGE_TRANSCRIPTION_PROMPT)
             else it[IMAGE_TRANSCRIPTION_PROMPT] = prompt
         }
     }
-
     suspend fun saveShowDocumentationFab(enabled: Boolean) {
         context.dataStore.edit { it[SHOW_DOCUMENTATION_FAB] = enabled }
     }
-
     suspend fun saveDeveloperOptionsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[DEVELOPER_OPTIONS_ENABLED] = enabled }
     }
-
     suspend fun saveShellEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_ENABLED] = enabled }
     }
-
     suspend fun saveAutomationToolsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[AUTOMATION_TOOLS_ENABLED] = enabled }
     }
-
     suspend fun saveExactExecutionEnabled(enabled: Boolean) {
         context.dataStore.edit { it[EXACT_EXECUTION_ENABLED] = enabled }
     }
@@ -664,26 +640,21 @@ class SettingsManager(private val context: Context) {
     suspend fun saveShellConfirmEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SHELL_CONFIRM_ENABLED] = enabled }
     }
-
     suspend fun saveShellDevices(devices: List<ShellDeviceConfig>) {
         context.dataStore.edit { it[SHELL_DEVICES_JSON] = com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(devices)) }
     }
-
     suspend fun saveMcpServers(servers: List<McpServerConfig>) {
         context.dataStore.edit {
             it[MCP_SERVERS_JSON] =
                 com.newoether.agora.util.SecretCrypto.encrypt(json.encodeToString(servers))
         }
     }
-
     suspend fun saveSandboxEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SANDBOX_ENABLED] = enabled }
     }
-
     suspend fun saveSandboxSharedStorageEnabled(enabled: Boolean) {
         context.dataStore.edit { it[SANDBOX_SHARED_STORAGE_ENABLED] = enabled }
     }
-
     suspend fun saveThemeMode(mode: String) {
         context.dataStore.edit { it[THEME_MODE] = mode }
     }
@@ -693,41 +664,32 @@ class SettingsManager(private val context: Context) {
     suspend fun saveDynamicColor(enabled: Boolean) {
         context.dataStore.edit { it[DYNAMIC_COLOR] = enabled }
     }
-
     suspend fun saveBlurEffectsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[BLUR_EFFECTS_ENABLED] = enabled }
     }
-
     suspend fun saveReduceMotion(enabled: Boolean) {
         context.dataStore.edit { it[REDUCE_MOTION] = enabled }
     }
-
     suspend fun saveParseInlineDollarMath(enabled: Boolean) {
         context.dataStore.edit { it[PARSE_INLINE_DOLLAR_MATH] = enabled }
     }
-
     suspend fun saveHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[HAPTICS_ENABLED] = enabled }
     }
-
     suspend fun saveDetailedTokenUsage(enabled: Boolean) {
         context.dataStore.edit { it[DETAILED_TOKEN_USAGE] = enabled }
     }
-
     suspend fun saveToolCallDisplayMode(mode: String) {
         context.dataStore.edit { it[TOOL_CALL_DISPLAY_MODE] = ToolCallDisplayModes.normalize(mode) }
     }
-
     suspend fun saveThinkingSegmentDisplayMode(mode: String) {
         context.dataStore.edit {
             it[THINKING_SEGMENT_DISPLAY_MODE] = ThinkingSegmentDisplayModes.normalize(mode)
         }
     }
-
     suspend fun saveAutoExpandActiveGroup(enabled: Boolean) {
         context.dataStore.edit { it[AUTO_EXPAND_ACTIVE_GROUP] = enabled }
     }
-
     suspend fun saveFontPreference(value: String) {
         context.dataStore.edit { it[FONT_PREFERENCE] = value }
     }
@@ -737,27 +699,21 @@ class SettingsManager(private val context: Context) {
     suspend fun saveCustomFontName(value: String) {
         context.dataStore.edit { it[CUSTOM_FONT_NAME] = value }
     }
-
     suspend fun saveSchemeStyle(style: String) {
         context.dataStore.edit { it[SCHEME_STYLE] = style }
     }
-
     suspend fun saveFirstLaunchTime(time: Long) {
         context.dataStore.edit { it[FIRST_LAUNCH_TIME] = time }
     }
-
     suspend fun saveOnboardingCompleted(completed: Boolean) {
         context.dataStore.edit { it[ONBOARDING_COMPLETED] = completed }
     }
-
     suspend fun saveRatingPromptSubmitted(submitted: Boolean) {
         context.dataStore.edit { it[RATING_PROMPT_SUBMITTED] = submitted }
     }
-
     suspend fun saveRatingPromptDismissed(dismissed: Boolean) {
         context.dataStore.edit { it[RATING_PROMPT_DISMISSED] = dismissed }
     }
-
     suspend fun incrementMessagesSent() {
         context.dataStore.edit { it[TOTAL_MESSAGES_SENT] = (it[TOTAL_MESSAGES_SENT] ?: 0) + 1 }
     }
@@ -784,7 +740,6 @@ class SettingsManager(private val context: Context) {
     suspend fun saveLastBackupTimestamp(timestamp: Long) {
         context.dataStore.edit { it[LAST_BACKUP_TIMESTAMP] = timestamp }
     }
-
     suspend fun saveLastModelsFetchFingerprint(fingerprint: String) =
         modelPreferenceStore.saveLastModelsFetchFingerprint(fingerprint)
 
@@ -811,6 +766,7 @@ class SettingsManager(private val context: Context) {
             prefs.remove(CONTEXT_COMPACT_MODEL)
             prefs.remove(CONTEXT_COMPACT_PROMPT)
             prefs.remove(CONTEXT_COMPACT_RETAIN_COUNT)
+            prefs.remove(CONTEXT_COMPACT_THRESHOLD_PERCENT)
             prefs.remove(CODE_EXECUTION_ENABLED)
             prefs.remove(GOOGLE_SEARCH_ENABLED)
             prefs.remove(THINKING_ENABLED)
@@ -819,6 +775,7 @@ class SettingsManager(private val context: Context) {
             prefs.remove(THINKING_BUDGET_TOKENS)
             prefs.remove(OPENAI_SERVICE_TIER_ENABLED)
             prefs.remove(OPENAI_SERVICE_TIER)
+            prefs.remove(OPENAI_RESPONSES_API_ENABLED)
             prefs.remove(PROVIDER_BASE_URLS)
             prefs.remove(TITLE_GENERATION_ENABLED)
             prefs.remove(TITLE_GENERATION_MODEL)
@@ -886,7 +843,6 @@ class SettingsManager(private val context: Context) {
             prefs.remove(LAST_MODELS_FETCH_FINGERPRINT)
         }
     }
-
     suspend fun invalidatePortableModelCaches() =
         modelPreferenceStore.invalidatePortableModelCaches()
 }

@@ -84,6 +84,8 @@ internal class GenerationApiPathBuilder(
                     thinkingBudgetEnabled = config.thinkingBudgetEnabled,
                     thinkingBudgetTokens = config.thinkingBudgetTokens,
                     openAiServiceTier = config.openAiServiceTier,
+                    responsesApiEnabled = config.responsesApiEnabled,
+                    openAiWebSearchEnabled = config.openAiWebSearchEnabled,
                     baseUrl = config.baseUrl,
                     tools = definitions,
                     userPrepend = config.userPrepend,

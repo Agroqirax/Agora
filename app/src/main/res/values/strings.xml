@@ -16,6 +16,7 @@
     <string name="tools">Tools</string>
     <string name="code_execution">Code Execution</string>
     <string name="google_search">Google Search</string>
+    <string name="openai_search">OpenAI Search</string>
     <string name="thinking">Thinking</string>
     <string name="web_search">Web Search</string>
     <string name="ask_agora">Ask Agora anything...</string>
@@ -420,10 +421,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">Privacy-focused search API. Free tier available.</string>
     <string name="web_search_kagi_desc">Premium search API with personalized results. Pay per use.</string>
@@ -1072,8 +1069,11 @@
     <string name="context_compact_select_model">Select compact model</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">Messages preserved verbatim after each compact</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_manual">Compact context</string>
     <string name="context_compacting">Compacting context…</string>
+    <string name="context_compact_failed">Compact failed</string>
     <string name="context_compact_select_available_model">Select an available model</string>
     <string name="context_compact_prompt_empty">Prompt cannot be empty</string>
     <string name="context_compact_retain_invalid">Enter a valid retained message count</string>
@@ -1129,4 +1129,6 @@
     <string name="developer_options_export_desc">Share a bounded JSON bundle. Sensitive content is redacted, and the file is never uploaded automatically.</string>
     <string name="developer_options_export_share_title">Share Agora diagnostic bundle</string>
     <string name="developer_options_export_failed">Could not create the diagnostic bundle.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Use the provider’s /responses endpoint instead of Chat Completions.</string>
 </resources>

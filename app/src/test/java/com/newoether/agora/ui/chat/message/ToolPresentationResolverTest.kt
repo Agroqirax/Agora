@@ -420,4 +420,35 @@ class ToolPresentationResolverTest {
         assertEquals("Filesystem", presentation.device)
         assertEquals(ToolPresentationState.COMPLETED, presentation.state)
     }
+
+    @Test
+    fun waitForJobResolvesAsShellJobAndKeepsFullOutput() {
+        val running = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "wait_for_job",
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = "streaming output",
+                toolTarget = "tinybox",
+            ),
+        )
+
+        assertEquals(ToolKind.SHELL_JOB_GET, running.kind)
+        assertEquals(ToolPresentationState.RUNNING, running.state)
+        assertEquals("streaming output", shellOutputText(running))
+
+        val terminal = ToolPresentationResolver.resolve(
+            MessageSegment(
+                type = "tool",
+                toolName = "wait_for_job",
+                toolArgs = """{"job_id":"job-9"}""",
+                toolResult = """{"type":"wait_for_job","job_id":"job-9","result":{"state":"succeeded","exit_code":0,"output":"done"}}""",
+            ),
+        )
+
+        assertEquals(ToolKind.SHELL_JOB_GET, terminal.kind)
+        assertEquals(ToolPresentationState.COMPLETED, terminal.state)
+        assertEquals("done", shellOutputText(terminal))
+        assertEquals("job-9", terminal.jobId)
+    }
 }

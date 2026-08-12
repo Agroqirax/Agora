@@ -32,6 +32,8 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     val window by viewModel.settings.maxContextWindow.collectAsState()
     val visualize by viewModel.settings.visualizeContextRollout.collectAsState()
     val compact by viewModel.settings.contextCompactEnabled.collectAsState()
+    val thresholdPercent by
+        viewModel.settings.contextCompactThresholdPercent.collectAsState()
     val compactModel by viewModel.settings.contextCompactModel.collectAsState()
     val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
     val retainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
@@ -115,6 +117,26 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                 items = buildList {
                     add {
                         SettingsItem(
+                            headlineContent = { Text(stringResource(R.string.context_compact_model)) },
+                            supportingContent = {
+                                Text(
+                                    compactModel?.let {
+                                        modelDisplayName(it, aliases, customProviders)
+                                    } ?: stringResource(R.string.title_gen_current_model)
+                                )
+                            },
+                            leadingContent = {
+                                Icon(
+                                    Icons.Default.Chat,
+                                    null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                            },
+                            modifier = Modifier.clickable { modelDialog = true },
+                        )
+                    }
+                    add {
+                        SettingsItem(
                             headlineContent = { Text(stringResource(R.string.context_compact_auto)) },
                             supportingContent = { Text(stringResource(R.string.context_compact_auto_desc)) },
                             leadingContent = {
@@ -137,23 +159,43 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     }
                     if (compact) {
                         add {
-                            SettingsItem(
-                                headlineContent = { Text(stringResource(R.string.context_compact_model)) },
-                                supportingContent = {
-                                    Text(
-                                        compactModel?.let {
-                                            modelDisplayName(it, aliases, customProviders)
-                                        } ?: stringResource(R.string.title_gen_current_model)
-                                    )
+                            val sliderGate = remember {
+                                PersistedSliderFeedbackGate(
+                                    initialPersisted = thresholdPercent,
+                                    toDisplay = { it.toFloat() },
+                                )
+                            }
+                            LaunchedEffect(thresholdPercent) {
+                                sliderGate.reconcile(thresholdPercent)
+                            }
+                            val draft = sliderGate.displayed
+                            ContextSliderItem(
+                                icon = Icons.Default.Compress,
+                                label = stringResource(R.string.context_compact_threshold),
+                                description = stringResource(
+                                    R.string.context_compact_threshold_desc,
+                                ),
+                                displayValue = "${draft.toInt()}%",
+                                sliderValue = draft,
+                                valueRange = 50f..100f,
+                                steps = 0,
+                                onValueChange = { sliderGate.updateFromGesture(kotlin.math.round(it)) },
+                                onValueChangeFinished = {
+                                    val committed = draft.toInt().coerceIn(50, 100)
+                                    if (committed != thresholdPercent) {
+                                        sliderGate.expectPersisted(
+                                            committed,
+                                            committed.toFloat(),
+                                        )
+                                        viewModel.settings
+                                            .setContextCompactThresholdPercent(committed)
+                                    } else {
+                                        sliderGate.settleWithoutWrite(
+                                            thresholdPercent,
+                                            committed.toFloat(),
+                                        )
+                                    }
                                 },
-                                leadingContent = {
-                                    Icon(
-                                        Icons.Default.Chat,
-                                        null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                },
-                                modifier = Modifier.clickable { modelDialog = true },
                             )
                         }
                     }

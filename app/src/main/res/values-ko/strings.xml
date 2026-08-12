@@ -16,6 +16,7 @@
     <string name="tools">도구</string>
     <string name="code_execution">코드 실행</string>
     <string name="google_search">Google 검색</string>
+    <string name="openai_search">OpenAI 검색</string>
     <string name="thinking">사고</string>
     <string name="web_search">웹 검색</string>
     <string name="ask_agora">Agora에게 무엇이든 물어보세요...</string>
@@ -381,10 +382,6 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
-    <string name="web_search_openai">OpenAI</string>
-    <string name="web_search_openai_key">OpenAI API key</string>
-    <string name="web_search_openai_key_hint">sk-...</string>
-    <string name="web_search_openai_desc">OpenAI-hosted web search through the Responses API. Requires a separate OpenAI API key.</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">개인정보 보호 중심 검색 API. 무료 등급 제공.</string>
     <string name="web_search_serper_desc">빠른 Google 검색 API. 월 2,500회 무료 쿼리.</string>
@@ -1069,6 +1066,8 @@
     <string name="context_compact_prompt">Compact prompt</string>
     <string name="context_compact_prompt_desc">Summary instructions</string>
     <string name="context_compact_select_model">Select compact model</string>
+    <string name="context_compact_threshold">Automatic compact threshold</string>
+    <string name="context_compact_threshold_desc">Compact when estimated context reaches this percentage of the selected window</string>
     <string name="context_compact_retain">Recent messages to keep</string>
     <string name="context_compact_retain_desc">각 압축 후 원문 그대로 보존할 메시지</string>
     <string name="context_compact_manual">Compact context</string>
@@ -1128,4 +1127,7 @@
     <string name="developer_options_export_desc">제한된 JSON 번들을 공유합니다. 민감한 콘텐츠는 삭제되며 파일은 자동 업로드되지 않습니다.</string>
     <string name="developer_options_export_share_title">Agora 진단 번들 공유</string>
     <string name="developer_options_export_failed">진단 번들을 만들 수 없습니다.</string>
+    <string name="responses_api">Responses API</string>
+    <string name="responses_api_desc">Chat Completions 대신 제공업체의 /responses 엔드포인트를 사용합니다.</string>
+    <string name="context_compact_failed">Compact failed</string>
 </resources>

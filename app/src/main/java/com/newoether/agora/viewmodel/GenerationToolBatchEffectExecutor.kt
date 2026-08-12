@@ -112,6 +112,13 @@ internal class GenerationToolOverlay(
                 toolState = ToolExecutionStates.RUNNING,
                 toolProgress = appendBoundedToolOutput(current.toolProgress, event.text),
             )
+            is ToolExecutionEvent.OutputSnapshot -> current.copy(
+                toolState = ToolExecutionStates.RUNNING,
+                toolProgress = takeLastWholeCodePoints(
+                    event.text,
+                    Constants.MAX_TOOL_RESULT_LENGTH,
+                ),
+            )
             is ToolExecutionEvent.TargetResolved -> current.copy(toolTarget = event.target)
             is ToolExecutionEvent.Progress -> current.copy(toolState = ToolExecutionStates.RUNNING)
             is ToolExecutionEvent.Completed -> current
@@ -166,6 +173,15 @@ internal class GenerationToolOverlay(
             }
         }
     }
+}
+
+internal fun takeLastWholeCodePoints(text: String, maxChars: Int): String {
+    if (text.length <= maxChars) return text
+    var start = text.length - maxChars
+    if (start > 0 && Character.isLowSurrogate(text[start]) && Character.isHighSurrogate(text[start - 1])) {
+        start++
+    }
+    return text.substring(start)
 }
 
 internal data class CompletedToolCall(

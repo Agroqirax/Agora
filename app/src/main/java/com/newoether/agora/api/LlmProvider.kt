@@ -71,6 +71,8 @@ data class ProviderConfig(
     val thinkingBudgetEnabled: Boolean = false,
     val thinkingBudgetTokens: Int = 4096,
     val openAiServiceTier: String? = null,
+    val responsesApiEnabled: Boolean = false,
+    val openAiWebSearchEnabled: Boolean = false,
     val baseUrl: String? = null,
     val tools: List<ToolDefinition>? = null,
     val userPrepend: String? = null,
@@ -144,6 +146,125 @@ data class OpenAiReasoning(
 data class OpenAiStreamOptions(
     @SerialName("include_usage") val includeUsage: Boolean = true
 )
+
+@Serializable
+data class OpenAiResponsesRequest(
+    val model: String,
+    val input: List<OpenAiResponseInputItem>,
+    val stream: Boolean = true,
+    val tools: List<OpenAiResponseTool>? = null,
+    val reasoning: OpenAiReasoning? = null,
+    @SerialName("service_tier") val serviceTier: String? = null,
+    val temperature: Float? = null,
+    @SerialName("max_output_tokens") val maxOutputTokens: Int? = null,
+    @SerialName("top_p") val topP: Float? = null,
+)
+
+@Serializable
+data class OpenAiResponseInputItem(
+    val type: String,
+    val role: String? = null,
+    val content: List<OpenAiResponseInputContent>? = null,
+    @SerialName("call_id") val callId: String? = null,
+    val name: String? = null,
+    val arguments: String? = null,
+    val output: String? = null,
+)
+
+@Serializable
+data class OpenAiResponseInputContent(
+    val type: String,
+    val text: String? = null,
+    @SerialName("image_url") val imageUrl: String? = null,
+    val detail: String? = null,
+)
+
+@Serializable
+data class OpenAiResponseTool(
+    val type: String = "function",
+    val name: String? = null,
+    val description: String? = null,
+    val parameters: ToolParameters? = null,
+)
+
+@Serializable
+data class OpenAiResponseStreamEvent(
+    val type: String,
+    val delta: String? = null,
+    val arguments: String? = null,
+    val name: String? = null,
+    @SerialName("item_id") val itemId: String? = null,
+    @SerialName("output_index") val outputIndex: Int? = null,
+    @SerialName("sequence_number") val sequenceNumber: Int? = null,
+    val item: OpenAiResponseOutputItem? = null,
+    val annotation: OpenAiResponseAnnotation? = null,
+    val response: OpenAiResponseEnvelope? = null,
+    val error: OpenAiError? = null,
+)
+
+@Serializable
+data class OpenAiResponseAnnotation(
+    val type: String,
+    val title: String? = null,
+    val url: String? = null,
+    @SerialName("start_index") val startIndex: Int? = null,
+    @SerialName("end_index") val endIndex: Int? = null,
+)
+
+@Serializable
+data class OpenAiResponseOutputItem(
+    val id: String? = null,
+    val type: String? = null,
+    @SerialName("call_id") val callId: String? = null,
+    val name: String? = null,
+    val arguments: String? = null,
+)
+
+@Serializable
+data class OpenAiResponseEnvelope(
+    val status: String? = null,
+    val error: OpenAiError? = null,
+    @SerialName("incomplete_details") val incompleteDetails: OpenAiResponseIncompleteDetails? = null,
+    val usage: OpenAiResponseUsage? = null,
+)
+
+@Serializable
+data class OpenAiResponseIncompleteDetails(val reason: String? = null)
+
+@Serializable
+data class OpenAiResponseUsage(
+    @SerialName("input_tokens") val inputTokens: Int? = null,
+    @SerialName("output_tokens") val outputTokens: Int? = null,
+    @SerialName("total_tokens") val totalTokens: Int? = null,
+    @SerialName("input_tokens_details") val inputTokensDetails: OpenAiResponseInputTokenDetails? = null,
+    @SerialName("output_tokens_details") val outputTokensDetails: OpenAiResponseOutputTokenDetails? = null,
+)
+
+@Serializable
+data class OpenAiResponseInputTokenDetails(
+    @SerialName("cached_tokens") val cachedTokens: Int? = null,
+)
+
+@Serializable
+data class OpenAiResponseOutputTokenDetails(
+    @SerialName("reasoning_tokens") val reasoningTokens: Int? = null,
+)
+
+internal fun OpenAiResponseUsage.toTokenUsage(): TokenUsage {
+    val input = inputTokens?.coerceAtLeast(0)
+    val cached = inputTokensDetails?.cachedTokens?.coerceAtLeast(0)
+    val output = outputTokens?.coerceAtLeast(0)
+    return TokenUsage(
+        totalTokenCount = (totalTokens ?: listOfNotNull(input, output).sum()).coerceAtLeast(0),
+        inputTokenCount = input,
+        cachedInputTokenCount = cached,
+        uncachedInputTokenCount = if (input != null && cached != null) {
+            (input - cached).coerceAtLeast(0)
+        } else null,
+        outputTokenCount = output,
+        reasoningTokenCount = outputTokensDetails?.reasoningTokens?.coerceAtLeast(0),
+    )
+}
 
 @Serializable
 data class OpenAiMessage(
