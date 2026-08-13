@@ -9,7 +9,11 @@ import com.newoether.agora.api.OpenAiResponseStreamEvent
 import com.newoether.agora.api.OpenAiResponseUsage
 import com.newoether.agora.api.StreamEvent
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -228,6 +232,113 @@ class ToolCallTextParserTest {
     }
 
     @Test
+    fun responsesReasoningOutputItemIsRetainedUntilCompletedCallRelease() {
+        val router = responsesRouter()
+        val reasoning = OpenAiResponseOutputItem(
+            id = "rs_1",
+            type = "reasoning",
+            summary = JsonArray(emptyList()),
+            encryptedContent = "opaque-reasoning-state",
+        )
+        assertTrue(
+            router.route(
+                responseEvent(
+                    "response.output_item.added",
+                    1,
+                    outputIndex = 0,
+                    item = reasoning,
+                ),
+            ).isEmpty(),
+        )
+        assertTrue(
+            router.route(
+                responseEvent(
+                    "response.output_item.done",
+                    2,
+                    outputIndex = 0,
+                    item = reasoning,
+                ),
+            ).isEmpty(),
+        )
+        val callItem = responseCallItem("item_1", "call_1", "lookup", "{}")
+        router.route(
+            responseEvent(
+                "response.output_item.added",
+                3,
+                outputIndex = 1,
+                item = callItem,
+            ),
+        )
+        router.route(
+            responseEvent(
+                "response.output_item.done",
+                4,
+                outputIndex = 1,
+                item = callItem,
+            ),
+        )
+
+        val call = router.route(
+            responseEvent(
+                "response.completed",
+                5,
+                response = OpenAiResponseEnvelope(status = "completed"),
+            ),
+        ).filterIsInstance<StreamEvent.ToolCallRequest>().single()
+
+        assertEquals(
+            listOf(responseItem(reasoning), responseItem(callItem)),
+            call.responseOutputItems,
+        )
+        assertTrue(router.route(responseEvent("response.created", 6)).single() is StreamEvent.Error)
+    }
+
+    @Test
+    fun responsesFinalArgumentsSnapshotOverridesEquivalentStreamFormatting() {
+        val router = responsesRouter()
+        val item = responseCallItem("item_1", "call_1", "lookup")
+        router.route(responseEvent("response.output_item.added", 1, outputIndex = 0, item = item))
+        router.route(
+            responseEvent(
+                "response.function_call_arguments.delta",
+                2,
+                delta = """{"q":"x"}""",
+                itemId = "item_1",
+                outputIndex = 0,
+            ),
+        )
+        val finalArguments = """{ "q": "x" }"""
+        val done = router.route(
+            responseEvent(
+                "response.function_call_arguments.done",
+                3,
+                arguments = finalArguments,
+                name = "lookup",
+                itemId = "item_1",
+                outputIndex = 0,
+            ),
+        )
+        val itemDone = router.route(
+            responseEvent(
+                "response.output_item.done",
+                4,
+                outputIndex = 0,
+                item = item.copy(arguments = finalArguments),
+            ),
+        )
+        val call = router.route(
+            responseEvent(
+                "response.completed",
+                5,
+                response = OpenAiResponseEnvelope(status = "completed"),
+            ),
+        ).filterIsInstance<StreamEvent.ToolCallRequest>().single()
+
+        assertTrue((done + itemDone).none { it is StreamEvent.Error })
+        assertEquals(finalArguments, call.arguments)
+    }
+
+    @Test
     fun responsesFunctionCallIsExecutableOnlyAfterCompleted() {
         val router = responsesRouter()
         val item = responseCallItem("item_1", "call_1", "lookup")
@@ -311,6 +422,63 @@ class ToolCallTextParserTest {
             )
         ).filterIsInstance<StreamEvent.ToolCallsRequest>().single()
         assertEquals(listOf("call_0", "call_1"), batch.calls.map { it.id })
+        assertEquals(2, batch.calls.first().responseOutputItems.size)
+        assertTrue(batch.calls.drop(1).all { it.responseOutputItems.isEmpty() })
+    }
+
+    @Test
+    fun responsesOutOfOrderCompletionStillReplaysOutputIndexOrder() {
+        val router = responsesRouter()
+        val first = responseCallItem("item_0", "call_0", "tool_0", "{}")
+        val second = responseCallItem("item_1", "call_1", "tool_1", "{}")
+        router.route(
+            responseEvent(
+                "response.output_item.added",
+                1,
+                outputIndex = 1,
+                item = second,
+            ),
+        )
+        router.route(
+            responseEvent(
+                "response.output_item.added",
+                2,
+                outputIndex = 0,
+                item = first,
+            ),
+        )
+        router.route(
+            responseEvent(
+                "response.output_item.done",
+                3,
+                outputIndex = 1,
+                item = second,
+            ),
+        )
+        router.route(
+            responseEvent(
+                "response.output_item.done",
+                4,
+                outputIndex = 0,
+                item = first,
+            ),
+        )
+
+        val batch = router.route(
+            responseEvent(
+                "response.completed",
+                5,
+                response = OpenAiResponseEnvelope(status = "completed"),
+            ),
+        ).filterIsInstance<StreamEvent.ToolCallsRequest>().single()
+
+        assertEquals(listOf("call_0", "call_1"), batch.calls.map { it.id })
+        assertEquals(
+            listOf("item_0", "item_1"),
+            batch.calls.first().responseOutputItems.map {
+                it["id"]?.jsonPrimitive?.content
+            },
+        )
     }
 
     @Test
@@ -456,6 +624,9 @@ class ToolCallTextParserTest {
     private fun responsesRouter(thinkingEnabled: Boolean = true) =
         OpenAiResponsesEventRouter(Json { ignoreUnknownKeys = true }, thinkingEnabled)
 
+    private fun responseItem(item: OpenAiResponseOutputItem) =
+        Json.encodeToJsonElement(OpenAiResponseOutputItem.serializer(), item).jsonObject
+
     private fun responseCallItem(
         itemId: String,
         callId: String,
@@ -488,7 +659,9 @@ class ToolCallTextParserTest {
         itemId = itemId,
         outputIndex = outputIndex,
         sequenceNumber = sequence,
-        item = item,
+        item = item?.let {
+            Json.encodeToJsonElement(OpenAiResponseOutputItem.serializer(), it).jsonObject
+        },
         response = response,
         error = error,
     )

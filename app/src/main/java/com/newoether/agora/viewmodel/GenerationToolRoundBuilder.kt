@@ -94,7 +94,9 @@ internal class GenerationToolRoundBuilder(
                         timestamp = timestamp + index + 1,
                         modelName = modelName,
                         runId = runId,
-                        toolCallJson = Json.encodeToString(listOf(call.toSegment(providerName))),
+                        toolCallJson = Json.encodeToString(
+                            listOf(call.toSegment(providerName, includeResponseState = false)),
+                        ),
                     ),
                 )
             }
@@ -106,7 +108,10 @@ internal class GenerationToolRoundBuilder(
         )
     }
 
-    private fun ToolCallData.toSegment(providerName: String) = MessageSegment(
+    private fun ToolCallData.toSegment(
+        providerName: String,
+        includeResponseState: Boolean = true,
+    ) = MessageSegment(
         type = "tool",
         toolName = toolName,
         toolArgs = arguments,
@@ -118,5 +123,7 @@ internal class GenerationToolRoundBuilder(
         toolResultText = resultText,
         toolStructuredResult = structuredResult,
         toolImages = resultImages,
+        responseOutputItems = if (includeResponseState) responseOutputItems else emptyList(),
+        responseOutputItemProvider = if (includeResponseState) responseOutputItemProvider else null,
     )
 }

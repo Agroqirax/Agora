@@ -13,7 +13,11 @@ import com.newoether.agora.api.util.safeWireToolCallId
 import com.newoether.agora.api.util.safeWireToolName
 import com.newoether.agora.api.util.validateToolDefinitions
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 
 internal fun OpenAiChatRequest.requireValidWireFormat(provider: String) {
     val violations = mutableListOf<String>()
@@ -121,15 +125,19 @@ internal fun OpenAiChatRequest.requireValidWireFormat(provider: String) {
     requireValidRequestFormat(provider, violations)
 }
 
-internal fun List<OpenAiMessage>.toResponsesInput(): List<OpenAiResponseInputItem> = buildList {
+internal fun List<OpenAiMessage>.toResponsesInput(
+    providerName: String? = null,
+): List<JsonObject> = buildList {
     this@toResponsesInput.forEach { message ->
         if (message.role == "tool") {
             add(
                 OpenAiResponseInputItem(
                     type = "function_call_output",
                     callId = message.toolCallId,
-                    output = message.content.orEmpty().joinToString("") { it.text.orEmpty() },
-                ),
+                    output = JsonPrimitive(
+                        message.content.orEmpty().joinToString("") { it.text.orEmpty() },
+                    ),
+                ).toResponseInputJson(),
             )
             return@forEach
         }
@@ -148,20 +156,65 @@ internal fun List<OpenAiMessage>.toResponsesInput(): List<OpenAiResponseInputIte
             }
         }
         if (content.isNotEmpty()) {
-            add(OpenAiResponseInputItem(type = "message", role = message.role, content = content))
-        }
-        message.toolCalls.orEmpty().forEach { call ->
             add(
                 OpenAiResponseInputItem(
-                    type = "function_call",
-                    callId = call.id,
-                    name = call.function.name,
-                    arguments = call.function.arguments,
-                ),
+                    type = "message",
+                    role = message.role,
+                    content = content,
+                ).toResponseInputJson(),
             )
+        }
+        val replayedResponseItems = if (
+            providerName != null &&
+            message.responseOutputItemProvider == providerName
+        ) {
+            message.responseOutputItems.orEmpty()
+        } else {
+            emptyList()
+        }
+        addAll(replayedResponseItems)
+        if (replayedResponseItems.isEmpty()) {
+            message.toolCalls.orEmpty().forEach { call ->
+                add(
+                    OpenAiResponseInputItem(
+                        type = "function_call",
+                        callId = call.id,
+                        name = call.function.name,
+                        arguments = call.function.arguments,
+                    ).toResponseInputJson(),
+                )
+            }
         }
     }
 }
+
+private fun OpenAiResponseInputItem.toResponseInputJson(): JsonObject =
+    validationJson.encodeToJsonElement(OpenAiResponseInputItem.serializer(), this).jsonObject
+
+private fun JsonObject.toResponseInputItem(): OpenAiResponseInputItem {
+    val type = stringField("type") ?: error("type must be a string")
+    return when (type) {
+        "message", "function_call", "function_call_output" ->
+            validationJson.decodeFromJsonElement(OpenAiResponseInputItem.serializer(), this)
+        else -> OpenAiResponseInputItem(
+            type = type,
+            id = stringField("id"),
+            callId = stringField("call_id"),
+            name = stringField("name"),
+            arguments = stringField("arguments"),
+            output = this["output"],
+        )
+    }
+}
+
+private fun JsonObject.stringField(name: String): String? =
+    (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+
+private fun JsonObject.hasNonNull(name: String): Boolean =
+    this[name]?.let { it !is JsonNull } == true
+
+private fun JsonObject.hasAnyNonNull(vararg names: String): Boolean =
+    names.any(::hasNonNull)
 
 internal fun List<ToolDefinition>.toResponsesTools(): List<OpenAiResponseTool> = map { tool ->
     OpenAiResponseTool(
@@ -193,7 +246,11 @@ internal fun OpenAiResponsesRequest.requireValidWireFormat(provider: String) {
 
     val pending = linkedSetOf<String>()
     val seen = mutableSetOf<String>()
-    input.forEachIndexed { index, item ->
+    input.forEachIndexed { index, rawItem ->
+        val item = runCatching { rawItem.toResponseInputItem() }.getOrElse { error ->
+            violations += "input[$index] is not a supported Responses item: ${error.message}"
+            return@forEachIndexed
+        }
         val location = "input[$index]"
         when (item.type) {
             "message" -> {
@@ -210,8 +267,22 @@ internal fun OpenAiResponsesRequest.requireValidWireFormat(provider: String) {
                         violations = violations,
                     )
                 }
-                if (item.callId != null || item.name != null || item.arguments != null || item.output != null) {
-                    violations += "$location message carries tool fields"
+                if (
+                    item.id != null && item.role != "assistant" ||
+                    item.summary != null || item.encryptedContent != null ||
+                    item.callId != null || item.name != null || item.arguments != null ||
+                    item.output != null
+                ) {
+                    violations += "$location message carries unrelated fields"
+                }
+            }
+            "reasoning" -> {
+                if (item.id.isNullOrBlank()) violations += "$location reasoning id is blank"
+                if (
+                    item.role != null || item.content != null || item.callId != null ||
+                    item.name != null || item.arguments != null || item.output != null
+                ) {
+                    violations += "$location opaque item carries unrelated fields"
                 }
             }
             "function_call" -> {
@@ -227,7 +298,10 @@ internal fun OpenAiResponsesRequest.requireValidWireFormat(provider: String) {
                 if (item.arguments == null || !isJsonObject(item.arguments)) {
                     violations += "$location arguments are not a JSON object"
                 }
-                if (item.role != null || item.content != null || item.output != null) {
+                if (
+                    item.summary != null || item.encryptedContent != null || item.role != null ||
+                    item.content != null || item.output != null
+                ) {
                     violations += "$location function call carries unrelated fields"
                 }
             }
@@ -239,16 +313,35 @@ internal fun OpenAiResponsesRequest.requireValidWireFormat(provider: String) {
                     violations += "$location does not match a pending function call"
                 }
                 if (item.output == null) violations += "$location output is absent"
-                if (item.role != null || item.content != null || item.name != null || item.arguments != null) {
+                if (
+                    item.summary != null || item.encryptedContent != null || item.role != null ||
+                    item.content != null || item.name != null || item.arguments != null
+                ) {
                     violations += "$location function output carries unrelated fields"
                 }
             }
-            else -> violations += "$location has unsupported type ${item.type}"
+            else -> {
+                if (item.id.isNullOrBlank()) {
+                    violations += "$location opaque item id is blank"
+                }
+                if (
+                    item.role != null || item.content != null || item.summary != null ||
+                    item.encryptedContent != null || item.callId != null || item.name != null ||
+                    item.arguments != null || item.output != null
+                ) {
+                    violations += "$location opaque item carries unrelated fields"
+                }
+            }
         }
     }
     if (pending.isNotEmpty()) violations += "function calls are missing outputs"
-    if (input.lastOrNull()?.let { it.type == "message" && it.role == "user" ||
-            it.type == "function_call_output" } != true
+    val lastItem = input.lastOrNull()?.let { raw ->
+        runCatching { raw.toResponseInputItem() }.getOrNull()
+    }
+    if (lastItem?.let { item ->
+            item.type == "message" && item.role == "user" ||
+                item.type == "function_call_output"
+        } != true
     ) {
         violations += "input does not end in user/function output"
     }

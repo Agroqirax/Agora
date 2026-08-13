@@ -164,6 +164,7 @@ class GenerationRequestBuilder(
         }
         val automaticCompact = AutomaticCompactConfig(
             enabled = settings.contextCompactEnabled.value,
+            thresholdPercent = settings.contextCompactThresholdPercent.value,
             request = CompactRequest(
                 model = compactModel,
                 prompt = settings.contextCompactPrompt.value,
@@ -172,6 +173,11 @@ class GenerationRequestBuilder(
             providerName = compactProviderName,
             apiKey = compactKey,
             baseUrl = providerRegistry.getEffectiveBaseUrl(compactProviderName),
+            responsesApiEnabled = isResponsesApiEnabledForProvider(
+                providerName = compactProviderName,
+                builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
+                customProviders = settings.customProviders.value,
+            ),
             provider = providerInstances[compactProviderName],
             configured = providerRegistry.isConfigured(compactProviderName, compactKey),
             generationContext = context.copy(

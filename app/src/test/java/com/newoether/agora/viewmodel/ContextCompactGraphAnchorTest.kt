@@ -157,6 +157,19 @@ class ContextCompactGraphAnchorTest {
     }
 
     @Test
+    fun automaticThresholdUsesCeilingBoundsAndLongArithmetic() {
+        assertEquals(1, automaticCompactTokenThreshold(1, 50))
+        assertEquals(2_500, automaticCompactTokenThreshold(5_000, 49))
+        assertEquals(4_500, automaticCompactTokenThreshold(5_000, 90))
+        assertEquals(5_000, automaticCompactTokenThreshold(5_000, 100))
+        assertEquals(5_000, automaticCompactTokenThreshold(5_000, 101))
+        assertEquals(
+            1_932_735_283,
+            automaticCompactTokenThreshold(Int.MAX_VALUE, 90),
+        )
+    }
+
+    @Test
     fun automaticEligibilityDoesNotExposeCompactingBeforeThreshold() {
         val path = listOf(
             entity("old-user", null, Participant.USER, 1).copy(text = "old"),

@@ -37,6 +37,7 @@ internal data class AuthorizedToolCall(
     val name: String,
     val arguments: String,
     val context: GenerationContext,
+    val authorizedToolNames: Set<String>,
 )
 
 internal data class AuthorizedToolResult(
@@ -160,6 +161,14 @@ internal class GenerationToolExecutor private constructor(
         call: AuthorizedToolCall,
         onEvent: suspend (ToolExecutionEvent) -> Unit,
     ): AuthorizedToolResult {
+        if (call.name !in call.authorizedToolNames) {
+            return call.result(
+                ToolExecutionResult(
+                    text = "Error executing tool '${call.name}': tool was not authorized for this provider pass",
+                    isError = true,
+                ),
+            )
+        }
         val completeArguments = call.arguments.ifBlank { "{}" }
         val argumentsAreCompleteObject = runCatching {
             Json.parseToJsonElement(completeArguments).jsonObject

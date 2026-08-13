@@ -64,8 +64,11 @@ class SettingsContractsTest {
         assertFalse(ConversationSettings(shellEnabled = false).isAllNull())
     }
     @Test
-    fun obsoleteOpenAiGenericSearchProviderNormalizesToDuckDuckGo() {
-        assertEquals("duckduckgo", normalizeWebSearchProvider("openai"))
+    fun legacyOpenAiGenericSearchProviderAndCredentialRemainAddressable() {
+        val apiKeys = mapOf("openai" to "retained-test-key")
+
+        assertEquals("openai", normalizeWebSearchProvider(" OpenAI "))
+        assertEquals("retained-test-key", apiKeys[normalizeWebSearchProvider("openai")])
         assertEquals("duckduckgo", normalizeWebSearchProvider(" unknown "))
         assertEquals("kagi", normalizeWebSearchProvider(" KAGI "))
     }

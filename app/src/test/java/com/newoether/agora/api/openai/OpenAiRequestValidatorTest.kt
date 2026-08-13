@@ -7,8 +7,15 @@ import com.newoether.agora.api.OpenAiRequestFunction
 import com.newoether.agora.api.OpenAiRequestToolCall
 import com.newoether.agora.api.OpenAiResponseInputContent
 import com.newoether.agora.api.OpenAiResponseInputItem
+import com.newoether.agora.api.OpenAiResponseOutputItem
 import com.newoether.agora.api.OpenAiResponsesRequest
 import com.newoether.agora.api.util.RequestFormatException
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -76,11 +83,16 @@ class OpenAiRequestValidatorTest {
         request.requireValidWireFormat("OpenAI")
         assertEquals(
             listOf("message", "function_call", "function_call_output"),
-            input.map { it.type },
+            input.map { it["type"]?.jsonPrimitive?.content },
         )
-        assertEquals(listOf("input_text", "input_image"), input.first().content?.map { it.type })
-        assertEquals("call_1", input[1].callId)
-        assertEquals("call_1", input[2].callId)
+        assertEquals(
+            listOf("input_text", "input_image"),
+            input.first()["content"]?.jsonArray?.map {
+                it.jsonObject["type"]?.jsonPrimitive?.content
+            },
+        )
+        assertEquals("call_1", input[1]["call_id"]?.jsonPrimitive?.content)
+        assertEquals("call_1", input[2]["call_id"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -95,7 +107,16 @@ class OpenAiRequestValidatorTest {
         ).toResponsesInput()
         OpenAiResponsesRequest(model = "gpt-test", input = input)
             .requireValidWireFormat("OpenAI")
-        assertEquals("output_text", input[1].content?.single()?.type)
+        assertEquals(
+            "output_text",
+            input[1]["content"]
+                ?.jsonArray
+                ?.single()
+                ?.jsonObject
+                ?.get("type")
+                ?.jsonPrimitive
+                ?.content,
+        )
     }
 
     @Test
@@ -107,18 +128,22 @@ class OpenAiRequestValidatorTest {
             val request = OpenAiResponsesRequest(
                 model = "gpt-test",
                 input = listOf(
-                    OpenAiResponseInputItem(
-                        type = "message",
-                        role = role,
-                        content = listOf(
-                            OpenAiResponseInputContent(type = contentType, text = "invalid"),
+                    responseItem(
+                        OpenAiResponseInputItem(
+                            type = "message",
+                            role = role,
+                            content = listOf(
+                                OpenAiResponseInputContent(type = contentType, text = "invalid"),
+                            ),
                         ),
                     ),
-                    OpenAiResponseInputItem(
-                        type = "message",
-                        role = "user",
-                        content = listOf(
-                            OpenAiResponseInputContent(type = "input_text", text = "continue"),
+                    responseItem(
+                        OpenAiResponseInputItem(
+                            type = "message",
+                            role = "user",
+                            content = listOf(
+                                OpenAiResponseInputContent(type = "input_text", text = "continue"),
+                            ),
                         ),
                     ),
                 ),
@@ -136,14 +161,16 @@ class OpenAiRequestValidatorTest {
         val request = OpenAiResponsesRequest(
             model = "gpt-test",
             input = listOf(
-                OpenAiResponseInputItem(
-                    type = "message",
-                    role = "assistant",
-                    content = listOf(
-                        OpenAiResponseInputContent(
-                            type = "input_image",
-                            imageUrl = "data:image/png;base64,AA==",
-                            detail = "auto",
+                responseItem(
+                    OpenAiResponseInputItem(
+                        type = "message",
+                        role = "assistant",
+                        content = listOf(
+                            OpenAiResponseInputContent(
+                                type = "input_image",
+                                imageUrl = "data:image/png;base64,AA==",
+                                detail = "auto",
+                            ),
                         ),
                     ),
                 ),
@@ -168,6 +195,130 @@ class OpenAiRequestValidatorTest {
 
         assertTrue(error is RequestFormatException)
         assertTrue(error?.message.orEmpty().contains("missing outputs"))
+    }
+
+    @Test
+    fun responsesContinuationReplaysCompleteProviderOutputWithoutDuplicatingCalls() {
+        val reasoning = responseItem(
+            OpenAiResponseOutputItem(
+                id = "rs_1",
+                type = "reasoning",
+                summary = JsonArray(emptyList()),
+                encryptedContent = "opaque-reasoning-state",
+            ),
+        )
+        val functionCall = responseItem(
+            OpenAiResponseOutputItem(
+                id = "fc_1",
+                type = "function_call",
+                callId = "call_1",
+                name = "lookup",
+                arguments = "{}",
+            ),
+        )
+        val input = listOf(
+            user("start"),
+            assistantToolCall("call_1").copy(
+                responseOutputItems = listOf(reasoning, functionCall),
+                responseOutputItemProvider = "OpenAI",
+            ),
+            toolResult("call_1"),
+        ).toResponsesInput(providerName = "OpenAI")
+        val request = OpenAiResponsesRequest(model = "gpt-test", input = input)
+
+        request.requireValidWireFormat("OpenAI")
+        assertEquals(
+            listOf("message", "reasoning", "function_call", "function_call_output"),
+            input.map { it["type"]?.jsonPrimitive?.content },
+        )
+        assertEquals("opaque-reasoning-state", input[1]["encrypted_content"]?.jsonPrimitive?.content)
+        assertEquals("fc_1", input[2]["id"]?.jsonPrimitive?.content)
+        assertEquals("call_1", input[2]["call_id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun responsesContinuationDoesNotReplayOpaqueItemsToAnotherProvider() {
+        val input = listOf(
+            user("start"),
+            assistantToolCall("call_1").copy(
+                responseOutputItems = listOf(
+                    responseItem(
+                        OpenAiResponseOutputItem(
+                            id = "rs_1",
+                            type = "reasoning",
+                            encryptedContent = "opaque-reasoning-state",
+                        ),
+                    ),
+                ),
+                responseOutputItemProvider = "OpenAI",
+            ),
+            toolResult("call_1"),
+        ).toResponsesInput(providerName = "Relay")
+
+        assertEquals(
+            listOf("message", "function_call", "function_call_output"),
+            input.map { it["type"]?.jsonPrimitive?.content },
+        )
+    }
+
+    @Test
+    fun responsesValidationRejectsOpaqueItemsWithToolFields() {
+        val request = OpenAiResponsesRequest(
+            model = "gpt-test",
+            input = listOf(
+                responseItem(
+                    OpenAiResponseInputItem(
+                        type = "reasoning",
+                        id = "rs_1",
+                        callId = "call_1",
+                        encryptedContent = "opaque-reasoning-state",
+                    ),
+                ),
+                listOf(user("continue")).toResponsesInput().single(),
+            ),
+        )
+
+        val error = runCatching { request.requireValidWireFormat("OpenAI") }.exceptionOrNull()
+
+        assertTrue(error is RequestFormatException)
+        assertTrue(error?.message.orEmpty().contains("opaque item carries unrelated fields"))
+    }
+
+    @Test
+    fun responsesValidationAcceptsStructuredFunctionOutput() {
+        val request = OpenAiResponsesRequest(
+            model = "gpt-test",
+            input = listOf(
+                responseItem(
+                    OpenAiResponseInputItem(
+                        type = "function_call",
+                        callId = "call_1",
+                        name = "lookup",
+                        arguments = "{}",
+                    ),
+                ),
+                Json.parseToJsonElement(
+                    """{"type":"function_call_output","call_id":"call_1","output":{"type":"input_text","text":"ok"}}""",
+                ).jsonObject,
+            ),
+        )
+
+        request.requireValidWireFormat("OpenAI")
+    }
+
+    @Test
+    fun responsesValidationPreservesUnknownOpaqueItemFields() {
+        val request = OpenAiResponsesRequest(
+            model = "gpt-test",
+            input = listOf(
+                Json.parseToJsonElement(
+                    """{"id":"opaque_1","type":"computer_call","action":{"type":"click","x":10,"y":20},"provider_extension":{"enabled":true}}""",
+                ).jsonObject,
+                listOf(user("continue")).toResponsesInput().single(),
+            ),
+        )
+
+        request.requireValidWireFormat("OpenAI")
     }
 
     private fun validRequest() = OpenAiChatRequest(
@@ -203,4 +354,10 @@ class OpenAiRequestValidatorTest {
         content = listOf(OpenAiContentPart(type = "text", text = "ok")),
         toolCallId = id,
     )
+
+    private fun responseItem(item: OpenAiResponseOutputItem): JsonObject =
+        Json.encodeToJsonElement(OpenAiResponseOutputItem.serializer(), item).jsonObject
+
+    private fun responseItem(item: OpenAiResponseInputItem): JsonObject =
+        Json.encodeToJsonElement(OpenAiResponseInputItem.serializer(), item).jsonObject
 }

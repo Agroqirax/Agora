@@ -56,6 +56,25 @@ class ToolArgumentAccumulatorTest {
     }
 
     @Test
+    fun nestedObjectOpeningBraceIsNotMistakenForAStaleSnapshot() {
+        val accumulator = ToolArgumentAccumulator()
+        accumulator.append("{\"outer\":")
+        accumulator.append("{")
+        accumulator.append("\"value\":1}}")
+
+        assertEquals("{\"outer\":{\"value\":1}}", accumulator.toString())
+    }
+
+    @Test
+    fun finalValueCanReplaceTheIncrementalSnapshot() {
+        val accumulator = ToolArgumentAccumulator("{\"q\":\"x\"}")
+
+        accumulator.replace("{ \"q\": \"x\" }")
+
+        assertEquals("{ \"q\": \"x\" }", accumulator.toString())
+    }
+
+    @Test
     fun initialValueFromBlockStart_isPreserved() {
         val accumulator = ToolArgumentAccumulator("{\"seed\":true}")
         assertTrue(!accumulator.isEmpty)

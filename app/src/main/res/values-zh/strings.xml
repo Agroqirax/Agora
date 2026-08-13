@@ -385,6 +385,10 @@
     <string name="web_search_serper">Serper</string>
     <string name="web_search_tavily">Tavily</string>
     <string name="web_search_searxng">SearXNG</string>
+    <string name="web_search_openai">OpenAI</string>
+    <string name="web_search_openai_key">OpenAI API Key</string>
+    <string name="web_search_openai_key_hint">sk-...</string>
+    <string name="web_search_openai_desc">通过 Responses API 使用 OpenAI 自带的联网搜索。需要单独配置 OpenAI API Key。</string>
     <string name="web_search_duckduckgo">DuckDuckGo</string>
     <string name="web_search_brave_desc">注重隐私的搜索 API。提供免费套餐。</string>
     <string name="web_search_kagi_desc">支持个性化结果的高级搜索 API，按量付费。</string>

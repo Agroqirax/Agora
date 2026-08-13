@@ -118,6 +118,8 @@ fun ChatApp(
     val compactModel by viewModel.settings.contextCompactModel.collectAsState()
     val compactPrompt by viewModel.settings.contextCompactPrompt.collectAsState()
     val compactRetainCount by viewModel.settings.contextCompactRetainCount.collectAsState()
+    val compactThresholdPercent by
+        viewModel.settings.contextCompactThresholdPercent.collectAsState()
     val manualCompactDialogVisible = rememberSaveable { mutableStateOf(false) }
     val dialogState = rememberChatAppDialogState(manualCompactDialogVisible)
     val queuedSends by viewModel.queuedSends.collectAsState()
@@ -169,6 +171,9 @@ fun ChatApp(
     val thinkingBudgetEnabled = convOverride?.thinkingBudgetEnabled ?: globalThinkingBudgetEnabled
     val thinkingBudgetTokens = convOverride?.thinkingBudgetTokens ?: globalThinkingBudgetTokens
     val selectedProviderName = viewModel.getProviderForModel(selectedModel)
+    val openAiServiceTierState = openAiConversationServiceTierState(
+        viewModel, convOverride, selectedProviderName, customProviders,
+    )
     val openAiWebSearchAvailable = resolveOpenAiNativeSearchAvailability(
         selectedProviderName, openAiResponsesApiEnabled, customProviders,
     )
@@ -909,6 +914,11 @@ fun ChatApp(
                         openAiWebSearchAvailable = openAiWebSearchAvailable,
                         openAiWebSearchEnabled = openAiWebSearchEnabled,
                         onOpenAiWebSearchToggle = { enabled -> updateOpenAiNativeSearch(viewModel, currentConversationId, haptics, enabled) },
+                        openAiServiceTierAvailable = openAiServiceTierState.available,
+                        openAiServiceTierEnabled = openAiServiceTierState.enabled,
+                        openAiServiceTier = openAiServiceTierState.tier,
+                        onOpenAiServiceTierToggle = { enabled -> updateOpenAiConversationServiceTierEnabled(viewModel, currentConversationId, haptics, enabled) },
+                        onOpenAiServiceTierChange = { tier -> updateOpenAiConversationServiceTier(viewModel, currentConversationId, haptics, tier) },
                         onCodeExecutionToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(codeExecutionEnabled = enabled) } },
                         onGoogleSearchToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(googleSearchEnabled = enabled) } },
                         onThinkingToggle = { enabled -> haptics.toggle(enabled); viewModel.updateConversationSetting(currentConversationId) { it.copy(thinkingEnabled = enabled) } },
@@ -949,6 +959,7 @@ fun ChatApp(
                         compactDefaultRetainCount = compactRetainCount,
                         contextEstimatedTokens = contextUsage.estimatedTokenCount,
                         contextTokenBudget = contextUsage.tokenBudget,
+                        contextCompactThresholdPercent = compactThresholdPercent,
                         canCompact = currentConversationId != null && !isLoading && !isSwitching && !isStopping,
                         onCompactClick = {
                             dialogState.showManualCompact()

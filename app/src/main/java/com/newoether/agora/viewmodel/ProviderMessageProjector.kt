@@ -43,6 +43,8 @@ internal fun projectProviderMessages(
                 displayName = segment.toolDisplayName,
                 resultText = segment.toolResultText,
                 structuredResult = segment.toolStructuredResult,
+                responseOutputItems = segment.responseOutputItems,
+                responseOutputItemProvider = segment.responseOutputItemProvider,
             )
         }
         val attachmentMeta = entity.attachmentMeta?.let { json ->

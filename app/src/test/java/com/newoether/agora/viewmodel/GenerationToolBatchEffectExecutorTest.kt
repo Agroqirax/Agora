@@ -80,6 +80,7 @@ class GenerationToolBatchEffectExecutorTest {
                 calls = listOf(call()),
                 context = GenerationContext(),
                 conversationId = "conversation",
+                authorizedToolNames = setOf("tool"),
             ),
             overlay = overlay,
             callbacks = ToolBatchProgressCallbacks(

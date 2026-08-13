@@ -327,7 +327,14 @@ class GenerationManager(
                 completedToolCalls.clear()
                 currentStatus = MessageStatus.TOOL_CALLING
                 val outcome = toolBatchEffects.execute(
-                    request = AuthorizedToolBatchRequest(batchEffect, calls, ctx, conversationId),
+                    request = AuthorizedToolBatchRequest(
+                        effect = batchEffect,
+                        calls = calls,
+                        context = ctx,
+                        conversationId = conversationId,
+                        authorizedToolNames = providerConfig.tools.orEmpty()
+                            .mapTo(linkedSetOf()) { it.function.name },
+                    ),
                     overlay = toolOverlay,
                     callbacks = ToolBatchProgressCallbacks(
                         publish = ::publishStreamUpdate,

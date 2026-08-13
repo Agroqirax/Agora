@@ -45,6 +45,7 @@ private data class CompactProviderAccess(
     val providerName: String,
     val apiKey: String,
     val baseUrl: String?,
+    val responsesApiEnabled: Boolean,
     val provider: com.newoether.agora.api.LlmProvider?,
     val configured: Boolean,
     val generationContext: GenerationContext,
@@ -248,6 +249,17 @@ internal interface ContextCompactOperation {
     ): CompactResult
 }
 
+internal fun automaticCompactTokenThreshold(
+    contextLimit: Int,
+    thresholdPercent: Int,
+): Int {
+    val normalizedLimit = contextLimit.coerceAtLeast(1)
+    val normalizedPercent = thresholdPercent.coerceIn(50, 100)
+    return ((normalizedLimit.toLong() * normalizedPercent + 99L) / 100L)
+        .coerceIn(1L, Int.MAX_VALUE.toLong())
+        .toInt()
+}
+
 internal fun automaticCompactNeeded(
     entities: List<MessageEntity>,
     selectedChildren: Map<String?, String>,
@@ -322,7 +334,7 @@ internal class ContextCompactor(
         config.enabled && automaticCompactNeeded(
             conversations.getMessagesForConversationSnapshot(conversationId),
             conversations.restoreBranchSelections(conversationId),
-            contextLimit,
+            automaticCompactTokenThreshold(contextLimit, config.thresholdPercent),
             config.request.retainLogicalMessages,
             config.generationContext.imageTranscriptionEnabled,
             config.fixedTokenCost,
@@ -343,12 +355,16 @@ internal class ContextCompactor(
         return compact(
             conversationId = conversationId,
             request = config.request,
-            threshold = contextLimit.coerceAtLeast(1),
+            threshold = automaticCompactTokenThreshold(
+                contextLimit,
+                config.thresholdPercent,
+            ),
             fixedTokenCost = config.fixedTokenCost,
             providerAccess = CompactProviderAccess(
                 providerName = config.providerName,
                 apiKey = config.apiKey,
                 baseUrl = config.baseUrl,
+                responsesApiEnabled = config.responsesApiEnabled,
                 provider = config.provider,
                 configured = config.configured,
                 generationContext = config.generationContext,
@@ -651,6 +667,12 @@ internal class ContextCompactor(
                 ?: providers.providerForModel(request.model)
             val key = providerAccess?.apiKey
                 ?: settings.awaitActiveKey(providerName).orEmpty()
+            val responsesApiEnabled = providerAccess?.responsesApiEnabled
+                ?: com.newoether.agora.data.isResponsesApiEnabledForProvider(
+                    providerName = providerName,
+                    builtInOpenAiEnabled = settings.openAiResponsesApiEnabled.value,
+                    customProviders = settings.customProviders.value,
+                )
             val providerConfigured = providerAccess?.configured
                 ?: providers.isConfigured(providerName, key)
             if (!providerConfigured) {
@@ -669,6 +691,7 @@ internal class ContextCompactor(
                     contextWindow = compactWindow,
                 ),
                 thinkingEnabled = false,
+                responsesApiEnabled = responsesApiEnabled,
                 baseUrl = providerAccess?.baseUrl ?: providers.getEffectiveBaseUrl(providerName),
             )
             val effectIdentity = identity

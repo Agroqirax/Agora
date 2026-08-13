@@ -12,6 +12,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.util.UUID
@@ -156,6 +157,7 @@ internal class OpenAiResponsesEventRouter(
     private val thinkingEnabled: Boolean,
 ) {
     private data class FunctionCall(
+        val outputIndex: Int,
         val streamKey: String,
         var itemId: String? = null,
         var callId: String? = null,
@@ -166,7 +168,8 @@ internal class OpenAiResponsesEventRouter(
 
     private val callsByOutputIndex = linkedMapOf<Int, FunctionCall>()
     private val callsByItemId = mutableMapOf<String, FunctionCall>()
-    private val completedCalls = mutableListOf<StreamEvent.ToolCallRequest>()
+    private val responseItemsByOutputIndex = linkedMapOf<Int, JsonObject>()
+    private val completedCallsByOutputIndex = mutableMapOf<Int, StreamEvent.ToolCallRequest>()
     private val emittedCallIds = mutableSetOf<String>()
     private val emittedCitationUrls = mutableSetOf<String>()
     private var lastSequenceNumber: Int? = null
@@ -222,11 +225,20 @@ internal class OpenAiResponsesEventRouter(
     }
 
     private fun addOutputItem(event: OpenAiResponseStreamEvent): List<StreamEvent> {
-        val item = event.item ?: return fail(event.type, "missing output item")
-        if (item.type != "function_call") return emptyList()
+        val rawItem = event.item ?: return fail(event.type, "missing output item")
+        val item = try {
+            rawItem.toOutputItem()
+        } catch (error: Exception) {
+            return fail(event.type, error.localizedMessage ?: "invalid output item")
+        }
         val index = event.outputIndex ?: return fail(event.type, "missing output_index")
-        if (callsByOutputIndex.containsKey(index)) return fail(event.type, "duplicate output_index")
+        if (responseItemsByOutputIndex.containsKey(index)) {
+            return fail(event.type, "duplicate output_index")
+        }
+        responseItemsByOutputIndex[index] = rawItem
+        if (item.type != "function_call") return emptyList()
         val call = FunctionCall(
+            outputIndex = index,
             streamKey = item.id ?: "response_tool_$index",
             itemId = item.id,
             callId = item.callId,
@@ -254,7 +266,7 @@ internal class OpenAiResponsesEventRouter(
         event.arguments?.let { finalArguments ->
             val accumulated = call.arguments.toString()
             if (accumulated.isNotEmpty() && finalArguments != accumulated) {
-                return fail(event.type, "final arguments differ from streamed arguments")
+                call.arguments.replace(finalArguments)
             }
             if (accumulated.isEmpty()) call.arguments.append(finalArguments)
         }
@@ -262,15 +274,26 @@ internal class OpenAiResponsesEventRouter(
     }
 
     private fun completeOutputItem(event: OpenAiResponseStreamEvent): List<StreamEvent> {
-        val item = event.item ?: return fail(event.type, "missing output item")
+        val rawItem = event.item ?: return fail(event.type, "missing output item")
+        val item = try {
+            rawItem.toOutputItem()
+        } catch (error: Exception) {
+            return fail(event.type, error.localizedMessage ?: "invalid output item")
+        }
+        val index = event.outputIndex ?: return fail(event.type, "missing output_index")
+        if (!responseItemsByOutputIndex.containsKey(index)) {
+            return fail(event.type, "output item was not added")
+        }
+        responseItemsByOutputIndex[index] = rawItem
         if (item.type != "function_call") return emptyList()
-        val call = findCall(event) ?: return fail(event.type, "function call item was not added")
+        val call = findCall(event, item.id)
+            ?: return fail(event.type, "function call item was not added")
         item.callId?.let { call.callId = it }
         item.name?.let { call.name = it }
         item.arguments?.let { finalArguments ->
             val accumulated = call.arguments.toString()
             if (accumulated.isNotEmpty() && finalArguments != accumulated) {
-                return fail(event.type, "final arguments differ from streamed arguments")
+                call.arguments.replace(finalArguments)
             }
             if (accumulated.isEmpty()) call.arguments.append(finalArguments)
         }
@@ -289,7 +312,7 @@ internal class OpenAiResponsesEventRouter(
         }
         if (!emittedCallIds.add(callId)) return fail(rawType, "duplicate call_id")
         call.completed = true
-        completedCalls += StreamEvent.ToolCallRequest(
+        completedCallsByOutputIndex[call.outputIndex] = StreamEvent.ToolCallRequest(
             callId,
             name,
             arguments,
@@ -306,9 +329,19 @@ internal class OpenAiResponsesEventRouter(
         }
         sawTerminalMarker = true
         stopReason = "completed"
+        val continuationItems = responseItemsByOutputIndex
+            .toSortedMap()
+            .values
+            .toList()
+        val calls = completedCallsByOutputIndex
+            .toSortedMap()
+            .values
+            .mapIndexed { index, call ->
+                if (index == 0) call.copy(responseOutputItems = continuationItems) else call
+            }
         val output = mutableListOf<StreamEvent>()
-        if (completedCalls.size == 1) output += completedCalls.single()
-        if (completedCalls.size > 1) output += StreamEvent.ToolCallsRequest(completedCalls.toList())
+        if (calls.size == 1) output += calls.single()
+        if (calls.size > 1) output += StreamEvent.ToolCallsRequest(calls)
         response.usage?.let { output += StreamEvent.UsageUpdate(it.toTokenUsage()) }
         return output
     }
@@ -334,9 +367,9 @@ internal class OpenAiResponsesEventRouter(
         return usage?.let { listOf(StreamEvent.UsageUpdate(it.toTokenUsage())) }.orEmpty()
     }
 
-    private fun findCall(event: OpenAiResponseStreamEvent): FunctionCall? =
+    private fun findCall(event: OpenAiResponseStreamEvent, itemId: String? = null): FunctionCall? =
         event.itemId?.let(callsByItemId::get)
-            ?: event.item?.id?.let(callsByItemId::get)
+            ?: itemId?.let(callsByItemId::get)
             ?: event.outputIndex?.let(callsByOutputIndex::get)
 
     private fun validateSequence(event: OpenAiResponseStreamEvent): String? {
@@ -346,6 +379,9 @@ internal class OpenAiResponsesEventRouter(
         lastSequenceNumber = sequence
         return null
     }
+
+    private fun JsonObject.toOutputItem(): OpenAiResponseOutputItem =
+        json.decodeFromJsonElement(OpenAiResponseOutputItem.serializer(), this)
 
     private fun fail(rawType: String, cause: String): List<StreamEvent> {
         reportedError = true

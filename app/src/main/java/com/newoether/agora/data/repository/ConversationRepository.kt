@@ -321,6 +321,8 @@ class ConversationRepository(
                     toolResult = it.result,
                     signature = it.signature,
                     toolCallId = it.toolCallId,
+                    responseOutputItems = it.responseOutputItems,
+                    responseOutputItemProvider = it.responseOutputItemProvider,
                 )
             )
         }

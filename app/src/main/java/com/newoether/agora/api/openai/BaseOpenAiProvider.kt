@@ -142,7 +142,7 @@ abstract class BaseOpenAiProvider : LlmProvider {
             val requestBodyJson = if (config.responsesApiEnabled) {
                 val request = OpenAiResponsesRequest(
                     model = config.modelId,
-                    input = apiMessages.toResponsesInput(),
+                    input = apiMessages.toResponsesInput(providerName = name),
                     tools = buildList {
                         addAll(config.tools.orEmpty().toResponsesTools())
                         if (config.openAiWebSearchEnabled) add(OpenAiResponseTool(type = "web_search"))

@@ -87,7 +87,13 @@ fun convertToOpenAiMessages(
                     role = "assistant",
                     content = null,
                     toolCalls = toolCalls,
-                    reasoningContent = thoughtContent?.ifEmpty { null }
+                    reasoningContent = thoughtContent?.ifEmpty { null },
+                    responseOutputItems = toolSegs.firstOrNull {
+                        it.responseOutputItems.isNotEmpty()
+                    }?.responseOutputItems,
+                    responseOutputItemProvider = toolSegs.firstOrNull {
+                        it.responseOutputItems.isNotEmpty()
+                    }?.responseOutputItemProvider,
                 ))
             } else if (msg.toolCall != null) {
                 val tc = msg.toolCall!!
@@ -99,7 +105,9 @@ fun convertToOpenAiMessages(
                         id = toolId,
                         function = OpenAiRequestFunction(name = tc.toolName, arguments = tc.arguments)
                     )),
-                    reasoningContent = thoughtContent?.ifEmpty { null }
+                    reasoningContent = thoughtContent?.ifEmpty { null },
+                    responseOutputItems = tc.responseOutputItems.ifEmpty { null },
+                    responseOutputItemProvider = tc.responseOutputItemProvider,
                 ))
             }
             return@flatMap entries

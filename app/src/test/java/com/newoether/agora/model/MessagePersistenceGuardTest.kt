@@ -1,9 +1,11 @@
 package com.newoether.agora.model
 
 import com.newoether.agora.util.Constants
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import kotlinx.serialization.json.Json
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,6 +52,32 @@ class MessagePersistenceGuardTest {
         )
 
         assertNull(encoded)
+    }
+
+    @Test
+    fun responsesContinuationStateFailsExplicitlyInsteadOfBecomingSqlNull() {
+        val error = runCatching {
+            MessagePersistenceGuard.encodeSegmentsBounded(
+                segments = listOf(
+                    MessageSegment(
+                        type = "tool",
+                        toolName = "lookup",
+                        responseOutputItems = listOf(
+                            buildJsonObject {
+                                put("id", "rs_1")
+                                put("type", "reasoning")
+                                put("encrypted_content", "x".repeat(4_000))
+                            },
+                        ),
+                        responseOutputItemProvider = "OpenAI",
+                    ),
+                ),
+                maxBytes = 512,
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is IllegalStateException)
+        assertTrue(error?.message.orEmpty().contains("continuation state"))
     }
 
     @Test

@@ -97,6 +97,10 @@ internal class GenerationToolOverlay(
             toolCallId = call.id,
             signature = call.signature,
             signatureProvider = providerName.takeIf { call.signature != null },
+            responseOutputItems = call.responseOutputItems,
+            responseOutputItemProvider = providerName.takeIf {
+                call.responseOutputItems.isNotEmpty()
+            },
             toolState = ToolExecutionStates.RUNNING,
             toolTarget = metadata?.target ?: current.toolTarget,
             toolDisplayName = metadata?.displayName ?: current.toolDisplayName,
@@ -152,6 +156,8 @@ internal class GenerationToolOverlay(
                 displayName = completed.toolDisplayName,
                 resultText = displayText,
                 structuredResult = structuredResult,
+                responseOutputItems = completed.responseOutputItems,
+                responseOutputItemProvider = completed.responseOutputItemProvider,
             ),
         )
     }
@@ -194,6 +200,7 @@ internal data class AuthorizedToolBatchRequest(
     val calls: List<StreamEvent.ToolCallRequest>,
     val context: GenerationContext,
     val conversationId: String,
+    val authorizedToolNames: Set<String>,
 ) {
     init {
         require(calls.isNotEmpty())
@@ -239,6 +246,7 @@ internal class GenerationToolBatchEffectExecutor(
                     name = call.name,
                     arguments = call.arguments,
                     context = request.context,
+                    authorizedToolNames = request.authorizedToolNames,
                 ),
             ) { event ->
                 if (event !is ToolExecutionEvent.Completed) {

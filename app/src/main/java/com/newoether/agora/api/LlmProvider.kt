@@ -6,6 +6,7 @@ import com.newoether.agora.model.TokenUsage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
@@ -51,6 +52,8 @@ sealed class StreamEvent {
         val arguments: String,
         val signature: String? = null,
         val streamKey: String = id,
+        /** Raw Responses output items that must precede this call during local-tool continuation. */
+        val responseOutputItems: List<JsonObject> = emptyList(),
     ) : StreamEvent()
     data class ToolCallsRequest(val calls: List<ToolCallRequest>) : StreamEvent()
     /** Emitted before one provider retry. [attempt] is the 1-based retry number, while
@@ -150,7 +153,7 @@ data class OpenAiStreamOptions(
 @Serializable
 data class OpenAiResponsesRequest(
     val model: String,
-    val input: List<OpenAiResponseInputItem>,
+    val input: List<JsonObject>,
     val stream: Boolean = true,
     val tools: List<OpenAiResponseTool>? = null,
     val reasoning: OpenAiReasoning? = null,
@@ -163,12 +166,15 @@ data class OpenAiResponsesRequest(
 @Serializable
 data class OpenAiResponseInputItem(
     val type: String,
+    val id: String? = null,
     val role: String? = null,
     val content: List<OpenAiResponseInputContent>? = null,
+    val summary: JsonElement? = null,
+    @SerialName("encrypted_content") val encryptedContent: String? = null,
     @SerialName("call_id") val callId: String? = null,
     val name: String? = null,
     val arguments: String? = null,
-    val output: String? = null,
+    val output: JsonElement? = null,
 )
 
 @Serializable
@@ -196,7 +202,7 @@ data class OpenAiResponseStreamEvent(
     @SerialName("item_id") val itemId: String? = null,
     @SerialName("output_index") val outputIndex: Int? = null,
     @SerialName("sequence_number") val sequenceNumber: Int? = null,
-    val item: OpenAiResponseOutputItem? = null,
+    val item: JsonObject? = null,
     val annotation: OpenAiResponseAnnotation? = null,
     val response: OpenAiResponseEnvelope? = null,
     val error: OpenAiError? = null,
@@ -215,6 +221,8 @@ data class OpenAiResponseAnnotation(
 data class OpenAiResponseOutputItem(
     val id: String? = null,
     val type: String? = null,
+    val summary: JsonElement? = null,
+    @SerialName("encrypted_content") val encryptedContent: String? = null,
     @SerialName("call_id") val callId: String? = null,
     val name: String? = null,
     val arguments: String? = null,
@@ -272,7 +280,10 @@ data class OpenAiMessage(
     val content: List<OpenAiContentPart>? = null,
     @SerialName("tool_calls") val toolCalls: List<OpenAiRequestToolCall>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
-    @SerialName("reasoning_content") val reasoningContent: String? = null
+    @SerialName("reasoning_content") val reasoningContent: String? = null,
+    /** Provider-scoped raw Responses output items restored only by the Responses transport. */
+    @Transient val responseOutputItems: List<JsonObject>? = null,
+    @Transient val responseOutputItemProvider: String? = null,
 )
 
 @Serializable
