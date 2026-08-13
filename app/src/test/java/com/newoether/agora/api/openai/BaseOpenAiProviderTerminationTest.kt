@@ -30,6 +30,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketException
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -579,8 +580,12 @@ class BaseOpenAiProviderTerminationTest {
                         socket.getOutputStream().flush()
                         response(socket, release)
                         val output = socket.getOutputStream()
-                        output.write("0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
-                        output.flush()
+                        try {
+                            output.write("0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                            output.flush()
+                        } catch (_: SocketException) {
+                            // A terminal SSE event lets the client close before this optional chunk terminator.
+                        }
                     }
                 }
             } catch (error: Throwable) {
