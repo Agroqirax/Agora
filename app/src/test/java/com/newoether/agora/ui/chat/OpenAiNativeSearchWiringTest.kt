@@ -51,6 +51,18 @@ class OpenAiNativeSearchWiringTest {
             root,
             "com/newoether/agora/viewmodel/ContextCompactor.kt",
         ).readText()
+        val compactController = File(
+            root,
+            "com/newoether/agora/viewmodel/ConversationCompactController.kt",
+        ).readText()
+        val standardLauncher = File(
+            root,
+            "com/newoether/agora/viewmodel/StandardGenerationContinuationLauncher.kt",
+        ).readText()
+        val boundLauncher = File(
+            root,
+            "com/newoether/agora/viewmodel/BoundRunGenerationLauncher.kt",
+        ).readText()
 
         assertTrue(
             "ChatApp must collect the compact threshold",
@@ -75,8 +87,16 @@ class OpenAiNativeSearchWiringTest {
             "automaticCompactTokenThreshold(contextLimit, config.thresholdPercent)" in compactor,
         )
         assertTrue(
-            "ContextCompactor must project the selected provider transport",
-            "responsesApiEnabled = responsesApiEnabled" in compactor,
+            "Compact must delegate admission to the ordinary continuation launcher",
+            "continuationLauncher().launch(" in compactController,
+        )
+        assertTrue(
+            "ordinary continuation must own the bound generation launch",
+            "boundRunGenerationLauncher().launch(" in standardLauncher,
+        )
+        assertTrue(
+            "the ordinary GenerationManager must own provider execution",
+            "val result = generationManager.generate(" in boundLauncher,
         )
     }
 

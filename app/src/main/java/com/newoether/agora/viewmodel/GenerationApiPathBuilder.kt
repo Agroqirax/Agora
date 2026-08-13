@@ -69,6 +69,7 @@ internal class GenerationApiPathBuilder(
             val fixedTokenCost = ContextTokenEstimator.estimateFixed(
                 systemPrompt = config.effectiveSystemPrompt,
                 tools = definitions,
+                initialUserPrompt = config.initialUserPrompt,
             )
             GenerationApiPath(
                 messages = currentPath,

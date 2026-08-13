@@ -189,11 +189,23 @@ internal fun projectGenerationInputMessages(
     includeImages: Boolean,
     userPrepend: String?,
     userPostpend: String?,
-): List<ChatMessage> = applyUserTemplateToMessages(
-    messages = projectToolResultImagesToUserMessage(
-        messages = projectAssistantImagesToLatestUserMessage(messages, includeImages),
-        includeImages = includeImages,
-    ),
-    prepend = userPrepend,
-    postpend = userPostpend,
-)
+    initialUserPrompt: String? = null,
+): List<ChatMessage> {
+    val projected = applyUserTemplateToMessages(
+        messages = projectToolResultImagesToUserMessage(
+            messages = projectAssistantImagesToLatestUserMessage(messages, includeImages),
+            includeImages = includeImages,
+        ),
+        prepend = userPrepend,
+        postpend = userPostpend,
+    )
+    val prompt = initialUserPrompt?.takeIf(String::isNotBlank) ?: return projected
+    val parent = projected.lastOrNull()
+    return projected + ChatMessage(
+        id = "api_initial_user_${parent?.id.orEmpty()}",
+        parentId = parent?.id,
+        text = prompt,
+        participant = Participant.USER,
+        timestamp = parent?.timestamp?.let { if (it == Long.MAX_VALUE) it else it + 1L } ?: 0L,
+    )
+}

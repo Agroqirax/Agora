@@ -13,96 +13,79 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
 class ChatContextCompactDaoTest {
-    @Test
-    fun manualCompactCreatesLiveMessageThenSettlesMessageAndRunAtomically() = runTest {
-        val dao = mockk<ChatDao>()
-        val conversation = conversation()
-        val sourceRun = activeRun().copy(
-            id = "source-run",
-            status = RunStatus.COMPLETED,
-            activeSlot = null,
-            endedAt = 5,
-            endReason = RunEndReason.MODEL_COMPLETED,
-        )
-        val source = message("source", null, sourceRun.id, 0, Participant.MODEL)
-        val compactRun = activeRun().copy(id = "compact-run", parentRunId = sourceRun.id)
-        val compact = message("compact_boundary", source.id, compactRun.id, 0, Participant.MODEL)
-            .copy(status = MessageStatus.SENDING, text = "")
-        coEvery {
-            dao.beginManualContextCompact(any(), any(), any(), any(), any())
-        } coAnswers { callOriginal() }
-        coEvery { dao.getLiveRun(conversation.id) } returns null
-        coEvery { dao.getConversation(conversation.id) } returns conversation
-        coEvery { dao.getMessage(source.id) } returns source
-        coEvery { dao.insertRun(compactRun) } just Runs
-        coEvery { dao.insertMessage(compact) } just Runs
-        coEvery { dao.updateSelectionsForRunDeletion(any(), any(), any(), any()) } returns 1
-
-        assertEquals(
-            compact,
-            dao.beginManualContextCompact(compactRun, compact, "{}", "{}", 20),
-        )
-
-        coEvery {
-            dao.settleManualContextCompact(any(), any(), any(), any(), any(), any(), any())
-        } coAnswers { callOriginal() }
-        coEvery { dao.getMessage(compact.id) } returns compact
-        coEvery { dao.getRun(compactRun.id) } returns compactRun
-        coEvery {
-            dao.settleContextCompactMessage(
-                compact.id,
-                compactRun.id,
-                "summary",
-                MessageStatus.SUCCESS,
-            )
-        } returns 1
-        coEvery {
-            dao.terminalizeManualContextCompactRun(
-                compactRun.id,
-                RunStatus.COMPLETED,
-                RunEndReason.MODEL_COMPLETED,
-                30,
-            )
-        } returns 1
-
-        assertEquals(
-            true,
-            dao.settleManualContextCompact(
-                compact.id,
-                compactRun.id,
-                "summary",
-                MessageStatus.SUCCESS,
-                RunStatus.COMPLETED,
-                RunEndReason.MODEL_COMPLETED,
-                30,
-            ),
-        )
-    }
 
     @Test
-    fun recompactRestartsTheSameTerminalRowWithoutChangingItsGraphOrRun() = runTest {
+    fun recompactSubstitutesAFreshRunAndChangesOnlyTheTargetMessageRow() = runTest {
         val dao = mockk<ChatDao>()
-        val conversation = conversation()
+        val conversation = conversation().copy(
+            selectedRunBranchesJson =
+                "{\"source-run\":\"original-run\",\"original-run\":\"suffix-run\"}",
+        )
+        val source = message(
+            id = "source",
+            parentId = null,
+            runId = "source-run",
+            sequence = 0,
+            participant = Participant.MODEL,
+        )
         val compact = message(
             id = "compact_boundary",
-            parentId = "source",
+            parentId = source.id,
             runId = "original-run",
             sequence = 7,
             participant = Participant.MODEL,
         ).copy(text = "old summary", modelName = "old/model")
+        val oldRun = activeRun().copy(
+            id = compact.runId,
+            parentRunId = source.runId,
+            status = RunStatus.COMPLETED,
+            activeSlot = null,
+            endedAt = 10,
+            endReason = RunEndReason.MODEL_COMPLETED,
+        )
+        val replacementRun = activeRun().copy(
+            id = "fresh-run",
+            parentRunId = source.runId,
+            startedAt = 20,
+            lastCheckpointAt = 20,
+        )
+        val selectedRuns = slot<String>()
         coEvery {
-            dao.beginRecompactContextCompact(any(), any(), any())
+            dao.beginRecompactContextCompact(any(), any(), any(), any())
         } coAnswers { callOriginal() }
         coEvery { dao.getMessage(compact.id) } returns compact
+        coEvery { dao.getMessage(source.id) } returns source
         coEvery { dao.getLiveRun(conversation.id) } returns null
         coEvery { dao.getConversation(conversation.id) } returns conversation
-        coEvery { dao.restartContextCompactMessage(compact.id, "new/model") } returns 1
+        coEvery { dao.getRun(compact.runId) } returns oldRun
+        coEvery { dao.getMessagesForRuns(listOf(compact.runId)) } returns listOf(compact)
+        coEvery { dao.insertRun(replacementRun) } just Runs
+        coEvery {
+            dao.replaceContextCompactMessageRun(
+                compact.id,
+                oldRun.id,
+                replacementRun.id,
+                "new/model",
+            )
+        } returns 1
+        coEvery { dao.reparentRunChildren(oldRun.id, replacementRun.id) } returns 1
+        coEvery {
+            dao.updateSelectionsForRunDeletion(
+                conversation.id,
+                conversation.selectedBranchesJson!!,
+                capture(selectedRuns),
+                replacementRun.startedAt,
+            )
+        } returns 1
+        coEvery { dao.deleteRun(oldRun.id) } returns 1
 
         val restarted = dao.beginRecompactContextCompact(
+            replacementRun = replacementRun,
             messageId = compact.id,
             modelName = "new/model",
             expectedSelectedBranchesJson = "{}",
@@ -110,14 +93,85 @@ class ChatContextCompactDaoTest {
 
         assertEquals(compact.id, restarted.id)
         assertEquals(compact.parentId, restarted.parentId)
-        assertEquals(compact.runId, restarted.runId)
-        assertEquals(compact.runSequence, restarted.runSequence)
+        assertEquals(replacementRun.id, restarted.runId)
+        assertEquals(0L, restarted.runSequence)
         assertEquals("", restarted.text)
         assertEquals(MessageStatus.SENDING, restarted.status)
         assertEquals("new/model", restarted.modelName)
-        coVerify(exactly = 0) { dao.insertRun(any()) }
+        assertTrue(selectedRuns.captured.contains("\"source-run\":\"fresh-run\""))
+        assertTrue(selectedRuns.captured.contains("\"fresh-run\":\"suffix-run\""))
+        coVerifyOrder {
+            dao.insertRun(replacementRun)
+            dao.replaceContextCompactMessageRun(
+                compact.id,
+                oldRun.id,
+                replacementRun.id,
+                "new/model",
+            )
+            dao.reparentRunChildren(oldRun.id, replacementRun.id)
+            dao.updateSelectionsForRunDeletion(any(), any(), any(), any())
+            dao.deleteRun(oldRun.id)
+        }
         coVerify(exactly = 0) { dao.insertMessage(any()) }
-        coVerify(exactly = 0) { dao.updateMessageParent(any(), any()) }
+
+        coVerify(exactly = 0) { dao.reparentMessageChildren(any(), any()) }
+        coVerify(exactly = 0) { dao.deleteMessagesByIds(any()) }
+    }
+
+    @Test
+    fun recompactRejectsASharedLegacyRunBeforeAnyMutation() = runTest {
+        val dao = mockk<ChatDao>()
+        val compact = message(
+            id = "compact_boundary",
+            parentId = "source",
+            runId = "shared-run",
+            sequence = 1,
+            participant = Participant.MODEL,
+        )
+        val sibling = message(
+            id = "sibling",
+            parentId = compact.id,
+            runId = compact.runId,
+            sequence = 2,
+            participant = Participant.MODEL,
+        )
+        val oldRun = activeRun().copy(
+            id = compact.runId,
+            status = RunStatus.COMPLETED,
+            activeSlot = null,
+            endedAt = 10,
+            endReason = RunEndReason.MODEL_COMPLETED,
+        )
+        val replacementRun = activeRun().copy(id = "fresh-run")
+        coEvery {
+            dao.beginRecompactContextCompact(any(), any(), any(), any())
+        } coAnswers { callOriginal() }
+        coEvery { dao.getMessage(compact.id) } returns compact
+        coEvery { dao.getLiveRun(compact.conversationId) } returns null
+        coEvery { dao.getRun(oldRun.id) } returns oldRun
+        coEvery { dao.getMessagesForRuns(listOf(oldRun.id)) } returns listOf(compact, sibling)
+
+        try {
+            dao.beginRecompactContextCompact(
+                replacementRun = replacementRun,
+                messageId = compact.id,
+                modelName = "new/model",
+                expectedSelectedBranchesJson = "{}",
+            )
+            fail("Expected shared legacy Run rejection")
+        } catch (_: IllegalStateException) {
+            // Fail closed: substituting this Run would affect the sibling message.
+        }
+
+        coVerify(exactly = 0) { dao.insertRun(any()) }
+        coVerify(exactly = 0) {
+            dao.replaceContextCompactMessageRun(any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { dao.reparentRunChildren(any(), any()) }
+        coVerify(exactly = 0) {
+            dao.updateSelectionsForRunDeletion(any(), any(), any(), any())
+        }
+        coVerify(exactly = 0) { dao.deleteRun(any()) }
     }
 
     @Test
@@ -149,6 +203,55 @@ class ChatContextCompactDaoTest {
 
         coVerify(exactly = 0) { dao.deleteRun(run.id) }
         coVerify(exactly = 0) { dao.reparentRunChildren(any(), any()) }
+    }
+
+    @Test
+    fun deletingDedicatedCompactReparentsItsChildAndDeletesOnlyTheCompactRow() = runTest {
+        val dao = mockk<ChatDao>()
+        val conversation = conversation().copy(
+            selectedBranchesJson =
+                "{\"source\":\"compact_boundary\",\"compact_boundary\":\"suffix\"}",
+            selectedRunBranchesJson =
+                "{\"source-run\":\"5f5a-run\",\"5f5a-run\":\"suffix-run\"}",
+        )
+        val compactRun = activeRun().copy(
+            id = "5f5a-run",
+            parentRunId = "source-run",
+            status = RunStatus.COMPLETED,
+            activeSlot = null,
+            endedAt = 10,
+            endReason = RunEndReason.MODEL_COMPLETED,
+        )
+        val compact = message(
+            "compact_boundary",
+            "source",
+            compactRun.id,
+            0,
+            Participant.MODEL,
+        )
+        coEvery { dao.removeContextCompact(compact.id) } coAnswers { callOriginal() }
+        coEvery { dao.getMessage(compact.id) } returns compact
+        coEvery { dao.getConversation(conversation.id) } returns conversation
+        coEvery { dao.getRun(compactRun.id) } returns compactRun
+        coEvery { dao.getMessagesForRuns(listOf(compactRun.id)) } returns listOf(compact)
+        coEvery { dao.reparentMessageChildren(compact.id, compact.parentId) } returns 1
+        coEvery { dao.deleteEmbeddingsByMessageIds(listOf(compact.id)) } just Runs
+        coEvery { dao.deleteMessagesByIds(listOf(compact.id)) } just Runs
+        coEvery { dao.updateSelectionsForRunDeletion(any(), any(), any(), any()) } returns 1
+        coEvery {
+            dao.reparentRunChildren(compactRun.id, compactRun.parentRunId)
+        } returns 1
+        coEvery { dao.deleteRun(compactRun.id) } returns 1
+
+        assertEquals(true, dao.removeContextCompact(compact.id))
+
+        coVerify(exactly = 1) {
+            dao.reparentMessageChildren(compact.id, compact.parentId)
+            dao.deleteMessagesByIds(listOf(compact.id))
+            dao.reparentRunChildren(compactRun.id, compactRun.parentRunId)
+            dao.deleteRun(compactRun.id)
+        }
+
     }
 
     private fun conversation() = ChatEntity(

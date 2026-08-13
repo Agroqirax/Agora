@@ -10,6 +10,10 @@ import com.newoether.agora.api.OpenAiResponseInputItem
 import com.newoether.agora.api.OpenAiResponseOutputItem
 import com.newoether.agora.api.OpenAiResponsesRequest
 import com.newoether.agora.api.util.RequestFormatException
+import com.newoether.agora.api.util.convertToOpenAiMessages
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.Participant
+import com.newoether.agora.viewmodel.projectGenerationInputMessages
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -24,6 +28,25 @@ class OpenAiRequestValidatorTest {
     @Test
     fun completeToolRound_isAccepted() {
         validRequest().requireValidWireFormat("OpenAI")
+    }
+
+    @Test
+    fun compactApiOnlyInvocationEndsResponsesInputWithUser() {
+        val projected = projectGenerationInputMessages(
+            messages = listOf(
+                ChatMessage(id = "user", text = "question", participant = Participant.USER),
+                ChatMessage(id = "assistant", text = "answer", participant = Participant.MODEL),
+            ),
+            includeImages = true,
+            userPrepend = null,
+            userPostpend = null,
+            initialUserPrompt = "Create the compact context summary now.",
+        )
+        val input = convertToOpenAiMessages(projected).toResponsesInput()
+        val request = OpenAiResponsesRequest(model = "gpt-test", input = input)
+
+        request.requireValidWireFormat("OpenAI")
+        assertEquals("user", input.last()["role"]?.jsonPrimitive?.content)
     }
 
     @Test

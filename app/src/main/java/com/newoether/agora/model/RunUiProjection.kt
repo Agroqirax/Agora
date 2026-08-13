@@ -21,8 +21,8 @@ data class RunMessagePresentation(
  *  - regenerated MODEL roots are siblings under one shared USER input, so their selector belongs
  *    only to the selected generation's terminal output.
  *
- * Each real USER starts a generation. Only that USER and the last ordinary assistant before the
- * next USER expose actions. Compact and synthetic tool/result rows never expose their own bars.
+ * Each real USER and each durable Assistant Run boundary starts a generation. The USER and the
+ * last ordinary assistant in each boundary expose actions. Compact and synthetic tool/result rows never expose their own bars.
  */
 object RunUiProjection {
     fun project(
@@ -69,8 +69,13 @@ object RunUiProjection {
         MessageGenerationBoundaryResolver.resolve(uniqueVisibleMessages).forEach { boundary ->
             val outputBoundary = boundary.lastAssistant ?: return@forEach
             val rootOutput = boundary.firstAssistant ?: outputBoundary
-            val siblings = boundary.input
+            val structuralInput = boundary.input
                 ?.takeIf { rootOutput.parentId == it.id }
+                ?: uniqueAllMessages.firstOrNull { candidate ->
+                    candidate.id == rootOutput.parentId &&
+                        MessageGenerationBoundaryResolver.isRealUser(candidate)
+                }
+            val siblings = structuralInput
                 ?.let { regenerationSiblingsByParent[it.id] }
                 .orEmpty()
             result[outputBoundary.id] = RunMessagePresentation(

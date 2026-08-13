@@ -29,6 +29,7 @@ import com.newoether.agora.model.AttachmentItem
 import com.newoether.agora.model.ChatConversation
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.model.SelectedAttachment
 import com.newoether.agora.sandbox.SandboxManager
@@ -612,13 +613,17 @@ class ChatViewModel(
     val isCompacting: StateFlow<Boolean> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf(false)
-            else generationRegistry.getOrCreate(conversationId).compacting
+            else generationRegistry.getOrCreate(conversationId).streamingMessage
+                .map { message -> message?.isContextCompact() == true }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val compactPreview: StateFlow<String> = currentConversationId
         .flatMapLatest { conversationId ->
             if (conversationId == null) flowOf("")
-            else generationRegistry.getOrCreate(conversationId).compactPreview
+            else generationRegistry.getOrCreate(conversationId).streamingMessage
+                .map { message ->
+                    message?.takeIf(ChatMessage::isContextCompact)?.text.orEmpty()
+                }
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "")
     val pendingConversationSettings: StateFlow<ConversationSettings?> = _pendingConversationSettings.asStateFlow()

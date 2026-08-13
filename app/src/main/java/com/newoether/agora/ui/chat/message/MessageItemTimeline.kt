@@ -598,7 +598,7 @@ internal fun TimelineSegmentsContent(
                                     .fillMaxWidth()
                                     .padding(top = if (index == 0) 0.dp else 6.dp)
                             ) {
-                                ChatStreamingMarkdown(
+                                StreamingMarkdownMessage(
                                     content = seg.content,
                                     isStreaming = answerIsStreaming,
                                     renderContext = renderContext,

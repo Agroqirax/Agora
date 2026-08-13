@@ -1,7 +1,6 @@
 package com.newoether.agora.viewmodel
 
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationCommand
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.Participant
@@ -409,6 +408,20 @@ class ConversationGenerationStateTest {
         assertTrue(state.consumeQueueDrainPermission())
     }
 
+    @Test
+    fun compactStopKeepsAutomaticHandoffSuppressed() = runBlocking {
+        val state = ConversationGenerationState("conversation")
+        val token = state.acquireForSend()!!
+        state.bindRun(token, "compact-run")
+        state.deferNextQueueDrain()
+
+        val stopped = state.stop()
+
+        assertEquals("compact-run", stopped.runId)
+        assertFalse(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
+    }
+
     /**
      * The Stop barrier has two halves (coroutine unwind, durable terminal write) that can complete
      * in either order, and whichever finishes LAST performs the release.
@@ -639,77 +652,6 @@ class ConversationGenerationStateTest {
     }
 
     @Test
-    fun manualCompactUsesOrdinaryGenerationProjectionAndDrain() = runBlocking {
-        var registryActiveCount = 0
-        var registryIdleCount = 0
-        var queueDrainCount = 0
-        val state = ConversationGenerationState(
-            conversationId = "conversation",
-            onRegistryActive = { registryActiveCount += 1 },
-            onRegistryIdle = { registryIdleCount += 1 },
-        )
-        state.onQueueDrainRequested = { queueDrainCount += 1 }
-
-        val effect = state.commands.requestCompact(
-            compactRunId = "compact-run",
-            effectId = "compact-effect",
-        )!!
-
-        assertTrue(state.compacting.value)
-        assertTrue(state.generating.value)
-        assertTrue(state.isLoading.value)
-        assertEquals("compact-run", state.currentRunId())
-        assertNull(state.commands.requestCompact("other-compact", "other-effect"))
-        val queued = state.commands.requestSend(
-            proposedRunId = "send-run",
-            effectId = "send-effect",
-            directOnly = false,
-            hasPendingGuidance = false,
-        )
-        assertEquals(
-            RunEffect.AcceptGuidance(
-                RunEffectIdentity(
-                    conversationId = "conversation",
-                    ownerToken = effect.identity.ownerToken,
-                    runId = "compact-run",
-                    pass = 0,
-                    effectId = "send-effect",
-                ),
-            ),
-            queued.effects.single(),
-        )
-
-        val settled = state.finishCompact(effect.identity, CompactOutcome.CREATED)
-
-        assertTrue(settled.accepted)
-        assertFalse(state.compacting.value)
-        assertFalse(state.generating.value)
-        assertFalse(state.isLoading.value)
-        assertEquals(1, registryActiveCount)
-        assertEquals(1, registryIdleCount)
-        assertEquals(1, queueDrainCount)
-        val retried = state.commands.requestSend(
-            proposedRunId = "send-run",
-            effectId = "send-effect",
-            directOnly = false,
-            hasPendingGuidance = false,
-        )
-        val input = retried.effects.single() as RunEffect.PersistAcceptedInput
-        assertTrue(state.commands.abandonSendLaunch(input.identity))
-        assertEquals(
-            listOf(
-                "CompactRequested",
-                "CompactRequested",
-                "SendRequested",
-                "CompactCompleted",
-                "SendRequested",
-                "SendLaunchAbandoned",
-            ),
-            state.runtimeTraceSnapshot().map { it.commandType },
-        )
-    }
-
-    @Test
     fun providerPassCallbacksRejectStaleAndDuplicateResults() = runBlocking {
         val state = ConversationGenerationState("conversation")
         val token = state.acquireForSend()!!
@@ -828,6 +770,42 @@ class ConversationGenerationStateTest {
         state.deferNextQueueDrain()
 
         assertFalse(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
+    }
+
+    @Test
+    fun consecutiveOriginAndCompactDrainDeferralsCannotConsumeEachOther() {
+        val state = ConversationGenerationState("conversation")
+
+        state.deferNextQueueDrain()
+        state.deferNextQueueDrain()
+
+        assertFalse(state.consumeQueueDrainPermission())
+        assertFalse(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
+    }
+
+    @Test
+    fun successfulCompactRemovesOnlyItsOwnDrainDeferral() {
+        val state = ConversationGenerationState("conversation")
+
+        state.deferNextQueueDrain()
+        state.deferNextQueueDrain()
+        state.cancelDeferredQueueDrain()
+
+        assertFalse(state.consumeQueueDrainPermission())
+        assertTrue(state.consumeQueueDrainPermission())
+    }
+
+    @Test
+    fun successfulCompactRemovesItsDeferralAfterOriginSettlement() {
+        val state = ConversationGenerationState("conversation")
+
+        state.deferNextQueueDrain()
+        state.deferNextQueueDrain()
+        assertFalse(state.consumeQueueDrainPermission())
+        state.cancelDeferredQueueDrain()
+
         assertTrue(state.consumeQueueDrainPermission())
     }
 

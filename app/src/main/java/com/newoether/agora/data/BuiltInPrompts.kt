@@ -7,6 +7,8 @@ object BuiltInPrompts {
     const val CONTEXT_COMPACT_SYSTEM =
         "Summarize the conversation for continued work. Preserve decisions, facts, constraints, unresolved tasks, tool results, and exact technical details that remain relevant. Use the same language or languages as the conversation. Do not translate. Output only the compact context summary."
 
+    const val CONTEXT_COMPACT_USER = "Create the compact context summary now."
+
     const val IMAGE_TRANSCRIPTION_SYSTEM =
         "You are an image describer. Describe the given image in detail."
 

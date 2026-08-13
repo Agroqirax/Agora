@@ -28,7 +28,9 @@ class AnsweringHapticEligibilityTest {
     fun compactAndEveryBlockingPresentationAreIneligible() {
         assertFalse(
             answeringHapticEligible(
-                activeSnapshot().copy(isCompacting = true),
+                activeSnapshot().copy(
+                    streamingMessage = answer.copy(id = "compact_stream"),
+                ),
                 "conversation",
                 TopLevelPresentation.CHAT,
             ),
@@ -82,6 +84,5 @@ class AnsweringHapticEligibilityTest {
         streamingMessage = answer,
         isLoading = true,
         isGenerating = true,
-        isCompacting = false,
     )
 }

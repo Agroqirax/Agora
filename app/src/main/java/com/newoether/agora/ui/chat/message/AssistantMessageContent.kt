@@ -37,7 +37,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.newoether.agora.R
-import com.newoether.agora.util.NoAutoScrollSelectionContainer
 import com.newoether.agora.util.noOpBringIntoView
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
@@ -440,7 +439,7 @@ internal fun AssistantMessageContent(
                                 appearanceRegistry = segmentAppearanceRegistry,
                                 isStreaming = isStreaming,
                             ) {
-                                ChatStreamingMarkdown(
+                                StreamingMarkdownMessage(
                                     content = answerBodyText,
                                     isStreaming = isStreaming,
                                     renderContext = renderContext,
@@ -449,7 +448,7 @@ internal fun AssistantMessageContent(
                                 )
                             }
                         } else {
-                            ChatStreamingMarkdown(
+                            StreamingMarkdownMessage(
                                 content = answerBodyText,
                                 isStreaming = isStreaming,
                                 renderContext = renderContext,
@@ -460,19 +459,7 @@ internal fun AssistantMessageContent(
                     }
                 }
                 if (errorContent != null) {
-                    Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f), contentColor = MaterialTheme.colorScheme.onErrorContainer, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.Top) {
-                            Icon(Icons.Default.Info, null, modifier = Modifier.size(16.dp).padding(top = 2.dp), tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.width(12.dp))
-                            NoAutoScrollSelectionContainer {
-                                Text(
-                                    errorContent.errorText,
-                                    style = ChatType.errorBody,
-                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                )
-                            }
-                        }
-                    }
+                    GenerationErrorBar(errorContent.errorText)
                 }
                 if (message.participant == Participant.MODEL && message.images.isNotEmpty()) {
                     val genImages = message.images

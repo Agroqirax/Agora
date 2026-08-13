@@ -86,7 +86,11 @@ class GenerationManager(
     ): Int = ContextTokenEstimator.estimateFixed(
         systemPrompt = config.effectiveSystemPrompt,
         tools = toolExecutor.definitions(context),
+        initialUserPrompt = config.initialUserPrompt,
     )
+
+    internal suspend fun buildApiPath(request: GenerationApiPathRequest): GenerationApiPath =
+        apiPathBuilder.build(request)
 
     internal suspend fun generate(
         conversationId: String,
@@ -532,6 +536,7 @@ class GenerationManager(
                 includeImages = providerConfig.includeImages,
                 userPrepend = config.userPrepend,
                 userPostpend = config.userPostpend,
+                initialUserPrompt = config.initialUserPrompt,
             )
             requestTrace?.mark("provider_dispatch")
             acceptProviderPass(collectProviderRequest(apiPath) {
@@ -644,6 +649,11 @@ class GenerationManager(
                     MessageStatus.SUCCESS
                 } else MessageStatus.ERROR
             }
+            generationErrorMessage = terminalGenerationErrorMessage(
+                status = currentStatus,
+                currentError = generationErrorMessage,
+                fallbackError = context.getString(R.string.failed_to_generate),
+            )
             if (generationJob?.isCancelled == true && currentStatus != MessageStatus.ERROR) {
                 currentStatus = MessageStatus.STOPPED
             }
@@ -684,7 +694,7 @@ class GenerationManager(
                         thoughtTiming.finishCurrent()
                         // Bound the row's toolCallJson aggregate (#51) and the unbounded answer
                         // text column — together they can exceed the 2MB CursorWindow otherwise.
-                        val finalMessage = GenerationFinalSnapshot(
+                        val generatedMessage = GenerationFinalSnapshot(
                             messageId = modelMessageId,
                             parentId = parentId,
                             text = totalText,
@@ -707,6 +717,9 @@ class GenerationManager(
                             runId = runId,
                             runSequence = modelRunSequence,
                         ).toMessage()
+                        val finalMessage = generatedMessage.withBoundedFinalTextTransform(
+                            callbacks.transformFinalText,
+                        )
                         val terminalDisposition = generationTerminalDisposition(
                             messageStatus = currentStatus,
                             hasPendingGuidance =

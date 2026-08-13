@@ -5,9 +5,12 @@ import androidx.compose.animation.expandIn
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkOut
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.ui.res.stringResource
@@ -29,7 +32,6 @@ import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.ChatMessage
-import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.isContextCompact
 import com.newoether.agora.model.Participant
@@ -44,12 +46,12 @@ import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.mikepenz.markdown.compose.components.markdownComponents
 import kotlinx.coroutines.flow.StateFlow
 
+private const val CompactStreamingStatusText = "Context compacting..."
+private const val CompactErrorText = "Compact error"
+
 internal fun usesExplicitDetailBackHandler(thinkingSegmentDisplayMode: String): Boolean =
     ThinkingSegmentDisplayModes.normalize(thinkingSegmentDisplayMode) ==
         ThinkingSegmentDisplayModes.BOTTOM_SHEET
-
-internal fun messageEntranceInitialScale(message: ChatMessage): Float =
-    if (message.isContextCompact()) 0.9f else 1f
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -115,6 +117,12 @@ internal fun MessageItem(
     var showCompactDetail by remember(message.id) { mutableStateOf(false) }
     val haptics = LocalAgoraHaptics.current
     val motionPolicy = LocalAgoraMotionPolicy.current
+    val compactInProgress = message.isContextCompact() && message.status in setOf(
+        MessageStatus.SENDING,
+        MessageStatus.THINKING,
+        MessageStatus.TOOL_CALLING,
+        MessageStatus.TRANSCRIBING,
+    )
 
     if (showInfoDialog) {
         MessageInfoDialog(
@@ -197,7 +205,6 @@ internal fun MessageItem(
         animationKey = "message:${message.id}",
         animate = animateEntrance && !isSwitching,
         durationMillis = MESSAGE_ENTER_DURATION_MS,
-        initialScale = messageEntranceInitialScale(message),
     )
 
     Row(
@@ -240,10 +247,6 @@ internal fun MessageItem(
                     Modifier
                 }
                 if (message.isContextCompact()) {
-                    val compactInProgress = message.status in setOf(
-                        MessageStatus.SENDING,
-                        MessageStatus.THINKING,
-                    )
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -252,6 +255,7 @@ internal fun MessageItem(
                     ) {
                         ContextCompactPill(
                             inProgress = compactInProgress,
+                            error = message.status == MessageStatus.ERROR,
                             actionsEnabled = compactActionsEnabled && !compactInProgress,
                             onClick = { showCompactDetail = true },
                             onRecompact = { onRecompact(message.id) },
@@ -339,31 +343,38 @@ internal fun MessageItem(
         }
     }
 
+    val failedToGenerateText = stringResource(com.newoether.agora.R.string.failed_to_generate)
+    val detailErrorText = remember(
+        message.text,
+        message.status,
+        message.participant,
+        message.segments,
+        failedToGenerateText,
+    ) {
+        assistantErrorContent(
+            message = message,
+            mergedSegments = mergeAdjacentSegments(message.segments.orEmpty()),
+            fallbackErrorText = failedToGenerateText,
+        )?.errorText
+    }
+
     if (showCompactDetail) {
-        val compactInProgress = message.status in setOf(
-            MessageStatus.SENDING,
-            MessageStatus.THINKING,
-        )
         val compactDetailText = liveCompactPreview
             ?.takeIf { compactInProgress }
             ?.collectAsState()
             ?.value
             ?: message.text
-        val compactDetailMessage = remember(message.id, message.status, compactDetailText) {
-            val renderableText = compactDetailText.ifBlank { "\u200B" }
-            message.copy(
-                text = renderableText,
-                segments = listOf(MessageSegment(type = "thought", content = renderableText)),
-            )
-        }
         SegmentDetailSheet(
-            message = compactDetailMessage,
+            message = message,
             selectedSegmentIndex = 0,
             selectedSegmentIndices = listOf(0),
             isStreaming = compactInProgress,
             markdownRenderContext = thoughtMarkdownRenderContext,
             onMediaClick = onMediaClick,
             titleOverride = stringResource(com.newoether.agora.R.string.context_compact),
+            directMarkdownContent = compactDetailText,
+            emptyStreamingText = CompactStreamingStatusText,
+            errorText = detailErrorText,
             handleBackInternally = true,
             onDismiss = { showCompactDetail = false },
         )
@@ -378,6 +389,7 @@ internal fun MessageItem(
             isStreaming = isStreaming,
             markdownRenderContext = thoughtMarkdownRenderContext,
             onMediaClick = onMediaClick,
+            errorText = detailErrorText,
             handleBackInternally = detailUsesExplicitBackHandler,
             showSegmentListFirst = detailUsesExplicitBackHandler,
             onDismiss = { showSegmentDetail = false }
@@ -388,6 +400,7 @@ internal fun MessageItem(
 @Composable
 internal fun ContextCompactPill(
     inProgress: Boolean = false,
+    error: Boolean = false,
     actionsEnabled: Boolean = true,
     onClick: (() -> Unit)? = null,
     onRecompact: () -> Unit = {},
@@ -395,6 +408,33 @@ internal fun ContextCompactPill(
 ) {
     var actionsExpanded by remember { mutableStateOf(false) }
     val pillShape = RoundedCornerShape(100.dp)
+    val containerColor by animateColorAsState(
+        targetValue = if (error) {
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        },
+        animationSpec = tween(durationMillis = 240),
+        label = "compactPillContainer",
+    )
+    val contentColor by animateColorAsState(
+        targetValue = if (error) {
+            MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+        } else {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        },
+        animationSpec = tween(durationMillis = 240),
+        label = "compactPillContent",
+    )
+    val iconColor by animateColorAsState(
+        targetValue = if (error) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        },
+        animationSpec = tween(durationMillis = 240),
+        label = "compactPillIcon",
+    )
     val destructiveActionTint = MaterialTheme.colorScheme.error.copy(
         alpha = if (actionsEnabled) 1f else 0.38f,
     )
@@ -407,31 +447,45 @@ internal fun ContextCompactPill(
             Modifier
         },
         shape = pillShape,
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = containerColor,
+        contentColor = contentColor,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+            modifier = Modifier
+                .heightIn(min = 42.dp)
+                .padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            if (inProgress) {
-                com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator(
-                    modifier = Modifier.size(16.dp),
-                    strokeWidth = 2.dp,
-                )
-            } else {
-                Icon(
-                    imageVector = androidx.compose.material.icons.Icons.Default.Compress,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
+            Box(
+                modifier = Modifier.size(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (inProgress) {
+                    com.newoether.agora.ui.motion.MotionAwareCircularProgressIndicator(
+                        modifier = Modifier.fillMaxSize(),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (error) {
+                            androidx.compose.material.icons.Icons.Default.Error
+                        } else {
+                            androidx.compose.material.icons.Icons.Default.Compress
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        tint = iconColor,
+                    )
+                }
             }
             Text(
-                stringResource(
-                    if (inProgress) com.newoether.agora.R.string.context_compacting
-                    else com.newoether.agora.R.string.context_compact,
-                ),
+                when {
+                    error -> CompactErrorText
+                    inProgress -> stringResource(com.newoether.agora.R.string.context_compacting)
+                    else -> stringResource(com.newoether.agora.R.string.context_compact)
+                },
+                maxLines = 1,
                 style = MaterialTheme.typography.labelLarge,
             )
             Box {

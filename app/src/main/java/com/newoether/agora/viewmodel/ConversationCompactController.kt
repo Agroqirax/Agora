@@ -1,15 +1,17 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.data.local.MessageEntity
+import com.newoether.agora.api.util.splitContextForCompactRetention
+import com.newoether.agora.data.BuiltInPrompts
 import com.newoether.agora.data.repository.ConversationRepository
+import com.newoether.agora.model.ChatMessage
+import com.newoether.agora.model.MessageGenerationBoundaryResolver
 import com.newoether.agora.model.MessageStatus
+import com.newoether.agora.model.isContextCompact
+import com.newoether.agora.model.isSuccessfulContextCompact
 import com.newoether.agora.util.Constants
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import java.util.UUID
 
 internal data class StandardCompactLaunch(
     val messageId: String,
@@ -17,21 +19,15 @@ internal data class StandardCompactLaunch(
 )
 
 /**
- * Executes only mailbox-authorized Compact work and publishes the resulting durable graph.
- *
- * It owns no Run state or long-lived resource. The existing effect coordinator returns every
- * asynchronous result through the same conversation mailbox before this component returns.
+ * Prepares Compact-specific presentation and generation parameters, then delegates the complete
+ * durable Run, stream, Stop, finalization, queue, and recovery lifecycle to ordinary generation.
  */
 internal class ConversationCompactController(
     private val conversations: ConversationRepository,
     private val operation: ContextCompactOperation,
-    private val effectCoordinator: ContextCompactEffectCoordinator =
-        ContextCompactEffectCoordinator(),
-    private val projectGraph: (
-        conversationId: String,
-        messages: List<MessageEntity>,
-        selectedChildren: Map<String?, String>,
-    ) -> Unit,
+    private val requestBuilder: GenerationRequestBuilder?,
+    private val generationManagerProvider: () -> GenerationManager,
+    private val continuationLauncher: () -> StandardGenerationContinuationLauncher,
     private val onCompactStarted: (conversationId: String, messageId: String) -> Unit = { _, _ -> },
 ) {
     suspend fun automaticNeeded(
@@ -40,22 +36,24 @@ internal class ConversationCompactController(
         config: AutomaticCompactConfig,
     ): Boolean = operation.automaticNeeded(conversationId, contextLimit, config)
 
-    /**
-     * Starts an ordinary manual-style Compact generation from IDLE and returns as soon as its
-     * durable capsule has been projected. The caller then invokes the unchanged send path; because
-     * this same generation slot is occupied, the accepted input enters the ordinary FIFO queue.
-     */
     suspend fun startAutomaticBeforeSend(
         conversationId: String,
         contextLimit: Int,
         config: AutomaticCompactConfig,
         state: ConversationGenerationState,
-    ): Boolean = startAutomaticStandard(
-        conversationId = conversationId,
-        contextLimit = contextLimit,
-        config = config,
-        state = state,
-    ) != null
+    ): CompactResult {
+        if (!operation.automaticNeeded(conversationId, contextLimit, config)) {
+            return CompactResult.NotNeeded
+        }
+        val snapshot = automaticSnapshot(conversationId, config)
+        return launch(
+            conversationId = conversationId,
+            request = config.request,
+            snapshot = snapshot,
+            state = state,
+            awaitCompletion = false,
+        ).second
+    }
 
     suspend fun startAutomaticStandard(
         conversationId: String,
@@ -64,56 +62,14 @@ internal class ConversationCompactController(
         state: ConversationGenerationState,
     ): StandardCompactLaunch? {
         if (!operation.automaticNeeded(conversationId, contextLimit, config)) return null
-        val rowStarted = CompletableDeferred<String?>()
-        val job = state.scope.launch {
-            var startedMessageId: String? = null
-            suspend fun publishGraph() {
-                startedMessageId = projectCurrentGraph(
-                    conversationId = conversationId,
-                    expectedMessageId = null,
-                    alreadyStartedMessageId = startedMessageId,
-                )
-                if (startedMessageId != null) rowStarted.complete(startedMessageId)
-            }
-            try {
-                effectCoordinator.execute(state) { effect ->
-                    if (conversations.getLiveRun(conversationId) != null) {
-                        return@execute CompactResult.NotNeeded
-                    }
-                    operation.compactBeforeSend(
-                        conversationId = conversationId,
-                        contextLimit = contextLimit,
-                        config = config,
-                        identity = effect.identity,
-                        compactRunId = effect.compactRunId,
-                        onSummaryUpdate = { snapshot ->
-                            state.updateCompactPreview(effect.identity, snapshot)
-                        },
-                        onGraphChanged = { publishGraph() },
-                    ).also { result ->
-                        if (result.hasDurableMessage()) publishGraph()
-                    }
-                }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Automatic pre-send Compact is best effort. If no row became durable, the caller
-                // continues through the ordinary direct send path.
-            } finally {
-                rowStarted.complete(null)
-            }
-        }
-        job.invokeOnCompletion { rowStarted.complete(null) }
-        val messageId = try {
-            rowStarted.await()
-        } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) {
-                job.cancel(cancelled)
-                job.join()
-            }
-            throw cancelled
-        }
-        return messageId?.let { StandardCompactLaunch(it, job) }
+        val snapshot = automaticSnapshot(conversationId, config)
+        return launch(
+            conversationId = conversationId,
+            request = config.request,
+            snapshot = snapshot,
+            state = state,
+            awaitCompletion = false,
+        ).first
     }
 
     suspend fun manual(
@@ -121,72 +77,194 @@ internal class ConversationCompactController(
         request: CompactRequest,
         state: ConversationGenerationState,
     ): CompactResult {
-        var startedMessageId: String? = null
-        suspend fun publishGraph() {
-            startedMessageId = projectCurrentGraph(
+        if (request.model.isBlank()) return CompactResult.Failed("Select a compact model")
+        if (request.prompt.isBlank()) return CompactResult.Failed("Compact prompt cannot be empty")
+        if (request.retainLogicalMessages < 0) {
+            return CompactResult.Failed("Retained messages cannot be negative")
+        }
+        val snapshotRunId = "compact_preflight_${UUID.randomUUID()}"
+        val snapshot = try {
+            val builder = requestBuilder
+                ?: return CompactResult.Failed("Compact setup is unavailable")
+            builder.captureAdmissionSnapshot(
                 conversationId = conversationId,
-                expectedMessageId = request.replaceMessageId,
-                alreadyStartedMessageId = startedMessageId,
+                runId = snapshotRunId,
+                modelId = request.model,
+            ).forCompact(request)
+        } catch (error: Exception) {
+            return CompactResult.Failed(
+                error.message?.takeIf(String::isNotBlank) ?: "Compact setup failed",
             )
         }
-        return when (
-            val execution = effectCoordinator.execute(state) { effect ->
-                if (conversations.getLiveRun(conversationId) != null) {
-                    return@execute CompactResult.Failed("Conversation is busy")
+        return launch(
+            conversationId = conversationId,
+            request = request,
+            snapshot = snapshot,
+            state = state,
+            awaitCompletion = true,
+        ).second
+    }
+
+    private suspend fun launch(
+        conversationId: String,
+        request: CompactRequest,
+        snapshot: GenerationAdmissionSnapshot,
+        state: ConversationGenerationState,
+        awaitCompletion: Boolean,
+    ): Pair<StandardCompactLaunch?, CompactResult> {
+        val loadedMessages = conversations.getMessagesForConversationSnapshot(conversationId)
+        val selectedChildren = conversations.restoreBranchSelections(conversationId)
+        val selectedPath = ConversationUiState.resolvePath(
+            allMessages = loadedMessages.map { it.toUiChatMessage { text -> text } },
+            streamingMsg = null,
+            selectedChildren = selectedChildren,
+        )
+        val target = request.replaceMessageId?.let { targetId ->
+            val targetBoundary = MessageGenerationBoundaryResolver.containing(
+                selectedPath,
+                targetId,
+            )
+            val targetMessage = targetBoundary
+                ?.messages
+                ?.firstOrNull { it.id == targetId }
+                ?.takeIf(ChatMessage::isContextCompact)
+                ?.takeIf {
+                    it.status in setOf(
+                        MessageStatus.SUCCESS,
+                        MessageStatus.ERROR,
+                        MessageStatus.STOPPED,
+                    )
                 }
-                operation.compactManual(
-                    conversationId = conversationId,
-                    request = request,
-                    identity = effect.identity,
-                    compactRunId = effect.compactRunId,
-                    onSummaryUpdate = { snapshot ->
-                        state.updateCompactPreview(effect.identity, snapshot)
-                    },
-                    onGraphChanged = { publishGraph() },
-                ).also { result ->
-                    if (result.hasDurableMessage()) publishGraph()
-                }
+            targetMessage
+                ?.let { loadedMessages.find { entity -> entity.id == it.id } }
+                ?: return null to CompactResult.Failed(
+                    "Compact message is not ready to recompact",
+                )
+        }
+        val parent = target?.parentId
+            ?.let { parentId -> loadedMessages.find { it.id == parentId } }
+            ?: selectedPath.lastOrNull()
+                ?.let { selected -> loadedMessages.find { it.id == selected.id } }
+            ?: return null to CompactResult.NotNeeded
+        if (target != null && target.parentId != parent.id) {
+            return null to CompactResult.Failed("Compact boundary disappeared")
+        }
+
+        val generationSnapshot = snapshot.forCompact(request)
+        val providerPath = generationManagerProvider().buildApiPath(
+            GenerationApiPathRequest(
+                parentId = parent.id,
+                conversationId = conversationId,
+                config = generationSnapshot.config,
+                context = generationSnapshot.context,
+                loadedMessages = loadedMessages,
+            ),
+        )
+        val transform = retainedTextTransform(
+            path = providerPath.messages,
+            retainLogicalMessages = request.retainLogicalMessages,
+        )
+        val messageId = target?.id ?: Constants.COMPACT_MSG_PREFIX + UUID.randomUUID()
+        val launched = continuationLauncher().launch(
+            StandardGenerationContinuationRequest(
+                conversationId = conversationId,
+                parentMessageId = parent.id,
+                snapshot = generationSnapshot,
+                modelMessageId = messageId,
+                replacementMessageId = target?.id,
+                callerTag = if (target == null) "compact" else "recompact",
+                queueDrainRequiresSuccess = true,
+                transformFinalText = transform,
+            ),
+            state,
+        ) ?: return null to CompactResult.Failed("Wait for the current generation to finish")
+
+        if (!launched.started.await()) {
+            launched.job.join()
+            return null to CompactResult.Failed("Compact generation did not start")
+        }
+        onCompactStarted(conversationId, messageId)
+        val compactLaunch = StandardCompactLaunch(messageId, launched.job)
+        if (!awaitCompletion) return compactLaunch to CompactResult.Created(messageId)
+
+        try {
+            launched.job.join()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        }
+        val settled = conversations.getMessagesForConversationSnapshot(conversationId)
+            .find { it.id == messageId }
+            ?: return compactLaunch to CompactResult.Failed("Compact message disappeared")
+        val result = if (settled.status == MessageStatus.SUCCESS) {
+            CompactResult.Created(messageId)
+        } else {
+            CompactResult.Failed(
+                settled.text.takeIf(String::isNotBlank) ?: "Context compact failed",
+                messageId,
+            )
+        }
+        return compactLaunch to result
+    }
+
+    private fun automaticSnapshot(
+        conversationId: String,
+        config: AutomaticCompactConfig,
+    ): GenerationAdmissionSnapshot = GenerationAdmissionSnapshot(
+        conversationId = conversationId,
+        runId = "compact_preflight_${UUID.randomUUID()}",
+        selectedModelId = config.request.model,
+        config = config.generationConfig,
+        context = config.generationContext,
+        providerInstances = config.providerInstances,
+        automaticCompact = config.copy(enabled = false),
+        titleGenerationEnabled = false,
+    ).forCompact(config.request)
+
+    private fun GenerationAdmissionSnapshot.forCompact(
+        request: CompactRequest,
+    ): GenerationAdmissionSnapshot = copy(
+        config = config.copy(
+            effectiveSystemPrompt = request.prompt,
+            initialUserPrompt = BuiltInPrompts.CONTEXT_COMPACT_USER,
+            codeExecutionEnabled = false,
+            googleSearchEnabled = false,
+            openAiWebSearchEnabled = false,
+            thinkingEnabled = false,
+        ),
+        context = context.copy(
+            accessSavedMemories = false,
+            accessActiveMemory = false,
+            accessPastConversations = false,
+            webSearchEnabled = false,
+            imageGenEnabled = false,
+            automationToolsEnabled = false,
+            shellEnabled = false,
+            sandboxEnabled = false,
+            sandboxSharedStorageEnabled = false,
+        ),
+        automaticCompact = automaticCompact.copy(enabled = false),
+        titleGenerationEnabled = false,
+    )
+
+    private fun retainedTextTransform(
+        path: List<ChatMessage>,
+        retainLogicalMessages: Int,
+    ): (String, MessageStatus) -> String {
+        val semanticPath = path.filterNot {
+            it.isContextCompact() && !it.isSuccessfulContextCompact()
+        }
+        val nearestCompact = semanticPath.indexOfLast(ChatMessage::isSuccessfulContextCompact)
+        val activePath = semanticPath.drop(nearestCompact.coerceAtLeast(-1) + 1)
+        val retained = splitContextForCompactRetention(
+            compactSplitMessages(activePath),
+            retainLogicalMessages,
+        ).retained
+        return { generatedText, status ->
+            if (status == MessageStatus.SUCCESS && generatedText.isNotBlank()) {
+                buildPersistedCompactText(generatedText, retained)
+            } else {
+                generatedText
             }
-        ) {
-            is ContextCompactEffectCoordinator.Execution.Settled -> execution.result
-            ContextCompactEffectCoordinator.Execution.Busy ->
-                CompactResult.Failed("Wait for the current generation to finish")
-            ContextCompactEffectCoordinator.Execution.Superseded ->
-                CompactResult.Failed("Context compact was interrupted")
         }
     }
-
-    private suspend fun projectCurrentGraph(
-        conversationId: String,
-        expectedMessageId: String?,
-        alreadyStartedMessageId: String?,
-    ): String? {
-        val messages = conversations.getMessagesForConversationSnapshot(conversationId)
-        projectGraph(
-            conversationId,
-            messages,
-            conversations.restoreBranchSelections(conversationId),
-        )
-        if (alreadyStartedMessageId != null) return alreadyStartedMessageId
-
-        val inFlightStatuses = setOf(MessageStatus.SENDING, MessageStatus.THINKING)
-        val started = expectedMessageId
-            ?.let { id ->
-                messages.firstOrNull { message ->
-                    message.id == id && message.status in inFlightStatuses
-                }
-            }
-            ?: messages.lastOrNull { message ->
-                message.id.startsWith(Constants.COMPACT_MSG_PREFIX) &&
-                    message.status in inFlightStatuses
-            }
-        started?.let { onCompactStarted(conversationId, it.id) }
-        return started?.id
-    }
-}
-
-private fun CompactResult.hasDurableMessage(): Boolean = when (this) {
-    is CompactResult.Created -> true
-    is CompactResult.Failed -> messageId != null
-    CompactResult.NotNeeded -> false
 }

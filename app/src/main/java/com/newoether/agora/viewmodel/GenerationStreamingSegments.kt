@@ -110,6 +110,22 @@ internal fun buildLiveSegments(
     return result.ifEmpty { null }
 }
 
+internal fun terminalGenerationErrorMessage(
+    status: MessageStatus,
+    currentError: String?,
+    fallbackError: String,
+): String? = if (status == MessageStatus.ERROR) {
+    currentError?.takeIf(String::isNotBlank) ?: fallbackError
+} else {
+    currentError
+}
+
+internal fun ChatMessage.withBoundedFinalTextTransform(
+    transform: (String, MessageStatus) -> String,
+): ChatMessage = copy(
+    text = MessagePersistenceGuard.clipText(transform(text, status)),
+)
+
 internal data class GenerationFinalSnapshot(
     val messageId: String,
     val parentId: String?,

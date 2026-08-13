@@ -15,7 +15,17 @@ import com.newoether.agora.util.Constants
 internal fun nearestUserAncestorId(
     messages: List<ChatMessage>,
     messageId: String,
-): String? = MessageGenerationBoundaryResolver.nearestInputAncestorId(messages, messageId)
+): String? {
+    val byId = messages.distinctBy(ChatMessage::id).associateBy(ChatMessage::id)
+    var parentId = byId[messageId]?.parentId
+    val visited = hashSetOf<String>()
+    while (parentId != null && visited.add(parentId)) {
+        val parent = byId[parentId] ?: return null
+        if (MessageGenerationBoundaryResolver.isRealUser(parent)) return parent.id
+        parentId = parent.parentId
+    }
+    return null
+}
 
 /**
  * Chooses the covered jump-cut destination after deleting a structural message subtree.

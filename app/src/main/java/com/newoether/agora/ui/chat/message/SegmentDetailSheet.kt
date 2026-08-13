@@ -127,6 +127,9 @@ internal fun SegmentDetailSheet(
     markdownRenderContext: ChatMarkdownRenderContext,
     onMediaClick: (List<String>, Int) -> Unit,
     titleOverride: String? = null,
+    directMarkdownContent: String? = null,
+    emptyStreamingText: String? = null,
+    errorText: String? = null,
     detailFooter: (@Composable () -> Unit)? = null,
     handleBackInternally: Boolean = false,
     showSegmentListFirst: Boolean = false,
@@ -135,13 +138,22 @@ internal fun SegmentDetailSheet(
     val liveSegs = remember(message.segments) {
         mergeAdjacentSegments(message.segments.orEmpty()).filter { it.type != "answer" }
     }
-    val selectedEntries = remember(liveSegs, selectedSegmentIndices, selectedSegmentIndex) {
-        selectedSegmentIndices.mapNotNull { index ->
-            liveSegs.getOrNull(index)?.let { index to it }
-        }.ifEmpty {
-            liveSegs.getOrNull(selectedSegmentIndex)
-                ?.let { listOf(selectedSegmentIndex to it) }
-                .orEmpty()
+    val selectedEntries = remember(
+        liveSegs,
+        selectedSegmentIndices,
+        selectedSegmentIndex,
+        directMarkdownContent,
+    ) {
+        if (directMarkdownContent != null) {
+            listOf(0 to MessageSegment(type = "thought", content = directMarkdownContent))
+        } else {
+            selectedSegmentIndices.mapNotNull { index ->
+                liveSegs.getOrNull(index)?.let { index to it }
+            }.ifEmpty {
+                liveSegs.getOrNull(selectedSegmentIndex)
+                    ?.let { listOf(selectedSegmentIndex to it) }
+                    .orEmpty()
+            }
         }
     }
     val firstSelectedSegment = selectedEntries.firstOrNull()?.second
@@ -173,13 +185,21 @@ internal fun SegmentDetailSheet(
         val scrollState = rememberScrollState()
         val segmentListScrollState = rememberScrollState()
         val lazyDetailListState = rememberLazyListState()
-        val usesVirtualizedSingleMarkdown = usesVirtualizedSegmentDetail(
-            selectedSegmentCount = selectedSegs.size,
-            segmentType = seg.type,
-            segmentContentIsBlank = seg.content.isBlank(),
-            isStreaming = isStreaming,
-            hasFooter = detailFooter != null,
-        )
+        var observedStreamingMarkdown by remember(message.id, selectedLiveIndex) {
+            mutableStateOf(isStreaming)
+        }
+        SideEffect {
+            if (isStreaming) observedStreamingMarkdown = true
+        }
+        val usesVirtualizedSingleMarkdown =
+            directMarkdownContent == null &&
+                usesVirtualizedSegmentDetail(
+                    selectedSegmentCount = selectedSegs.size,
+                    segmentType = seg.type,
+                    segmentContentIsBlank = seg.content.isBlank(),
+                    isStreaming = observedStreamingMarkdown,
+                    hasFooter = detailFooter != null || errorText != null,
+                )
 
         val PARTIAL = 0.45f
         val FULL = 0.94f
@@ -598,7 +618,11 @@ internal fun SegmentDetailSheet(
                                         content = seg.content,
                                         isStreaming = isStreaming,
                                         renderContext = markdownRenderContext,
+                                        emptyStreamingText = emptyStreamingText,
                                     )
+                                }
+                                errorText?.takeIf(String::isNotBlank)?.let {
+                                    GenerationErrorBar(it)
                                 }
                                 detailFooter?.invoke()
                             }
@@ -702,12 +726,13 @@ private fun StreamingDetailMarkdownReveal(
     content: String,
     isStreaming: Boolean,
     renderContext: ChatMarkdownRenderContext,
+    emptyStreamingText: String? = null,
 ) {
     DetailContentReveal(
         revealKey = revealKey,
         modifier = Modifier.fillMaxWidth(),
     ) { revealModifier, onReady ->
-        ChatStreamingMarkdown(
+        StreamingMarkdownMessage(
             content = content,
             isStreaming = isStreaming,
             renderContext = renderContext,
@@ -717,6 +742,7 @@ private fun StreamingDetailMarkdownReveal(
                     if (size.height > 0 || content.isEmpty()) onReady()
                 },
             selectionEnabled = !isStreaming,
+            emptyStreamingText = emptyStreamingText,
         )
     }
 }

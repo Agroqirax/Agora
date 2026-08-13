@@ -47,6 +47,49 @@ class GenerationApiPathBuilderTest {
     }
 
     @Test
+    fun `nearest normally completed compact on the parent chain is the context boundary`() = runTest {
+        val repository = mockk<ConversationRepository>(relaxed = true)
+        val builder = GenerationApiPathBuilder(repository) { emptyList() }
+
+        for (invalidStatus in listOf(
+            MessageStatus.ERROR,
+            MessageStatus.STOPPED,
+            MessageStatus.SENDING,
+            MessageStatus.THINKING,
+        )) {
+            val old = message("old-$invalidStatus", null, 0, Participant.USER)
+            val successful = message(
+                "${Constants.COMPACT_MSG_PREFIX}successful-$invalidStatus",
+                old.id,
+                1,
+            )
+            val middle = message("middle-$invalidStatus", successful.id, 2, Participant.USER)
+            val invalid = message(
+                "${Constants.COMPACT_MSG_PREFIX}invalid-$invalidStatus",
+                middle.id,
+                3,
+            ).copy(status = invalidStatus)
+            val latest = message("latest-$invalidStatus", invalid.id, 4, Participant.USER)
+
+            val path = builder.build(
+                GenerationApiPathRequest(
+                    parentId = latest.id,
+                    conversationId = "conversation",
+                    config = generationConfig(),
+                    context = GenerationContext(),
+                    loadedMessages = listOf(old, successful, middle, invalid, latest),
+                ),
+            )
+
+            assertEquals(successful.id, path.messages.first().id)
+            assertTrue(path.messages.none { it.id == old.id })
+            val prepared = prepareMessages(path.messages, path.providerConfig.maxContextWindow)
+            assertEquals("context_summary_${successful.id}", prepared.first().id)
+            assertTrue(prepared.none { it.id == invalid.id })
+        }
+    }
+
+    @Test
     fun `stopped run queued guidance reaches first openai request exactly once`() = runTest {
         val repository = mockk<ConversationRepository>(relaxed = true)
         val builder = GenerationApiPathBuilder(repository) { emptyList() }

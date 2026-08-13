@@ -5,7 +5,6 @@ import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import com.newoether.agora.model.MessageStatus
-import com.newoether.agora.model.RunEndReason
 import com.newoether.agora.model.RunStatus
 import com.newoether.agora.util.Constants
 import kotlinx.serialization.encodeToString
@@ -89,91 +88,29 @@ interface ChatContextCompactDao {
     @Query("UPDATE runs SET parentRunId = :replacementParentRunId WHERE parentRunId = :removedRunId")
     suspend fun reparentRunChildren(removedRunId: String, replacementParentRunId: String?): Int
 
-    @Query("UPDATE messages SET parentId = :newParentId WHERE id = :messageId")
-    suspend fun updateMessageParent(messageId: String, newParentId: String?): Int
-
     @Query(
         """
         UPDATE messages
-        SET text = :text
-        WHERE id = :messageId AND runId = :runId AND status = 'SENDING'
-          AND EXISTS (
-              SELECT 1 FROM runs
-              WHERE runs.id = :runId AND runs.status = 'ACTIVE' AND runs.activeSlot = 1
-                AND (:expectedPass IS NULL OR runs.currentPass = :expectedPass)
-          )
+        SET runId = :newRunId, runSequence = 0, text = '', status = 'SENDING',
+            modelName = :modelName
+        WHERE id = :messageId AND runId = :oldRunId
+          AND status IN ('SUCCESS', 'ERROR', 'STOPPED')
         """
     )
-    suspend fun updateContextCompactCheckpoint(
+    suspend fun replaceContextCompactMessageRun(
         messageId: String,
-        runId: String,
-        expectedPass: Int?,
-        text: String,
+        oldRunId: String,
+        newRunId: String,
+        modelName: String,
     ): Int
 
-    @Query(
-        """
-        UPDATE messages
-        SET text = '', status = 'SENDING', modelName = :modelName
-        WHERE id = :messageId AND status IN ('SUCCESS', 'ERROR', 'STOPPED')
-        """
-    )
-    suspend fun restartContextCompactMessage(messageId: String, modelName: String): Int
-
-    @Query(
-        """
-        UPDATE messages
-        SET text = :text
-        WHERE id = :messageId AND status = 'SENDING'
-        """
-    )
-    suspend fun updateRecompactCheckpoint(messageId: String, text: String): Int
-
-    @Query(
-        """
-        UPDATE messages
-        SET text = :text, status = :status
-        WHERE id = :messageId AND status = 'SENDING'
-        """
-    )
-    suspend fun settleRecompactMessage(
-        messageId: String,
-        text: String,
-        status: MessageStatus,
-    ): Int
-
-    @Query(
-        """
-        UPDATE messages
-        SET text = :text, status = :status
-        WHERE id = :messageId AND runId = :runId AND status = 'SENDING'
-        """
-    )
-    suspend fun settleContextCompactMessage(
-        messageId: String,
-        runId: String,
-        text: String,
-        status: MessageStatus,
-    ): Int
-
-    @Query(
-        """
-        UPDATE runs
-        SET status = :status, activeSlot = NULL, lastCheckpointAt = :at, endedAt = :at,
-            endReason = :reason
-        WHERE id = :runId AND status = 'ACTIVE' AND activeSlot = 1
-        """
-    )
-    suspend fun terminalizeManualContextCompactRun(
-        runId: String,
-        status: RunStatus,
-        reason: RunEndReason,
-        at: Long,
-    ): Int
-
-    /** Restarts one selected terminal Compact row in place without disturbing its descendants. */
+    /**
+     * Substitutes one terminal Compact's dedicated Run with a fresh active Run while retaining the
+     * same message identity and graph position. No non-target message row is updated.
+     */
     @Transaction
     suspend fun beginRecompactContextCompact(
+        replacementRun: RunEntity,
         messageId: String,
         modelName: String,
         expectedSelectedBranchesJson: String,
@@ -183,6 +120,13 @@ interface ChatContextCompactDao {
             "Conversation became busy during Recompact"
         }
         require(message.id.startsWith(Constants.COMPACT_MSG_PREFIX))
+        val oldRun = getRun(message.runId) ?: error("Compact Run disappeared")
+        check(oldRun.status.isTerminal && oldRun.activeSlot == null) {
+            "Compact Run is not terminal"
+        }
+        check(getMessagesForRuns(listOf(oldRun.id)).map(MessageEntity::id) == listOf(message.id)) {
+            "Compact Run is not independently replaceable"
+        }
         check(
             message.status in setOf(
                 MessageStatus.SUCCESS,
@@ -196,80 +140,54 @@ interface ChatContextCompactDao {
             decodeCompactSelections(conversation.selectedBranchesJson) ==
                 decodeCompactSelections(expectedSelectedBranchesJson)
         ) { "Selected message branch changed before Recompact" }
-        check(restartContextCompactMessage(message.id, modelName) == 1)
-        return message.copy(text = "", status = MessageStatus.SENDING, modelName = modelName)
-    }
+        val parent = message.parentId?.let { getMessage(it) }
+            ?: error("Compact parent disappeared")
+        require(replacementRun.id != oldRun.id) { "Recompact requires a fresh Run" }
+        require(replacementRun.conversationId == message.conversationId)
+        require(replacementRun.status == RunStatus.ACTIVE && replacementRun.activeSlot == 1)
+        require(replacementRun.parentRunId == parent.runId)
+        check(oldRun.parentRunId == parent.runId) { "Compact Run ancestry changed" }
 
-    /** Creates one live manual Compact Run and its durable streaming row atomically. */
-    @Transaction
-    suspend fun beginManualContextCompact(
-        run: RunEntity,
-        message: MessageEntity,
-        expectedSelectedBranchesJson: String,
-        selectedBranchesJson: String,
-        at: Long,
-    ): MessageEntity {
-        require(run.status == RunStatus.ACTIVE && run.activeSlot == 1)
-        require(message.runId == run.id)
-        require(message.parentId != null)
-        require(message.status == MessageStatus.SENDING)
-        check(getLiveRun(message.conversationId) == null) {
-            "Conversation ${message.conversationId} became busy during manual Compact"
-        }
-        val conversation = getConversation(message.conversationId)
-            ?: error("Conversation ${message.conversationId} disappeared")
+        val runSelections = decodeCompactSelections(conversation.selectedRunBranchesJson)
         check(
-            decodeCompactSelections(conversation.selectedBranchesJson) ==
-                decodeCompactSelections(expectedSelectedBranchesJson)
-        ) { "Selected message branch changed before manual Compact insertion" }
-        val parent = getMessage(message.parentId)
-            ?: error("Compact parent ${message.parentId} disappeared")
-        check(parent.conversationId == message.conversationId)
-        check(parent.runId == run.parentRunId)
-        insertRun(run)
-        insertMessage(message.copy(runSequence = 0))
-        val runSelections = decodeCompactSelections(conversation.selectedRunBranchesJson).apply {
-            put(run.parentRunId, run.id)
+            runSelections.none { (parentRunId, selectedRunId) ->
+                selectedRunId == oldRun.id && parentRunId != oldRun.parentRunId
+            }
+        ) { "Selected Run graph is inconsistent" }
+        val selectedChildRun = runSelections.remove(oldRun.id)
+        if (runSelections[oldRun.parentRunId] == oldRun.id) {
+            runSelections[oldRun.parentRunId] = replacementRun.id
         }
+        if (selectedChildRun != null) runSelections[replacementRun.id] = selectedChildRun
+
+        insertRun(replacementRun)
+        check(
+            replaceContextCompactMessageRun(
+                messageId = message.id,
+                oldRunId = oldRun.id,
+                newRunId = replacementRun.id,
+                modelName = modelName,
+            ) == 1
+        )
+        reparentRunChildren(oldRun.id, replacementRun.id)
         check(
             updateSelectionsForRunDeletion(
                 conversationId = message.conversationId,
-                selectedBranchesJson = selectedBranchesJson,
+                selectedBranchesJson = conversation.selectedBranchesJson ?: "{}",
                 selectedRunBranchesJson = encodeCompactSelections(runSelections),
-                at = at,
+                at = replacementRun.startedAt,
             ) == 1
         )
-        return message.copy(runSequence = 0)
+        check(deleteRun(oldRun.id) == 1)
+        return message.copy(
+            runId = replacementRun.id,
+            runSequence = 0,
+            text = "",
+            status = MessageStatus.SENDING,
+            modelName = modelName,
+        )
     }
 
-    /** Settles a manual Compact message and its dedicated live Run in one transaction. */
-    @Transaction
-    suspend fun settleManualContextCompact(
-        messageId: String,
-        runId: String,
-        text: String,
-        messageStatus: MessageStatus,
-        runStatus: RunStatus,
-        reason: RunEndReason,
-        at: Long,
-    ): Boolean {
-        require(messageStatus in setOf(MessageStatus.SUCCESS, MessageStatus.ERROR, MessageStatus.STOPPED))
-        require(runStatus.isTerminal)
-        val message = getMessage(messageId) ?: return false
-        require(message.id.startsWith(Constants.COMPACT_MSG_PREFIX))
-        check(message.runId == runId)
-        val run = getRun(runId) ?: return false
-        if (run.status.isTerminal) {
-            return message.status == messageStatus &&
-                message.text == text &&
-                run.status == runStatus &&
-                run.endReason == reason
-        }
-        if (run.status != RunStatus.ACTIVE || run.activeSlot != 1) return false
-        check(settleContextCompactMessage(messageId, runId, text, messageStatus) == 1)
-        check(terminalizeManualContextCompactRun(runId, runStatus, reason, at) == 1)
-        return true
-    }
 
     @Transaction
     suspend fun removeContextCompact(messageId: String): Boolean {
@@ -278,8 +196,7 @@ interface ChatContextCompactDao {
         val conversation = getConversation(message.conversationId) ?: return false
         val compactRun = getRun(message.runId) ?: return false
         val compactOwnsDedicatedRun =
-            compactRun.id.startsWith("compact_run_") &&
-                getMessagesForRuns(listOf(compactRun.id)).map(MessageEntity::id) == listOf(message.id)
+            getMessagesForRuns(listOf(compactRun.id)).map(MessageEntity::id) == listOf(message.id)
         reparentMessageChildren(message.id, message.parentId)
         deleteEmbeddingsByMessageIds(listOf(message.id))
         deleteMessagesByIds(listOf(message.id))

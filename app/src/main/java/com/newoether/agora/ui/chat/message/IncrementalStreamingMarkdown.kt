@@ -451,7 +451,7 @@ private class StreamingMarkdownRenderState(
 }
 
 @Composable
-internal fun ChatStreamingMarkdown(
+internal fun IncrementalStreamingMarkdownContent(
     content: String,
     isStreaming: Boolean,
     renderContext: ChatMarkdownRenderContext,

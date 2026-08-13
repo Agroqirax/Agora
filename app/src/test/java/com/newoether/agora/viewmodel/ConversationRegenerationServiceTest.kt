@@ -125,6 +125,85 @@ class ConversationRegenerationServiceTest {
         Unit
     }
 
+    @Test
+    fun adjacentAssistantRunRegeneratesOnlyItsOwnRootFromItsDirectParent() = runBlocking {
+        val fixture = Fixture()
+        val state = ConversationGenerationState("conversation")
+        val upper = TARGET_MODEL.copy(
+            id = "upper-model",
+            parentId = "source-input",
+            runId = "upper-run",
+            runSequence = 0,
+        )
+        val lower = TARGET_MODEL.copy(
+            id = "lower-model",
+            parentId = upper.id,
+            runId = "lower-run",
+            runSequence = 0,
+        )
+        val upperEntity = TARGET_MODEL_ENTITY.copy(
+            id = upper.id,
+            parentId = upper.parentId,
+            runId = requireNotNull(upper.runId),
+            runSequence = requireNotNull(upper.runSequence),
+        )
+        val lowerEntity = TARGET_MODEL_ENTITY.copy(
+            id = lower.id,
+            parentId = lower.parentId,
+            runId = requireNotNull(lower.runId),
+            runSequence = requireNotNull(lower.runSequence),
+        )
+        val createdRun = slot<RunEntity>()
+        val createdMessages = slot<List<MessageEntity>>()
+        coEvery {
+            fixture.conversations.getMessagesForConversationSnapshot("conversation")
+        } returns listOf(SOURCE_USER_ENTITY, upperEntity, lowerEntity)
+        coEvery {
+            fixture.conversations.createRunWithMessages(
+                run = capture(createdRun),
+                messages = capture(createdMessages),
+                messageSelectionUpdates = mapOf(upper.id to "new-model"),
+                conversationModelId = "provider:model",
+                at = any(),
+            )
+        } answers {
+            RunGraphCommit(
+                messages = secondArg(),
+                messageSelections = thirdArg(),
+                runSelections = emptyMap(),
+            )
+        }
+        coEvery { fixture.boundLauncher.launch(any(), state) } just Runs
+
+        assertTrue(
+            fixture.service.regenerate(
+                fixture.request.copy(
+                    messageId = lower.id,
+                    visiblePath = listOf(SOURCE_USER, upper, lower),
+                ),
+                state,
+            ),
+        )
+        val transition = checkNotNull(fixture.transitions.request.value)
+        fixture.transitions.acknowledgeFade(transition.id)
+
+        coVerify(timeout = 5_000, exactly = 1) {
+            fixture.boundLauncher.launch(
+                match {
+                    it.modelMessageId == "new-model" &&
+                        it.callerTag == "regenerate"
+                },
+                state,
+            )
+        }
+        assertEquals(upper.id, createdMessages.captured.single().parentId)
+        assertEquals(upper.runId, createdRun.captured.parentRunId)
+        assertEquals(lowerEntity, listOf(SOURCE_USER_ENTITY, upperEntity, lowerEntity).last())
+        fixture.transitions.complete(transition.id)
+        state.dispose()
+        Unit
+    }
+
     private class Fixture {
         val conversations = mockk<ConversationRepository>()
         val requestBuilder = mockk<GenerationRequestBuilder>()

@@ -9,7 +9,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class ConversationRuntimeRecoveryCompactReducerTest {
+class ConversationRuntimeRecoveryReducerTest {
     @Test
     fun `Room live Run snapshot produces one deterministic recovery effect`() {
         listOf(RunStatus.ACTIVE, RunStatus.STOPPING).forEach { priorStatus ->
@@ -89,109 +89,5 @@ class ConversationRuntimeRecoveryCompactReducerTest {
         assertTrue(recovered.effects.isEmpty())
     }
 
-    @Test
-    fun `Compact owns the standard generation slot queues Send and accepts Stop`() {
-        val identity = RunEffectIdentity(
-            conversationId = CONVERSATION_ID,
-            ownerToken = 4,
-            runId = "compact-run",
-            pass = 0,
-            effectId = "compact-effect",
-        )
-        val request = ConversationCommand.CompactRequested(
-            identity = identity,
-            compactRunId = "compact-run",
-        )
 
-        val started = ConversationRuntimeReducer.reduce(RunState.Idle(CONVERSATION_ID), request)
-
-        assertEquals(RunState.Compacting(identity, "compact-run"), started.newState)
-        assertEquals(
-            listOf(RunEffect.RunCompact(identity, "compact-run")),
-            started.effects,
-        )
-        val queuedSend = ConversationRuntimeReducer.reduce(
-            started.newState,
-            sendCommand(ownerToken = 5, runId = "send-run", effectId = "send"),
-        )
-        assertEquals(
-            RunEffect.AcceptGuidance(
-                RunEffectIdentity(
-                    conversationId = CONVERSATION_ID,
-                    ownerToken = 4,
-                    runId = "compact-run",
-                    pass = 0,
-                    effectId = "send",
-                ),
-            ),
-            queuedSend.effects.single(),
-        )
-        val directSend = ConversationRuntimeReducer.reduce(
-            started.newState,
-            sendCommand(
-                ownerToken = 5,
-                runId = "send-run",
-                effectId = "direct",
-                directOnly = true,
-            ),
-        )
-        assertTrue(directSend.effects.single() is RunEffect.RejectSendBusy)
-
-        val stopping = ConversationRuntimeReducer.reduce(
-            started.newState,
-            ConversationCommand.StopRequested(
-                identity = identity.runIdentity(),
-                coroutineAlreadySettled = false,
-                requiresPersistence = true,
-                effectId = "stop",
-            ),
-        )
-        assertTrue(stopping.newState is RunState.Stopping)
-        assertEquals(
-            listOf(
-                RunEffect.CancelProviderPass(identity.runIdentity()),
-                RunEffect.FinalizeStop(identity.copy(effectId = "stop")),
-            ),
-            stopping.effects,
-        )
-
-        val completed = ConversationRuntimeReducer.reduce(
-            started.newState,
-            ConversationCommand.CompactCompleted(identity, CompactOutcome.CREATED),
-        )
-        assertEquals(RunState.Idle(CONVERSATION_ID), completed.newState)
-        assertEquals(
-            listOf(
-                RunEffect.ReleaseSlot(
-                    identity.runIdentity(),
-                    SlotReleaseReason.NORMAL_COMPLETION,
-                ),
-            ),
-            completed.effects,
-        )
-    }
-
-    @Test
-    fun `Compact cannot interrupt or resume an active Run`() {
-        val active = active(ownerToken = 7, runId = "run", pass = 3)
-        val compactIdentity = RunEffectIdentity(
-            conversationId = CONVERSATION_ID,
-            ownerToken = 8,
-            runId = "compact-run",
-            pass = 0,
-            effectId = "compact-effect",
-        )
-
-        val rejected = ConversationRuntimeReducer.reduce(
-            active,
-            ConversationCommand.CompactRequested(
-                identity = compactIdentity,
-                compactRunId = "compact-run",
-            ),
-        )
-
-        assertEquals(CommandRejection.ILLEGAL_STATE, rejected.rejection)
-        assertSame(active, rejected.newState)
-        assertTrue(rejected.effects.isEmpty())
-    }
 }

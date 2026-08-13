@@ -347,10 +347,12 @@ class ConversationRepository(
     suspend fun deleteMessagesByIds(ids: List<String>) = chatDao.deleteMessagesByIds(ids)
 
     suspend fun beginRecompactContextCompact(
+        replacementRun: RunEntity,
         messageId: String,
         modelName: String,
         expectedSelections: Map<String?, String>,
     ): MessageEntity = chatDao.beginRecompactContextCompact(
+        replacementRun = replacementRun,
         messageId = messageId,
         modelName = modelName,
         expectedSelectedBranchesJson = Json.encodeToString(
@@ -358,69 +360,6 @@ class ConversationRepository(
         ),
     )
 
-    suspend fun beginManualContextCompact(
-        run: RunEntity,
-        message: MessageEntity,
-        expectedSelections: Map<String?, String>,
-        selections: Map<String?, String>,
-        at: Long = System.currentTimeMillis(),
-    ): MessageEntity = chatDao.beginManualContextCompact(
-        run = run,
-        message = message,
-        expectedSelectedBranchesJson = Json.encodeToString(
-            expectedSelections.mapKeys { it.key ?: "null" },
-        ),
-        selectedBranchesJson = Json.encodeToString(selections.mapKeys { it.key ?: "null" }),
-        at = at,
-    )
-
-    suspend fun updateContextCompactCheckpoint(
-        messageId: String,
-        runId: String,
-        expectedPass: Int?,
-        text: String,
-    ): Boolean = chatDao.updateContextCompactCheckpoint(
-        messageId = messageId,
-        runId = runId,
-        expectedPass = expectedPass,
-        text = MessagePersistenceGuard.clipText(text),
-    ) == 1
-
-    suspend fun updateRecompactCheckpoint(
-        messageId: String,
-        text: String,
-    ): Boolean = chatDao.updateRecompactCheckpoint(
-        messageId = messageId,
-        text = MessagePersistenceGuard.clipText(text),
-    ) == 1
-
-    suspend fun settleRecompactMessage(
-        messageId: String,
-        text: String,
-        status: MessageStatus,
-    ): Boolean = chatDao.settleRecompactMessage(
-        messageId = messageId,
-        text = MessagePersistenceGuard.clipText(text),
-        status = status,
-    ) == 1
-
-    suspend fun settleManualContextCompact(
-        messageId: String,
-        runId: String,
-        text: String,
-        messageStatus: MessageStatus,
-        runStatus: RunStatus,
-        reason: RunEndReason,
-        at: Long = System.currentTimeMillis(),
-    ): Boolean = chatDao.settleManualContextCompact(
-        messageId = messageId,
-        runId = runId,
-        text = text,
-        messageStatus = messageStatus,
-        runStatus = runStatus,
-        reason = reason,
-        at = at,
-    )
 
     suspend fun removeContextCompact(messageId: String): Boolean = chatDao.removeContextCompact(messageId)
 

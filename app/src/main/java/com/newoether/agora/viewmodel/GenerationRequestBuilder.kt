@@ -162,6 +162,16 @@ class GenerationRequestBuilder(
         } else {
             settings.resolveActiveKey(compactProviderName).orEmpty()
         }
+        val (compactGenerationConfig, compactGenerationContext) = buildGenerationPair(
+            providerName = compactProviderName,
+            modelId = compactModel,
+            activeKey = compactKey,
+            resolvedSystemPrompt = settings.contextCompactPrompt.value,
+            resolvedUserPrepend = null,
+            resolvedUserPostpend = null,
+            effectiveSettings = effectiveSettings,
+            currentId = conversationId,
+        )
         val automaticCompact = AutomaticCompactConfig(
             enabled = settings.contextCompactEnabled.value,
             thresholdPercent = settings.contextCompactThresholdPercent.value,
@@ -180,7 +190,9 @@ class GenerationRequestBuilder(
             ),
             provider = providerInstances[compactProviderName],
             configured = providerRegistry.isConfigured(compactProviderName, compactKey),
-            generationContext = context.copy(
+            generationConfig = compactGenerationConfig,
+            providerInstances = providerInstances,
+            generationContext = compactGenerationContext.copy(
                 webSearchApiKeys = context.webSearchApiKeys.toMap(),
                 shellDevices = context.shellDevices.toList(),
             ),

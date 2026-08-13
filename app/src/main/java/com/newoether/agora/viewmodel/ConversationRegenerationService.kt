@@ -56,13 +56,15 @@ internal class ConversationRegenerationService(
             request.messageId,
         ) ?: return false
         if (boundary.lastAssistant?.id != request.messageId) return false
-        val targetUserMessageId = boundary.input?.id ?: return false
+        val rootOutputId = boundary.firstAssistant?.id ?: return false
+        val targetParentMessageId =
+            boundary.input?.id ?: boundary.firstAssistant.parentId ?: return false
 
         val uiToken = state.tryAcquireForReplacement() ?: return false
         val transition = transitions.begin(
             conversationId = request.conversationId,
             oldMessageId = request.messageId,
-            targetUserMessageId = targetUserMessageId,
+            targetUserMessageId = targetParentMessageId,
         ) ?: run {
             state.scope.launch {
                 guidanceDrain.releaseUnlaunchedSlotAndDrain(state, uiToken)
@@ -97,21 +99,29 @@ internal class ConversationRegenerationService(
                         .getMessagesForConversationSnapshot(request.conversationId)
                     val persistedTarget = persistedMessages
                         .find { it.id == request.messageId } ?: return@lock
-                    val persistedUiMessages = persistedMessages.map(toUiMessage)
+
                     if (!MessageGenerationBoundaryResolver.isOrdinaryAssistant(toUiMessage(persistedTarget))) {
                         return@lock
                     }
-                    val sourceInput = persistedMessages
-                        .find { it.id == targetUserMessageId }
+                    val persistedRoot = persistedMessages
+                        .find { it.id == rootOutputId }
                         ?: return@lock
-                    if (!MessageGenerationBoundaryResolver.isRealUser(toUiMessage(sourceInput))) {
+                    val sourceBoundary = persistedMessages
+                        .find { it.id == targetParentMessageId }
+                        ?: return@lock
+                    if (
+                        !MessageGenerationBoundaryResolver.isOrdinaryAssistant(toUiMessage(persistedRoot)) ||
+                        persistedRoot.parentId != sourceBoundary.id ||
+                        persistedRoot.runId != persistedTarget.runId
+                    ) {
                         return@lock
                     }
                     if (
-                        MessageGenerationBoundaryResolver.nearestInputAncestorId(
-                            persistedUiMessages,
-                            persistedTarget.id,
-                        ) != sourceInput.id
+                        boundary.input != null &&
+                        !MessageGenerationBoundaryResolver.isRealUser(
+                            toUiMessage(sourceBoundary),
+
+                        )
                     ) {
                         return@lock
                     }
@@ -126,7 +136,7 @@ internal class ConversationRegenerationService(
                     val modelEntity = MessageEntity(
                         id = modelMessageId,
                         conversationId = request.conversationId,
-                        parentId = sourceInput.id,
+                        parentId = sourceBoundary.id,
                         text = "",
                         thoughts = null,
                         thoughtTitle = null,
@@ -141,14 +151,14 @@ internal class ConversationRegenerationService(
                         RunEntity(
                             id = runId,
                             conversationId = request.conversationId,
-                            parentRunId = sourceInput.runId,
+                            parentRunId = sourceBoundary.runId,
                             status = RunStatus.ACTIVE,
                             activeSlot = 1,
                             startedAt = startTime,
                             lastCheckpointAt = startTime,
                         ),
                         listOf(modelEntity),
-                        messageSelectionUpdates = mapOf(sourceInput.id to modelEntity.id),
+                        messageSelectionUpdates = mapOf(sourceBoundary.id to modelEntity.id),
                         conversationModelId = generationSnapshot.selectedModelId,
                     )
                     graphCommitted = true

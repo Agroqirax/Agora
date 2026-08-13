@@ -44,6 +44,22 @@ class ContextTokenEstimatorTest {
         assertEquals(first, ContextTokenEstimator.estimateFixed("System prompt", listOf(reordered)))
         assertTrue(first > ContextTokenEstimator.estimateFixed(null, emptyList()))
     }
+
+    @Test
+    fun fixedCostIncludesApiOnlyInitialUserPrompt() {
+        val withoutInvocation = ContextTokenEstimator.estimateFixed(
+            systemPrompt = "System prompt",
+            tools = emptyList(),
+        )
+        val withInvocation = ContextTokenEstimator.estimateFixed(
+            systemPrompt = "System prompt",
+            tools = emptyList(),
+            initialUserPrompt = "Create the compact context summary now.",
+        )
+
+        assertTrue(withInvocation > withoutInvocation)
+    }
+
     @Test
     fun multilingualTextIsDeterministicAndNonZero() {
         val text = "hello world 你好，世界 👋"

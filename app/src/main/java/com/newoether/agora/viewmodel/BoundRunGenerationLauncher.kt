@@ -22,6 +22,7 @@ internal data class BoundRunGenerationRequest(
     val runId: String,
     val pass: Int,
     val callerTag: String,
+    val transformFinalText: (String, MessageStatus) -> String = { text, _ -> text },
 ) {
     init {
         require(snapshot.conversationId == conversationId)
@@ -44,7 +45,11 @@ internal data class AutomaticCompactContinuationRequest(
 internal class BoundRunGenerationLauncher(
     private val conversations: ConversationRepository,
     private val generationManagerProvider: () -> GenerationManager,
-    private val compactController: ConversationCompactController,
+    private val automaticCompactNeeded: suspend (
+        conversationId: String,
+        contextLimit: Int,
+        config: AutomaticCompactConfig,
+    ) -> Boolean,
     private val terminalSettlement: GenerationTerminalSettlementController,
     private val toUiMessage: (MessageEntity) -> ChatMessage,
     private val onAutomaticCompactContinuation: (
@@ -97,12 +102,13 @@ internal class BoundRunGenerationLauncher(
                 providerInstances = request.snapshot.providerInstances,
                 generationJob = currentCoroutineContext()[Job],
                 callbacks = state.callbacksFor(request.uiToken, request.persistId).copy(
+                    transformFinalText = request.transformFinalText,
                     onToolRoundPersisted = {
                         if (
-                            compactController.automaticNeeded(
-                                conversationId = request.conversationId,
-                                contextLimit = request.snapshot.config.maxContextWindow,
-                                config = automaticCompactConfig,
+                            automaticCompactNeeded(
+                                request.conversationId,
+                                request.snapshot.config.maxContextWindow,
+                                automaticCompactConfig,
                             )
                         ) {
                             ToolRoundBoundaryDecision.CompleteForFollowUp

@@ -242,7 +242,7 @@ class BoundRunGenerationLauncherTest {
             launcher = BoundRunGenerationLauncher(
                 conversations = conversations,
                 generationManagerProvider = { manager },
-                compactController = compactController,
+                automaticCompactNeeded = compactController::automaticNeeded,
                 terminalSettlement = terminalSettlement,
                 toUiMessage = ::toUiMessage,
                 onAutomaticCompactContinuation = { request, state ->

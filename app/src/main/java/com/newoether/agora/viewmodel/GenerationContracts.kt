@@ -14,6 +14,8 @@ data class GenerationConfig(
     val modelId: String,
     val apiKey: String,
     val effectiveSystemPrompt: String?,
+    /** Optional API-only USER invocation appended to the initial Provider request. */
+    val initialUserPrompt: String? = null,
     val maxContextWindow: Int = ContextBudget.DEFAULT_TOKENS,
     val codeExecutionEnabled: Boolean,
     val googleSearchEnabled: Boolean,
@@ -86,6 +88,10 @@ internal data class AutomaticCompactConfig(
     val responsesApiEnabled: Boolean = false,
     val provider: LlmProvider?,
     val configured: Boolean,
+    /** Frozen ordinary generation parameters resolved for the selected Compact model. */
+    val generationConfig: GenerationConfig,
+    /** Frozen provider registry snapshot used by the shared generation tail. */
+    val providerInstances: Map<String, LlmProvider>,
     /** Frozen attachment/transcription policy used to project Compact input exactly once. */
     val generationContext: GenerationContext,
     /** Frozen API-only USER templates included in the exact Auto Compact threshold projection. */
@@ -174,6 +180,9 @@ internal data class GenerationCallbacks(
     val onToolBatchCompleted: suspend (RunEffectIdentity) -> RunEffect.CommitToolRound? = {
         RunEffect.CommitToolRound(it.copy(effectId = "tool-round-${it.effectId}"))
     },
+    /** Generic final text projection applied before the shared terminal writer persists output. */
+    val transformFinalText: (String, com.newoether.agora.model.MessageStatus) -> String =
+        { text, _ -> text },
     /** Only an accepted durable success result authorizes the next Provider pass. */
     val onToolRoundCommitted: suspend (RunEffectIdentity, Boolean) -> RunEffect? =
         { identity, success ->

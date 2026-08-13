@@ -88,6 +88,58 @@ class GenerationStreamingSegmentsTest {
     }
 
     @Test
+    fun `terminal generation errors always retain a visible error value`() {
+        assertEquals(
+            "Generation failed",
+            terminalGenerationErrorMessage(
+                status = MessageStatus.ERROR,
+                currentError = null,
+                fallbackError = "Generation failed",
+            ),
+        )
+        assertEquals(
+            "Provider failed",
+            terminalGenerationErrorMessage(
+                status = MessageStatus.ERROR,
+                currentError = "Provider failed",
+                fallbackError = "Generation failed",
+            ),
+        )
+        assertNull(
+            terminalGenerationErrorMessage(
+                status = MessageStatus.SUCCESS,
+                currentError = null,
+                fallbackError = "Generation failed",
+            ),
+        )
+    }
+
+    @Test
+    fun `final text transform is field restricted and persistence bounded`() {
+        val original = ChatMessage(
+            id = "compact",
+            parentId = "parent",
+            text = "summary",
+            participant = com.newoether.agora.model.Participant.MODEL,
+            status = MessageStatus.SUCCESS,
+            runId = "fresh-run",
+            runSequence = 0,
+        )
+        val oversizedSuffix = "x".repeat(2_000_000)
+
+        val transformed = original.withBoundedFinalTextTransform { text, status ->
+            assertEquals(MessageStatus.SUCCESS, status)
+            text + oversizedSuffix
+        }
+
+        assertEquals(
+            MessagePersistenceGuard.clipText(original.text + oversizedSuffix),
+            transformed.text,
+        )
+        assertEquals(original, transformed.copy(text = original.text))
+    }
+
+    @Test
     fun `failed snapshot keeps generated answer separate from terminal error`() {
         val snapshot = GenerationFinalSnapshot(
             messageId = "model",

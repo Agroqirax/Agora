@@ -1,6 +1,5 @@
 package com.newoether.agora.viewmodel
 
-import com.newoether.agora.model.CompactOutcome
 import com.newoether.agora.model.ConversationRuntimeReducer
 import com.newoether.agora.model.ProviderPassResult
 import com.newoether.agora.model.RunEffect
@@ -50,34 +49,6 @@ class ConversationRuntimeCommandPortTest {
                     ProviderPassResult.COMPLETED_TEXT,
                 ),
             )
-        } finally {
-            harness.close()
-        }
-    }
-
-    @Test
-    fun compactUsesItsOwnRunIdentityAndReturnsToIdleThroughTheMailbox() = runBlocking {
-        val harness = Harness()
-        try {
-            val compact = harness.port.requestCompact("compact-run", "compact")!!
-
-            assertEquals(
-                RunEffectIdentity(
-                    conversationId = CONVERSATION_ID,
-                    ownerToken = OWNER_TOKEN,
-                    runId = "compact-run",
-                    pass = 0,
-                    effectId = "compact",
-                ),
-                compact.identity,
-            )
-            assertTrue(
-                harness.port.finishCompact(
-                    compact.identity,
-                    CompactOutcome.NOT_NEEDED,
-                ).accepted,
-            )
-            assertTrue(harness.state is RunState.Idle)
         } finally {
             harness.close()
         }
