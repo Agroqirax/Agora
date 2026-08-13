@@ -197,9 +197,14 @@ class ConversationGenerationStateTest {
         )
         val inputEffect = requested.effects.single() as RunEffect.PersistAcceptedInput
         val unwind = CompletableDeferred<Unit>()
+        val started = CompletableDeferred<Unit>()
         val job = launch {
-            withContext(NonCancellable) { unwind.await() }
+            withContext(NonCancellable) {
+                started.complete(Unit)
+                unwind.await()
+            }
         }
+        started.await()
         assertTrue(state.attachGenerationJob(inputEffect.identity.ownerToken, job))
         val settled = CompletableDeferred<Unit>()
         state.onStopSettled = { settled.complete(Unit) }
