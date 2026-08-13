@@ -7,9 +7,55 @@ on:
     branches: [master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  test:
+    name: Unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Run application and build-logic tests
+        run: |
+          chmod +x ./gradlew
+          ./gradlew -p build-logic test --stacktrace
+          ./gradlew :app:testFdroidDebugUnitTest :app:testPlayDebugUnitTest verifyKotlinFileSize --stacktrace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/test-results/
+            build-logic/build/reports/tests/
+            build-logic/build/test-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -46,12 +92,6 @@ jobs:
         run: |
           chmod +x ./build-proot.sh
           ./build-proot.sh
-
-      - name: Test and verify Kotlin source budget
-        run: |
-          chmod +x ./gradlew
-          ./gradlew -p build-logic test
-          ./gradlew verifyKotlinFileSize
 
       - name: Build F-Droid Release APK
         run: ./gradlew assembleFdroidRelease
