@@ -94,7 +94,9 @@ jobs:
           ./build-proot.sh
 
       - name: Build F-Droid Release APK
-        run: ./gradlew assembleFdroidRelease
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleFdroidRelease
 
       - name: Verify PRoot runtime packaging
         run: |
