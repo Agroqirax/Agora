@@ -342,7 +342,7 @@ class BaseOpenAiProviderTerminationTest {
                 """{"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"completed","action":{"type":"search","query":"latest Agora"}}}""",
             )
             socket.writeSse(
-                """{"type":"response.reasoning_summary_text.delta","sequence_number":6,"delta":"Checked current sources."}""",
+                """{"type":"response.reasoning_summary_text.delta","sequence_number":6,"output_index":1,"summary_index":0,"delta":"**Checked current sources**"}""",
             )
             socket.writeSse(
                 """{"type":"response.output_text.delta","sequence_number":7,"delta":"Answer"}""",
@@ -370,9 +370,14 @@ class BaseOpenAiProviderTerminationTest {
         assertEquals(null, hosted.first().result)
         assertTrue(hosted.last().arguments.contains("latest Agora"))
         assertTrue(hosted.last().result?.contains("web_search_call") == true)
+        assertTrue(hosted.all { it.name == "openai_search" })
         assertEquals(
-            "Checked current sources.",
+            "**Checked current sources**",
             events.filterIsInstance<StreamEvent.ThoughtChunk>().single().thought,
+        )
+        assertEquals(
+            "Checked current sources",
+            events.filterIsInstance<StreamEvent.ThoughtChunk>().single().title,
         )
         assertEquals("Answer", events.filterIsInstance<StreamEvent.TextChunk>().single().text)
         assertTrue(events.none { it is StreamEvent.ToolCallRequest })

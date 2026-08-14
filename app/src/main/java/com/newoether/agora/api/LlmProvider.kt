@@ -216,6 +216,7 @@ data class OpenAiResponseStreamEvent(
     val name: String? = null,
     @SerialName("item_id") val itemId: String? = null,
     @SerialName("output_index") val outputIndex: Int? = null,
+    @SerialName("summary_index") val summaryIndex: Int? = null,
     @SerialName("sequence_number") val sequenceNumber: Int? = null,
     val item: JsonObject? = null,
     val annotation: OpenAiResponseAnnotation? = null,

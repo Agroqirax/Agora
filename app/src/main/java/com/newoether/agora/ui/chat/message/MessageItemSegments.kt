@@ -40,10 +40,15 @@ private fun mergeDurationMs(first: Long?, second: Long?): Long? {
     return merged.takeIf { it > 0L }
 }
 
-internal fun thoughtDurationMs(segs: List<MessageSegment>): Long? {
-    return segs.sumOf { seg ->
-        if (seg.type == "thought") seg.durationMs ?: 0L else 0L
-    }.takeIf { it > 0L }
+internal fun thoughtDurationMs(
+    segs: List<MessageSegment>,
+    fallbackMs: Long? = null,
+): Long? {
+    val thoughtSegments = segs.filter { it.type == "thought" }
+    if (thoughtSegments.isEmpty()) return null
+    return thoughtSegments.sumOf { it.durationMs ?: 0L }
+        .takeIf { it > 0L }
+        ?: fallbackMs?.takeIf { it > 0L }
 }
 
 private fun MessageSegment.isBlankAnswerSegment(): Boolean =

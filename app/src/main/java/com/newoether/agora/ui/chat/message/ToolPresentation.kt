@@ -183,7 +183,7 @@ internal object ToolPresentationResolver {
         "edit_memory_file" -> ToolKind.MEMORY_EDIT
         "delete_memory_file" -> ToolKind.MEMORY_DELETE
         "update_active_memory" -> ToolKind.MEMORY_UPDATE_ACTIVE
-        "web_search" -> ToolKind.WEB_SEARCH
+        "web_search", "openai_search", "google_search" -> ToolKind.WEB_SEARCH
         "web_fetch" -> ToolKind.WEB_FETCH
         "search_conversations" -> ToolKind.CONVERSATION_SEARCH
         "list_conversations" -> ToolKind.CONVERSATION_LIST

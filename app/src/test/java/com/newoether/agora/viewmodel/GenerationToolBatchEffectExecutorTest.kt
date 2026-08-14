@@ -60,13 +60,13 @@ class GenerationToolBatchEffectExecutorTest {
         val overlay = GenerationToolOverlay(
             presentation = object : GenerationToolPresentationSource {
                 override fun presentationMetadata(name: String) =
-                    ToolPresentationMetadata(displayName = "Web Search")
+                    ToolPresentationMetadata(displayName = "OpenAI Search")
             },
             providerName = "OpenAI",
         )
         val active = StreamEvent.HostedToolCallUpdate(
             streamKey = "ws_1",
-            name = "web_search",
+            name = "openai_search",
             arguments = "{}",
         )
 
@@ -83,8 +83,8 @@ class GenerationToolBatchEffectExecutorTest {
         )
 
         val segment = overlay.snapshot().last()
-        assertEquals("web_search", segment.toolName)
-        assertEquals("Web Search", segment.toolDisplayName)
+        assertEquals("openai_search", segment.toolName)
+        assertEquals("OpenAI Search", segment.toolDisplayName)
         assertEquals(ToolExecutionStates.SUCCEEDED, segment.toolState)
         assertTrue(segment.toolResult?.contains("web_search_call") == true)
     }

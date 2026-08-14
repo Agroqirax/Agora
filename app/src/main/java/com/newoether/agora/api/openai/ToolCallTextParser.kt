@@ -17,6 +17,13 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import java.util.UUID
 
+private val RESPONSES_THOUGHT_TITLE_BOLD = Regex("\\*\\*(.*?)\\*\\*")
+private val RESPONSES_THOUGHT_TITLE_HEADING = Regex("(?m)^#+\\s*(.*)$")
+
+private fun extractResponsesThoughtTitle(content: String): String? =
+    RESPONSES_THOUGHT_TITLE_BOLD.find(content)?.groupValues?.get(1)
+        ?: RESPONSES_THOUGHT_TITLE_HEADING.find(content)?.groupValues?.get(1)
+
 /**
  * Recovers tool calls that an OpenAI-compatible server emitted as **content text** rather than as
  * structured `delta.tool_calls` (issue #33, path B). llama.cpp and other self-hosted servers
@@ -173,6 +180,8 @@ internal class OpenAiResponsesEventRouter(
     private val completedCallsByOutputIndex = mutableMapOf<Int, StreamEvent.ToolCallRequest>()
     private val emittedCallIds = mutableSetOf<String>()
     private val emittedCitationUrls = mutableSetOf<String>()
+    private var lastSummaryOutputIndex: Int? = null
+    private var lastSummaryIndex: Int? = null
     private var lastSequenceNumber: Int? = null
     var sawTerminalMarker: Boolean = false
         private set
@@ -198,9 +207,10 @@ internal class OpenAiResponsesEventRouter(
             "response.output_text.delta" -> event.delta?.takeIf(String::isNotEmpty)
                 ?.let { listOf(StreamEvent.TextChunk(it)) }.orEmpty()
             "response.output_text.annotation.added" -> routeCitation(event)
-            "response.reasoning_text.delta", "response.reasoning_summary_text.delta" ->
+            "response.reasoning_text.delta" ->
                 event.delta?.takeIf { thinkingEnabled && it.isNotEmpty() }
                     ?.let { listOf(StreamEvent.ThoughtChunk(it)) }.orEmpty()
+            "response.reasoning_summary_text.delta" -> routeReasoningSummary(event)
             "response.output_item.added" -> addOutputItem(event)
             "response.function_call_arguments.delta" -> updateArguments(event)
             "response.function_call_arguments.done" -> completeArguments(event)
@@ -211,6 +221,29 @@ internal class OpenAiResponsesEventRouter(
             "error" -> failApi(event.error, "Provider reported a Responses stream error")
             else -> emptyList()
         }
+    }
+
+    private fun routeReasoningSummary(event: OpenAiResponseStreamEvent): List<StreamEvent> {
+        val delta = event.delta?.takeIf { thinkingEnabled && it.isNotEmpty() }
+            ?: return emptyList()
+        val outputIndex = event.outputIndex
+        val summaryIndex = event.summaryIndex
+        val startsNewPart =
+            outputIndex != null &&
+                summaryIndex != null &&
+                lastSummaryOutputIndex != null &&
+                lastSummaryIndex != null &&
+                (outputIndex != lastSummaryOutputIndex || summaryIndex != lastSummaryIndex)
+        if (outputIndex != null && summaryIndex != null) {
+            lastSummaryOutputIndex = outputIndex
+            lastSummaryIndex = summaryIndex
+        }
+        return listOf(
+            StreamEvent.ThoughtChunk(
+                thought = if (startsNewPart) "\n\n$delta" else delta,
+                title = extractResponsesThoughtTitle(delta),
+            ),
+        )
     }
 
     private fun routeCitation(event: OpenAiResponseStreamEvent): List<StreamEvent> {
@@ -423,7 +456,7 @@ internal class OpenAiResponsesEventRouter(
         val status = (this["status"] as? JsonPrimitive)?.content
         return StreamEvent.HostedToolCallUpdate(
             streamKey = streamKey,
-            name = "web_search",
+            name = "openai_search",
             arguments = action.toString(),
             result = takeIf { completed }?.toString(),
             isError = completed && status in setOf("failed", "incomplete"),

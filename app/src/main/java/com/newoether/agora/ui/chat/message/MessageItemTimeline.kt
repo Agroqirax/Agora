@@ -205,7 +205,7 @@ internal fun compactSegmentTitle(
     val isToolCalling = useLiveStatus && message.status == MessageStatus.TOOL_CALLING
     val isTranscribing = useLiveStatus && message.status == MessageStatus.TRANSCRIBING
     val toolCount = segs.count { it.type == "tool" && it.toolResult != null }
-    val thoughtMs = thoughtDurationMs(segs) ?: message.thoughtTimeMs
+    val thoughtMs = thoughtDurationMs(segs, fallbackMs = message.thoughtTimeMs)
     return when {
         isThinking -> message.thoughtTitle ?: stringResource(R.string.thinking_ellipsis)
         isTranscribing -> message.thoughtTitle ?: stringResource(R.string.transcription_ellipsis)

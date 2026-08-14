@@ -14,6 +14,35 @@ import org.junit.Test
 class MessageItemSegmentsTest {
 
     @Test
+    fun toolOnlySegmentsDoNotUseMessageThoughtDuration() {
+        val segments = listOf(
+            MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+        )
+
+        assertEquals(null, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
+    fun realThoughtSegmentMayUseMessageThoughtDuration() {
+        val segments = listOf(
+            MessageSegment(type = "thought", content = "Reasoning"),
+            MessageSegment(type = "tool", toolName = "web_search", toolResult = "{}"),
+        )
+
+        assertEquals(4_000L, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
+    fun persistedThoughtSegmentDurationWinsOverMessageFallback() {
+        val segments = listOf(
+            MessageSegment(type = "thought", content = "Reasoning", durationMs = 1_500L),
+            MessageSegment(type = "thought", content = "More", durationMs = 500L),
+        )
+
+        assertEquals(2_000L, thoughtDurationMs(segments, fallbackMs = 4_000L))
+    }
+
+    @Test
     fun timelineInfoBlockUsesCompactTopSpacingWithoutVisibleMessageAbove() {
         assertEquals(0.dp, timelineInfoTopPaddingExtra(false))
     }

@@ -276,7 +276,7 @@ the origin release and very fast Compact completion can settle in either order a
 consume each other's decision. Failure never clears, drops, duplicates, or reorders queued user
 input; it leaves that input pending for a later explicit user action.
 
-### 8.9 Provider-hosted Responses output and OpenAI-compatible controls
+### 8.9 Provider-hosted output and OpenAI-compatible controls
 
 An official OpenAI Provider or a custom Provider selected as OpenAI-compatible, together with
 Responses API enabled, is sufficient to expose both `OpenAI Search` and `Service Tier` in the
@@ -293,12 +293,26 @@ OpenAI Responses reasoning summaries are public summary content, not raw chain-o
 thinking is enabled on an official or custom OpenAI-compatible Responses transport, the request opts
 into the most detailed available summary with `reasoning.summary = auto`. Summary text deltas enter
 the ordinary `ThoughtChunk` path and therefore form normal durable thinking segments and thinking
-blocks. Disabling thinking suppresses both the summary request and its presentation.
+blocks. Deltas with the same `output_index` and `summary_index` remain contiguous; a change in either
+index inserts exactly one blank line between summary parts. Bold text or a Markdown heading in the
+current summary part supplies the thinking-card title with its marker removed, matching Gemini.
+Disabling thinking suppresses both the summary request and its presentation.
 
 Provider-hosted tools use display-only stream events. They may create and settle ordinary tool
 segments, but they cannot authorize local execution, enter the tool-effect reducer, or fabricate a
 tool-result continuation round. Provider semantic termination still owns whether the request
 succeeded; Stop and errors use the shared generation settlement.
+A message card with tool segments but no real `thought` segment displays only `Called x tools`.
+Message-level thought duration is a fallback only when at least one thought segment exists; it must
+not turn a tool-only card into `Thought for xs, called x tools`.
+Gemini keeps its hosted output protocol-local. Candidate `groundingMetadata` becomes a completed
+`google_search` hosted block displayed as `Google Search`, with normalized `results` for the shared
+search presentation and the full grounding metadata retained in the durable result. An
+`executableCode` part starts a `code_execution` block displayed as `Code Execution`; the matching
+`codeExecutionResult` completes that same block. Code and output are not duplicated into answer
+text. Persisted Code Execution segments replay to later Gemini requests as typed executable-code and
+code-execution-result model parts in their original order. Multiple pairs remain ordered, and an
+unmatched executable-code part leaves a tool in flight so semantic termination fails closed.
 
 If the official service, selected model, or compatible relay rejects `web_search`,
 `service_tier`, reasoning summary, or the Responses request itself, that failure is an ordinary
@@ -429,6 +443,6 @@ reachable safe prefix. It must never jump to a Compact on another branch.
 | Delete isolation | Target-only delete, direct-child reparent, unchanged surviving rows, independent Run presentation. |
 | Priority | Only Compact SUCCESS permits handoff; then pending and already-claimed queue guidance beat loop and the no-guidance path admits loop once. ERROR/STOPPED/cancellation/anomaly starts neither. |
 | Request terminal role | Compact dispatch appends one non-durable initial USER invocation after an Assistant or tool-result parent; provider-visible input ends USER and fixed token accounting includes it. |
-| Responses-compatible output | Official and custom OpenAI-compatible Providers with Responses enabled show OpenAI Search and Service Tier; the real request serializes enabled `web_search`, selected `service_tier`, and thinking summaries; rejection renders the ordinary error bar; hosted tool added/done events settle one display-only tool block and never enter local execution. |
+| Provider-hosted output | OpenAI-compatible Responses requests serialize enabled `web_search`, selected `service_tier`, and reasoning summaries; summary indices preserve part boundaries and headings supply titles; OpenAI Search and Gemini Google Search/Code Execution settle display-only tool blocks without local execution; Gemini Code Execution replays typed parts and fails closed when a result is missing. |
 | Races and failures | Stop before/after bind, consecutive origin/Compact release suppressions in both settlement orders, selection drift, missing target/status, transaction rollback, stale callbacks, checkpoint-versus-terminal ordering, and queue claim failure. |
 | UI stability | Compact row/pill vertical bounds do not change across progress and terminal content; entrance is draw-only and does not alter apparent vertical spacing; error colors match the shared error bar theme tokens and alpha. |

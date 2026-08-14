@@ -173,6 +173,47 @@ class ToolCallTextParserTest {
     }
 
     @Test
+    fun responsesSummaryPartsAreSeparatedWithoutSplittingSamePartDeltas() {
+        val router = responsesRouter(thinkingEnabled = true)
+
+        val first = router.route(
+            responseEvent(
+                "response.reasoning_summary_text.delta",
+                1,
+                delta = "**Analyzing sources**",
+                outputIndex = 0,
+                summaryIndex = 0,
+            ),
+        ).filterIsInstance<StreamEvent.ThoughtChunk>().single()
+        val continuation = router.route(
+            responseEvent(
+                "response.reasoning_summary_text.delta",
+                2,
+                delta = " and constraints",
+                outputIndex = 0,
+                summaryIndex = 0,
+            ),
+        ).filterIsInstance<StreamEvent.ThoughtChunk>().single()
+        val next = router.route(
+            responseEvent(
+                "response.reasoning_summary_text.delta",
+                3,
+                delta = "**Planning fix**",
+                outputIndex = 0,
+                summaryIndex = 1,
+            ),
+        ).filterIsInstance<StreamEvent.ThoughtChunk>().single()
+
+        assertEquals("Analyzing sources", first.title)
+        assertEquals(null, continuation.title)
+        assertEquals("Planning fix", next.title)
+        assertEquals(
+            "**Analyzing sources** and constraints\n\n**Planning fix**",
+            listOf(first, continuation, next).joinToString("") { it.thought },
+        )
+    }
+
+    @Test
     fun responsesUrlCitationsArePresentedOnceAsSafeMarkdownLinks() {
         val router = responsesRouter()
         val citation = OpenAiResponseAnnotation(
@@ -648,6 +689,7 @@ class ToolCallTextParserTest {
         name: String? = null,
         itemId: String? = null,
         outputIndex: Int? = null,
+        summaryIndex: Int? = null,
         item: OpenAiResponseOutputItem? = null,
         response: OpenAiResponseEnvelope? = null,
         error: OpenAiError? = null,
@@ -658,6 +700,7 @@ class ToolCallTextParserTest {
         name = name,
         itemId = itemId,
         outputIndex = outputIndex,
+        summaryIndex = summaryIndex,
         sequenceNumber = sequence,
         item = item?.let {
             Json.encodeToJsonElement(OpenAiResponseOutputItem.serializer(), it).jsonObject

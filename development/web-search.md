@@ -11,8 +11,9 @@ Agora has two distinct capabilities:
 
 - Generic Web Search is a tool executed by `WebSearchToolProvider` using the provider selected on
   the Web Search settings page.
-- Native provider-hosted web search is an OpenAI-compatible Responses capability enabled for one
-  conversation/provider configuration and executed by that provider's normal Responses transport.
+- Native provider-hosted web search is owned by the selected model Provider: OpenAI-compatible
+  Responses `web_search` or Gemini Google Search grounding, executed through that Provider's normal
+  transport.
 
 Native provider-hosted search is not a generic Web Search provider. It must not gain a second
 standalone provider row, credential, base URL, request adapter, or compatibility path.
@@ -48,12 +49,12 @@ this product boundary or provider order requires explicit user confirmation and 
 - `SettingsContracts.kt` owns supported-value normalization and the default.
 - `SettingsWebSearchPage.kt` owns generic provider presentation and exact visible order.
 - `WebSearchToolProvider.kt` owns generic provider execution.
-- Provider configuration, OpenAI-native search availability, and `BaseOpenAiProvider` own the
-  separate conversation-scoped Responses search path.
+- Provider configuration, OpenAI-native search availability, `BaseOpenAiProvider`, and
+  `GeminiProvider` own their separate provider-hosted search paths.
 
 No owner may infer the other capability from a matching company name or legacy stored value.
 
-## 5. Native Responses availability, request, and presentation
+## 5. Native provider-hosted availability, request, and presentation
 
 - An official OpenAI Provider or a custom Provider selected as OpenAI-compatible, together with
   Responses API enabled, is sufficient to show `OpenAI Search` in the conversation UI. No
@@ -67,7 +68,11 @@ No owner may infer the other capability from a matching company name or legacy s
   generation error and display the existing red error bar. Do not silently fall back to generic Web
   Search or Chat Completions, auto-disable the setting, or use a Snackbar-only error path.
 - Every OpenAI Responses `web_search_call` output item must appear in the ordinary message
-  timeline as one Web Search tool block.
+  timeline as one `OpenAI Search` tool block.
+- Gemini candidate `groundingMetadata` must become one completed `Google Search` hosted-tool block.
+  Its durable result keeps the full grounding metadata and exposes normalized source `results` with
+  titles and URLs for the shared search-card presentation. It must not call `WebSearchToolProvider`
+  or reuse generic search settings.
 - Provider-hosted calls are display-only. They must never become a local `ToolCallRequest`, execute
   through `WebSearchToolProvider`, consume generic provider credentials, or start a tool
   continuation round.
@@ -98,7 +103,10 @@ Changes touching this subsystem must verify:
 5. an enabled search serializes the native `web_search` tool in the actual Responses request;
 6. Provider rejection persists bounded error text and renders the ordinary error bar without silent
    fallback, auto-disablement, or a Snackbar-only path;
-7. `web_search_call` added/done lifecycle renders one terminal display-only tool block without local execution;
-8. relevant resource contracts, focused tests, the complete scoped diff, and the project full build.
+7. `web_search_call` added/done lifecycle renders one terminal `OpenAI Search` display-only block
+   without local execution;
+8. Gemini grounding metadata renders one `Google Search` display-only block with normalized sources
+   and retained full metadata, without generic-search execution or credentials;
+9. relevant resource contracts, focused tests, the complete scoped diff, and the project full build.
 
 Compilation alone is not proof of visible order or correct capability ownership.
