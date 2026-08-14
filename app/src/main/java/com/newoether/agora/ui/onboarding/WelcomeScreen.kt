@@ -93,14 +93,15 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomEndpointProtocol
+import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.LocalChatModelConfig
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.ui.components.CustomEndpointProtocolSelector
 import com.newoether.agora.ui.components.TypewriterMode
 import com.newoether.agora.ui.components.TypewriterText
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.util.Constants
 import com.newoether.agora.viewmodel.ChatViewModel
 import kotlin.math.absoluteValue
@@ -461,6 +462,7 @@ fun WelcomeScreen(
                                     ModelPage(
                                         models = models,
                                         modelAliases = modelAliases,
+                                        customProviders = customProviders,
                                         selectedId = selectedModelId,
                                         isLoading = isFetchingModels,
                                         onSelect = applyModel,
@@ -757,7 +759,7 @@ private fun ApiKeyPage(
 }
 
 @Composable
-private fun ModelPage(models: List<String>, modelAliases: Map<String, String>, selectedId: String?, isLoading: Boolean, onSelect: (String) -> Unit, modifier: Modifier) {
+private fun ModelPage(models: List<String>, modelAliases: Map<String, String>, customProviders: List<CustomProviderConfig>, selectedId: String?, isLoading: Boolean, onSelect: (String) -> Unit, modifier: Modifier) {
     Surface(modifier, RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 2.dp) {
         if (models.isEmpty()) {
             // While a fetch is in flight show a quiet spinner instead of the empty
@@ -795,7 +797,7 @@ private fun ModelPage(models: List<String>, modelAliases: Map<String, String>, s
                 Column(Modifier.verticalScroll(scrollState)) {
                     Spacer(Modifier.height(10.dp))
                     models.forEach { m ->
-                        val name = modelAliases[m] ?: com.newoether.agora.model.ModelId.parse(m).apiModelName
+                        val name = modelAliasDisplayName(m, modelAliases, customProviders)
                         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp).clip(RoundedCornerShape(28.dp)).clickable { onSelect(m) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(selected = selectedId == m, onClick = { onSelect(m) })
                             Spacer(Modifier.width(8.dp))

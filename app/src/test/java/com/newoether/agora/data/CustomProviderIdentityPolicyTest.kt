@@ -106,6 +106,26 @@ class CustomProviderIdentityPolicyTest {
     }
 
     @Test
+    fun modelAliasDisplayReplacesStableIdsInsideAliasText() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val model = "$id:gemini-3.1-pro"
+        val aliases = mapOf(model to "Fast via $id")
+        val providers = listOf(CustomProviderConfig(name = "Relay X", id = id))
+
+        assertEquals("Fast via Relay X", modelAliasDisplayName(model, aliases, providers))
+        assertEquals("Fast via Custom", modelAliasDisplayName(model, aliases, emptyList()))
+    }
+
+    @Test
+    fun bareStableModelIdUsesProviderDisplayFallback() {
+        val id = "custom-provider-00000000-0000-4000-8000-000000000001"
+        val providers = listOf(CustomProviderConfig(name = "Relay X", id = id))
+
+        assertEquals("Relay X", modelApiDisplayName(id, providers))
+        assertEquals("Custom", modelApiDisplayName(id, emptyList()))
+    }
+
+    @Test
     fun unresolvedStableIdentityNeverLeaksIntoDisplayText() {
         val id = "custom-provider-00000000-0000-4000-8000-000000000001"
 

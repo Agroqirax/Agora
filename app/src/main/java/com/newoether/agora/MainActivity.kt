@@ -583,7 +583,7 @@ fun MainNavigation(
                                     .padding(12.dp)
                             ) {
                                 Text(
-                                    text = trace,
+                                    text = viewModel.displayText(trace),
                                     style = MaterialTheme.typography.bodySmall.copy(
                                         fontFamily = FontFamily(Font(R.font.jetbrains_mono_regular)),
                                         lineHeight = 16.sp
@@ -668,7 +668,9 @@ fun MainNavigation(
         }
     }
 
-    // Sandbox events piped into the same global SnackbarHost.
+    val customProviders by viewModel.settings.customProviders.collectAsState()
+
+    // Keep every flavor-specific snackbar on the same display-only provider-ID boundary.
     // Uses a launch+Job pattern so a new message cancels the
     // previous showSnackbar suspension immediately.
     LaunchedEffect(Unit) {
@@ -679,7 +681,9 @@ fun MainNavigation(
                 snackbarJob?.cancel()
                 snackbarJob = launch {
                     try {
-                        snackbarHostState.showSnackbar(msg)
+                        snackbarHostState.showSnackbar(
+                            viewModel.displayText(msg),
+                        )
                     } finally {
                         snackbarVersion++
                     }

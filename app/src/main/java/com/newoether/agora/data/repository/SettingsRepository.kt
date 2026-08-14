@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Repository wrapping DataStore-backed SettingsManager.
@@ -72,6 +74,25 @@ class SettingsRepository(
             }
             .launchIn(scope)
         return state.asStateFlow()
+    }
+
+    private val conversationSettingsState = ConversationSettingsState()
+    private val conversationSettingsWriteMutex = Mutex()
+
+    private fun hotConversationSettings(): StateFlow<Map<String, ConversationSettings>> {
+        val loaded = CompletableDeferred<Unit>()
+        initialLoadSignals += loaded
+        settingsManager.conversationSettings
+            .onEach { value ->
+                conversationSettingsState.acceptPersisted(value)
+                loaded.complete(Unit)
+            }
+            .catch { error ->
+                loaded.completeExceptionally(error)
+                throw error
+            }
+            .launchIn(scope)
+        return conversationSettingsState.state
     }
 
     /**
@@ -182,7 +203,7 @@ class SettingsRepository(
     val defaultTopP: StateFlow<Float?> = hot(settingsManager.defaultTopP, null)
     val defaultFrequencyPenalty: StateFlow<Float?> = hot(settingsManager.defaultFrequencyPenalty, null)
     val defaultPresencePenalty: StateFlow<Float?> = hot(settingsManager.defaultPresencePenalty, null)
-    val conversationSettings: StateFlow<Map<String, ConversationSettings>> = hot(settingsManager.conversationSettings, emptyMap())
+    val conversationSettings: StateFlow<Map<String, ConversationSettings>> = hotConversationSettings()
     val themeMode: StateFlow<String> = hot(settingsManager.themeMode, "FOLLOW_DEVICE")
     val colorScheme: StateFlow<String> = hot(settingsManager.colorScheme, "DEFAULT")
     val dynamicColor: StateFlow<Boolean> = hot(settingsManager.dynamicColor, true)
@@ -446,7 +467,37 @@ class SettingsRepository(
     fun removeMcpServer(serverId: String) =
         scope.launch { settingsManager.saveMcpServers(mcpServers.value.filter { it.id != serverId }) }
 
-    fun setConversationSettings(convId: String, settings: ConversationSettings?) = scope.launch { settingsManager.saveConversationSettings(convId, settings) }
+    fun setConversationSettings(convId: String, settings: ConversationSettings?) {
+        persistConversationSettings(conversationSettingsState.set(convId, settings))
+    }
+
+    fun updateConversationSettings(
+        convId: String,
+        update: (ConversationSettings) -> ConversationSettings,
+    ) {
+        persistConversationSettings(conversationSettingsState.update(convId, update))
+    }
+
+    private fun persistConversationSettings(write: ConversationSettingsWrite) {
+        scope.launch {
+            conversationSettingsWriteMutex.withLock {
+                if (!conversationSettingsState.isLatest(write)) return@withLock
+                runCatching {
+                    settingsManager.saveConversationSettings(
+                        conversationId = write.conversationId,
+                        settings = write.settings,
+                    )
+                }.onSuccess { persisted ->
+                    conversationSettingsState.complete(write, persisted)
+                }.onFailure {
+                    val persisted = runCatching {
+                        settingsManager.conversationSettings.first()
+                    }.getOrNull()
+                    conversationSettingsState.fail(write, persisted)
+                }
+            }
+        }
+    }
 
     // ── Simple setting toggles ────────────────────────────────
     fun setMaxContextWindow(window: Int) = scope.launch { settingsManager.saveMaxContextWindow(window) }

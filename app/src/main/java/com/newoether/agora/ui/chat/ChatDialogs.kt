@@ -36,10 +36,12 @@ import com.newoether.agora.viewmodel.ChatViewModel
 @Composable
 internal fun ChatRenameDialog(
     initialName: String,
+    initialDisplayName: String = initialName,
     onSave: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var name by remember { mutableStateOf(initialName) }
+    var name by remember(initialName, initialDisplayName) { mutableStateOf(initialDisplayName) }
+    var edited by remember(initialName, initialDisplayName) { mutableStateOf(false) }
     AlertDialog(
         modifier = Modifier.clearFocusOnTap(),
         containerColor = MaterialTheme.colorScheme.surfaceContainer,
@@ -48,14 +50,17 @@ internal fun ChatRenameDialog(
         text = {
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = {
+                    name = it
+                    edited = true
+                },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             )
         },
         confirmButton = {
-            TextButton(onClick = { onSave(name) }) {
+            TextButton(onClick = { onSave(if (edited) name else initialName) }) {
                 Text(stringResource(R.string.save))
             }
         },

@@ -38,7 +38,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelAliasDisplayName
+import com.newoether.agora.data.modelApiDisplayName
 import com.newoether.agora.data.providerDisplayName
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.clearFocusOnTap
@@ -144,6 +147,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     var customModelProvider by rememberSaveable { mutableStateOf("") }
     var customModelId by rememberSaveable { mutableStateOf("") }
     var customModelAlias by rememberSaveable { mutableStateOf("") }
+    var customModelRawAlias by rememberSaveable { mutableStateOf("") }
     var customModelProviderMenuExpanded by remember { mutableStateOf(false) }
     var modelSearchQuery by rememberSaveable { mutableStateOf("") }
     val expandedProviders = remember { mutableStateMapOf<String, MutableTransitionState<Boolean>>() }
@@ -233,13 +237,16 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             }
 
             item(key = "default_model") {
-                val activeAlias = modelAliases[selectedModel]
                 val activeParsed = com.newoether.agora.model.ModelId.parse(selectedModel)
                 val providerName = providerDisplayName(
                     activeParsed.providerName,
                     customProviders,
                 )
-                val activeDisplayName = activeAlias ?: activeParsed.apiModelName
+                val activeDisplayName = modelAliasDisplayName(
+                    selectedModel,
+                    modelAliases,
+                    customProviders,
+                )
                 val activeIconRes = providerIcon(providerName)
                 val isActiveLocal = providerName.equals(Constants.PROVIDER_LOCAL, ignoreCase = true)
                 val hasEnabledModels = enabledModels.isNotEmpty()
@@ -320,7 +327,11 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             customProviders,
                         )
                         customModelId = parsed.modelName
-                        customModelAlias = modelAliases[model].orEmpty()
+                        customModelRawAlias = modelAliases[model].orEmpty()
+                        customModelAlias = replaceCustomProviderIdsForDisplay(
+                            customModelRawAlias,
+                            customProviders,
+                        )
                         showCustomModelDialog = true
                     },
                     onEnabledChange = { model, enabled ->
@@ -339,6 +350,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             editingCustomModel = null
                             customModelId = ""
                             customModelAlias = ""
+                            customModelRawAlias = ""
                             if (customModelProvider !in providerChoices) {
                                 customModelProvider = providerChoices.firstOrNull().orEmpty()
                             }
@@ -467,9 +479,12 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             text = {
                 LazyColumn(modifier = Modifier.fillMaxWidth()) {
                     items(enabledModels.toList(), key = { it }) { model ->
-                        val alias = modelAliases[model]
                         val parsed = com.newoether.agora.model.ModelId.parse(model)
-                        val displayName = alias ?: parsed.apiModelName
+                        val displayName = modelAliasDisplayName(
+                            model,
+                            modelAliases,
+                            customProviders,
+                        )
                         val providerName = providerDisplayName(
                             parsed.providerName,
                             customProviders,
@@ -509,6 +524,17 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
         val normalizedProvider = customModelProvider.trim()
         val normalizedModelId = customModelId.trim()
         val normalizedAlias = customModelAlias.trim()
+        val unchangedDisplayAlias = replaceCustomProviderIdsForDisplay(
+            customModelRawAlias,
+            customProviders,
+        ).trim()
+        val aliasToPersist = if (
+            originalModelId != null && normalizedAlias == unchangedDisplayAlias
+        ) {
+            customModelRawAlias.trim()
+        } else {
+            normalizedAlias
+        }
         val pendingModelId = if (
             normalizedProvider.isNotEmpty() &&
             normalizedModelId.isNotEmpty()
@@ -683,14 +709,14 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                                 viewModel.settings.addCustomModel(
                                     provider = normalizedProvider,
                                     modelName = normalizedModelId,
-                                    alias = normalizedAlias,
+                                    alias = aliasToPersist,
                                 )
                             } else {
                                 viewModel.updateCustomModel(
                                     oldModelId = originalModelId,
                                     provider = normalizedProvider,
                                     modelId = normalizedModelId,
-                                    alias = normalizedAlias,
+                                    alias = aliasToPersist,
                                 )
                             }
                             customModelProviderMenuExpanded = false
@@ -713,8 +739,7 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
     }
 
     deletingCustomModel?.let { model ->
-        val parsed = ModelId.parse(model)
-        val displayName = modelAliases[model] ?: parsed.apiModelName
+        val displayName = modelAliasDisplayName(model, modelAliases, customProviders)
         AlertDialog(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
             onDismissRequest = { deletingCustomModel = null },
@@ -755,7 +780,9 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
 
     // ── Model Alias Dialog ──
     showModelAliasDialog?.let { model ->
-        val aliasState = rememberTextFieldState(modelAliases[model] ?: "")
+        val rawAlias = modelAliases[model].orEmpty()
+        val displayAlias = replaceCustomProviderIdsForDisplay(rawAlias, customProviders)
+        val aliasState = rememberTextFieldState(displayAlias)
 
         AlertDialog(
             modifier = Modifier.clearFocusOnTap(),
@@ -763,9 +790,9 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
             onDismissRequest = { showModelAliasDialog = null },
             title = { Text(stringResource(R.string.models_rename), fontWeight = FontWeight.Bold) },
             text = {
-                val parsed = com.newoether.agora.model.ModelId.parse(model)
+                val displayApiModelName = modelApiDisplayName(model, customProviders)
                 Column(Modifier.fillMaxWidth()) {
-                    Text(stringResource(R.string.models_rename_current, parsed.apiModelName), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.models_rename_current, displayApiModelName), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Spacer(modifier = Modifier.height(8.dp))
                     Box(modifier = Modifier.noOpBringIntoView()) {
                         OutlinedTextField(
@@ -773,14 +800,18 @@ fun SettingsModelsPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                             label = { Text(stringResource(R.string.models_alias_hint)) },
                             shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text(parsed.apiModelName) }
+                            placeholder = { Text(displayApiModelName) }
                         )
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.settings.updateModelAlias(model, aliasState.text.toString())
+                    val editedAlias = aliasState.text.toString()
+                    viewModel.settings.updateModelAlias(
+                        model,
+                        if (editedAlias == displayAlias) rawAlias else editedAlias,
+                    )
                     showModelAliasDialog = null
                 }) { Text(stringResource(R.string.provider_save)) }
             },

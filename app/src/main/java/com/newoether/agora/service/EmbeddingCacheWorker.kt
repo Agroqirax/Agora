@@ -14,6 +14,7 @@ import com.newoether.agora.data.EmbeddingCacheLocks
 import com.newoether.agora.data.EmbeddingModelType
 import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.SettingsManager
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.EmbeddingEntity
 import com.newoether.agora.util.Constants
@@ -163,8 +164,12 @@ class EmbeddingCacheWorker(
             }
         } catch (e: Exception) {
             DebugLog.e(TAG, "Cache worker failed", e)
+            val displayError = replaceCustomProviderIdsForDisplay(
+                e.localizedMessage ?: "Unknown error",
+                settingsManager.customProviders.first(),
+            )
             return Result.failure(Data.Builder()
-                .putString("error", e.localizedMessage ?: "Unknown error").build())
+                .putString("error", displayError).build())
         }
 
         val failed = attempted - succeeded

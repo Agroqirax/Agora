@@ -38,9 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.modelAliasDisplayName
+import com.newoether.agora.data.modelApiDisplayName
 import com.newoether.agora.data.providerDisplayName
-import com.newoether.agora.model.ModelId
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.components.clearFocusOnTap
 import com.newoether.agora.ui.components.providerIcon
 import com.newoether.agora.ui.motion.LocalAgoraMotionPolicy
@@ -185,12 +185,15 @@ internal fun LazyListScope.modelProviderGroups(
                             CardSurface(shape = modelShape) {
                                 val isEnabled = model in enabledModels
                                 val alias = modelAliases[model]
-                                val parsed = ModelId.parse(model)
-                                val displayName = alias ?: parsed.apiModelName
+                                val displayName = modelAliasDisplayName(
+                                    model,
+                                    modelAliases,
+                                    customProviders,
+                                )
                                 SettingsItem(
                                     headlineContent = { Text(displayName) },
                                     supportingContent = if (alias != null) {
-                                        { Text(parsed.apiModelName) }
+                                        { Text(modelApiDisplayName(model, customProviders)) }
                                     } else {
                                         null
                                     },

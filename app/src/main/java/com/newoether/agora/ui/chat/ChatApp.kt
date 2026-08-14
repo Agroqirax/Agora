@@ -46,6 +46,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
 import com.newoether.agora.TopLevelPresentation
+import com.newoether.agora.data.forDisplay
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.util.gradientBlur
 import com.newoether.agora.model.ContextBudget
 import com.newoether.agora.ui.chat.bottombar.CHAT_BOTTOM_BAR_OUTER_SHAPE
@@ -149,6 +151,8 @@ fun ChatApp(
     val globalThinkingBudgetEnabled by viewModel.settings.thinkingBudgetEnabled.collectAsState()
     val globalThinkingBudgetTokens by viewModel.settings.thinkingBudgetTokens.collectAsState()
     val customProviders by viewModel.settings.customProviders.collectAsState()
+    val displayConversations = remember(conversations, customProviders) { conversations.map { it.forDisplay(customProviders) } }
+    val displayMessagesState = remember(messagesState, customProviders) { derivedStateOf { messagesState.value.map { it.forDisplay(customProviders) } } }
     val openAiResponsesApiEnabled by viewModel.settings.openAiResponsesApiEnabled.collectAsState()
     val globalWebSearch by viewModel.settings.webSearchEnabled.collectAsState()
     val webSearchApiKeys by viewModel.settings.webSearchApiKeys.collectAsState()
@@ -267,7 +271,7 @@ fun ChatApp(
     )
     val conversationInteraction = rememberConversationInteractionState(
         currentConversationId = currentConversationId,
-        messages = messagesState,
+        messages = displayMessagesState,
         listState = listState,
     )
     val conversationSearchActive = conversationInteraction.searchActive
@@ -407,9 +411,11 @@ fun ChatApp(
                 topBar = {
                     ChatTopBar(
                         isNewChatMode = isNewChatMode,
-                        conversations = conversations,
+                        conversations = displayConversations,
                         currentConversationId = currentConversationId,
-                        currentConversationTitle = currentConversation?.title,
+                        currentConversationTitle = currentConversation?.title?.let {
+                            replaceCustomProviderIdsForDisplay(it, customProviders)
+                        },
                         totalTokens = totalTokens,
                         searchActive = conversationSearchActive,
                         searchQuery = conversationSearchQuery,

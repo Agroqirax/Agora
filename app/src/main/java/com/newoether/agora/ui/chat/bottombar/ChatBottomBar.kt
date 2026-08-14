@@ -666,13 +666,6 @@ fun ChatBottomBar(
                                 onClick = { onGoogleSearchToggle(!googleSearchEnabled) }
                             )
                         }
-                        if (openAiWebSearchAvailable && isModelValid) {
-                            NativeSearchMenuItem(
-                                checked = openAiWebSearchEnabled,
-                                provider = "OpenAI",
-                                onCheckedChange = onOpenAiWebSearchToggle,
-                            )
-                        }
                         if (openAiServiceTierAvailable && isModelValid) {
                             DropdownMenuItem(
                                 text = {
@@ -707,6 +700,13 @@ fun ChatBottomBar(
                                     activeMenu = null
                                     showOpenAiServiceTierSheet = true
                                 },
+                            )
+                        }
+                        if (openAiWebSearchAvailable && isModelValid) {
+                            NativeSearchMenuItem(
+                                checked = openAiWebSearchEnabled,
+                                provider = "OpenAI",
+                                onCheckedChange = onOpenAiWebSearchToggle,
                             )
                         }
                         if (showWebSearch) {

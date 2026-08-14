@@ -12,6 +12,7 @@ import androidx.work.workDataOf
 import com.newoether.agora.AgoraApplication
 import com.newoether.agora.R
 import com.newoether.agora.automation.TaskManager
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.util.DebugLog
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -37,6 +38,10 @@ class TaskWorker(
         val container = (applicationContext as AgoraApplication)
             .awaitContainer()
             ?: return Result.failure(workDataOf(KEY_ERROR to "Database unavailable"))
+        fun displayError(text: String): String = replaceCustomProviderIdsForDisplay(
+            text,
+            container.settingsRepository.customProviders.value,
+        )
         return try {
             setForeground(
                 AutomationForegroundInfo.create(
@@ -68,7 +73,7 @@ class TaskWorker(
                         Result.retry()
                     } else {
                         container.taskManager.finishScheduledRun(taskId, scheduledAt)
-                        Result.failure(workDataOf(KEY_ERROR to outcome.reason))
+                        Result.failure(workDataOf(KEY_ERROR to displayError(outcome.reason)))
                     }
                 }
                 is TaskManager.ExecutionResult.Failure -> {
@@ -76,7 +81,7 @@ class TaskWorker(
                         Result.retry()
                     } else {
                         container.taskManager.finishScheduledRun(taskId, scheduledAt)
-                        Result.failure(workDataOf(KEY_ERROR to outcome.reason))
+                        Result.failure(workDataOf(KEY_ERROR to displayError(outcome.reason)))
                     }
                 }
             }
@@ -91,7 +96,9 @@ class TaskWorker(
                     .onFailure { finishError ->
                         DebugLog.e("TaskWorker", "Failed to finalize schedule for $taskId", finishError)
                     }
-                Result.failure(workDataOf(KEY_ERROR to (e.localizedMessage ?: "Unexpected error")))
+                Result.failure(
+                    workDataOf(KEY_ERROR to displayError(e.localizedMessage ?: "Unexpected error"))
+                )
             }
         }
     }

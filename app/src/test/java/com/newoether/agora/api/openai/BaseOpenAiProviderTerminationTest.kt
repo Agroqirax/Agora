@@ -343,6 +343,26 @@ class BaseOpenAiProviderTerminationTest {
     }
 
     @Test
+    fun responsesHostedWebSearchDisabledOmitsHostedTool() = withServer(
+        terminalGraceMillis = 100L,
+        responsesApiEnabled = true,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"type":"response.completed","sequence_number":1,"response":{"status":"completed"}}""",
+            )
+        },
+    ) { provider, config, server ->
+        val events = collect(
+            provider,
+            config.withTools().copy(openAiWebSearchEnabled = false),
+        )
+        val body = WIRE_JSON.parseToJsonElement(server.requests.single().body).jsonObject
+        val tools = body["tools"]?.jsonArray.orEmpty().map { it.jsonObject }
+        assertEquals(listOf("function"), tools.map { it["type"]?.jsonPrimitive?.content })
+        assertTrue(tools.none { it["type"]?.jsonPrimitive?.content == "web_search" })
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+    @Test
     fun hostedWebSearchWithoutResponsesFailsBeforeNetworkDispatch() {
         val provider = object : BaseOpenAiProvider() {
             override val name: String = "test"

@@ -31,6 +31,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.Color
 
 import androidx.compose.ui.unit.dp
+import com.newoether.agora.data.forDisplay
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
 import com.newoether.agora.model.isContextCompact
@@ -108,6 +110,12 @@ internal fun MessageItem(
     onLayoutMutationSettled: (String) -> Unit = {},
     thoughtExpandedStates: SnapshotStateMap<String, Boolean> = remember { mutableStateMapOf() }
 ) {
+    val displayMessage = remember(message, customProviders) {
+        message.forDisplay(customProviders)
+    }
+    val displayActionCopyText = remember(actionCopyText, customProviders) {
+        actionCopyText?.let { replaceCustomProviderIdsForDisplay(it, customProviders) }
+    }
     var showSegmentDetail by remember { mutableStateOf(false) }
     var detailUsesExplicitBackHandler by remember { mutableStateOf(false) }
     var selectedSegmentIndex by remember { mutableIntStateOf(-1) }
@@ -126,7 +134,7 @@ internal fun MessageItem(
 
     if (showInfoDialog) {
         MessageInfoDialog(
-            message = message,
+            message = displayMessage,
             modelAliases = modelAliases.map,
             customProviders = customProviders,
             onDismiss = { showInfoDialog = false }
@@ -182,7 +190,7 @@ internal fun MessageItem(
 
     val searchHighlight = searchQuery.takeIf { it.isNotBlank() }?.let { query ->
         val active = activeSearchMatch?.takeIf { it.messageId == message.id }
-        val matchKeys = conversationSearchMatchRanges(message, query).map { range ->
+        val matchKeys = conversationSearchMatchRanges(displayMessage, query).map { range ->
             "${message.id}:${range.first}:${range.last + 1}"
         }
         SearchHighlightSpec(
@@ -264,7 +272,7 @@ internal fun MessageItem(
                     }
                 } else if (message.participant == Participant.USER) {
                     UserMessageBubble(
-                        message = message,
+                        message = displayMessage,
                         shape = shape,
                         backgroundColor = backgroundColor,
                         textColor = textColor,
@@ -273,7 +281,7 @@ internal fun MessageItem(
                         isLoading = isLoading,
                         isEditingAllowed = isEditingAllowed,
                         showActions = showActions,
-                        actionCopyText = actionCopyText,
+                        actionCopyText = displayActionCopyText,
                         showBranchSelector = showBranchSelector,
                         branchIndex = branchIndex,
                         totalBranches = totalBranches,
@@ -290,7 +298,7 @@ internal fun MessageItem(
                     )
                 } else {
                     AssistantMessageContent(
-                        message = message,
+                        message = displayMessage,
                         segmentAppearanceRegistry = segmentAppearanceRegistry,
                         contextAlpha = contextAlpha,
                         isStreaming = isStreaming,
@@ -298,7 +306,7 @@ internal fun MessageItem(
                         isRegenerationExiting = isRegenerationExiting,
                         isEditingAllowed = isEditingAllowed,
                         showActions = showActions,
-                        actionCopyText = actionCopyText,
+                        actionCopyText = displayActionCopyText,
                         showBranchSelector = showBranchSelector,
                         toolCallDisplayMode = toolCallDisplayMode,
                         thinkingSegmentDisplayMode = thinkingSegmentDisplayMode,
@@ -345,27 +353,30 @@ internal fun MessageItem(
 
     val failedToGenerateText = stringResource(com.newoether.agora.R.string.failed_to_generate)
     val detailErrorText = remember(
-        message.text,
-        message.status,
-        message.participant,
-        message.segments,
+        displayMessage.text,
+        displayMessage.status,
+        displayMessage.participant,
+        displayMessage.segments,
         failedToGenerateText,
     ) {
         assistantErrorContent(
-            message = message,
-            mergedSegments = mergeAdjacentSegments(message.segments.orEmpty()),
+            message = displayMessage,
+            mergedSegments = mergeAdjacentSegments(displayMessage.segments.orEmpty()),
             fallbackErrorText = failedToGenerateText,
         )?.errorText
     }
 
     if (showCompactDetail) {
-        val compactDetailText = liveCompactPreview
+        val rawCompactDetailText = liveCompactPreview
             ?.takeIf { compactInProgress }
             ?.collectAsState()
             ?.value
             ?: message.text
+        val compactDetailText = remember(rawCompactDetailText, customProviders) {
+            replaceCustomProviderIdsForDisplay(rawCompactDetailText, customProviders)
+        }
         SegmentDetailSheet(
-            message = message,
+            message = displayMessage,
             selectedSegmentIndex = 0,
             selectedSegmentIndices = listOf(0),
             isStreaming = compactInProgress,
@@ -383,7 +394,7 @@ internal fun MessageItem(
     // Segment detail bottom sheet (self-contained draggable sheet + FSM).
     if (showSegmentDetail && selectedSegmentIndex >= 0) {
         SegmentDetailSheet(
-            message = message,
+            message = displayMessage,
             selectedSegmentIndex = selectedSegmentIndex,
             selectedSegmentIndices = selectedSegmentIndices,
             isStreaming = isStreaming,
@@ -491,7 +502,7 @@ internal fun ContextCompactPill(
             Box {
                 IconButton(
                     onClick = { actionsExpanded = true },
-                    modifier = Modifier.size(28.dp),
+                    modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
                         imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
@@ -502,23 +513,21 @@ internal fun ContextCompactPill(
                 DropdownMenu(
                     expanded = actionsExpanded,
                     onDismissRequest = { actionsExpanded = false },
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(12.dp),
                     containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    tonalElevation = 16.dp,
                 ) {
                     DropdownMenuItem(
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Default.Refresh,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(com.newoether.agora.R.string.recompact),
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
+                            Text(
+                                text = stringResource(com.newoether.agora.R.string.recompact),
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Default.Refresh,
+                                contentDescription = null,
+                            )
                         },
                         enabled = actionsEnabled,
                         onClick = {
@@ -528,20 +537,17 @@ internal fun ContextCompactPill(
                     )
                     DropdownMenuItem(
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = androidx.compose.material.icons.Icons.Default.Delete,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp),
-                                    tint = destructiveActionTint,
-                                )
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    text = stringResource(com.newoether.agora.R.string.delete),
-                                    color = destructiveActionTint,
-                                    style = MaterialTheme.typography.labelLarge,
-                                )
-                            }
+                            Text(
+                                text = stringResource(com.newoether.agora.R.string.delete),
+                                color = destructiveActionTint,
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = androidx.compose.material.icons.Icons.Default.Delete,
+                                contentDescription = null,
+                                tint = destructiveActionTint,
+                            )
                         },
                         enabled = actionsEnabled,
                         onClick = {

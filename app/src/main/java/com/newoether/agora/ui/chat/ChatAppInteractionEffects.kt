@@ -247,7 +247,8 @@ internal fun ConversationShareEffect(
                 viewModel.emitSnackbar(
                     shareFailureTemplate.replace(
                         SHARE_ERROR_DETAIL_TOKEN,
-                        e.localizedMessage ?: e.javaClass.simpleName,
+                        e.localizedMessage?.let(viewModel::displayText)
+                            ?: e.javaClass.simpleName,
                     )
                 )
             }

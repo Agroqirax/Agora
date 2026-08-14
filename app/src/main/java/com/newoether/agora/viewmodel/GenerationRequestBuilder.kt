@@ -6,6 +6,7 @@ import com.newoether.agora.data.ConversationSettings
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
 import com.newoether.agora.data.SystemPromptEntry
+import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.data.isOpenAiProtocolProvider
 import com.newoether.agora.data.isResponsesApiEnabledForProvider
 import com.newoether.agora.data.local.ChatEntity
@@ -46,7 +47,16 @@ class GenerationRequestBuilder(
         val providerName = providerRegistry.providerForModel(modelId)
         val activeKey = settings.resolveActiveKey(providerName) ?: ""
         if (!providerRegistry.isConfigured(providerName, activeKey)) {
-            onSnackbar(appContext.getString(R.string.no_api_key_for_provider, providerName))
+            val displayProviderName = providerDisplayName(
+                providerName,
+                settings.customProviders.value,
+            )
+            onSnackbar(
+                appContext.getString(
+                    R.string.no_api_key_for_provider,
+                    displayProviderName,
+                )
+            )
             return null
         }
         return ProviderKey(providerName, activeKey)

@@ -1,5 +1,6 @@
 package com.newoether.agora.ui.chat.message
 
+import androidx.compose.ui.unit.dp
 import com.newoether.agora.model.MessageSegment
 import com.newoether.agora.model.ChatMessage
 import com.newoether.agora.model.MessageStatus
@@ -11,6 +12,16 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageItemSegmentsTest {
+
+    @Test
+    fun timelineInfoBlockUsesCompactTopSpacingWithoutVisibleMessageAbove() {
+        assertEquals(0.dp, timelineInfoTopPaddingExtra(false))
+    }
+
+    @Test
+    fun timelineInfoBlockUsesNormalSeparationAfterVisibleMessage() {
+        assertEquals(8.dp, timelineInfoTopPaddingExtra(true))
+    }
 
     @Test
     fun reducedMotionRetainsExpandedLayoutUntilCollapseFadeSettles() {

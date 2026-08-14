@@ -4,7 +4,9 @@ import android.app.Application
 import com.newoether.agora.util.DebugLog
 import com.newoether.agora.api.LlmProvider
 import com.newoether.agora.api.StreamEvent
+import com.newoether.agora.data.CustomProviderConfig
 import com.newoether.agora.data.MemoryManager
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.model.ChatMessage
@@ -36,6 +38,7 @@ class GenerationManager(
     private val context: android.content.Context,
     private val sandboxFactory: com.newoether.agora.sandbox.SandboxManagerFactory? = null,
     additionalToolProviders: List<ToolProvider> = emptyList(),
+    private val customProviders: () -> List<CustomProviderConfig> = { emptyList() },
 ) {
     var onMessagePersisted: ((messageId: String, text: String) -> Unit)? = null
 
@@ -62,7 +65,11 @@ class GenerationManager(
         isAppInForeground = { AppForegroundTracker.isInForeground },
         releaseForegroundLease = AgoraForegroundService::release,
         notify = { text, conversationId ->
-            AgoraForegroundService.showCompletionNotification(app, text, conversationId)
+            AgoraForegroundService.showCompletionNotification(
+                app,
+                replaceCustomProviderIdsForDisplay(text, customProviders()),
+                conversationId,
+            )
         },
     )
 

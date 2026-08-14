@@ -305,6 +305,7 @@ internal fun TaskDetailPage(
             itemsIndexed(executions, key = { _, e -> e.conversation.id }) { index, execution ->
                 ExecutionRow(
                     execution = execution,
+                    customProviders = customProviders,
                     shape = stackedShape(index, executions.size),
                     onClick = { onOpenConversation(task.id, execution.conversation.id) },
                     menuEnabled = !isRunning,

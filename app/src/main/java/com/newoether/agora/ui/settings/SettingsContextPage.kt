@@ -18,11 +18,11 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.newoether.agora.R
+import com.newoether.agora.data.modelAliasDisplayName
 import com.newoether.agora.data.modelDisplayName
 import com.newoether.agora.data.providerDisplayName
 import com.newoether.agora.model.ModelId
 import com.newoether.agora.model.ContextBudget
-import com.newoether.agora.model.apiModelName
 import com.newoether.agora.ui.common.PersistedSliderFeedbackGate
 import com.newoether.agora.viewmodel.ChatViewModel
 
@@ -268,7 +268,11 @@ fun SettingsContextPage(viewModel: ChatViewModel, onBack: () -> Unit) {
                     items(enabledModels.toList(), key = { it }) { model ->
                         val parsed = ModelId.parse(model)
                         CompactModelItem(
-                            label = aliases[model] ?: parsed.apiModelName,
+                            label = modelAliasDisplayName(
+                                model,
+                                aliases,
+                                customProviders,
+                            ),
                             provider = providerDisplayName(parsed.providerName, customProviders),
                             selected = compactModel == model,
                             onClick = {

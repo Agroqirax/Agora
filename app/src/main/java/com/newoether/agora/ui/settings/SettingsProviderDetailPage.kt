@@ -4,6 +4,7 @@ import com.newoether.agora.util.DebugLog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -261,14 +262,21 @@ fun SettingsProviderDetailPage(
                             if (config.protocol == CustomEndpointProtocol.OPENAI) {
                                 add {
                                     SettingsItem(
+                                        modifier = Modifier.toggleable(
+                                            value = config.responsesApiEnabled,
+                                            onValueChange = {
+                                                viewModel.settings.setCustomProviderResponsesApiEnabled(
+                                                    currentName,
+                                                    it,
+                                                )
+                                            },
+                                        ),
                                         headlineContent = { Text(stringResource(R.string.responses_api)) },
                                         supportingContent = { Text(stringResource(R.string.responses_api_desc)) },
                                         trailingContent = {
                                             Switch(
                                                 checked = config.responsesApiEnabled,
-                                                onCheckedChange = {
-                                                    viewModel.settings.setCustomProviderResponsesApiEnabled(currentName, it)
-                                                },
+                                                onCheckedChange = null,
                                             )
                                         },
                                     )
@@ -277,12 +285,16 @@ fun SettingsProviderDetailPage(
                         } ?: if (currentName == Constants.PROVIDER_OPENAI) {
                             add {
                                 SettingsItem(
+                                    modifier = Modifier.toggleable(
+                                        value = openAiResponsesApiEnabled,
+                                        onValueChange = viewModel.settings::setOpenAiResponsesApiEnabled,
+                                    ),
                                     headlineContent = { Text(stringResource(R.string.responses_api)) },
                                     supportingContent = { Text(stringResource(R.string.responses_api_desc)) },
                                     trailingContent = {
                                         Switch(
                                             checked = openAiResponsesApiEnabled,
-                                            onCheckedChange = viewModel.settings::setOpenAiResponsesApiEnabled,
+                                            onCheckedChange = null,
                                         )
                                     },
                                 )

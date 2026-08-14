@@ -526,14 +526,20 @@ class SettingsManager(private val context: Context) {
             if (value == null) prefs.remove(DEFAULT_PRESENCE_PENALTY) else prefs[DEFAULT_PRESENCE_PENALTY] = value.toString()
         }
     }
-    suspend fun saveConversationSettings(conversationId: String, settings: ConversationSettings?) {
+    suspend fun saveConversationSettings(
+        conversationId: String,
+        settings: ConversationSettings?,
+    ): Map<String, ConversationSettings> {
+        var updated: Map<String, ConversationSettings> = emptyMap()
         context.dataStore.edit { prefs ->
             val current = prefs[CONVERSATION_SETTINGS_JSON] ?: "{}"
             val map = try { json.decodeFromString<MutableMap<String, ConversationSettings>>(current) } catch (e: Exception) { mutableMapOf() }
             if (settings == null || settings.isAllNull()) map.remove(conversationId)
             else map[conversationId] = settings
+            updated = map.toMap()
             prefs[CONVERSATION_SETTINGS_JSON] = json.encodeToString(map)
         }
+        return updated
     }
     suspend fun saveConversationSettingsMap(settings: Map<String, ConversationSettings>) {
         val nonEmpty = settings.filterValues { !it.isAllNull() }

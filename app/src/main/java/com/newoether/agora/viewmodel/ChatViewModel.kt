@@ -19,6 +19,8 @@ import com.newoether.agora.data.DataExporter
 import com.newoether.agora.data.DataImporter
 import com.newoether.agora.data.MemoryManager
 import com.newoether.agora.data.PredefinedVariables
+import com.newoether.agora.data.forDisplay
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 
 import com.newoether.agora.data.ShellDeviceConfig
 
@@ -246,6 +248,7 @@ class ChatViewModel(
             context = appContext,
             sandboxFactory = sandboxFactory,
             additionalToolProviders = listOf(automationToolProvider, mcpToolProvider),
+            customProviders = { settings.customProviders.value },
         ).also { gm ->
             // Gate lives in RagManager.indexMessageForRag (autoCacheEnabled + active model).
             gm.onMessagePersisted = { messageId, text -> ragManager.indexMessageForRag(messageId, text) }
@@ -467,7 +470,11 @@ class ChatViewModel(
         extraBufferCapacity = 1,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    val snackbarMessage = _snackbarMessage.asSharedFlow()
+    val snackbarMessage = _snackbarMessage
+        .map { it.forDisplay(settings.customProviders.value) }
+    fun displayText(text: String): String =
+        replaceCustomProviderIdsForDisplay(text, settings.customProviders.value)
+
     fun emitSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         viewModelScope.launch { _snackbarMessage.emit(SnackbarEvent(message, actionLabel, onAction)) }
     }
@@ -476,7 +483,8 @@ class ChatViewModel(
         extraBufferCapacity = 1,
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
     )
-    val conversationShareText = _conversationShareText.asSharedFlow()
+    val conversationShareText = _conversationShareText
+        .map { replaceCustomProviderIdsForDisplay(it, settings.customProviders.value) }
 
     private val _firstMessageCommitted = MutableSharedFlow<String>(
         replay = 0,
@@ -736,8 +744,7 @@ class ChatViewModel(
 
     fun updateConversationSetting(convId: String?, update: (ConversationSettings) -> ConversationSettings) {
         if (convId != null) {
-            val current = settings.conversationSettings.value[convId] ?: ConversationSettings()
-            settings.setConversationSettings(convId, update(current))
+            settings.updateConversationSettings(convId, update)
         } else {
             val current = _pendingConversationSettings.value ?: ConversationSettings()
             _pendingConversationSettings.value = update(current)

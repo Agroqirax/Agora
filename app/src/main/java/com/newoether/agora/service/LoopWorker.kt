@@ -10,6 +10,8 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.newoether.agora.AgoraApplication
+import com.newoether.agora.data.CustomProviderConfig
+import com.newoether.agora.data.replaceCustomProviderIdsForDisplay
 import com.newoether.agora.util.DebugLog
 import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
@@ -25,12 +27,14 @@ class LoopWorker(
             ?.takeIf { it.isNotBlank() }
             ?: return Result.failure()
         val scheduledAt = inputData.getLong(KEY_SCHEDULED_AT, 0L)
+        var customProviders = emptyList<CustomProviderConfig>()
 
         return try {
             setForeground(AutomationForegroundInfo.forLoop(applicationContext, conversationId, id))
             val container = (applicationContext as AgoraApplication)
                 .awaitContainer()
                 ?: return Result.failure(workDataOf(KEY_ERROR to "Database unavailable"))
+            customProviders = container.settingsRepository.customProviders.value
             // A model-level Failure is a completed attempt: LoopManager counts it and schedules
             // the next cycle. Retrying it here could append a duplicate turn to the conversation.
             when (val outcome = container.loopManager.executeByConversationId(conversationId, scheduledAt)) {
@@ -57,11 +61,19 @@ class LoopWorker(
                 runCatching {
                     val container = (applicationContext as AgoraApplication).awaitContainer()
                         ?: return@runCatching
+                    customProviders = container.settingsRepository.customProviders.value
                     container.loopManager.deferAfterInfrastructureFailure(conversationId)
                 }.onFailure { repairError ->
                     DebugLog.e("LoopWorker", "Failed to defer loop=$conversationId", repairError)
                 }
-                Result.failure(workDataOf(KEY_ERROR to (e.localizedMessage ?: e.javaClass.simpleName)))
+                Result.failure(
+                    workDataOf(
+                        KEY_ERROR to replaceCustomProviderIdsForDisplay(
+                            e.localizedMessage ?: e.javaClass.simpleName,
+                            customProviders,
+                        )
+                    )
+                )
             }
         }
     }

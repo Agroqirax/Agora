@@ -555,6 +555,9 @@ internal fun retainExpandedLayoutDuringFade(
     targetExpanded: Boolean,
 ): Boolean = currentExpanded || targetExpanded
 
+internal fun timelineInfoTopPaddingExtra(hasVisibleMessageAbove: Boolean): Dp =
+    if (hasVisibleMessageAbove) 8.dp else 0.dp
+
 @Composable
 internal fun TimelineSegmentsContent(
     segments: List<MessageSegment>,
@@ -574,7 +577,6 @@ internal fun TimelineSegmentsContent(
     Column(modifier = Modifier.fillMaxWidth()) {
         var detailIndex = 0
         var index = 0
-        var groupedBlockIndex = 0
         var previousVisibleWasAnswer = false
         val lastVisibleSegmentIndex = segments.indexOfLast { segment ->
             segment.isVisibleAnswerSegment() || segment.isInfoSegment()
@@ -631,7 +633,8 @@ internal fun TimelineSegmentsContent(
                             message.id,
                             blockDetailIndices.firstOrNull() ?: index,
                         )
-                        val blockTopPaddingExtra = if (groupedBlockIndex > 0) 8.dp else 0.dp
+                        val blockTopPaddingExtra =
+                            timelineInfoTopPaddingExtra(previousVisibleWasAnswer)
                         val blockContent: @Composable () -> Unit = {
                             CompactSegmentBlock(
                                 segs = blockSegments,
@@ -661,13 +664,13 @@ internal fun TimelineSegmentsContent(
                         ) {
                             blockContent()
                         }
-                        groupedBlockIndex++
                         previousVisibleWasAnswer = false
                         index = blockEnd
                     } else {
                         val currentDetailIndex = detailIndex
                         detailIndex++
-                        val cardTopPaddingExtra = if (previousVisibleWasAnswer) 8.dp else 0.dp
+                        val cardTopPaddingExtra =
+                            timelineInfoTopPaddingExtra(previousVisibleWasAnswer)
                         val timelineKey = detailSegmentAppearanceKey(
                             message.id,
                             currentDetailIndex,
