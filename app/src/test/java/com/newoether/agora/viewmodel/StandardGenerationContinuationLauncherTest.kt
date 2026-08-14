@@ -11,6 +11,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -103,6 +104,74 @@ class StandardGenerationContinuationLauncherTest {
         assertEquals("continuation-run", launchedRequest.captured.runId)
         assertEquals("continuation-message", launchedRequest.captured.modelMessageId)
         coVerify(exactly = 1) { boundLauncher.launch(any(), state) }
+        state.dispose()
+        Unit
+    }
+
+    @Test
+    fun cancellationAfterRoomCommitReconcilesTheDurableRunBeforeRelease() = runBlocking {
+        val conversations = mockk<ConversationRepository>()
+        val terminalSettlement = mockk<GenerationTerminalSettlementController>()
+        val state = ConversationGenerationState("conversation")
+        val parent = MessageEntity(
+            id = "parent",
+            conversationId = "conversation",
+            text = "result",
+            participant = Participant.MODEL,
+            status = MessageStatus.SUCCESS,
+            timestamp = 100L,
+            runId = "origin-run",
+            runSequence = 0,
+        )
+        coEvery { conversations.getMessagesForConversationSnapshot("conversation") } returns
+            listOf(parent)
+        coEvery { conversations.restoreBranchSelections("conversation") } returns emptyMap()
+        coEvery {
+            conversations.createRunWithMessages(any(), any(), any(), any(), any())
+        } coAnswers {
+            throw CancellationException("cancelled after Room committed")
+        }
+        coEvery { conversations.getRun("continuation-run") } returns
+            com.newoether.agora.data.local.RunEntity(
+                id = "continuation-run",
+                conversationId = "conversation",
+                parentRunId = "origin-run",
+                status = com.newoether.agora.model.RunStatus.ACTIVE,
+                activeSlot = 1,
+                startedAt = 200L,
+                lastCheckpointAt = 200L,
+            )
+        coEvery { terminalSettlement.settleCancelledDurableRun(state, any()) } returns true
+        val ids = ArrayDeque(listOf("continuation-run", "continuation-message"))
+        val launcher = StandardGenerationContinuationLauncher(
+            conversations = conversations,
+            executionCoordinator = ConversationExecutionCoordinator(),
+            terminalSettlement = terminalSettlement,
+            boundRunGenerationLauncher = { mockk() },
+            toUiMessage = ::toUiMessage,
+            isConversationOpen = { false },
+            projectGraph = { _, _, _, _ -> },
+            idFactory = { ids.removeFirst() },
+            clock = { 200L },
+        )
+
+        val launch = requireNotNull(
+            launcher.launch(
+                StandardGenerationContinuationRequest(
+                    conversationId = "conversation",
+                    parentMessageId = parent.id,
+                    snapshot = testGenerationAdmissionSnapshot(
+                        conversationId = "conversation",
+                        runId = "origin-run",
+                    ),
+                ),
+                state,
+            ),
+        )
+        launch.job.join()
+
+        coVerify(exactly = 1) { conversations.getRun("continuation-run") }
+        coVerify(exactly = 1) { terminalSettlement.settleCancelledDurableRun(state, any()) }
         state.dispose()
         Unit
     }

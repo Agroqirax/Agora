@@ -4,6 +4,7 @@ import com.newoether.agora.data.local.ChatDao
 import com.newoether.agora.data.local.ChatEntity
 import com.newoether.agora.data.local.ConversationDraftAttachmentReference
 import com.newoether.agora.data.local.EmbeddingEntity
+import com.newoether.agora.data.local.EmbeddingSearchRow
 import com.newoether.agora.data.local.IndexableMessage
 import com.newoether.agora.data.local.MessageAttachmentReference
 import com.newoether.agora.data.local.MessageEntity
@@ -514,8 +515,17 @@ class ConversationRepository(
     suspend fun findExistingMessageIds(ids: List<String>): List<String> =
         chatDao.findExistingMessageIds(ids)
 
-    suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity> =
-        chatDao.getEmbeddingsByModel(modelId)
+    suspend fun getEmbeddingSearchPage(
+        modelId: String,
+        afterId: Long,
+        minimumTextLength: Int,
+        limit: Int,
+    ): List<EmbeddingSearchRow> = chatDao.getEmbeddingSearchPage(
+        modelId = modelId,
+        afterId = afterId,
+        minimumTextLength = minimumTextLength,
+        limit = limit,
+    )
 
     suspend fun deleteEmbedding(messageId: String) =
         chatDao.deleteEmbedding(messageId)

@@ -318,9 +318,9 @@ class ConversationGenerationState(
                 true
             }
             SlotReleaseReason.STOP_BARRIERS_SETTLED -> {
-                // Pending inputs still belong to the STOPPED Run and must migrate to a fresh one.
-                // The callback runs after mailbox handling and therefore outside [genLock].
-                onStopSettled?.invoke(this@ConversationGenerationState)
+                // Every terminal release uses one process-owned queue-drain signal. Keeping Stop
+                // on the shared path lets registry handoff/rebinding preserve the obligation.
+                onQueueDrainRequested?.invoke(this@ConversationGenerationState)
                 false
             }
             SlotReleaseReason.EMPTY_STOP -> error("Coroutine settlement cannot emit EMPTY_STOP")
@@ -386,11 +386,8 @@ class ConversationGenerationState(
     @Volatile var onActive: ((String) -> Unit)? = null
     @Volatile var onIdle: ((String) -> Unit)? = null
     @Volatile var onStreamCommit: ((String, ChatMessage) -> Unit)? = null
-    /** Fired when a process-owned generation (rather than the UI controller) releases normally. */
+    /** Fired after any normal or STOPPED terminal release so pending guidance can claim a fresh Run. */
     @Volatile var onQueueDrainRequested: ((ConversationGenerationState) -> Unit)? = null
-    /** Fired after a Stop cleanly settles (durable STOPPED row persisted + slot released).
-     *  The controller wires this to drain queued sends into a fresh Run. */
-    @Volatile var onStopSettled: ((ConversationGenerationState) -> Unit)? = null
 
     /** Builds the token-gated callbacks for one generation, writing ONLY to this conversation's
      *  private state. The ChatViewModel mirror pipes private→global when this conversation is
@@ -495,7 +492,7 @@ class ConversationGenerationState(
             ?: return@withContext StopFinalizationOutcome.RECORDED
         check(release.reason == SlotReleaseReason.STOP_BARRIERS_SETTLED)
         // Fire after mailbox handling and outside [genLock].
-        onStopSettled?.invoke(this@ConversationGenerationState)
+        onQueueDrainRequested?.invoke(this@ConversationGenerationState)
         StopFinalizationOutcome.SETTLED
     }
 

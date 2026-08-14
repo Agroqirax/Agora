@@ -102,10 +102,6 @@ class ConversationStateRegistry {
                 state.onIdle = null
                 state.onStreamCommit = null
                 state.onQueueDrainRequested = null
-                // onStopSettled captures the ViewModel's controller. Leaving it bound would keep a
-                // dead ViewModel (and its object graph) alive in this process-scoped map, and a
-                // later Stop would drain the queue through a controller with a cancelled scope.
-                state.onStopSettled = null
             }
             uiCallbackOwner = null
             uiCallbackBinder = null

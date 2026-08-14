@@ -7,7 +7,6 @@ import com.newoether.agora.api.ToolDefinition
 import com.newoether.agora.api.ToolFunction
 import com.newoether.agora.api.ToolParameters
 import com.newoether.agora.api.ToolProperty
-import com.newoether.agora.data.EmbeddingIndexer
 import com.newoether.agora.data.local.MessageEntity
 import com.newoether.agora.data.repository.ConversationRepository
 import com.newoether.agora.model.Participant
@@ -30,9 +29,12 @@ import kotlinx.serialization.json.putJsonArray
  * branch reconstruction, pagination). Execution depends on [ConversationRepository]
  * and embedding search.
  */
+private const val MIN_SEMANTIC_SEARCH_TEXT_LENGTH = 10
+
 class RagToolProvider(
     private val conversations: ConversationRepository
 ) : ToolProvider {
+    private val semanticSelector = BoundedSemanticEmbeddingSelector()
 
     override fun definitions(ctx: GenerationContext): List<ToolDefinition> {
         if (!ctx.accessPastConversations) return emptyList()
@@ -408,25 +410,33 @@ class RagToolProvider(
             return@withContext emptyList()
         }
 
-        val all = conversations.getEmbeddingsByModel(config.id)
-        DebugLog.d("AgoraVM", "GM RAG: ${all.size} stored embeddings, query dim=${queryEmbedding.size}")
-        if (all.isEmpty()) return@withContext emptyList()
-
-        val scored = all.map {
-            val stored = EmbeddingIndexer.bytesToFloats(it.embedding)
-            it to EmbeddingIndexer.cosineSimilarity(queryEmbedding, stored)
+        val selection = semanticSelector.select(
+            queryEmbedding = queryEmbedding,
+            threshold = ctx.ragThreshold,
+            limit = limit,
+        ) { afterId, pageLimit ->
+            conversations.getEmbeddingSearchPage(
+                modelId = config.id,
+                afterId = afterId,
+                minimumTextLength = MIN_SEMANTIC_SEARCH_TEXT_LENGTH,
+                limit = pageLimit,
+            )
         }
-        val best = scored.maxOfOrNull { it.second } ?: 0f
-        DebugLog.d("AgoraVM", "GM RAG: best cosine = ${"%.4f".format(best)}")
-        val aboveThreshold = scored.filter { it.second > ctx.ragThreshold }
+        DebugLog.d(
+            "AgoraVM",
+            "GM RAG: scanned=${selection.scannedRows}, invalid=${selection.skippedInvalidRows}, " +
+                "query dim=${queryEmbedding.size}, best cosine=${"%.4f".format(selection.bestScore)}",
+        )
+        if (selection.candidates.isEmpty()) return@withContext emptyList()
+
         val messagesById = conversations
-            .getSearchableMessagesByIds(aboveThreshold.map { it.first.messageId })
+            .getSearchableMessagesByIds(selection.candidates.map { it.messageId })
             .associateBy { it.id }
-        val filtered = aboveThreshold
-            .filter { (messagesById[it.first.messageId]?.text?.length ?: 0) >= 10 }
-            .sortedByDescending { it.second }
-            .take(limit)
-        filtered.mapNotNull { (embedding, score) -> messagesById[embedding.messageId]?.let { it to score } }
+        selection.candidates.mapNotNull { candidate ->
+            messagesById[candidate.messageId]
+                ?.takeIf { it.text.length >= MIN_SEMANTIC_SEARCH_TEXT_LENGTH }
+                ?.let { it to candidate.score }
+        }
     }
 
     private fun resolveEmbeddingApiKey(ctx: GenerationContext): String? {

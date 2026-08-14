@@ -651,8 +651,30 @@ interface ChatDao : ChatAutomationDao, ChatContextCompactDao {
     @Query("DELETE FROM embeddings WHERE messageId = :messageId")
     suspend fun deleteEmbedding(messageId: String)
 
-    @Query("SELECT e.* FROM embeddings e INNER JOIN messages m ON e.messageId = m.id INNER JOIN conversations c ON m.conversationId = c.id WHERE e.modelId = :modelId AND c.taskId IS NULL AND m.participant IN ('USER', 'MODEL') AND m.text != '' AND m.id NOT LIKE 'tool_%' AND m.id NOT LIKE 'result_%' AND m.id NOT LIKE 'compact_%'")
-    suspend fun getEmbeddingsByModel(modelId: String): List<EmbeddingEntity>
+    @Query(
+        """
+        SELECT e.id, e.messageId, e.embedding, e.dimension
+        FROM embeddings e
+        INNER JOIN messages m ON e.messageId = m.id
+        INNER JOIN conversations c ON m.conversationId = c.id
+        WHERE e.modelId = :modelId
+          AND e.id > :afterId
+          AND c.taskId IS NULL
+          AND m.participant IN ('USER', 'MODEL')
+          AND LENGTH(m.text) >= :minimumTextLength
+          AND m.id NOT LIKE 'tool_%'
+          AND m.id NOT LIKE 'result_%'
+          AND m.id NOT LIKE 'compact_%'
+        ORDER BY e.id
+        LIMIT :limit
+        """
+    )
+    suspend fun getEmbeddingSearchPage(
+        modelId: String,
+        afterId: Long,
+        minimumTextLength: Int,
+        limit: Int,
+    ): List<EmbeddingSearchRow>
 
     @Query("DELETE FROM embeddings WHERE modelId = :modelId")
     suspend fun deleteEmbeddingsByModel(modelId: String)

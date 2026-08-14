@@ -553,13 +553,6 @@ class ChatViewModel(
                     generationController.drainQueuedAfterGeneration(settledState)
                 }
             }
-            state.onStopSettled = { settledState ->
-                // After a Stop cleanly settles (STOPPED row persisted, slot released), drain
-                // any queued sends into a fresh Run so accepted interventions are never dropped.
-                settledState.scope.launch {
-                    generationController.drainQueuedAfterStop(settledState)
-                }
-            }
         }
     }
 

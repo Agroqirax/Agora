@@ -536,14 +536,23 @@ object ConversationRuntimeReducer {
                 }
                 state.identity
             }
-            is RunState.Stopping -> return reject(
-                state = state,
-                rejection = if (state.identity == command.identity) {
-                    CommandRejection.DUPLICATE_RESULT
-                } else {
-                    CommandRejection.STALE_IDENTITY
-                },
-            )
+            is RunState.Stopping -> return when {
+                state.identity != command.identity ||
+                    state.finalizationEffectId != command.effectId ->
+                    reject(state, CommandRejection.STALE_IDENTITY)
+                !state.persistenceFailureReported ->
+                    reject(state, CommandRejection.DUPLICATE_RESULT)
+                state.finalizationEffectId == null ->
+                    reject(state, CommandRejection.ILLEGAL_STATE)
+                else -> Transition(
+                    newState = state.copy(persistenceFailureReported = false),
+                    effects = listOf(
+                        RunEffect.FinalizeStop(
+                            state.identity.effectIdentity(state.finalizationEffectId),
+                        ),
+                    ),
+                )
+            }
             is RunState.Idle -> return reject(state, CommandRejection.ILLEGAL_STATE)
         }
         if (activeIdentity != command.identity) {

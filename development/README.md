@@ -99,6 +99,7 @@ Never:
 | Scope | Required module contract |
 |---|---|
 | Message generation, Run lifecycle, queue, tools, Compact, Regenerate, message actions/status, or Provider context | [message-generation.md](message-generation.md) |
+| Embedding-cache reads, semantic conversation search, RAG ranking, or search eligibility | [semantic-search.md](semantic-search.md) |
 
 Add a module document when a user defines durable behavior for another subsystem. Each module
 document must describe current code ownership, allowed and forbidden responsibilities, concrete

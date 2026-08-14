@@ -155,6 +155,9 @@ durable message identity and cannot become a parallel message graph.
 - Input queued while another generation owns the slot stays memory-owned until a legal boundary.
 - Claim failure returns the exact batch to the front; durable success transfers ownership exactly
   once. No item may be lost, duplicated, reordered, or attached to the terminal origin Run.
+- Normal completion and Stop settlement emit one shared process queue-drain signal. UI owner
+  detachment/rebinding may hand that signal off, but it cannot replace it with a Stop-only callback
+  or discard a pending FIFO batch.
 
 ### 8.2 Regenerate
 
@@ -307,7 +310,12 @@ reachable safe prefix. It must never jump to a Compact on another branch.
 9. **Atomic replacement.** Same-row fresh-Run substitution either updates the target and Run graph
    completely or changes nothing. Non-target message rows are immutable inputs.
 10. **Cancellation robustness.** Cancellation cannot strand a SENDING row, lose a claimed queue
-    lease, reopen a terminal Run, or bypass both coroutine and durable settlement barriers.
+    lease, reopen a terminal Run, or bypass both coroutine and durable settlement barriers. A Stop
+    persistence failure keeps the slot occupied; only after that exact failure is recorded may a
+    later Stop reissue the same finalization effect identity. Concurrent duplicates and stale
+    identities remain rejected. If cancellation or failure is delivered at a suspending Run-graph
+    commit boundary, the owner must re-read the exact proposed Run before treating the transaction
+    as uncommitted or allowing the process slot to release.
 11. **Bounded persistence.** Final transforms may change only declared presentation text and the
     shared persistence guard is reapplied afterward.
 12. **Fail closed.** Missing/cyclic parents, shared legacy Runs that cannot be substituted safely,

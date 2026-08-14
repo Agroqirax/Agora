@@ -80,6 +80,13 @@ internal class StandardGenerationContinuationLauncher(
             var runCreated = false
             var runBound = false
             var stopFinalizationClaimed = false
+
+            suspend fun reconcileCommittedRun(): Boolean =
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    if (!runCreated) runCreated = conversations.getRun(runId) != null
+                    runCreated
+                }
+
             try {
                 val persistId = state.nextPersistId()
                 val launchAtBoundary: suspend () -> Unit = boundary@{
@@ -206,7 +213,7 @@ internal class StandardGenerationContinuationLauncher(
                     }
                 }
             } catch (error: CancellationException) {
-                if (runCreated && !runBound && !stopFinalizationClaimed) {
+                if (reconcileCommittedRun() && !runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         val binding = state.bindPersistedRun(uiToken, runId)
                         stopFinalizationClaimed =
@@ -218,7 +225,7 @@ internal class StandardGenerationContinuationLauncher(
                 }
                 throw error
             } catch (error: Exception) {
-                if (runCreated && !runBound && !stopFinalizationClaimed) {
+                if (reconcileCommittedRun() && !runBound && !stopFinalizationClaimed) {
                     withContext(kotlinx.coroutines.NonCancellable) {
                         val binding = state.bindPersistedRun(uiToken, runId)
                         runBound = binding is ConversationGenerationState.RunBindingOutcome.Active

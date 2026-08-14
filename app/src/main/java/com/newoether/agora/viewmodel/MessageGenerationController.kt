@@ -479,9 +479,6 @@ internal class MessageGenerationController(
         queuedGuidanceDrainExecutor.drainAfterSettlement(state)
     }
 
-    internal suspend fun drainQueuedAfterStop(state: ConversationGenerationState) =
-        drainQueuedAfterGeneration(state)
-
     /**
      * Core send into a KNOWN conversation [genId] (never re-reads currentConversationId, so a
      * background send lands in its own conversation). Placement enters the conversation command

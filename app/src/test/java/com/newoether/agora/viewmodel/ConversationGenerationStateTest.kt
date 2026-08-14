@@ -77,7 +77,7 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
         val settled = CompletableDeferred<Unit>()
-        state.onStopSettled = { settled.complete(Unit) }
+        state.onQueueDrainRequested = { settled.complete(Unit) }
 
         val stopped = state.stop()
 
@@ -111,6 +111,30 @@ class ConversationGenerationStateTest {
         assertTrue(state.generating.value)
         assertTrue(state.stopping.value)
         assertNull(state.acquireForSend())
+    }
+
+    @Test
+    fun failedStopFinalization_repeatedStopReissuesTheSameEffectAndCanSettle() = runBlocking {
+        val active = activeStateWithStreamingMessage()
+        val state = active.state
+        val first = state.stop()
+        active.unwind.complete(Unit)
+        active.job.join()
+
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.FAILED,
+            state.finishStopFinalization(first.completion(success = false)),
+        )
+
+        val retry = state.stop()
+
+        assertEquals(first.finalizationEffect, retry.finalizationEffect)
+        assertEquals(
+            ConversationGenerationState.StopFinalizationOutcome.SETTLED,
+            state.finishStopFinalization(retry.completion(success = true)),
+        )
+        assertFalse(state.generating.value)
+        assertFalse(state.stopping.value)
     }
 
     @Test
@@ -206,7 +230,7 @@ class ConversationGenerationStateTest {
         started.await()
         assertTrue(state.attachGenerationJob(inputEffect.identity.ownerToken, job))
         val settled = CompletableDeferred<Unit>()
-        state.onStopSettled = { settled.complete(Unit) }
+        state.onQueueDrainRequested = { settled.complete(Unit) }
 
         val initialStop = state.stop()
         val binding = state.finishInputPersistence(inputEffect.identity)
@@ -427,7 +451,7 @@ class ConversationGenerationStateTest {
      * in either order, and whichever finishes LAST performs the release.
      *
      * These two tests pin both orders against the same requirement: the releaser must announce the
-     * settle through onStopSettled, because that is the only path which migrates the still-pending
+     * settle through onQueueDrainRequested, because that is the only path which migrates the still-pending
      * queued inputs onto a fresh Run. A release that instead just reported "you may drain" would
      * look correct in isolation while handing the drain a terminalized Run, which fails deep inside
      * and strands durably-accepted user messages with no answer.
@@ -437,7 +461,7 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
         var settledCount = 0
-        state.onStopSettled = { settledCount += 1 }
+        state.onQueueDrainRequested = { settledCount += 1 }
 
         val stopped = state.stop()
         active.unwind.complete(Unit)
@@ -460,7 +484,7 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
         val settled = CompletableDeferred<Unit>()
-        state.onStopSettled = { settled.complete(Unit) }
+        state.onQueueDrainRequested = { settled.complete(Unit) }
 
         val stopped = state.stop()
         // Durable half lands first; it cannot release while the coroutine still owns the slot.
@@ -484,7 +508,7 @@ class ConversationGenerationStateTest {
         val active = activeStateWithStreamingMessage()
         val state = active.state
         val settled = CompletableDeferred<Unit>()
-        state.onStopSettled = { settled.complete(Unit) }
+        state.onQueueDrainRequested = { settled.complete(Unit) }
 
         val stopped = state.stop()
         assertEquals(
