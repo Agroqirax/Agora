@@ -114,6 +114,7 @@ internal fun Throwable.asRetryableTransportError(): GenerationError? = when (thi
 internal fun StreamEvent.carriesModelOutput(): Boolean = when (this) {
     is StreamEvent.TextChunk -> text.isNotEmpty()
     is StreamEvent.ThoughtChunk -> thought.isNotEmpty() || signature != null
+    is StreamEvent.HostedToolCallUpdate -> true
     is StreamEvent.ToolCallUpdate -> true
     is StreamEvent.ToolCallRequest -> true
     is StreamEvent.ToolCallsRequest -> true

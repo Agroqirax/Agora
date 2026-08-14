@@ -56,6 +56,40 @@ class GenerationToolBatchEffectExecutorTest {
     }
 
     @Test
+    fun `provider hosted tool lifecycle becomes one terminal display segment`() {
+        val overlay = GenerationToolOverlay(
+            presentation = object : GenerationToolPresentationSource {
+                override fun presentationMetadata(name: String) =
+                    ToolPresentationMetadata(displayName = "Web Search")
+            },
+            providerName = "OpenAI",
+        )
+        val active = StreamEvent.HostedToolCallUpdate(
+            streamKey = "ws_1",
+            name = "web_search",
+            arguments = "{}",
+        )
+
+        assertTrue(overlay.upsertHosted(active))
+        assertEquals(ToolExecutionStates.RUNNING, overlay.snapshot().last().toolState)
+        assertEquals(
+            false,
+            overlay.upsertHosted(
+                active.copy(
+                    arguments = """{"type":"search","query":"latest Agora"}""",
+                    result = """{"type":"web_search_call","status":"completed"}""",
+                ),
+            ),
+        )
+
+        val segment = overlay.snapshot().last()
+        assertEquals("web_search", segment.toolName)
+        assertEquals("Web Search", segment.toolDisplayName)
+        assertEquals(ToolExecutionStates.SUCCEEDED, segment.toolState)
+        assertTrue(segment.toolResult?.contains("web_search_call") == true)
+    }
+
+    @Test
     fun `snapshot clipping never starts with half of a surrogate pair`() {
         assertEquals("😀b", takeLastWholeCodePoints("a😀b", 3))
         assertEquals("b", takeLastWholeCodePoints("a😀b", 2))

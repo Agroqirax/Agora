@@ -86,6 +86,7 @@ internal class ProviderPassRunner(
                     }
                     is StreamEvent.TextChunk,
                     is StreamEvent.ThoughtChunk,
+                    is StreamEvent.HostedToolCallUpdate,
                     is StreamEvent.UsageUpdate,
                     is StreamEvent.Retrying,
                     -> Unit

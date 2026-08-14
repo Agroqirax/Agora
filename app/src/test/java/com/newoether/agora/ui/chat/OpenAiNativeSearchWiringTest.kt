@@ -1,6 +1,7 @@
 package com.newoether.agora.ui.chat
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -101,7 +102,7 @@ class OpenAiNativeSearchWiringTest {
     }
 
     @Test
-    fun `conversation service tier and legacy generic OpenAI search stay wired`() {
+    fun `conversation service tier stays wired and standalone OpenAI search stays retired`() {
         val root = locateMainSourceRoot()
         val chatApp = File(root, "com/newoether/agora/ui/chat/ChatApp.kt").readText()
         val serviceTier = File(
@@ -119,7 +120,7 @@ class OpenAiNativeSearchWiringTest {
         val settingsPage = File(
             root,
             "com/newoether/agora/ui/settings/SettingsWebSearchPage.kt",
-        ).readText()
+        ).readText().replace("\r\n", "\n")
 
         listOf(
             "openAiServiceTierAvailable =",
@@ -136,14 +137,20 @@ class OpenAiNativeSearchWiringTest {
             "service-tier selection must persist a normalized conversation override",
             "it.copy(openAiServiceTier = OpenAiServiceTiers.normalize(tier))" in serviceTier,
         )
-        assertTrue("generic provider set must retain OpenAI", "\"openai\"" in settingsContracts)
-        assertTrue(
-            "generic OpenAI provider must execute its Responses web-search request",
+        assertFalse("generic provider set must exclude OpenAI", "\"openai\"" in settingsContracts)
+        assertFalse(
+            "generic Web Search must not own an OpenAI Responses request",
             "\"openai\" -> HttpClient.post(" in webSearchProvider,
         )
+        assertFalse(
+            "standalone OpenAI must not be selectable in Web Search settings",
+            "web_search_openai" in settingsPage,
+        )
         assertTrue(
-            "generic OpenAI provider must remain selectable in settings",
-            "\"openai\" to R.string.web_search_openai" in settingsPage,
+            "DuckDuckGo must be the first Web Search provider",
+            "val providers = listOf(\n" +
+                "                        \"duckduckgo\" to R.string.web_search_duckduckgo,\n" +
+                "                        \"brave\" to R.string.web_search_brave," in settingsPage,
         )
     }
 

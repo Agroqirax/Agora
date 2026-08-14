@@ -421,6 +421,20 @@ class GenerationManager(
                         currentStatus = MessageStatus.ERROR
                         generationErrorMessage = event.message
                     }
+                    is StreamEvent.HostedToolCallUpdate -> {
+                        if (!toolOverlay.hasStream(event.streamKey)) {
+                            flushAnswerSegment()
+                            flushThoughtSegment()
+                        }
+                        val created = toolOverlay.upsertHosted(event)
+                        currentStatus = MessageStatus.TOOL_CALLING
+                        retryText = null
+                        val now = System.currentTimeMillis()
+                        if (created || event.result != null || uiUpdateGate.isDue(now)) {
+                            publishStreamUpdate(forceCheckpoint = created || event.result != null)
+                            uiUpdateGate.recordPublished(now)
+                        }
+                    }
                     is StreamEvent.ToolCallUpdate -> {
                         val created = upsertStreamingToolSegment(
                             streamKey = event.streamKey,

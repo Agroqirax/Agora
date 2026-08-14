@@ -148,7 +148,12 @@ abstract class BaseOpenAiProvider : LlmProvider {
                         if (config.openAiWebSearchEnabled) add(OpenAiResponseTool(type = "web_search"))
                     }.ifEmpty { null },
                     reasoning = config.thinkingLevel.takeIf { config.thinkingEnabled }
-                        ?.let { OpenAiReasoning(effort = it) },
+                        ?.let {
+                            OpenAiReasoning(
+                                effort = it,
+                                summary = "auto",
+                            )
+                        },
                     serviceTier = config.openAiServiceTier,
                     temperature = config.temperature,
                     maxOutputTokens = config.maxTokens,

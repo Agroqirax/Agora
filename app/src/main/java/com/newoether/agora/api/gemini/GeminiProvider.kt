@@ -49,6 +49,7 @@ private fun extractThoughtTitle(content: String): String? =
 
 private fun ChatMessage.isGeminiToolRoundCompatible(
     targetModel: String,
+    targetProviderName: String,
     signatureRequired: Boolean,
 ): Boolean {
     val calls = segments
@@ -72,7 +73,8 @@ private fun ChatMessage.isGeminiToolRoundCompatible(
         if (signatureRequired && call.signature.isNullOrBlank()) return@all false
         if (call.signature.isNullOrBlank()) return@all true
         call.signatureProvider?.let { provider ->
-            return@all provider.equals(Constants.PROVIDER_GOOGLE, ignoreCase = true)
+            return@all provider.equals(Constants.PROVIDER_GOOGLE, ignoreCase = true) ||
+                provider == targetProviderName
         }
         modelName == null ||
             modelName.equals(targetModel, ignoreCase = true) ||
@@ -286,10 +288,11 @@ class GeminiProvider(
                 cleanModelName.contains("gemini-3.5", ignoreCase = true)
         val validatedPath = adaptToolRoundsForProvider(
             messages = canonicalPath,
-            providerName = "Gemini",
+            providerName = name,
         ) { toolMessage ->
             toolMessage.isGeminiToolRoundCompatible(
                 targetModel = cleanModelName,
+                targetProviderName = name,
                 signatureRequired = requiresFunctionCallSignature,
             )
         }
@@ -379,7 +382,7 @@ class GeminiProvider(
                 } catch (e: Exception) {
                     DebugLog.e(
                         "AgoraAPI",
-                        "[Gemini] failed to encode image exception=${e.javaClass.simpleName}",
+                        "[$name] failed to encode image exception=${e.javaClass.simpleName}",
                     )
                 }
             }
@@ -493,13 +496,13 @@ class GeminiProvider(
             )
             val requestJson = json.encodeToString(ApiGenerateContentRequest.serializer(), requestBody)
             requireValidSerializedRequest(
-                provider = "Gemini",
+                provider = name,
                 body = requestJson,
                 requiredArrayFields = setOf("contents"),
             )
             DebugLog.d(
                 "AgoraAPI",
-                "[Gemini] request model=$cleanModelName messages=${apiContents.size} " +
+                "[$name] request model=$cleanModelName messages=${apiContents.size} " +
                     "thinking=${config.thinkingEnabled} tools=${tools.size}",
             )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
@@ -565,8 +568,8 @@ class GeminiProvider(
                                         code = error.code?.toString(),
                                         type = error.status,
                                         message = error.message?.ifBlank {
-                                            "Gemini reported an error in the response stream"
-                                        } ?: "Gemini reported an error in the response stream",
+                                            "$name reported an error in the response stream"
+                                        } ?: "$name reported an error in the response stream",
                                     )
                                 }
                                 if (streamError == null && ProviderRetryPolicy.isFailedToGenerateOutcome(response.outcome)) {
@@ -646,7 +649,7 @@ class GeminiProvider(
                             } catch (e: Exception) {
                                 DebugLog.e(
                                     "AgoraAPI",
-                                    "[Gemini] malformed stream payload exception=${e.javaClass.simpleName}",
+                                    "[$name] malformed stream payload exception=${e.javaClass.simpleName}",
                                 )
                                 streamError = GenerationError.SseParse(
                                     rawLine = jsonStr.take(512),
@@ -664,12 +667,12 @@ class GeminiProvider(
                             timedOut,
                             toolCallInFlight,
                         )
-                        DebugLog.d("AgoraSSE", "[Gemini] ${termination.describe()}")
+                        DebugLog.d("AgoraSSE", "[$name] ${termination.describe()}")
                         if (termination.isRetryable && attempt < maxAttempts) {
                             emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                             delay(ProviderRetryPolicy.delayMillis(attempt))
                         } else {
-                            termination.toError("Gemini")?.let { emit(StreamEvent.Error(it)) }
+                            termination.toError(name)?.let { emit(StreamEvent.Error(it)) }
                             done = true
                         }
                     } else {
@@ -677,7 +680,7 @@ class GeminiProvider(
                         val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
                         DebugLog.e(
                             "AgoraAPI",
-                            "[Gemini] HTTP ${handle.code} responseBytes=$responseBytes",
+                            "[$name] HTTP ${handle.code} responseBytes=$responseBytes",
                         )
                         val retryable = ProviderRetryPolicy.shouldRetryHttp(
                             handle.code,
@@ -709,8 +712,8 @@ class GeminiProvider(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: RequestFormatException) {
-            DebugLog.e("AgoraAPI", "[Gemini] blocked invalid request: ${e.violations.joinToString()}")
-            emit(StreamEvent.Error(GenerationError.RequestFormat("Gemini", e.violations.joinToString())))
+            DebugLog.e("AgoraAPI", "[$name] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat(name, e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {

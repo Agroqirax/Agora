@@ -322,6 +322,128 @@ class BaseOpenAiProviderTerminationTest {
     }
 
     @Test
+    fun responsesRequestEmitsServiceTierSummaryAndHostedSearchEvents() = withServer(
+        terminalGraceMillis = 100L,
+        responsesApiEnabled = true,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"in_progress"}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.web_search_call.in_progress","sequence_number":2,"output_index":0,"item_id":"ws_1"}""",
+            )
+            socket.writeSse(
+                """{"type":"response.web_search_call.searching","sequence_number":3,"output_index":0,"item_id":"ws_1"}""",
+            )
+            socket.writeSse(
+                """{"type":"response.web_search_call.completed","sequence_number":4,"output_index":0,"item_id":"ws_1"}""",
+            )
+            socket.writeSse(
+                """{"type":"response.output_item.done","sequence_number":5,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"completed","action":{"type":"search","query":"latest Agora"}}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.reasoning_summary_text.delta","sequence_number":6,"delta":"Checked current sources."}""",
+            )
+            socket.writeSse(
+                """{"type":"response.output_text.delta","sequence_number":7,"delta":"Answer"}""",
+            )
+            socket.writeSse(
+                """{"type":"response.completed","sequence_number":8,"response":{"status":"completed"}}""",
+            )
+        },
+    ) { provider, config, server ->
+        val events = collect(
+            provider,
+            config.copy(
+                thinkingEnabled = true,
+                thinkingLevel = "low",
+                openAiServiceTier = "fast",
+                openAiWebSearchEnabled = true,
+            ),
+        )
+
+        val body = WIRE_JSON.parseToJsonElement(server.requests.single().body).jsonObject
+        assertEquals("fast", body["service_tier"]?.jsonPrimitive?.content)
+        assertEquals("auto", body["reasoning"]?.jsonObject?.get("summary")?.jsonPrimitive?.content)
+        val hosted = events.filterIsInstance<StreamEvent.HostedToolCallUpdate>()
+        assertEquals(2, hosted.size)
+        assertEquals(null, hosted.first().result)
+        assertTrue(hosted.last().arguments.contains("latest Agora"))
+        assertTrue(hosted.last().result?.contains("web_search_call") == true)
+        assertEquals(
+            "Checked current sources.",
+            events.filterIsInstance<StreamEvent.ThoughtChunk>().single().thought,
+        )
+        assertEquals("Answer", events.filterIsInstance<StreamEvent.TextChunk>().single().text)
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest })
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun responsesHostedWebSearchWithoutDoneFailsClosed() = withServer(
+        terminalGraceMillis = 100L,
+        responsesApiEnabled = true,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"in_progress"}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.completed","sequence_number":2,"response":{"status":"completed"}}""",
+            )
+        },
+    ) { provider, config, _ ->
+        val events = collect(provider, config)
+
+        assertEquals(1, events.filterIsInstance<StreamEvent.HostedToolCallUpdate>().size)
+        assertEquals(1, events.filterIsInstance<StreamEvent.Error>().size)
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest })
+    }
+
+    @Test
+    fun responsesHostedWebSearchKeepsAddedStreamKeyWhenDoneAddsId() = withServer(
+        terminalGraceMillis = 100L,
+        responsesApiEnabled = true,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"type":"web_search_call","status":"in_progress"}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"id":"ws_late","type":"web_search_call","status":"completed","action":{"type":"search","query":"Agora"}}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.completed","sequence_number":3,"response":{"status":"completed"}}""",
+            )
+        },
+    ) { provider, config, _ ->
+        val events = collect(provider, config)
+        val hosted = events.filterIsInstance<StreamEvent.HostedToolCallUpdate>()
+
+        assertEquals(2, hosted.size)
+        assertEquals(listOf("response_hosted_0"), hosted.map { it.streamKey }.distinct())
+        assertTrue(events.none { it is StreamEvent.Error })
+    }
+
+    @Test
+    fun responsesHostedWebSearchRejectsDoneIdentityChange() = withServer(
+        terminalGraceMillis = 100L,
+        responsesApiEnabled = true,
+        response = { socket, _ ->
+            socket.writeSse(
+                """{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"ws_1","type":"web_search_call","status":"in_progress"}}""",
+            )
+            socket.writeSse(
+                """{"type":"response.output_item.done","sequence_number":2,"output_index":0,"item":{"id":"ws_2","type":"web_search_call","status":"completed","action":{"type":"search","query":"Agora"}}}""",
+            )
+        },
+    ) { provider, config, _ ->
+        val events = collect(provider, config)
+
+        assertEquals(1, events.filterIsInstance<StreamEvent.HostedToolCallUpdate>().size)
+        assertEquals(1, events.filterIsInstance<StreamEvent.Error>().size)
+        assertTrue(events.none { it is StreamEvent.ToolCallRequest })
+    }
+
+    @Test
     fun responsesHostedWebSearchCoexistsWithFunctionTools() = withServer(
         terminalGraceMillis = 100L,
         responsesApiEnabled = true,
@@ -503,6 +625,23 @@ class BaseOpenAiProviderTerminationTest {
         assertTrue(events.none { it is StreamEvent.Error })
     }
 
+    @Test
+    fun customProviderUnauthorizedDoesNotRetry() = withServer(
+        terminalGraceMillis = 100L,
+        statusCode = 401,
+        errorBody = """{"error":{"message":"unauthorized","type":"authentication_error"}}""",
+        providerFactory = { baseUrl -> CustomOpenAiProvider("Relay", baseUrl) },
+        response = { _, _ -> },
+    ) { provider, config, server ->
+        val events = collect(provider, config)
+
+        assertEquals(1, server.requests.size)
+        assertTrue(events.none { it is StreamEvent.Retrying })
+        val error = events.filterIsInstance<StreamEvent.Error>().single().error
+        assertTrue(error is GenerationError.Api)
+        assertEquals("unauthorized", (error as GenerationError.Api).message)
+    }
+
     private fun collect(
         provider: BaseOpenAiProvider,
         config: ProviderConfig,
@@ -537,11 +676,14 @@ class BaseOpenAiProviderTerminationTest {
         terminalGraceMillis: Long,
         responsesApiEnabled: Boolean = false,
         connectionCount: Int = 1,
+        statusCode: Int = 200,
+        errorBody: String? = null,
+        providerFactory: ((String) -> BaseOpenAiProvider)? = null,
         response: (Socket, CountDownLatch) -> Unit,
         test: (BaseOpenAiProvider, ProviderConfig, SseServer) -> Unit,
     ) {
-        SseServer(connectionCount, response).use { server ->
-            val provider = object : BaseOpenAiProvider() {
+        SseServer(connectionCount, statusCode, errorBody, response).use { server ->
+            val provider = providerFactory?.invoke(server.baseUrl) ?: object : BaseOpenAiProvider() {
                 override val name: String = "test"
                 override val defaultBaseUrl: String = server.baseUrl
                 override val terminalSseGraceMillis: Long = terminalGraceMillis
@@ -569,6 +711,8 @@ class BaseOpenAiProviderTerminationTest {
 
     private class SseServer(
         private val connectionCount: Int,
+        private val statusCode: Int,
+        private val errorBody: String?,
         private val response: (Socket, CountDownLatch) -> Unit,
     ) : AutoCloseable {
         private val server = ServerSocket(0)
@@ -588,23 +732,37 @@ class BaseOpenAiProviderTerminationTest {
                         socket.tcpNoDelay = true
                         requests += readRequest(socket)
                         accepted.countDown()
-                        val headers = buildString {
-                            append("HTTP/1.1 200 OK\r\n")
-                            append("Content-Type: text/event-stream\r\n")
-                            append("Cache-Control: no-cache\r\n")
-                            append("Transfer-Encoding: chunked\r\n")
-                            append("Connection: close\r\n")
-                            append("\r\n")
-                        }
-                        socket.getOutputStream().write(headers.toByteArray(StandardCharsets.US_ASCII))
-                        socket.getOutputStream().flush()
-                        response(socket, release)
                         val output = socket.getOutputStream()
-                        try {
-                            output.write("0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                        if (statusCode == 200) {
+                            val headers = buildString {
+                                append("HTTP/1.1 200 OK\r\n")
+                                append("Content-Type: text/event-stream\r\n")
+                                append("Cache-Control: no-cache\r\n")
+                                append("Transfer-Encoding: chunked\r\n")
+                                append("Connection: close\r\n")
+                                append("\r\n")
+                            }
+                            output.write(headers.toByteArray(StandardCharsets.US_ASCII))
                             output.flush()
-                        } catch (_: SocketException) {
-                            // A terminal SSE event lets the client close before this optional chunk terminator.
+                            response(socket, release)
+                            try {
+                                output.write("0\r\n\r\n".toByteArray(StandardCharsets.US_ASCII))
+                                output.flush()
+                            } catch (_: SocketException) {
+                                // A terminal SSE event lets the client close before this optional chunk terminator.
+                            }
+                        } else {
+                            val payload = (errorBody ?: "Unknown error").toByteArray(StandardCharsets.UTF_8)
+                            val headers = buildString {
+                                append("HTTP/1.1 $statusCode Error\r\n")
+                                append("Content-Type: application/json\r\n")
+                                append("Content-Length: ${payload.size}\r\n")
+                                append("Connection: close\r\n")
+                                append("\r\n")
+                            }
+                            output.write(headers.toByteArray(StandardCharsets.US_ASCII))
+                            output.write(payload)
+                            output.flush()
                         }
                     }
                 }

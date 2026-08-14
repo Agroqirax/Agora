@@ -370,10 +370,10 @@ private fun completedSummary(
         R.string.tool_delete_memory_default,
     )
     ToolKind.MEMORY_UPDATE_ACTIVE -> stringResource(R.string.tool_update_active_default)
-    ToolKind.WEB_SEARCH -> if (subject == null) {
+    ToolKind.WEB_SEARCH -> if (subject == null || presentation.count == null) {
         stringResource(R.string.tool_web_search_done_default)
     } else {
-        stringResource(R.string.tool_web_search_done, presentation.count ?: 0, subject)
+        stringResource(R.string.tool_web_search_done, presentation.count, subject)
     }
     ToolKind.WEB_FETCH -> optionalSubjectSummary(
         subject,

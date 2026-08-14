@@ -85,6 +85,27 @@ internal class GenerationToolOverlay(
         return true
     }
 
+    fun upsertHosted(event: StreamEvent.HostedToolCallUpdate): Boolean {
+        val created = upsert(
+            streamKey = event.streamKey,
+            toolCallId = event.streamKey,
+            name = event.name,
+            arguments = event.arguments,
+            signature = null,
+        )
+        val index = checkNotNull(streamIndices[event.streamKey])
+        val current = segments[index]
+        segments[index] = current.copy(
+            toolResult = event.result,
+            toolState = when {
+                event.result == null -> ToolExecutionStates.RUNNING
+                event.isError -> ToolExecutionStates.FAILED
+                else -> ToolExecutionStates.SUCCEEDED
+            },
+        )
+        return created
+    }
+
     fun start(call: StreamEvent.ToolCallRequest) {
         val index = checkNotNull(streamIndices[call.streamKey]) {
             "Missing live segment for tool call ${call.streamKey}"

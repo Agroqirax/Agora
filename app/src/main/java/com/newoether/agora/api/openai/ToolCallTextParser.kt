@@ -169,6 +169,7 @@ internal class OpenAiResponsesEventRouter(
     private val callsByOutputIndex = linkedMapOf<Int, FunctionCall>()
     private val callsByItemId = mutableMapOf<String, FunctionCall>()
     private val responseItemsByOutputIndex = linkedMapOf<Int, JsonObject>()
+    private val openHostedOutputIndexes = mutableSetOf<Int>()
     private val completedCallsByOutputIndex = mutableMapOf<Int, StreamEvent.ToolCallRequest>()
     private val emittedCallIds = mutableSetOf<String>()
     private val emittedCitationUrls = mutableSetOf<String>()
@@ -236,6 +237,15 @@ internal class OpenAiResponsesEventRouter(
             return fail(event.type, "duplicate output_index")
         }
         responseItemsByOutputIndex[index] = rawItem
+        if (item.type == "web_search_call") {
+            openHostedOutputIndexes += index
+            return listOf(
+                rawItem.toHostedWebSearchUpdate(
+                    streamKey = item.id ?: "response_hosted_$index",
+                    completed = false,
+                ),
+            )
+        }
         if (item.type != "function_call") return emptyList()
         val call = FunctionCall(
             outputIndex = index,
@@ -281,8 +291,30 @@ internal class OpenAiResponsesEventRouter(
             return fail(event.type, error.localizedMessage ?: "invalid output item")
         }
         val index = event.outputIndex ?: return fail(event.type, "missing output_index")
-        if (!responseItemsByOutputIndex.containsKey(index)) {
-            return fail(event.type, "output item was not added")
+        val addedRawItem = responseItemsByOutputIndex[index]
+            ?: return fail(event.type, "output item was not added")
+        val addedItem = try {
+            addedRawItem.toOutputItem()
+        } catch (error: Exception) {
+            return fail(event.type, error.localizedMessage ?: "invalid added output item")
+        }
+        if (item.type == "web_search_call" || addedItem.type == "web_search_call") {
+            if (item.type != addedItem.type) {
+                return fail(event.type, "hosted output item type changed")
+            }
+            if (addedItem.id != null && item.id != addedItem.id) {
+                return fail(event.type, "hosted output item id changed")
+            }
+            if (!openHostedOutputIndexes.remove(index)) {
+                return fail(event.type, "hosted output item was already completed")
+            }
+            responseItemsByOutputIndex[index] = rawItem
+            return listOf(
+                rawItem.toHostedWebSearchUpdate(
+                    streamKey = addedItem.id ?: "response_hosted_$index",
+                    completed = true,
+                ),
+            )
         }
         responseItemsByOutputIndex[index] = rawItem
         if (item.type != "function_call") return emptyList()
@@ -323,6 +355,9 @@ internal class OpenAiResponsesEventRouter(
 
     private fun completeResponse(event: OpenAiResponseStreamEvent): List<StreamEvent> {
         if (toolCallInFlight) return fail(event.type, "response completed with an open function call")
+        if (openHostedOutputIndexes.isNotEmpty()) {
+            return fail(event.type, "response completed with an open hosted tool call")
+        }
         val response = event.response ?: return fail(event.type, "missing response envelope")
         if (response.status != "completed") {
             return fail(event.type, "unexpected terminal status ${response.status}")
@@ -378,6 +413,21 @@ internal class OpenAiResponsesEventRouter(
         if (previous != null && sequence <= previous) return "non-increasing sequence_number"
         lastSequenceNumber = sequence
         return null
+    }
+
+    private fun JsonObject.toHostedWebSearchUpdate(
+        streamKey: String,
+        completed: Boolean,
+    ): StreamEvent.HostedToolCallUpdate {
+        val action = this["action"] as? JsonObject ?: JsonObject(emptyMap())
+        val status = (this["status"] as? JsonPrimitive)?.content
+        return StreamEvent.HostedToolCallUpdate(
+            streamKey = streamKey,
+            name = "web_search",
+            arguments = action.toString(),
+            result = takeIf { completed }?.toString(),
+            isError = completed && status in setOf("failed", "incomplete"),
+        )
     }
 
     private fun JsonObject.toOutputItem(): OpenAiResponseOutputItem =

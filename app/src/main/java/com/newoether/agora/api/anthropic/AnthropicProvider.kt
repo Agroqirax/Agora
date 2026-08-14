@@ -193,9 +193,11 @@ internal fun classifyClaudeFamily(modelName: String): ClaudeFamily {
 private fun MessageSegment.signatureIsCompatibleWithAnthropic(
     sourceModel: String?,
     targetModel: String,
+    targetProviderName: String,
 ): Boolean {
     signatureProvider?.let {
-        return it.equals(Constants.PROVIDER_ANTHROPIC, ignoreCase = true)
+        return it.equals(Constants.PROVIDER_ANTHROPIC, ignoreCase = true) ||
+            it == targetProviderName
     }
     return sourceModel == null ||
         sourceModel.equals(targetModel, ignoreCase = true) ||
@@ -204,6 +206,7 @@ private fun MessageSegment.signatureIsCompatibleWithAnthropic(
 
 private fun ChatMessage.isAnthropicToolRoundCompatible(
     targetModel: String,
+    targetProviderName: String,
     signedThinkingRequired: Boolean,
 ): Boolean {
     if (!signedThinkingRequired) return true
@@ -212,7 +215,7 @@ private fun ChatMessage.isAnthropicToolRoundCompatible(
         .orEmpty()
     return thoughts.isNotEmpty() && thoughts.all {
         !it.signature.isNullOrBlank() &&
-            it.signatureIsCompatibleWithAnthropic(modelName, targetModel)
+            it.signatureIsCompatibleWithAnthropic(modelName, targetModel, targetProviderName)
     }
 }
 
@@ -241,7 +244,7 @@ class AnthropicProvider(
             if (config.thinkingBudgetEnabled) config.thinkingBudgetTokens else ThinkingLevels.DefaultBudgetTokens
         ).coerceIn(1024, 128000)
         val thinking = when {
-            !config.thinkingEnabled || !modelName.startsWith("claude") -> null
+            !config.thinkingEnabled -> null
             family == ClaudeFamily.NO_THINKING -> null
             family == ClaudeFamily.BUDGET_THINKING ->
                 AnthropicThinking(type = "enabled", budgetTokens = thinkingBudget, display = "summarized")
@@ -261,10 +264,11 @@ class AnthropicProvider(
         val canonicalPath = prepareMessages(messages, config.maxContextWindow)
         val validatedPath = adaptToolRoundsForProvider(
             messages = canonicalPath,
-            providerName = "Anthropic",
+            providerName = name,
         ) { toolMessage ->
             toolMessage.isAnthropicToolRoundCompatible(
                 targetModel = modelName,
+                targetProviderName = name,
                 signedThinkingRequired = thinking != null,
             )
         }
@@ -368,14 +372,14 @@ class AnthropicProvider(
             headers["anthropic-version"] = "2023-06-01"
             val requestBodyJson = json.encodeToString(AnthropicRequest.serializer(), requestBody)
             requireValidSerializedRequest(
-                provider = "Anthropic",
+                provider = name,
                 body = requestBodyJson,
                 requiredStringFields = setOf("model"),
                 requiredArrayFields = setOf("messages"),
             )
             DebugLog.d(
                 "AgoraAPI",
-                "[Anthropic] request model=$modelName messages=${apiMessages.size} " +
+                "[$name] request model=$modelName messages=${apiMessages.size} " +
                     "thinking=${thinking != null} tools=${anthropicTools?.size ?: 0}",
             )
             val maxAttempts = ProviderRetryPolicy.MAX_ATTEMPTS
@@ -398,7 +402,7 @@ class AnthropicProvider(
                     if (retryable != null && attempt < maxAttempts) {
                         DebugLog.w(
                             "AgoraAPI",
-                            "[Anthropic] Transport failure opening the stream on attempt " +
+                            "[$name] Transport failure opening the stream on attempt " +
                                 "$attempt/$maxAttempts (${e.javaClass.simpleName}), retrying",
                         )
                         val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
@@ -460,7 +464,7 @@ class AnthropicProvider(
                             } catch (e: Exception) {
                                 DebugLog.e(
                                     "AgoraAPI",
-                                    "[Anthropic] malformed stream payload exception=${e.javaClass.simpleName}",
+                                    "[$name] malformed stream payload exception=${e.javaClass.simpleName}",
                                 )
                                 eventRouter.captureParseError(
                                     rawLine = jsonStr,
@@ -500,7 +504,7 @@ class AnthropicProvider(
                         timedOut = timedOut,
                     )
                     DebugLog.d("AgoraSSE",
-                        "[Anthropic] stream_end ${termination.describe()} " +
+                        "[$name] stream_end ${termination.describe()} " +
                         "tool_use_blocks=${eventRouter.toolUseBlockStarts} " +
                         "attempt=$attempt/$maxAttempts"
                     )
@@ -508,7 +512,7 @@ class AnthropicProvider(
                     if (termination.isRetryable && attempt < maxAttempts) {
                         // Nothing was surfaced yet, so replaying cannot duplicate visible output.
                         DebugLog.w("AgoraAPI",
-                            "[Anthropic] Incomplete stream on attempt $attempt/$maxAttempts, retrying")
+                            "[$name] Incomplete stream on attempt $attempt/$maxAttempts, retrying")
                         val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
                         emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                         delay(retryDelayMs)
@@ -521,7 +525,7 @@ class AnthropicProvider(
                     val responseBytes = errorRaw.toByteArray(Charsets.UTF_8).size
                     DebugLog.e(
                         "AgoraAPI",
-                        "[Anthropic] HTTP ${handle.code} responseBytes=$responseBytes",
+                        "[$name] HTTP ${handle.code} responseBytes=$responseBytes",
                     )
 
                     if (
@@ -532,14 +536,19 @@ class AnthropicProvider(
                         ) && attempt < maxAttempts
                     ) {
                         val retryDelayMs = ProviderRetryPolicy.delayMillis(attempt)
-                        DebugLog.w("AgoraAPI", "[Anthropic] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${retryDelayMs}ms...")
+                        DebugLog.w("AgoraAPI", "[$name] Transient error ${handle.code} on attempt $attempt/$maxAttempts, retrying in ${retryDelayMs}ms...")
                         emit(StreamEvent.Retrying(attempt, ProviderRetryPolicy.MAX_RETRIES))
                         delay(retryDelayMs)
                     } else {
                         done = true
                         val genError = try {
-                            val errorJson = json.decodeFromString<OpenAiErrorResponse>(errorRaw)
-                            GenerationError.Api(code = errorJson.error.code ?: handle.code.toString(), type = errorJson.error.type, message = errorJson.error.message)
+                            val errorJson = json.decodeFromString<AnthropicStreamEvent>(errorRaw)
+                            val error = requireNotNull(errorJson.error)
+                            GenerationError.Api(
+                                code = handle.code.toString(),
+                                type = error.type,
+                                message = error.message?.takeIf { it.isNotBlank() } ?: errorRaw,
+                            )
                         } catch (_: Exception) {
                             GenerationError.Network(statusCode = handle.code, message = errorRaw)
                         }
@@ -551,8 +560,8 @@ class AnthropicProvider(
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: RequestFormatException) {
-            DebugLog.e("AgoraAPI", "[Anthropic] blocked invalid request: ${e.violations.joinToString()}")
-            emit(StreamEvent.Error(GenerationError.RequestFormat("Anthropic", e.violations.joinToString())))
+            DebugLog.e("AgoraAPI", "[$name] blocked invalid request: ${e.violations.joinToString()}")
+            emit(StreamEvent.Error(GenerationError.RequestFormat(name, e.violations.joinToString())))
         } catch (e: java.net.SocketTimeoutException) {
             emit(StreamEvent.Error(GenerationError.Timeout))
         } catch (e: java.net.ConnectException) {
@@ -578,7 +587,7 @@ class AnthropicProvider(
                 it.type == "thought" &&
                     it.content.isNotEmpty() &&
                     !it.signature.isNullOrBlank() &&
-                    it.signatureIsCompatibleWithAnthropic(msg.modelName, targetModel)
+                    it.signatureIsCompatibleWithAnthropic(msg.modelName, targetModel, name)
             }
             ?.map { AnthropicContentPart(type = "thinking", thinking = it.content, signature = it.signature) }
             .orEmpty()

@@ -46,6 +46,20 @@ sealed class StreamEvent {
         val signature: String? = null,
     ) : StreamEvent()
 
+    /**
+     * Display-only progress for a tool executed inside the provider transport.
+     *
+     * Unlike [ToolCallRequest], this event never authorizes local execution or a continuation
+     * round. A non-null [result] closes the provider-hosted call into a terminal UI segment.
+     */
+    data class HostedToolCallUpdate(
+        val streamKey: String,
+        val name: String,
+        val arguments: String,
+        val result: String? = null,
+        val isError: Boolean = false,
+    ) : StreamEvent()
+
     data class ToolCallRequest(
         val id: String,
         val name: String,
@@ -141,6 +155,7 @@ data class OpenAiPlugin(
 @Serializable
 data class OpenAiReasoning(
     val effort: String? = null,
+    val summary: String? = null,
     @SerialName("max_tokens") val maxTokens: Int? = null,
     val enabled: Boolean? = null
 )
